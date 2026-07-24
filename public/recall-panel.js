@@ -341,16 +341,13 @@
     /**
      * One open: event stream is primary (always visible).
      * Tool rows (if any) are expanded process panel — no nested second click.
+     * Conclusions stay on the list row only (compact peek) — not re-rendered here.
      * @param {Array} events
-     * @param {{ focusEventNo?: number, conclusions?: object[] }} [options]
+     * @param {{ focusEventNo?: number }} [options]
      */
     function renderInvocationTrace(events, options = {}) {
       const root = document.createElement("div");
       root.className = "recall-process-root";
-
-      const conclusions = options.conclusions || [];
-      const conclusionsEl = renderConclusionsBlock(conclusions);
-      if (conclusionsEl) root.appendChild(conclusionsEl);
 
       // Tool/command rows when present — force open so no second expand.
       if (typeof buildProcessPanelFromEvents === "function") {
@@ -425,7 +422,6 @@
       children.push(
         renderInvocationTrace(page.events, {
           focusEventNo: options.focusEventNo,
-          conclusions: options.conclusions,
         })
       );
       target.replaceChildren(...children);
@@ -587,9 +583,7 @@
       row.append(body);
       try {
         const page = await fetchInvocationEvents(invocationId);
-        fillInvocationBody(body, page, {
-          conclusions: conclusionsFor(invocationId),
-        });
+        fillInvocationBody(body, page);
       } catch (e) {
         const err =
           typeof R.loadFailed === "function" ? R.loadFailed(e.message) : `加载失败: ${e.message}`;
@@ -756,7 +750,6 @@
         const page = await fetchInvocationEvents(invocationId);
         fillInvocationBody(body, page, {
           focusEventNo: hit.eventNo != null ? hit.eventNo : undefined,
-          conclusions: conclusionsFor(invocationId),
         });
       } catch (e) {
         const err =

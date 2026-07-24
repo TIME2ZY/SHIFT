@@ -288,19 +288,22 @@ test("setMemories attaches product conclusions to producing invocation", () => {
     assert.equal(attached[0].id, "m1");
     assert.equal(panel.conclusionsFor("inv-missing").length, 0);
 
-    const root = panel.renderInvocationTrace(
-      [
-        { eventNo: 0, kind: "text.delta", ts: "2026-07-12T00:00:00.000Z", payload: { text: "hi" } },
-        { eventNo: 1, kind: "tool.started", ts: "2026-07-12T00:00:01.000Z", payload: { toolName: "read" } },
-      ],
-      { conclusions: attached }
-    );
+    const root = panel.renderInvocationTrace([
+      { eventNo: 0, kind: "text.delta", ts: "2026-07-12T00:00:00.000Z", payload: { text: "hi" } },
+      { eventNo: 1, kind: "tool.started", ts: "2026-07-12T00:00:01.000Z", payload: { toolName: "read" } },
+    ]);
     assert.equal(root.className, "recall-process-root");
     // Event stream is a flat panel (not nested details).
-    const hasEventsPanel = (root.childNodes || root.children || []).some(
+    const kids = root.childNodes || root.children || [];
+    const hasEventsPanel = kids.some(
       (c) => c && String(c.className || "").includes("recall-events-panel")
     );
     assert.ok(hasEventsPanel, "events panel should be present without second open");
+    // Expanded body must not re-render conclusions (list row already peeks them).
+    const hasConclusions = kids.some(
+      (c) => c && String(c.className || "").includes("recall-item-conclusions")
+    );
+    assert.equal(hasConclusions, false);
   } finally {
     if (prevDoc === undefined) delete g.document;
     else g.document = prevDoc;
