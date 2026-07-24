@@ -56,7 +56,7 @@
     const brand = brandForAgent(id);
     const label = String(options.label || id || "Agent");
     const avatar = document.createElement(options.element || "span");
-    avatar.className = ["agent-avatar", options.className || ""].filter(Boolean).join(" ");
+    avatar.className = ["msg-avatar", "agent-avatar", options.className || ""].filter(Boolean).join(" ");
     avatar.dataset.agentId = id;
     avatar.dataset.agentBrand = brand ? brand.id : "fallback";
     avatar.setAttribute("aria-hidden", "true");
@@ -70,6 +70,27 @@
     return avatar;
   }
 
+  /** Person silhouette — matches agent avatar shell size for chat symmetry. */
+  function userAvatarSvg() {
+    return (
+      '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+      '<path fill="currentColor" d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.33 0-10 1.67-10 5v1.5c0 .28.22.5.5.5h19c.28 0 .5-.22.5-.5V19c0-3.33-6.67-5-10-5Z"/>' +
+      "</svg>"
+    );
+  }
+
+  function createUserAvatar(options = {}) {
+    if (typeof document === "undefined") return null;
+    const label = String(options.label || "用户");
+    const avatar = document.createElement(options.element || "span");
+    avatar.className = ["msg-avatar", "user-avatar", options.className || ""].filter(Boolean).join(" ");
+    avatar.dataset.role = "user";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.title = label;
+    avatar.innerHTML = userAvatarSvg();
+    return avatar;
+  }
+
   const api = {
     BRAND_BY_AGENT,
     normalizeAgentId,
@@ -77,6 +98,8 @@
     fallbackInitial,
     brandSvg,
     createAgentAvatar,
+    createUserAvatar,
+    userAvatarSvg,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;

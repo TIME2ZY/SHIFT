@@ -80,13 +80,13 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* User docked to the right edge of the canvas */
+/* User docked to the right; Agent/system to the left */
 .message.user {
   align-self: flex-end;
   align-items: flex-end;
   margin-left: auto;
   margin-right: 0;
-  max-width: min(76%, 40rem);
+  max-width: min(78%, 42rem);
 }
 
 .message.assistant,
@@ -97,26 +97,40 @@
   max-width: min(94%, 52rem);
 }
 
-.message.assistant {
+/* Shared avatar + bubble grid — user is mirrored for right-side dock */
+.message.has-avatar {
   display: grid;
+  column-gap: 10px;
+  row-gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.message.assistant.has-avatar {
   grid-template-columns: 32px minmax(0, 1fr);
   grid-template-areas:
     "avatar meta"
     "avatar card"
     ". usage";
-  column-gap: 10px;
-  row-gap: 6px;
 }
 
-.message.assistant > .agent-avatar-message {
+.message.user.has-avatar {
+  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-areas:
+    "meta avatar"
+    "card avatar";
+}
+
+.message.has-avatar > .agent-avatar-message,
+.message.has-avatar > .user-avatar-message {
   grid-area: avatar;
   align-self: start;
   margin-top: 1px;
 }
 
-.message.assistant > .msg-meta { grid-area: meta; }
-.message.assistant > .msg-card { grid-area: card; }
-.message.assistant > .msg-usage { grid-area: usage; }
+.message.has-avatar > .msg-meta { grid-area: meta; }
+.message.has-avatar > .msg-card { grid-area: card; }
+.message.has-avatar > .msg-usage { grid-area: usage; }
 
 .message[data-agent-status="thinking"] .agent-avatar-message,
 .message[data-agent-status="writing"] .agent-avatar-message {
@@ -262,7 +276,10 @@
 .message:focus-within .msg-copy { opacity: 0.6; }
 .msg-copy:hover { opacity: 1; color: var(--accent); }
 
-/* Canvas messages: user on the right; branded Agent bubbles on the left. */
+/* Canvas messages: mirrored speech bubbles (user right / agent left).
+   Sharp corner sits on the avatar side of the bubble top edge:
+   - assistant: top-left (avatar left)
+   - user:      top-right (avatar right) */
 .msg-card {
   position: relative;
   border: none;
@@ -276,16 +293,20 @@
 
 .message.user .msg-card {
   background: var(--user-bg);
-  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-subtle));
-  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-subtle));
+  /* TL TR BR BL — sharp top-right, toward user avatar */
+  border-radius: var(--radius-lg) var(--radius-xs) var(--radius-lg) var(--radius-lg);
   width: fit-content;
   max-width: 100%;
   margin-left: auto;
+  justify-self: end;
+  box-shadow: var(--shadow-sm);
 }
 
 .message.assistant .msg-card {
   background: color-mix(in srgb, var(--surface-raised) 74%, var(--surface-canvas));
   border: 1px solid color-mix(in srgb, var(--agent-color, var(--assistant-line)) 16%, var(--border-subtle));
+  /* TL TR BR BL — sharp top-left, toward agent avatar */
   border-radius: var(--radius-xs) var(--radius-lg) var(--radius-lg) var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
@@ -359,20 +380,16 @@
   font-family: var(--font-body);
   padding: var(--space-3) var(--space-4);
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
+/* User + assistant share the same bubble body metrics; only wrap rules differ */
 .user .msg-bubble {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding: var(--space-3) var(--space-4);
-  font-size: 14.5px;
 }
 
 .assistant .msg-bubble {
-  overflow-wrap: anywhere;
   word-break: break-word;
-  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-4);
-  font-size: 14.5px;
 }
 
 .system .msg-bubble {
