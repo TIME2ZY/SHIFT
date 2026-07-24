@@ -15,6 +15,9 @@ const LAYER_MESSAGE = "message";
 const LAYER_EVIDENCE = "evidence";
 const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
+const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
+/** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
+const DEFAULT_MAX_AUTO_MEMORY = 2;
 
 function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
   if (!transcript) throw new Error("Transcript fallback is required.");
@@ -240,7 +243,11 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
             sourceKind: "memory-entry",
             sourceId: memory.id,
             layer: LAYER_MEMORY,
-            score: 20 + recencyBoost(memory.createdAt) + (memory.status === "confirmed" ? 10 : 0),
+            score:
+              20 +
+              recencyBoost(memory.createdAt) +
+              (memory.status === "confirmed" ? 10 : 0) +
+              kindBoost(memory.kind),
             matchChannels: ["recency"],
             memoryId: memory.id,
             memoryStatus: memory.status || null,
@@ -427,9 +434,11 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     };
 
     // Channel A — recency (always; also the only channel for weak/empty prompts).
+    // Over-fetch so product kinds still surface when many handoffs are newer.
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
-        const recent = storage.memory.listActive(threadId, { limit: recentLimit });
+        const recentPool = Math.max(recentLimit * 3, 12);
+        const recent = storage.memory.listActive(threadId, { limit: recentPool });
         for (let index = 0; index < recent.length; index++) {
           noteChannel(recent[index], "recency", Math.max(0, 6 - index));
         }
@@ -466,11 +475,12 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     });
 
-    // Prefer keeping some recency items when related dominates.
+    // Prefer product memories; cap auto kinds so handoffs cannot fill the pack.
     const selected = selectRetrieveItems(ranked, {
       recentLimit,
       relatedLimit,
       totalLimit: recentLimit + relatedLimit,
+      maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
     const rendered = renderActiveMemoryCard(selected, { budgetChars });
@@ -567,27 +577,59 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
   };
 }
 
-function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit }) {
+function isProductMemoryKind(kind) {
+  return PRODUCT_MEMORY_KINDS.has(kind);
+}
+
+function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }) {
   const selected = [];
   const seen = new Set();
+  let autoCount = 0;
+  const autoCap = Math.max(0, Number(maxAuto) || 0);
+
   const take = (predicate, max) => {
     let count = 0;
     for (const item of ranked) {
       if (count >= max || selected.length >= totalLimit) break;
       if (seen.has(item.id) || !predicate(item)) continue;
+      const isAuto = !isProductMemoryKind(item.kind);
+      if (isAuto && autoCount >= autoCap) continue;
       selected.push(item);
       seen.add(item.id);
       count += 1;
+      if (isAuto) autoCount += 1;
     }
   };
-  // Keep a recency spine, then fill with related, then any remaining high-score items.
+
+  // Product recency first, then remaining recency (auto capped), then related, then score fill.
+  take((item) => item.channels?.includes("recency") && isProductMemoryKind(item.kind), recentLimit);
   take((item) => item.channels?.includes("recency"), recentLimit);
+  take((item) => item.channels?.includes("related") && isProductMemoryKind(item.kind), relatedLimit);
   take((item) => item.channels?.includes("related"), relatedLimit);
   take(() => true, totalLimit);
   return selected.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    const kindDelta = kindBoost(b.kind) - kindBoost(a.kind);
+    if (kindDelta !== 0) return kindDelta;
     return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   });
+}
+
+function kindBoost(kind) {
+  switch (kind) {
+    case "decision":
+      return 30;
+    case "constraint":
+      return 28;
+    case "fact":
+      return 24;
+    case "handoff":
+      return 6;
+    case "window-seal":
+      return 2;
+    default:
+      return 0;
+  }
 }
 
 function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layers }) {
@@ -654,6 +696,7 @@ function scoreRecallItem(item, terms) {
   const status = item.metadata?.status;
   if (status === "confirmed") score += 10;
   score += recencyBoost(item.createdAt);
+  score += kindBoost(item.metadata?.kind || item.memoryKind || null);
   if (item.metadata?.quality?.ok) score += 2;
   if (item.metadata?.partial) score -= 2;
   if (String(item.snippet || item.content || "").trim().length < 8) score -= 5;
@@ -677,8 +720,10 @@ function scoreMemoryRecord(memory, terms) {
     content: memory.content,
     snippet: memory.content,
     createdAt: memory.createdAt,
+    memoryKind: memory.kind,
     metadata: {
       status: memory.status,
+      kind: memory.kind,
       quality: memory.metadata?.quality,
       partial: memory.metadata?.partial,
     },

@@ -74,6 +74,59 @@ test("callback client validates required environment and arguments", () => {
   });
 });
 
+test("callback client builds memory-upsert and memory-invalidate requests", () => {
+  const upsert = callbackClient.buildRequest(
+    "memory-upsert",
+    {
+      kind: "decision",
+      topic: "storage-primary",
+      content: "SQLite is primary",
+      "supersession-key": "decision:storage-primary",
+    },
+    ENV
+  );
+  assert.equal(upsert.url.href, "http://127.0.0.1:8787/api/callbacks/memory-upsert");
+  assert.equal(upsert.init.method, "POST");
+  assert.deepEqual(JSON.parse(upsert.init.body), {
+    sessionId: "thread-中文",
+    invocationId: "inv-1",
+    callbackToken: "secret",
+    kind: "decision",
+    topic: "storage-primary",
+    content: "SQLite is primary",
+    supersessionKey: "decision:storage-primary",
+  });
+
+  assert.throws(
+    () => callbackClient.buildRequest("memory-upsert", { kind: "decision", content: "x" }, ENV),
+    /requires --topic/
+  );
+  assert.throws(
+    () =>
+      callbackClient.buildRequest(
+        "memory-upsert",
+        { kind: "decision", topic: "t" },
+        ENV
+      ),
+    /requires --content/
+  );
+
+  const invalidate = callbackClient.buildRequest(
+    "memory-invalidate",
+    { id: "mem-1", reason: "revoked" },
+    ENV
+  );
+  assert.equal(invalidate.url.href, "http://127.0.0.1:8787/api/callbacks/memory-invalidate");
+  assert.deepEqual(JSON.parse(invalidate.init.body), {
+    sessionId: "thread-中文",
+    invocationId: "inv-1",
+    callbackToken: "secret",
+    id: "mem-1",
+    reason: "revoked",
+  });
+  assert.throws(() => callbackClient.buildRequest("memory-invalidate", {}, ENV), /requires --id/);
+});
+
 test("callback client exit codes distinguish delivery from handoff acceptance", () => {
   assert.equal(
     callbackClient.exitCodeForResult("post-message", {

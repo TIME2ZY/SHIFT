@@ -2389,11 +2389,13 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   });
 });
 
-test("buildCallbackInstructions mentions all 3 recall commands", () => {
+test("buildCallbackInstructions mentions recall and memory-write commands", () => {
   const tpl = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
   assert.match(tpl, /callback-client\.js list-invocations/);
   assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
+  assert.match(tpl, /callback-client\.js memory-upsert/);
+  assert.match(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
 });
 
@@ -3129,6 +3131,7 @@ test("buildCallbackInstructions includes SHIFT context and recall commands", () 
   assert.match(instructions, /callback-client\.js list-invocations/);
   assert.match(instructions, /callback-client\.js session-search/);
   assert.match(instructions, /callback-client\.js read-invocation/);
+  assert.match(instructions, /callback-client\.js memory-upsert/);
   assert.match(instructions, /layer=memory/);
   assert.match(instructions, /Active Memories/);
   assert.match(instructions, /--layers memory,message,evidence/);

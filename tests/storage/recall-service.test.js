@@ -520,3 +520,48 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
     storage.close();
   }
 });
+
+test("retrieveForTurn prefers product memories over dense handoff noise", async () => {
+  const { storage, service } = createFixture();
+  try {
+    storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage-primary",
+      content: "Online writes go to SQLite only.",
+      createdBy: "codex",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    });
+    for (let index = 0; index < 8; index += 1) {
+      storage.memory.capture({
+        id: `handoff-${index}`,
+        threadId: "thread-1",
+        kind: "handoff",
+        content: `handoff noise ${index} about CSS and layout`,
+        createdBy: "codex",
+        captureKey: `handoff:inv-${index}:to:0`,
+        createdAt: `2026-07-20T0${index}:00:00.000Z`,
+      });
+    }
+
+    const result = service.retrieveForTurn({
+      threadId: "thread-1",
+      prompt: "继续",
+      budgetChars: 4000,
+      recentLimit: 4,
+      relatedLimit: 2,
+    });
+
+    assert.ok(
+      result.items.some((item) => item.kind === "decision"),
+      "decision should survive recency handoff flood"
+    );
+    const autoCount = result.items.filter(
+      (item) => item.kind === "handoff" || item.kind === "window-seal"
+    ).length;
+    assert.ok(autoCount <= 2, `expected at most 2 auto memories, got ${autoCount}`);
+    assert.ok((result.stats.byKind.decision || 0) >= 1);
+  } finally {
+    storage.close();
+  }
+});

@@ -108,6 +108,8 @@
       invalidatePrompt: "否定原因（可选）",
       contentRequired: "请填写记忆内容",
       createOk: "已写入记忆",
+      agentWrote: "Agent 已写入记忆",
+      agentInvalidated: "Agent 已否定一条记忆",
     },
 
     recall: {

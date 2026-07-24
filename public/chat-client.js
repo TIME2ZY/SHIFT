@@ -30,6 +30,7 @@
       syncComposerControls,
       onRuntimeStatusChange,
       onUsageEvent,
+      onMemoryEvent,
     } = deps;
 
     function store() {
@@ -190,6 +191,11 @@
           if (active) addSystem(text);
           break;
         }
+        case "memory":
+          if (typeof onMemoryEvent === "function") {
+            onMemoryEvent(data, sessionId);
+          }
+          break;
         case "done":
           finishStream("就绪", sessionId);
           break;

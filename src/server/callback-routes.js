@@ -1,3 +1,7 @@
+const { PRODUCT_KINDS } = require("../storage/memory-keys");
+
+const MAX_MEMORY_CONTENT_CHARS = 2048;
+
 function countHitLayers(hits) {
   const layers = { memory: 0, message: 0, evidence: 0 };
   for (const hit of hits || []) {
@@ -27,6 +31,44 @@ function validateOptionalCallbackAuth({
   return true;
 }
 
+function resolveAgentId(callbacks, sessionId, invocationId) {
+  const thread = typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
+  const record = thread?.tokens?.get(invocationId);
+  if (record && typeof record.agentId === "string" && record.agentId.trim()) {
+    return record.agentId.trim();
+  }
+  return "agent";
+}
+
+function broadcastMemoryEvent(callbacks, sessionId, payload) {
+  const thread = typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
+  if (!thread?.res || typeof callbacks.sendSse !== "function") return false;
+  return callbacks.sendSse(thread.res, "memory", payload);
+}
+
+function appendMemoryCapturedEvent(eventStore, sessionId, invocationId, memory, created) {
+  if (!eventStore || typeof eventStore.append !== "function" || !invocationId) return;
+  eventStore.append({
+    threadId: sessionId,
+    invocationId,
+    kind: "memory-captured",
+    payload: {
+      id: memory.id,
+      threadId: sessionId,
+      kind: memory.kind,
+      status: memory.status,
+      content: memory.content,
+      captureKey: memory.captureKey,
+      supersessionKey: memory.supersessionKey,
+      createdBy: memory.createdBy,
+      createdAt: memory.createdAt,
+      persisted: true,
+      created: Boolean(created),
+      source: "callback:memory-upsert",
+    },
+  });
+}
+
 function createCallbackRoutes({
   callbacks,
   transcript,
@@ -38,6 +80,9 @@ function createCallbackRoutes({
   durableRecorder,
   recallService,
   memoryCapture,
+  memoryService = null,
+  eventStore = null,
+  logger = console,
 }) {
   const recall = recallService || transcript;
   return async function handleCallbackRoutes(req, res, url) {
@@ -227,10 +272,218 @@ function createCallbackRoutes({
       return true;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-upsert") {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
+      const callbackToken = typeof body.callbackToken === "string" ? body.callbackToken : "";
+      const kind = typeof body.kind === "string" ? body.kind.trim() : "";
+      const topic = typeof body.topic === "string" ? body.topic.trim() : "";
+      const content = typeof body.content === "string" ? body.content.trim() : "";
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
+        return true;
+      }
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return true;
+      }
+      if (!memoryService) {
+        sendJson(res, 503, {
+          error: "Memory service unavailable. Enable SQLite storage (dual or sqlite mode).",
+        });
+        return true;
+      }
+      if (getSession && !getSession(sessionsFile, sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      if (!PRODUCT_KINDS.includes(kind)) {
+        sendJson(res, 400, {
+          error: `kind must be one of: ${PRODUCT_KINDS.join(", ")}.`,
+        });
+        return true;
+      }
+      if (!topic) {
+        sendJson(res, 400, { error: "topic is required for memory-upsert." });
+        return true;
+      }
+      if (!content) {
+        sendJson(res, 400, { error: "content is required." });
+        return true;
+      }
+      if (content.length > MAX_MEMORY_CONTENT_CHARS) {
+        sendJson(res, 400, {
+          error: `content exceeds ${MAX_MEMORY_CONTENT_CHARS} characters.`,
+        });
+        return true;
+      }
+
+      const agentId = resolveAgentId(callbacks, sessionId, invocationId);
+      try {
+        // Prefer linking the active callback invocation; if SQLite has not mirrored
+        // it yet (or tests omit the row), still accept the write with metadata only.
+        const baseInput = {
+          threadId: sessionId,
+          kind,
+          topic,
+          content,
+          supersessionKey:
+            typeof body.supersessionKey === "string" ? body.supersessionKey : undefined,
+          createdBy: agentId,
+          metadata: {
+            ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+            source: "callback:memory-upsert",
+            callbackInvocationId: invocationId,
+          },
+        };
+        let outcome;
+        try {
+          outcome = memoryService.createProduct({
+            ...baseInput,
+            sourceInvocationId: invocationId,
+          });
+        } catch (error) {
+          if (!/Source invocation .* does not exist/i.test(String(error.message || ""))) {
+            throw error;
+          }
+          outcome = memoryService.createProduct(baseInput);
+        }
+
+        try {
+          appendMemoryCapturedEvent(
+            eventStore,
+            sessionId,
+            invocationId,
+            outcome.memory,
+            outcome.created
+          );
+        } catch (error) {
+          logger.error?.(`[memory-upsert] event append failed: ${error.message}`);
+        }
+
+        const payload = {
+          action: "upsert",
+          sessionId,
+          created: outcome.created,
+          topic: outcome.topic,
+          supersessionKey: outcome.supersessionKey,
+          superseded: outcome.superseded,
+          memory: {
+            id: outcome.memory.id,
+            kind: outcome.memory.kind,
+            status: outcome.memory.status,
+            content: outcome.memory.content,
+            topic: outcome.topic,
+            supersessionKey: outcome.supersessionKey,
+            createdBy: outcome.memory.createdBy,
+            createdAt: outcome.memory.createdAt,
+          },
+        };
+        broadcastMemoryEvent(callbacks, sessionId, payload);
+
+        sendJson(res, 200, {
+          ok: true,
+          created: outcome.created,
+          topic: outcome.topic,
+          supersessionKey: outcome.supersessionKey,
+          memory: outcome.memory,
+          superseded: outcome.superseded,
+        });
+      } catch (error) {
+        logger.error?.(`[memory-upsert] failed: ${error.message}`);
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-invalidate") {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
+      const callbackToken = typeof body.callbackToken === "string" ? body.callbackToken : "";
+      const memoryId = typeof body.id === "string" ? body.id.trim() : "";
+      const reason = typeof body.reason === "string" ? body.reason : "";
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
+        return true;
+      }
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return true;
+      }
+      if (!memoryService) {
+        sendJson(res, 503, {
+          error: "Memory service unavailable. Enable SQLite storage (dual or sqlite mode).",
+        });
+        return true;
+      }
+      if (!memoryId) {
+        sendJson(res, 400, { error: "id is required." });
+        return true;
+      }
+      if (getSession && !getSession(sessionsFile, sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+
+      const existing = memoryService.get(memoryId);
+      if (!existing || existing.threadId !== sessionId) {
+        sendJson(res, 404, { error: "Memory not found." });
+        return true;
+      }
+
+      const agentId = resolveAgentId(callbacks, sessionId, invocationId);
+      try {
+        const memory = memoryService.invalidate(memoryId, {
+          invalidatedBy: agentId,
+          reason,
+        });
+        const payload = {
+          action: "invalidate",
+          sessionId,
+          memory: {
+            id: memory.id,
+            kind: memory.kind,
+            status: memory.status,
+            content: memory.content,
+            topic: memory.topic,
+            supersessionKey: memory.supersessionKey,
+            createdBy: memory.createdBy,
+            createdAt: memory.createdAt,
+          },
+        };
+        broadcastMemoryEvent(callbacks, sessionId, payload);
+        sendJson(res, 200, { ok: true, memory });
+      } catch (error) {
+        logger.error?.(`[memory-invalidate] failed: ${error.message}`);
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
     return false;
   };
 }
 
 module.exports = {
   createCallbackRoutes,
+  resolveAgentId,
+  broadcastMemoryEvent,
 };

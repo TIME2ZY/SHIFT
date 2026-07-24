@@ -857,6 +857,20 @@
     syncComposerControls,
     onRuntimeStatusChange,
     onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
+    onMemoryEvent: (payload, sessionId) => {
+      const sid = (payload && payload.sessionId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      if (state.rightPanelTab === "memory") memoryPanel.load();
+      const action = payload && payload.action;
+      const locale = window.Locale || window.LocaleZhCN;
+      const t = (path, fallback) =>
+        locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+      if (action === "invalidate") {
+        setStatus(t("memory.agentInvalidated", "Agent 已否定一条记忆"), "ok");
+      } else {
+        setStatus(t("memory.agentWrote", "Agent 已写入记忆"), "ok");
+      }
+    },
   });
 
   /* ═══════════════════════════════════════════════════════════

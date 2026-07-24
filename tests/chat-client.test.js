@@ -129,6 +129,29 @@ test("handleSseEvent session updates state and reloads session-scoped data", () 
   assert.deepEqual(calls, [["sessions"], ["project", "s1"], ["worktree"], ["workspace"]]);
 });
 
+test("handleSseEvent routes memory frames to onMemoryEvent", () => {
+  const seen = [];
+  const deps = makeDeps({
+    onMemoryEvent(payload, sessionId) {
+      seen.push([payload.action, payload.sessionId, sessionId]);
+    },
+  });
+  deps.state.currentSessionId = "s1";
+  const client = chatClientModule.createChatClient(deps);
+
+  client.handleSseEvent(
+    "memory",
+    {
+      action: "upsert",
+      sessionId: "s1",
+      memory: { id: "m1", kind: "decision", content: "use sqlite" },
+    },
+    { sessionId: "s1" }
+  );
+
+  assert.deepEqual(seen, [["upsert", "s1", "s1"]]);
+});
+
 test("handleSseEvent routes canonical agent-event frames into the bound session", () => {
   const seen = [];
   const deps = makeDeps({
