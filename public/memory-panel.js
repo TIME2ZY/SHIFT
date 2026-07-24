@@ -99,10 +99,22 @@
       }
       const count = Number(payload.count) || (payload.items || []).length || 0;
       const items = Array.isArray(payload.items) ? payload.items : [];
-      const title =
+      const availability =
+        payload.availability || payload.stats?.availability || { state: "available" };
+      let title =
         count > 0
           ? t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count))
           : t("memory.injectedEmpty", "本回合未注入结构化记忆");
+      if (availability.state === "unavailable") {
+        title = t(
+          "memory.injectedUnavailable",
+          "记忆系统暂时不可用（非空库）"
+        );
+      } else if (availability.state === "degraded") {
+        title =
+          t("memory.injectedDegraded", "记忆检索降级") +
+          (count > 0 ? ` · ${count}` : "");
+      }
       const list =
         count > 0
           ? `<ul class="memory-inject-list">${items
@@ -115,8 +127,14 @@
               })
               .join("")}</ul>`
           : "";
+      const warn =
+        availability.state === "unavailable" || availability.state === "degraded"
+          ? `<div class="memory-inject-warn" data-availability="${escHtml(
+              availability.state
+            )}">${escHtml(availability.reason || availability.state)}</div>`
+          : "";
       injectEl.hidden = false;
-      injectEl.innerHTML = `<div class="memory-inject-title">${escHtml(title)}</div>${list}`;
+      injectEl.innerHTML = `<div class="memory-inject-title">${escHtml(title)}</div>${warn}${list}`;
     }
 
     function setInjectPreview(payload) {

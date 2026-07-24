@@ -28,7 +28,14 @@ function createMemoryService({
     while (attempt < MAX_SUPERSESSION_RETRIES) {
       attempt += 1;
       try {
-        return captureOnce(input);
+        const outcome = captureOnce(input);
+        if (outcome?.created) {
+          recordMemoryLifecycleEvents(storage, outcome, {
+            agentId: outcome.memory?.createdBy || input.createdBy || null,
+            invocationId: input.sourceInvocationId || null,
+          });
+        }
+        return outcome;
       } catch (error) {
         if (isCaptureKeyConflict(error)) {
           const scope = input.scope === "project" ? "project" : "thread";
@@ -112,7 +119,11 @@ function createMemoryService({
         );
       }
 
-      return { memory, created: true, superseded: previous.map((item) => item.id) };
+      return {
+        memory,
+        created: true,
+        superseded: previous.map((item) => item.id),
+      };
     });
   }
 
@@ -314,22 +325,42 @@ function createMemoryService({
         confirmationSource,
       },
     });
-    return enrichMemory(storage.memories.get(id));
+    const confirmed = enrichMemory(storage.memories.get(id));
+    storage.memoryEvents?.recordSafe?.({
+      eventType: "memory_confirmed",
+      threadId: confirmed?.ownerThreadId || confirmed?.originThreadId || confirmed?.threadId,
+      projectKey: confirmed?.projectKey || null,
+      memoryId: confirmed?.id,
+      agentId: confirmedBy,
+      payload: { confirmationSource, previousAuthority: existing.authority },
+    });
+    return confirmed;
   }
 
   function invalidate(id, audit = {}) {
     const existing = storage.memories.get(id);
     if (!existing) return null;
     assertTransitionAllowed(existing, "invalidated");
+    const invalidatedBy = requiredString(audit.invalidatedBy, "memory invalidator");
     storage.memories.transition(id, "invalidated", {
       metadata: {
         ...(existing.metadata || {}),
-        invalidatedBy: requiredString(audit.invalidatedBy, "memory invalidator"),
+        invalidatedBy,
         invalidatedAt: audit.invalidatedAt || nowIso(clock),
         invalidationReason: nullableString(audit.reason),
       },
     });
-    return enrichMemory(storage.memories.get(id));
+    const invalidated = enrichMemory(storage.memories.get(id));
+    storage.memoryEvents?.recordSafe?.({
+      eventType: "memory_invalidated",
+      threadId:
+        invalidated?.ownerThreadId || invalidated?.originThreadId || invalidated?.threadId,
+      projectKey: invalidated?.projectKey || null,
+      memoryId: invalidated?.id,
+      agentId: invalidatedBy,
+      payload: { reason: nullableString(audit.reason) },
+    });
+    return invalidated;
   }
 
   function enrichMemory(memory) {
@@ -532,9 +563,45 @@ function nullableString(value) {
   return typeof value === "string" && value ? value : null;
 }
 
+function recordMemoryLifecycleEvents(storage, outcome, meta = {}) {
+  if (!storage?.memoryEvents?.recordSafe || !outcome?.memory) return;
+  const memory = outcome.memory;
+  if (outcome.created) {
+    storage.memoryEvents.recordSafe({
+      eventType: "memory_written",
+      threadId: memory.ownerThreadId || memory.originThreadId || memory.threadId,
+      projectKey: memory.projectKey || null,
+      memoryId: memory.id,
+      invocationId: meta.invocationId || memory.sourceInvocationId || null,
+      agentId: meta.agentId || memory.createdBy || null,
+      payload: {
+        kind: memory.kind,
+        scope: memory.scope,
+        status: memory.status,
+        authority: memory.authority,
+        activation: memory.activation,
+        captureKey: memory.captureKey,
+        supersessionKey: memory.supersessionKey,
+      },
+    });
+  }
+  for (const supersededId of outcome.superseded || []) {
+    storage.memoryEvents.recordSafe({
+      eventType: "memory_superseded",
+      threadId: memory.ownerThreadId || memory.originThreadId || memory.threadId,
+      projectKey: memory.projectKey || null,
+      memoryId: supersededId,
+      invocationId: meta.invocationId || null,
+      agentId: meta.agentId || memory.createdBy || null,
+      payload: { supersededBy: memory.id },
+    });
+  }
+}
+
 module.exports = {
   createMemoryService,
   deriveWriteFields,
   resolveProductScope,
+  recordMemoryLifecycleEvents,
   MAX_SUPERSESSION_RETRIES,
 };

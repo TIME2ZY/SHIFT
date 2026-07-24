@@ -1,6 +1,7 @@
 const {
   renderActiveMemoryCard,
   resolveA2AMemoryBudget,
+  resolveBudgetBuckets,
   resolveMemoryBudget,
   resolveRecentMemoryLimit,
   resolveRelatedMemoryLimit,
@@ -202,6 +203,21 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         }
       }
     }
+
+    storage?.memoryEvents?.recordSafe?.({
+      eventType: "memory_searched",
+      threadId,
+      payload: {
+        query: result.query,
+        weakQuery: result.weakQuery,
+        source,
+        mode,
+        limit,
+        hits: result.hits.length,
+        layers: result.layers,
+        availability: result.availability || null,
+      },
+    });
 
     logSearchMetrics({
       threadId,
@@ -539,36 +555,53 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
+    const budgetBuckets = resolveBudgetBuckets(budgetChars);
     const rendered =
       availability.state === "unavailable"
         ? renderUnavailableMemoryCard(availability)
         : availability.state === "degraded"
           ? prependAvailabilityWarning(
-              renderActiveMemoryCard(selected, { budgetChars }),
+              renderActiveMemoryCard(selected, { budgetChars, budgetBuckets }),
               availability
             )
-          : renderActiveMemoryCard(selected, { budgetChars });
+          : renderActiveMemoryCard(selected, { budgetChars, budgetBuckets });
     const usedChars = rendered.length;
     const byKind = {};
     for (const item of selected) {
       byKind[item.kind || "memory"] = (byKind[item.kind || "memory"] || 0) + 1;
     }
 
+    const stats = {
+      usedChars,
+      truncated: /truncated:\s*true/i.test(rendered),
+      byKind,
+      channels: {
+        recency: selected.filter((item) => item.channels?.includes("recency")).length,
+        related: selected.filter((item) => item.channels?.includes("related")).length,
+      },
+      weakQuery: weak,
+      termCount: terms.length,
+      availability,
+      budgetBuckets,
+    };
+
+    storage?.memoryEvents?.recordSafe?.({
+      eventType: "memory_injected",
+      threadId,
+      payload: {
+        source: "retrieveForTurn",
+        count: selected.length,
+        memoryIds: selected.map((item) => item.id).filter(Boolean),
+        availability,
+        usedChars,
+        truncated: stats.truncated,
+      },
+    });
+
     return {
       items: selected,
       rendered,
-      stats: {
-        usedChars,
-        truncated: /truncated:\s*true/i.test(rendered),
-        byKind,
-        channels: {
-          recency: selected.filter((item) => item.channels?.includes("recency")).length,
-          related: selected.filter((item) => item.channels?.includes("related")).length,
-        },
-        weakQuery: weak,
-        termCount: terms.length,
-        availability,
-      },
+      stats,
     };
   }
 

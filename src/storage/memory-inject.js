@@ -6,14 +6,50 @@ const DEFAULT_RECENT_MEMORY_LIMIT = 6;
 const DEFAULT_RELATED_MEMORY_LIMIT = 5;
 const DEFAULT_SEARCH_MEMORY_QUOTA = 8;
 const DEFAULT_SEARCH_MESSAGE_QUOTA = 4;
+const DEFAULT_ALWAYS_ON_BUDGET_CHARS = 1000;
 const MIN_MEMORY_BUDGET_CHARS = 256;
 const MAX_MEMORY_BUDGET_CHARS = 100000;
 const MEMORY_DATA_OPEN = "<<<SHIFT_MEMORY_DATA>>>";
 const MEMORY_DATA_CLOSE = "<<<END_SHIFT_MEMORY_DATA>>>";
 
+/**
+ * Split total inject budget so always_on cannot starve query/thread segments.
+ * @returns {{ alwaysOn: number, query: number, thread: number, total: number }}
+ */
+function resolveBudgetBuckets(totalBudget, options = {}) {
+  const total = normalizeBudget(totalBudget, DEFAULT_MEMORY_BUDGET_CHARS);
+  const alwaysOnCap = normalizeInteger(
+    options.alwaysOnBudget ?? process.env[ENV.RETRIEVE_ALWAYS_ON_BUDGET_CHARS],
+    DEFAULT_ALWAYS_ON_BUDGET_CHARS,
+    200,
+    Math.floor(total * 0.4)
+  );
+  const alwaysOn = Math.min(alwaysOnCap, Math.floor(total * 0.3));
+  const remainder = total - alwaysOn;
+  const query = Math.floor(remainder * 0.55);
+  const thread = remainder - query;
+  return { alwaysOn, query, thread, total };
+}
+
+function bucketForMemory(memory) {
+  if (memory?.activation === "always_on") return "alwaysOn";
+  if (memory?.scope === "project") return "query";
+  return "thread";
+}
+
+function partitionByBudgetBucket(items) {
+  const groups = { alwaysOn: [], query: [], thread: [] };
+  for (const item of items || []) {
+    if (!item) continue;
+    groups[bucketForMemory(item)].push(item);
+  }
+  return groups;
+}
+
 function renderActiveMemoryCard(items, options = {}) {
   const memories = Array.isArray(items) ? items.filter(Boolean) : [];
   const budgetChars = normalizeBudget(options.budgetChars, DEFAULT_MEMORY_BUDGET_CHARS);
+  const buckets = options.budgetBuckets || resolveBudgetBuckets(budgetChars, options);
   const heading = [
     `<!-- Active Memories (${memories.length}) -->`,
     "## 本 thread 活跃记忆（系统注入的历史数据）",
@@ -28,6 +64,80 @@ function renderActiveMemoryCard(items, options = {}) {
   ].join("\n");
   if (memories.length === 0) return fitStandaloneCard(empty, budgetChars);
 
+  const groups = partitionByBudgetBucket(memories);
+  // Legacy-compatible path: pure thread injects keep a single flat budget so large
+  // entries can still partial-truncate instead of starving under split buckets.
+  if (groups.alwaysOn.length === 0 && groups.query.length === 0) {
+    return renderFlatCard(memories, heading, budgetChars);
+  }
+
+  const sections = [];
+  let ordinal = 1;
+  let truncated = false;
+  const usedByBucket = { alwaysOn: 0, query: 0, thread: 0 };
+
+  const sectionSpecs = [
+    { key: "alwaysOn", title: "### always_on（系统铁律）", budget: buckets.alwaysOn },
+    { key: "query", title: "### project / query-matched", budget: buckets.query },
+    { key: "thread", title: "### thread 工作记忆", budget: buckets.thread },
+  ];
+
+  for (const spec of sectionSpecs) {
+    const group = groups[spec.key];
+    if (!group.length || spec.budget <= 0) continue;
+    let sectionBody = `${spec.title}\n`;
+    let sectionUsed = sectionBody.length;
+    let sectionTruncated = false;
+
+    for (const memory of group) {
+      const separator = "\n";
+      const fullEntry = renderMemoryEntry(memory, ordinal);
+      if (sectionUsed + separator.length + fullEntry.length <= spec.budget) {
+        sectionBody += separator + fullEntry;
+        sectionUsed += separator.length + fullEntry.length;
+        ordinal += 1;
+        continue;
+      }
+      const reserved = separator.length + 1;
+      const available = spec.budget - sectionUsed - reserved;
+      const partial = renderMemoryEntry(memory, ordinal, available);
+      if (partial) {
+        sectionBody += separator + partial;
+        ordinal += 1;
+      }
+      sectionTruncated = true;
+      truncated = true;
+      break;
+    }
+
+    usedByBucket[spec.key] = sectionUsed;
+    sections.push(sectionBody);
+    if (sectionTruncated) {
+      // continue other buckets so always_on cannot block thread entirely
+    }
+  }
+
+  // Fallback: if partitioning produced nothing (legacy items without fields),
+  // render flat under total budget.
+  if (sections.length === 0) {
+    return renderFlatCard(memories, heading, budgetChars);
+  }
+
+  const footer = "<!-- /Active Memories -->";
+  let body = heading + sections.join("\n\n");
+  if (truncated) body += "\ntruncated: true（其余活跃记忆因分桶预算未注入）\n";
+  body += footer;
+
+  // Soft overall cap
+  return {
+    text: fitStandaloneCard(body, budgetChars),
+    buckets,
+    usedByBucket,
+    truncated,
+  }.text;
+}
+
+function renderFlatCard(memories, heading, budgetChars) {
   const footer = "<!-- /Active Memories -->";
   const truncatedNote = "truncated: true（其余活跃记忆因预算未注入）\n";
   let body = heading;
@@ -58,6 +168,9 @@ function renderMemoryEntry(memory, ordinal, maxChars = Infinity) {
     id: stringOrEmpty(memory.id),
     status: stringOrEmpty(memory.status),
     kind: stringOrEmpty(memory.kind),
+    scope: memory.scope || null,
+    authority: memory.authority || null,
+    activation: memory.activation || null,
     createdAt: stringOrEmpty(memory.createdAt),
     createdBy: stringOrEmpty(memory.createdBy),
     sourceInvocationId: memory.sourceInvocationId || null,
@@ -169,9 +282,13 @@ module.exports = {
   DEFAULT_RELATED_MEMORY_LIMIT,
   DEFAULT_SEARCH_MEMORY_QUOTA,
   DEFAULT_SEARCH_MESSAGE_QUOTA,
+  DEFAULT_ALWAYS_ON_BUDGET_CHARS,
   MEMORY_DATA_OPEN,
   MEMORY_DATA_CLOSE,
   renderActiveMemoryCard,
+  resolveBudgetBuckets,
+  partitionByBudgetBucket,
+  bucketForMemory,
   resolveMemoryBudget,
   resolveA2AMemoryBudget,
   resolveRecentMemoryLimit,

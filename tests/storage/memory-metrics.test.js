@@ -58,5 +58,6 @@ test("buildMemoryInjectPayload shapes UI payload", () => {
   assert.equal(payload.count, 1);
   assert.equal(payload.sessionId, "s1");
   assert.equal(payload.items[0].kind, "fact");
+  assert.equal(payload.availability.state, "available");
   assert.deepEqual(emptyWriteStats().upsertCallback, 0);
 });
