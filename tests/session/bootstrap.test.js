@@ -150,7 +150,9 @@ test("buildActiveMemoryCard reads only the configured recency window", async () 
     },
   });
 
-  assert.deepEqual(calls, [{ threadId: "thread-memory", options: { limit: 4 } }]);
+  assert.deepEqual(calls, [
+    { threadId: "thread-memory", options: { limit: 4, scope: "all", forInject: true } },
+  ]);
   assert.match(pack.rendered, /\[confirmed\]\[decision\] id=decision-1/);
   assert.match(pack.rendered, /Use SQLite/);
   assert.equal(pack.items.length, 1);
