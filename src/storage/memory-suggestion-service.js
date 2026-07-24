@@ -1,5 +1,5 @@
 const crypto = require("node:crypto");
-const { PRODUCT_KINDS, slugifyTopic, buildSupersessionKey } = require("./memory-keys");
+const { PRODUCT_KINDS, slugifyTopic } = require("./memory-keys");
 
 /**
  * Suggestion queue: extractor/agent may propose; only user accept promotes to L2.
