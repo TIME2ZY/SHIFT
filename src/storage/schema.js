@@ -328,6 +328,31 @@ const MIGRATIONS = Object.freeze([
       migrateMemoryFoundationOwnership(db);
     },
   },
+  {
+    version: 7,
+    name: "memory_events_telemetry",
+    sql: `
+      CREATE TABLE memory_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        thread_id TEXT,
+        project_key TEXT,
+        memory_id TEXT,
+        invocation_id TEXT,
+        agent_id TEXT,
+        payload_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX memory_events_thread_created
+        ON memory_events(thread_id, created_at);
+      CREATE INDEX memory_events_type_created
+        ON memory_events(event_type, created_at);
+      CREATE INDEX memory_events_memory_created
+        ON memory_events(memory_id, created_at)
+        WHERE memory_id IS NOT NULL;
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

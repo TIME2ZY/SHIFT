@@ -1,5 +1,5 @@
 /**
- * Per-turn L3 memory write observability.
+ * Per-turn L3 memory write observability + inject payloads.
  * Opt-in terminal logs: SHIFT_MEMORY_METRICS_LOG=1
  */
 
@@ -83,6 +83,9 @@ function slimInjectItems(items, max = 12) {
     id: item.id || null,
     kind: item.kind || null,
     status: item.status || null,
+    scope: item.scope || null,
+    authority: item.authority || null,
+    activation: item.activation || null,
     topic: item.topic || item.metadata?.topic || null,
     content: String(item.content || "").slice(0, 120),
     score: typeof item.score === "number" ? item.score : undefined,
@@ -90,9 +93,27 @@ function slimInjectItems(items, max = 12) {
   }));
 }
 
+function normalizeAvailability(stats = {}) {
+  const raw = stats.availability;
+  if (raw && typeof raw === "object" && raw.state) {
+    return {
+      state: raw.state,
+      empty: Boolean(raw.empty),
+      partial: Boolean(raw.partial),
+      reason: raw.reason || null,
+    };
+  }
+  const empty =
+    stats.empty === true ||
+    (Array.isArray(stats.items) && stats.items.length === 0) ||
+    false;
+  return { state: "available", empty, partial: false, reason: null };
+}
+
 function buildMemoryInjectPayload(input = {}) {
   const items = slimInjectItems(input.items);
   const stats = input.stats && typeof input.stats === "object" ? input.stats : {};
+  const availability = normalizeAvailability(stats);
   return {
     sessionId: input.sessionId || input.threadId || null,
     agent: input.agent || null,
@@ -105,7 +126,10 @@ function buildMemoryInjectPayload(input = {}) {
       byKind: stats.byKind || {},
       weakQuery: Boolean(stats.weakQuery),
       channels: stats.channels || {},
+      availability,
+      budgetBuckets: stats.budgetBuckets || null,
     },
+    availability,
   };
 }
 
@@ -118,4 +142,5 @@ module.exports = {
   logMemoryWriteMetrics,
   slimInjectItems,
   buildMemoryInjectPayload,
+  normalizeAvailability,
 };

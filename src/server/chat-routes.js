@@ -16,6 +16,7 @@ const {
   logMemoryWriteMetrics,
   buildMemoryInjectPayload,
 } = require("../storage/memory-metrics");
+const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -78,6 +79,7 @@ function createChatRoutes({
   sessionBootstrap,
   recallService,
   memoryService,
+  storage = null,
   agentIdentity,
   agentHandoff,
   worktreeManager,
@@ -380,6 +382,17 @@ function createChatRoutes({
         messageId: userMessageId,
       },
     });
+    if (looksLikeDecisionLanguage(rawPrompt)) {
+      storage?.memoryEvents?.recordSafe?.({
+        eventType: "decision_language_detected",
+        threadId: sessionId,
+        agentId: requestedAgent,
+        payload: {
+          messageId: userMessageId,
+          chars: rawPrompt.length,
+        },
+      });
+    }
 
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -507,17 +520,25 @@ function createChatRoutes({
         threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
         if (i === 0) {
-          sendSse(
-            res,
-            "memory-inject",
-            buildMemoryInjectPayload({
-              sessionId,
-              agent,
+          const injectPayload = buildMemoryInjectPayload({
+            sessionId,
+            agent,
+            source: "bootstrap",
+            items: bootstrapInject.items,
+            stats: bootstrapInject.stats,
+          });
+          sendSse(res, "memory-inject", injectPayload);
+          storage?.memoryEvents?.recordSafe?.({
+            eventType: "memory_injected",
+            threadId: sessionId,
+            agentId: agent,
+            payload: {
               source: "bootstrap",
-              items: bootstrapInject.items,
-              stats: bootstrapInject.stats,
-            })
-          );
+              count: injectPayload.count,
+              memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
+              availability: injectPayload.availability,
+            },
+          });
         }
 
         let agentPrompt;
@@ -644,17 +665,25 @@ function createChatRoutes({
           logA2AInjectMetrics(injectMetrics, log);
           sendSse(res, "handoff-metrics", injectMetrics);
           if (pending.inject) {
-            sendSse(
-              res,
-              "memory-inject",
-              buildMemoryInjectPayload({
-                sessionId,
-                agent: pending.agent,
+            const a2aInject = buildMemoryInjectPayload({
+              sessionId,
+              agent: pending.agent,
+              source: "a2a",
+              items: pending.inject.items,
+              stats: pending.inject.stats,
+            });
+            sendSse(res, "memory-inject", a2aInject);
+            storage?.memoryEvents?.recordSafe?.({
+              eventType: "memory_injected",
+              threadId: sessionId,
+              agentId: pending.agent,
+              payload: {
                 source: "a2a",
-                items: pending.inject.items,
-                stats: pending.inject.stats,
-              })
-            );
+                count: a2aInject.count,
+                memoryIds: (a2aInject.items || []).map((item) => item.id).filter(Boolean),
+                availability: a2aInject.availability,
+              },
+            });
           }
         }
         threadCtx.currentInvocationId = invocationId;

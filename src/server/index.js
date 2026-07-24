@@ -323,6 +323,7 @@ function createServer(options = {}) {
     sessionBootstrap,
     recallService,
     memoryService,
+    storage: storageContext.storage,
     agentIdentity,
     agentHandoff,
     worktreeManager,
