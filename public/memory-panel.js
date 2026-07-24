@@ -18,6 +18,7 @@
 
   function createMemoryPanel({
     bodyEl,
+    injectEl,
     filterKindEl,
     filterStatusEl,
     includeRetiredEl,
@@ -32,10 +33,13 @@
       return {
         load() {},
         bind() {},
+        setInjectPreview() {},
+        clearInjectPreview() {},
       };
     }
 
     let loadToken = 0;
+    let lastInject = null;
 
     function toast(message, isError) {
       if (typeof onToast === "function") onToast(message, isError);
@@ -81,6 +85,44 @@
           t("memory.loadFailed", "加载失败") + ": " + (error.message || error)
         )}</div>`;
       }
+    }
+
+    function renderInjectPreview(payload) {
+      if (!injectEl) return;
+      lastInject = payload || null;
+      if (!payload) {
+        injectEl.hidden = true;
+        injectEl.innerHTML = "";
+        return;
+      }
+      const count = Number(payload.count) || (payload.items || []).length || 0;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const title =
+        count > 0
+          ? t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count))
+          : t("memory.injectedEmpty", "本回合未注入结构化记忆");
+      const list =
+        count > 0
+          ? `<ul class="memory-inject-list">${items
+              .map((item) => {
+                const kind = KIND_LABELS[item.kind] || item.kind || "";
+                const snippet = String(item.content || "").slice(0, 80);
+                return `<li><span class="memory-kind">${escHtml(kind)}</span> ${escHtml(
+                  snippet
+                )}</li>`;
+              })
+              .join("")}</ul>`
+          : "";
+      injectEl.hidden = false;
+      injectEl.innerHTML = `<div class="memory-inject-title">${escHtml(title)}</div>${list}`;
+    }
+
+    function setInjectPreview(payload) {
+      renderInjectPreview(payload);
+    }
+
+    function clearInjectPreview() {
+      renderInjectPreview(null);
     }
 
     function renderList(memories, counts) {
@@ -240,7 +282,7 @@
       if (formEl) formEl.addEventListener("submit", onCreateSubmit);
     }
 
-    return { load, bind };
+    return { load, bind, setInjectPreview, clearInjectPreview };
   }
 
   const api = { createMemoryPanel, KIND_LABELS, STATUS_LABELS };

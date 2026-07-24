@@ -426,6 +426,7 @@
 
   const memoryPanel = window.MemoryPanel.createMemoryPanel({
     bodyEl: memoryPanelInlineEl ? memoryPanelInlineEl.querySelector(".memory-body") : null,
+    injectEl: $("#memory-inject-inline"),
     filterKindEl: $("#memory-filter-kind"),
     filterStatusEl: $("#memory-filter-status"),
     includeRetiredEl: $("#memory-include-retired"),
@@ -870,6 +871,29 @@
       } else {
         setStatus(t("memory.agentWrote", "Agent 已写入记忆"), "ok");
       }
+    },
+    onMemoryInject: (payload, sessionId) => {
+      const sid = (payload && payload.sessionId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      if (typeof memoryPanel.setInjectPreview === "function") {
+        memoryPanel.setInjectPreview(payload);
+      }
+      const count = Number(payload && payload.count) || 0;
+      if (count > 0 && state.rightPanelTab !== "memory") {
+        const locale = window.Locale || window.LocaleZhCN;
+        const t = (path, fallback) =>
+          locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+        setStatus(
+          t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count)),
+          "ok"
+        );
+      }
+    },
+    onMemoryMetrics: (payload, sessionId) => {
+      const sid = (payload && payload.threadId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      const total = Number(payload && payload.totalWrites) || 0;
+      if (total > 0 && state.rightPanelTab === "memory") memoryPanel.load();
     },
   });
 

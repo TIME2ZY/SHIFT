@@ -31,6 +31,8 @@
       onRuntimeStatusChange,
       onUsageEvent,
       onMemoryEvent,
+      onMemoryInject,
+      onMemoryMetrics,
     } = deps;
 
     function store() {
@@ -194,6 +196,16 @@
         case "memory":
           if (typeof onMemoryEvent === "function") {
             onMemoryEvent(data, sessionId);
+          }
+          break;
+        case "memory-inject":
+          if (typeof onMemoryInject === "function") {
+            onMemoryInject(data, sessionId);
+          }
+          break;
+        case "memory-metrics":
+          if (typeof onMemoryMetrics === "function") {
+            onMemoryMetrics(data, sessionId);
           }
           break;
         case "done":

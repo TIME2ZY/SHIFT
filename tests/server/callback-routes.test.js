@@ -178,9 +178,10 @@ test("handleCallbackRoutes memory-upsert writes product memory and emits SSE", a
     assert.equal(res.body.memory.createdBy, "codex");
     // Invocation may not be mirrored to SQLite yet; metadata still records the callback id.
     assert.equal(res.body.memory.metadata?.callbackInvocationId, "i1");
-    assert.equal(sseEvents.length, 1);
-    assert.equal(sseEvents[0].event, "memory");
-    assert.equal(sseEvents[0].data.action, "upsert");
+    const memoryEvents = sseEvents.filter((item) => item.event === "memory");
+    assert.equal(memoryEvents.length, 1);
+    assert.equal(memoryEvents[0].data.action, "upsert");
+    assert.ok(sseEvents.some((item) => item.event === "memory-metrics"));
 
     // Same topic supersedes previous active entry.
     const res2 = makeRes();

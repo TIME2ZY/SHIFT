@@ -110,6 +110,8 @@
       createOk: "已写入记忆",
       agentWrote: "Agent 已写入记忆",
       agentInvalidated: "Agent 已否定一条记忆",
+      injectedSummary: "本回合注入 {{n}} 条",
+      injectedEmpty: "本回合未注入结构化记忆",
     },
 
     recall: {

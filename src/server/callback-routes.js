@@ -1,6 +1,19 @@
 const { PRODUCT_KINDS } = require("../storage/memory-keys");
+const {
+  emptyWriteStats,
+  buildMemoryWriteMetrics,
+  logMemoryWriteMetrics,
+} = require("../storage/memory-metrics");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
+
+function bumpThreadWriteStat(callbacks, sessionId, field, amount = 1) {
+  const thread = typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
+  if (!thread) return emptyWriteStats();
+  if (!thread.memoryWriteStats) thread.memoryWriteStats = emptyWriteStats();
+  thread.memoryWriteStats[field] = (Number(thread.memoryWriteStats[field]) || 0) + amount;
+  return { ...thread.memoryWriteStats };
+}
 
 function countHitLayers(hits) {
   const layers = { memory: 0, message: 0, evidence: 0 };
@@ -112,6 +125,7 @@ function createCallbackRoutes({
       const postOptions = { appendToSession };
       if (durableRecorder) postOptions.durableRecorder = durableRecorder;
       if (memoryCapture) postOptions.memoryCapture = memoryCapture;
+      if (memoryService) postOptions.memoryService = memoryService;
       const result = callbacks.postMessage(sessionId, invocationId, content, postOptions);
       if (!result) {
         sendJson(res, 410, { error: "Thread no longer active; message was not delivered." });
@@ -389,6 +403,20 @@ function createCallbackRoutes({
           },
         };
         broadcastMemoryEvent(callbacks, sessionId, payload);
+        const liveStats = bumpThreadWriteStat(callbacks, sessionId, "upsertCallback", 1);
+        const writeMetrics = buildMemoryWriteMetrics({
+          source: "callback",
+          threadId: sessionId,
+          invocationId,
+          agent: agentId,
+          stats: liveStats,
+        });
+        logMemoryWriteMetrics(writeMetrics, logger);
+        if (typeof callbacks.sendSse === "function") {
+          const thread =
+            typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
+          if (thread?.res) callbacks.sendSse(thread.res, "memory-metrics", writeMetrics);
+        }
 
         sendJson(res, 200, {
           ok: true,
@@ -400,6 +428,7 @@ function createCallbackRoutes({
         });
       } catch (error) {
         logger.error?.(`[memory-upsert] failed: ${error.message}`);
+        bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
         sendJson(res, 400, { error: error.message });
       }
       return true;
@@ -470,9 +499,24 @@ function createCallbackRoutes({
           },
         };
         broadcastMemoryEvent(callbacks, sessionId, payload);
+        const liveStats = bumpThreadWriteStat(callbacks, sessionId, "invalidateCallback", 1);
+        const writeMetrics = buildMemoryWriteMetrics({
+          source: "callback",
+          threadId: sessionId,
+          invocationId,
+          agent: agentId,
+          stats: liveStats,
+        });
+        logMemoryWriteMetrics(writeMetrics, logger);
+        if (typeof callbacks.sendSse === "function") {
+          const thread =
+            typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
+          if (thread?.res) callbacks.sendSse(thread.res, "memory-metrics", writeMetrics);
+        }
         sendJson(res, 200, { ok: true, memory });
       } catch (error) {
         logger.error?.(`[memory-invalidate] failed: ${error.message}`);
+        bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
         sendJson(res, 400, { error: error.message });
       }
       return true;

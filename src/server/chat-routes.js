@@ -8,6 +8,14 @@ const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
+const { applyMemoryBlocks } = require("../agents/memory-block");
+const {
+  emptyWriteStats,
+  mergeWriteStats,
+  buildMemoryWriteMetrics,
+  logMemoryWriteMetrics,
+  buildMemoryInjectPayload,
+} = require("../storage/memory-metrics");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -305,8 +313,9 @@ function createChatRoutes({
     // Agent persona identity is re-rendered every turn so A2A handoffs still know "who I am".
     // Wave R: Memory Card uses retrieveForTurn(recency + related) when recallService supports it.
     let bootstrapPacket;
+    let bootstrapInject = { items: [], stats: {} };
     try {
-      bootstrapPacket = await sessionBootstrap.buildBootstrapPacket({
+      const bootstrapResult = await sessionBootstrap.buildBootstrapPacket({
         threadId: sessionId,
         sessionId,
         agent: AGENTS[requestedAgent],
@@ -316,6 +325,14 @@ function createChatRoutes({
         retrieveSource: recallService || null,
         memorySource: memoryService || null,
       });
+      const coerced =
+        typeof sessionBootstrap.coerceBootstrapResult === "function"
+          ? sessionBootstrap.coerceBootstrapResult(bootstrapResult)
+          : typeof bootstrapResult === "string"
+            ? { packet: bootstrapResult, inject: { items: [], stats: {} } }
+            : bootstrapResult;
+      bootstrapPacket = coerced.packet;
+      bootstrapInject = coerced.inject || bootstrapInject;
     } catch (error) {
       if (activeInvocations.get(sessionId) === invocationController) {
         activeInvocations.delete(sessionId);
@@ -489,6 +506,19 @@ function createChatRoutes({
         const sealer = sessionSealer.makeSealer();
         threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
+        if (i === 0) {
+          sendSse(
+            res,
+            "memory-inject",
+            buildMemoryInjectPayload({
+              sessionId,
+              agent,
+              source: "bootstrap",
+              items: bootstrapInject.items,
+              stats: bootstrapInject.stats,
+            })
+          );
+        }
 
         let agentPrompt;
         /** @type {string[]} */
@@ -508,7 +538,7 @@ function createChatRoutes({
               ? prev.handoffQualityByTarget[agent]
               : prev.handoffQuality || agentHandoff.evaluateHandoff(handoff);
           // Wave H1 Receive Bundle: memory card + policy banner + structured task + outbound card.
-          const a2aMemoryCard = await sessionBootstrap.buildActiveMemoryCard({
+          const a2aMemoryPackRaw = await sessionBootstrap.buildActiveMemoryCard({
             threadId: sessionId,
             prompt: [rawPrompt, handoff?.what, handoff?.next_action, prev.content]
               .filter(Boolean)
@@ -519,6 +549,13 @@ function createChatRoutes({
               ? sessionBootstrap.resolveA2AMemoryBudget()
               : undefined,
           });
+          const a2aMemoryPack =
+            typeof sessionBootstrap.coerceMemoryCardResult === "function"
+              ? sessionBootstrap.coerceMemoryCardResult(a2aMemoryPackRaw)
+              : typeof a2aMemoryPackRaw === "string"
+                ? { rendered: a2aMemoryPackRaw, items: [], stats: {} }
+                : a2aMemoryPackRaw;
+          const a2aMemoryCard = a2aMemoryPack.rendered;
           const receiveBundle = agentHandoff.renderReceiveBundle({
             handoff,
             quality,
@@ -554,6 +591,10 @@ function createChatRoutes({
             agent,
             fromAgent: prev.agent,
             memoryCard: a2aMemoryCard,
+            inject: {
+              items: a2aMemoryPack.items,
+              stats: a2aMemoryPack.stats,
+            },
           };
         }
 
@@ -602,6 +643,19 @@ function createChatRoutes({
           });
           logA2AInjectMetrics(injectMetrics, log);
           sendSse(res, "handoff-metrics", injectMetrics);
+          if (pending.inject) {
+            sendSse(
+              res,
+              "memory-inject",
+              buildMemoryInjectPayload({
+                sessionId,
+                agent: pending.agent,
+                source: "a2a",
+                items: pending.inject.items,
+                stats: pending.inject.stats,
+              })
+            );
+          }
         }
         threadCtx.currentInvocationId = invocationId;
         threadCtx.windowId = durableRun?.window?.id || null;
@@ -930,6 +984,33 @@ function createChatRoutes({
         Object.assign(handoffByTarget, finalized.handoffByTarget);
         Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
         threadCtx.a2aCount = finalized.a2aCount;
+
+        // L3 product memories from fenced ```memory blocks (soft — never blocks routing).
+        const blockStats = applyMemoryBlocks({
+          text: assistantContent,
+          threadId: sessionId,
+          invocationId,
+          agentId: agent,
+          memoryService,
+          eventStore: events,
+          sendSse: (event, payload) => sendSse(res, event, payload),
+          logger: log,
+        });
+        const turnWriteStats = mergeWriteStats(
+          emptyWriteStats(),
+          threadCtx.memoryWriteStats || emptyWriteStats()
+        );
+        const mergedWriteStats = mergeWriteStats(turnWriteStats, blockStats);
+        threadCtx.memoryWriteStats = emptyWriteStats();
+        const writeMetrics = buildMemoryWriteMetrics({
+          source: "chat",
+          threadId: sessionId,
+          invocationId,
+          agent,
+          stats: mergedWriteStats,
+        });
+        logMemoryWriteMetrics(writeMetrics, log);
+        sendSse(res, "memory-metrics", writeMetrics);
       }
     } finally {
       if (activeInvocations.get(sessionId) === invocationController) {

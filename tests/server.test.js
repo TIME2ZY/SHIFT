@@ -1980,7 +1980,7 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   assert.equal(appended.length, 1);
   // sendSse writes two lines per event (event: + data:), so count by event name.
   const eventNames = sseEvents.filter((line) => line.startsWith("event: ")).map((line) => line.trim());
-  assert.deepEqual(eventNames, ["event: message"]);
+  assert.deepEqual(eventNames, ["event: message", "event: memory-metrics"]);
 
   callbacks.unregisterThread(sessionId);
 });
@@ -2700,8 +2700,8 @@ test("frontend caps recall page size and surfaces truncation state", () => {
 test("app.js stays an orchestrator under line budget after P0 split", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const lines = js.split(/\r?\n/).length;
-  // Budget raised for run-bar / jump-bottom / toast / auto-grow wiring (still no feature bodies inlined).
-  assert.ok(lines <= 1000, `app.js has ${lines} lines; expected <= 1000 after UX chrome wiring`);
+  // Budget includes memory inject/metrics SSE wiring; still no heavy feature bodies inlined.
+  assert.ok(lines <= 1100, `app.js has ${lines} lines; expected <= 1100 after memory panel wiring`);
   assert.match(js, /createMessageView/);
   assert.match(js, /createWorkspacePanel/);
   assert.match(js, /createRecallPanel/);
