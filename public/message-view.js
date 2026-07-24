@@ -757,13 +757,21 @@
       bubble.className = "msg-bubble";
       card.appendChild(bubble);
 
-      const avatar =
-        role === "assistant" && agent && globalScope.AgentAvatar
-          ? globalScope.AgentAvatar.createAgentAvatar(agent, {
-              label: roleDisplayName(role, agent),
-              className: "agent-avatar-message",
-            })
-          : null;
+      let avatar = null;
+      if (globalScope.AgentAvatar) {
+        if (role === "assistant" && agent) {
+          avatar = globalScope.AgentAvatar.createAgentAvatar(agent, {
+            label: roleDisplayName(role, agent),
+            className: "agent-avatar-message",
+          });
+        } else if (role === "user" && typeof globalScope.AgentAvatar.createUserAvatar === "function") {
+          avatar = globalScope.AgentAvatar.createUserAvatar({
+            label: roleDisplayName(role, agent),
+            className: "user-avatar-message",
+          });
+        }
+      }
+      if (avatar) wrapper.classList.add("has-avatar");
 
       if (role === "assistant" && content === "") {
         bubble.classList.add("msg-bubble-live");

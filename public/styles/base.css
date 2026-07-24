@@ -69,8 +69,10 @@ button {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); background-clip: padding-box; }
 
-/* Shared Agent identity shell. Brand artwork stays untouched inside it. */
-.agent-avatar {
+/* Shared message identity shell (user + agent). Brand/user glyphs sit inside. */
+.msg-avatar,
+.agent-avatar,
+.user-avatar {
   position: relative;
   display: inline-grid;
   place-items: center;
@@ -84,7 +86,9 @@ button {
   box-shadow: 0 1px 2px color-mix(in srgb, #0f1412 7%, transparent);
 }
 
-.agent-avatar svg {
+.msg-avatar svg,
+.agent-avatar svg,
+.user-avatar svg {
   display: block;
   width: 19px;
   height: 19px;
@@ -103,6 +107,21 @@ button {
   color: var(--agent-color, var(--accent));
   background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface-canvas));
   font: 700 13px/1 var(--font-ui);
+}
+
+/* User avatar: accent-filled counterpart to agent brand marks */
+.user-avatar {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow:
+    0 1px 2px color-mix(in srgb, #0f1412 8%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.user-avatar svg {
+  width: 17px;
+  height: 17px;
 }
 
 /* Global motion defaults — honor reduced-motion */
