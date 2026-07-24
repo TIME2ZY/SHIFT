@@ -152,10 +152,11 @@ test("recall projection can be rebuilt from durable source tables", () => {
     });
 
     const result = storage.recall.rebuildThread("thread-1");
-    assert.deepEqual(result, { messages: 1, events: 1, memories: 1 });
-    assert.equal(storage.recall.search("thread-1", "rebuild").length, 3);
-    const rebuiltMemory = storage.recall.getBySource("memory-entry", "memory-1");
-    assert.equal(rebuiltMemory.windowId, "window-1");
+    // L2 memories project via memory_search, not recall_items.
+    assert.deepEqual(result, { messages: 1, events: 1, memories: 0 });
+    assert.equal(storage.recall.search("thread-1", "rebuild").length, 2);
+    const rebuiltMemory = storage.memories.getSearchProjection("memory-1");
+    assert.ok(rebuiltMemory);
     assert.equal(rebuiltMemory.metadata.captureKey, "decision:memory-1");
     assert.equal(rebuiltMemory.metadata.supersessionKey, "decision:storage");
     assert.deepEqual(rebuiltMemory.metadata.quality, { ok: true });

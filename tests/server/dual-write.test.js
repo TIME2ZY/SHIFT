@@ -137,10 +137,10 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       method: "DELETE",
     });
     assert.equal(deleteResponse.status, 200);
+    // Default delete archives the thread (hidden) without purging L0 evidence.
     assert.equal(storage.threads.list().length, 0);
-    assert.equal(
-      storage.db.prepare("SELECT COUNT(*) AS count FROM invocation_events").get().count,
-      0
+    assert.ok(
+      storage.db.prepare("SELECT COUNT(*) AS count FROM invocation_events").get().count > 0
     );
   } finally {
     await new Promise((resolve) => server.close(resolve));

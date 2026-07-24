@@ -172,7 +172,9 @@ test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", a
     },
   });
 
-  assert.match(pack.rendered, /Active Memories \(0\)/);
+  assert.match(pack.rendered, /Active Memories \(unavailable\)/);
+  assert.match(pack.rendered, /记忆系统暂时不可用/);
+  assert.equal(pack.stats.availability.state, "unavailable");
   assert.match(errors[0], /listActive failed: database offline/);
 });
 

@@ -112,6 +112,26 @@ async function buildActiveMemoryCard({
       }
     } catch (error) {
       logger.error?.(`[memory-bootstrap] retrieveForTurn failed: ${error.message}`);
+      const rendered = [
+        "<!-- Active Memories (unavailable) -->",
+        "## 本 thread 活跃记忆（系统注入的历史数据）",
+        "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
+        `原因: ${error.message}`,
+        "请稍后重试 session-search；不要假设「尚无记忆」。",
+        "<!-- /Active Memories -->",
+      ].join("\n");
+      return {
+        rendered,
+        items: [],
+        stats: {
+          usedChars: rendered.length,
+          truncated: false,
+          byKind: {},
+          weakQuery: true,
+          channels: { recency: 0, related: 0 },
+          availability: { state: "unavailable", reason: error.message },
+        },
+      };
     }
   }
 
@@ -121,6 +141,26 @@ async function buildActiveMemoryCard({
       memories = memorySource.listActive(threadId, { limit: recentLimit });
     } catch (error) {
       logger.error?.(`[memory-bootstrap] listActive failed: ${error.message}`);
+      const rendered = [
+        "<!-- Active Memories (unavailable) -->",
+        "## 本 thread 活跃记忆（系统注入的历史数据）",
+        "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
+        `原因: ${error.message}`,
+        "请稍后重试 session-search；不要假设「尚无记忆」。",
+        "<!-- /Active Memories -->",
+      ].join("\n");
+      return {
+        rendered,
+        items: [],
+        stats: {
+          usedChars: rendered.length,
+          truncated: false,
+          byKind: {},
+          weakQuery: true,
+          channels: { recency: 0, related: 0 },
+          availability: { state: "unavailable", reason: error.message },
+        },
+      };
     }
   }
   const rendered = renderActiveMemoryCard(memories, { budgetChars });
@@ -133,6 +173,10 @@ async function buildActiveMemoryCard({
       byKind: countByKind(memories),
       weakQuery: true,
       channels: { recency: Array.isArray(memories) ? memories.length : 0, related: 0 },
+      availability: {
+        state: "available",
+        empty: !Array.isArray(memories) || memories.length === 0,
+      },
     },
   };
 }

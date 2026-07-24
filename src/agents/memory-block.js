@@ -141,6 +141,7 @@ function applyMemoryBlocks(input = {}) {
         topic: block.topic,
         content: block.content,
         createdBy: agentId,
+        writeChannel: "agent",
         metadata: {
           source: "block:memory",
           blockIndex: block.blockIndex,

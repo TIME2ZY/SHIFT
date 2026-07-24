@@ -23,7 +23,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      5
+      6
     );
     for (const name of [
       "threads",
@@ -32,21 +32,34 @@ test("memory database applies schema and safety pragmas", () => {
       "invocations",
       "invocation_events",
       "memory_entries",
+      "memory_search",
+      "projects",
+      "purged_threads",
       "recall_items",
       "recall_fts",
     ]) {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 5);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 5);
+    assert.equal(applyMigrations(db), 6);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 6);
     const memoryColumns = new Set(
       db
         .prepare("PRAGMA table_info(memory_entries)")
         .all()
         .map((column) => column.name)
     );
-    for (const column of ["metadata_json", "window_id", "capture_key", "supersession_key"]) {
+    for (const column of [
+      "metadata_json",
+      "window_id",
+      "capture_key",
+      "supersession_key",
+      "owner_thread_id",
+      "project_key",
+      "origin_thread_id",
+      "authority",
+      "activation",
+    ]) {
       assert.ok(memoryColumns.has(column), `expected memory_entries.${column}`);
     }
     const windowColumns = new Set(
@@ -123,9 +136,9 @@ test("storage refuses a database created by newer code", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
   try {
     db.prepare(
-      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (6, 'future', 'now')"
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (99, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 5/);
+    assert.throws(() => applyMigrations(db), /newer than supported version 6/);
   } finally {
     db.close();
   }
@@ -145,10 +158,13 @@ test("later migrations upgrade a version 2 database without losing memory rows",
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 5);
+    assert.equal(applyMigrations(db), 6);
     const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
     assert.equal(memory.content, "keep me");
-    assert.equal(memory.capture_key, null);
+    // v6 backfills null capture keys and moves ownership columns.
+    assert.equal(memory.capture_key, "legacy:memory-1");
+    assert.equal(memory.owner_thread_id, "thread-1");
+    assert.equal(memory.scope, "thread");
     assert.equal(memory.supersession_key, null);
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 3").get().count,
@@ -172,7 +188,7 @@ test("context usage migration rebases only legacy active model capacities", () =
     insert.run("active-codex", "codex", "codex", "active", 200000);
     insert.run("sealed-gemini", "gemini", "antigravity", "sealed", 200000);
 
-    assert.equal(applyMigrations(db), 5);
+    assert.equal(applyMigrations(db), 6);
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
         .capacity_tokens,
@@ -231,7 +247,7 @@ test("sequence and causality migration backfills counters and message types", ()
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 5);
+    assert.equal(applyMigrations(db), 6);
     assert.equal(
       db.prepare("SELECT next_message_sequence value FROM threads WHERE id = 't'").get().value,
       4

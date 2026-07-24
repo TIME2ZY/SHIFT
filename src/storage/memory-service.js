@@ -12,6 +12,8 @@ const {
   parseSupersessionKey,
 } = require("./memory-keys");
 
+const MAX_SUPERSESSION_RETRIES = 3;
+
 function createMemoryService({
   storage,
   idFactory = crypto.randomUUID,
@@ -22,59 +24,140 @@ function createMemoryService({
   }
 
   function capture(input) {
-    const threadId = requiredString(input?.threadId, "thread id");
-    const captureKey = requiredString(input?.captureKey, "memory capture key");
-
-    try {
-      return storage.transaction(() => {
-        const existing = storage.memories.getByCaptureKey(threadId, captureKey);
-        if (existing) return { memory: existing, created: false, superseded: [] };
-
-        const id = input.id || idFactory();
-        const supersessionKey = nullableString(input.supersessionKey);
-        const previous = supersessionKey
-          ? storage.memories.listActiveBySupersessionKey(threadId, supersessionKey)
-          : [];
-        const memory = storage.memories.create({
-          ...input,
-          id,
-          threadId,
-          captureKey,
-          supersessionKey,
-          status: "captured",
-          createdAt: input.createdAt || nowIso(clock),
-        });
-        const supersededAt = nowIso(clock);
-        for (const oldMemory of previous) {
-          storage.memories.transition(oldMemory.id, "superseded", {
-            supersededBy: memory.id,
-            metadata: {
-              ...(oldMemory.metadata || {}),
-              supersededAt,
-              supersededBy: memory.id,
-            },
-          });
+    let attempt = 0;
+    while (attempt < MAX_SUPERSESSION_RETRIES) {
+      attempt += 1;
+      try {
+        return captureOnce(input);
+      } catch (error) {
+        if (isCaptureKeyConflict(error)) {
+          const scope = input.scope === "project" ? "project" : "thread";
+          const owner =
+            scope === "project"
+              ? input.projectKey
+              : input.ownerThreadId || input.threadId;
+          const existing = storage.memories.getByCaptureKey(owner, input.captureKey, { scope });
+          if (existing) return { memory: existing, created: false, superseded: [] };
         }
-        return { memory, created: true, superseded: previous.map((item) => item.id) };
-      });
-    } catch (error) {
-      if (isCaptureKeyConflict(error)) {
-        const existing = storage.memories.getByCaptureKey(threadId, captureKey);
-        if (existing) return { memory: existing, created: false, superseded: [] };
+        if (isActiveUniqueConflict(error) && attempt < MAX_SUPERSESSION_RETRIES) {
+          continue;
+        }
+        throw error;
       }
-      throw error;
     }
+    throw new Error("Memory capture failed after supersession retries.");
+  }
+
+  function captureOnce(input) {
+    const scope = input.scope === "project" ? "project" : "thread";
+    const captureKey = requiredString(input?.captureKey, "memory capture key");
+    const ownerThreadId =
+      scope === "thread"
+        ? requiredString(input?.ownerThreadId || input?.threadId, "thread id")
+        : null;
+    const projectKey =
+      scope === "project" ? requiredString(input?.projectKey, "project key") : null;
+    const originThreadId = nullableString(
+      input?.originThreadId || input?.threadId || ownerThreadId
+    );
+
+    return storage.transaction(() => {
+      const existing = storage.memories.getByCaptureKey(
+        scope === "project" ? projectKey : ownerThreadId,
+        captureKey,
+        { scope }
+      );
+      if (existing) return { memory: existing, created: false, superseded: [] };
+
+      ensureProjectRow(projectKey, input.projectIdentity);
+
+      const id = input.id || idFactory();
+      const supersessionKey = nullableString(input.supersessionKey);
+      const writeFields = deriveWriteFields(input);
+
+      // Contract: retire peers BEFORE insert so UNIQUE active indexes stay valid.
+      const previous = supersessionKey
+        ? storage.memories.retireActivePeers({
+            scope,
+            ownerThreadId,
+            projectKey,
+            supersessionKey,
+            metadataPatch: {
+              supersededAt: nowIso(clock),
+            },
+          })
+        : [];
+
+      const memory = storage.memories.create({
+        ...input,
+        id,
+        scope,
+        ownerThreadId,
+        projectKey,
+        originThreadId,
+        captureKey,
+        supersessionKey,
+        status: input.status || "captured",
+        authority: writeFields.authority,
+        activation: writeFields.activation,
+        createdBy: writeFields.createdBy,
+        confirmedBy: input.confirmedBy || null,
+        createdAt: input.createdAt || nowIso(clock),
+      });
+
+      if (previous.length > 0) {
+        storage.memories.setSupersededBy(
+          previous.map((item) => item.id),
+          memory.id
+        );
+      }
+
+      return { memory, created: true, superseded: previous.map((item) => item.id) };
+    });
+  }
+
+  function ensureProjectRow(projectKey, identity) {
+    if (!projectKey || !storage.db) return;
+    const existing = storage.db.prepare("SELECT 1 FROM projects WHERE project_key = ?").get(projectKey);
+    if (existing) return;
+    const now = nowIso(clock);
+    storage.db
+      .prepare(
+        `
+        INSERT OR IGNORE INTO projects
+          (project_key, identity_kind, canonical_path, created_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        projectKey,
+        identity?.kind || "directory",
+        identity?.canonicalPath || projectKey,
+        now,
+        now,
+        identity ? JSON.stringify(identity) : null
+      );
   }
 
   /**
-   * Product write path for decision / constraint / fact.
-   * Always sets a stable supersessionKey so later writes replace active peers.
+   * Product write path for decision / constraint / fact / lesson.
    */
   function createProduct(input = {}) {
     const threadId = requiredString(input.threadId, "thread id");
     const kind = normalizeProductKind(input.kind);
     const content = requiredString(input.content, "memory content");
     assertProductSourceAffinity(threadId, input);
+
+    const writeChannel = input.writeChannel || inferWriteChannel(input);
+    const writeFields = deriveWriteFields({ ...input, writeChannel, kind });
+
+    const thread = storage.threads?.get?.(threadId) || null;
+    const scope = resolveProductScope(kind, input.scope, thread);
+
+    if (scope === "project" && !thread?.projectKey) {
+      throw new Error("Cannot write project-scoped memory without a resolved project identity.");
+    }
+
     const requestedSupersessionKey =
       typeof input.supersessionKey === "string" && input.supersessionKey.trim()
         ? input.supersessionKey.trim()
@@ -105,22 +188,39 @@ function createMemoryService({
     const outcome = capture({
       id: input.id,
       threadId,
+      ownerThreadId: scope === "thread" ? threadId : null,
+      projectKey: scope === "project" ? thread.projectKey : null,
+      originThreadId: threadId,
+      scope,
+      projectIdentity: thread
+        ? {
+            kind: thread.projectIdentityKind || "directory",
+            canonicalPath: thread.projectCanonicalPath || thread.projectDir || thread.projectKey,
+          }
+        : null,
       kind,
       content,
+      topic,
+      summary: input.summary || null,
+      anchors: input.anchors || null,
       sourceMessageId: input.sourceMessageId || null,
       sourceInvocationId: input.sourceInvocationId || null,
-      createdBy: input.createdBy || "user",
+      createdBy: writeFields.createdBy,
+      writeChannel,
+      authority: writeFields.authority,
+      activation: writeFields.activation,
       createdAt: input.createdAt,
       metadata: {
         ...(input.metadata && typeof input.metadata === "object" ? input.metadata : {}),
         source: "product",
         topic,
+        writeChannel,
       },
       windowId: input.windowId || null,
       captureKey,
       supersessionKey,
     });
-    return { ...outcome, topic, supersessionKey };
+    return { ...outcome, topic, supersessionKey, scope };
   }
 
   function assertProductSourceAffinity(threadId, input) {
@@ -160,9 +260,6 @@ function createMemoryService({
     return selected;
   }
 
-  /**
-   * List memories for management UI (active and/or historical).
-   */
   function list(threadId, options = {}) {
     const id = requiredString(threadId, "thread id");
     const includeRetired = options.includeRetired !== false;
@@ -178,7 +275,6 @@ function createMemoryService({
     if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.kind));
     if (statuses.length > 0) items = items.filter((item) => statuses.includes(item.status));
 
-    // Newest first for management UI.
     items = items
       .slice()
       .sort((a, b) => {
@@ -206,7 +302,11 @@ function createMemoryService({
     if (!existing) return null;
     assertTransitionAllowed(existing, "confirmed");
     const confirmedAt = audit.confirmedAt || nowIso(clock);
+    // User confirmation raises authority to user (contract §6.3).
     storage.memories.transition(id, "confirmed", {
+      confirmedBy,
+      verifiedAt: confirmedAt,
+      authority: "user",
       metadata: {
         ...(existing.metadata || {}),
         confirmedBy,
@@ -234,22 +334,52 @@ function createMemoryService({
 
   function enrichMemory(memory) {
     if (!memory) return null;
-    const related = memory.supersessionKey
-      ? storage.memories
-          .listForThread(memory.threadId)
-          .filter(
-            (item) => item.supersessionKey === memory.supersessionKey && item.id !== memory.id
-          )
-          .map((item) => ({
-            id: item.id,
-            status: item.status,
-            createdAt: item.createdAt,
-            supersededBy: item.supersededBy,
-          }))
-      : [];
+    const relatedKey = memory.supersessionKey;
+    let related = [];
+    if (relatedKey) {
+      if (memory.scope === "project" && memory.projectKey) {
+        related = storage.memories
+          .listActiveByProject(memory.projectKey, { limit: 200 })
+          .concat(
+            // include retired peers via origin listing is expensive; scan project by supersession in SQL
+            []
+          );
+      }
+      related = storage.db
+        ? storage.db
+            .prepare(
+              `
+              SELECT id, status, created_at, superseded_by, scope, project_key, owner_thread_id
+              FROM memory_entries
+              WHERE supersession_key = ? AND id != ?
+                AND (
+                  (scope = 'thread' AND owner_thread_id = ?)
+                  OR (scope = 'project' AND project_key = ?)
+                )
+              ORDER BY created_at DESC
+            `
+            )
+            .all(
+              relatedKey,
+              memory.id,
+              memory.ownerThreadId || "",
+              memory.projectKey || ""
+            )
+            .map((item) => ({
+              id: item.id,
+              status: item.status,
+              createdAt: item.created_at,
+              supersededBy: item.superseded_by,
+            }))
+        : [];
+    }
     return {
       ...memory,
-      topic: parseSupersessionKey(memory.supersessionKey)?.topic || memory.metadata?.topic || null,
+      topic:
+        memory.topic ||
+        parseSupersessionKey(memory.supersessionKey)?.topic ||
+        memory.metadata?.topic ||
+        null,
       related,
       isActive: ACTIVE_STATUSES.includes(memory.status),
       isProduct: PRODUCT_KINDS.includes(memory.kind),
@@ -266,6 +396,65 @@ function createMemoryService({
     invalidate,
     PRODUCT_KINDS,
   };
+}
+
+/**
+ * Server-side derivation of authority / activation / createdBy.
+ * Clients cannot forge system/always_on via writeChannel allowlist.
+ */
+function deriveWriteFields(input = {}) {
+  const channel = input.writeChannel || inferWriteChannel(input);
+  const kind = input.kind || "fact";
+  const requestedBy = typeof input.createdBy === "string" && input.createdBy ? input.createdBy : null;
+
+  if (channel === "system") {
+    return {
+      createdBy: requestedBy || "system:bootstrap",
+      authority: "system",
+      activation: input.activation === "query" ? "query" : "always_on",
+    };
+  }
+
+  if (channel === "user" || channel === "ui") {
+    return {
+      createdBy: requestedBy || "user",
+      authority: "user",
+      activation: "query",
+    };
+  }
+
+  // agent / callback / block / auto
+  const auto = kind === "handoff" || kind === "window-seal" || kind === "digest";
+  return {
+    createdBy: requestedBy || "agent",
+    authority: "agent",
+    activation: auto ? "backstop" : "query",
+  };
+}
+
+function inferWriteChannel(input = {}) {
+  if (input.writeChannel) return input.writeChannel;
+  const by = String(input.createdBy || "");
+  if (by === "user" || by.startsWith("user:")) return "user";
+  if (by.startsWith("system:") || by === "system") return "system";
+  if (input.metadata?.source === "block:memory") return "agent";
+  if (input.metadata?.source === "handoff" || input.metadata?.source === "window-seal") {
+    return "agent";
+  }
+  return "agent";
+}
+
+function resolveProductScope(kind, requested, thread) {
+  if (requested === "thread" || requested === "project") {
+    if (requested === "project" && !thread?.projectKey) {
+      return "thread";
+    }
+    return requested;
+  }
+  // Defaults from contract §8
+  if (!thread?.projectKey) return "thread";
+  if (kind === "decision" || kind === "constraint" || kind === "lesson") return "project";
+  return "thread"; // fact
 }
 
 function assertTransitionAllowed(memory, nextStatus) {
@@ -295,8 +484,15 @@ function nowIso(clock) {
 function isCaptureKeyConflict(error) {
   return (
     error?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
-    String(error.message || "").includes("memory_entries.thread_id") &&
-    String(error.message || "").includes("memory_entries.capture_key")
+    String(error.message || "").includes("capture")
+  );
+}
+
+function isActiveUniqueConflict(error) {
+  return (
+    error?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
+    (String(error.message || "").includes("memory_active_") ||
+      String(error.message || "").includes("supersession"))
   );
 }
 
@@ -336,4 +532,9 @@ function nullableString(value) {
   return typeof value === "string" && value ? value : null;
 }
 
-module.exports = { createMemoryService };
+module.exports = {
+  createMemoryService,
+  deriveWriteFields,
+  resolveProductScope,
+  MAX_SUPERSESSION_RETRIES,
+};

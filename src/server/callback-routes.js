@@ -353,6 +353,7 @@ function createCallbackRoutes({
           supersessionKey:
             typeof body.supersessionKey === "string" ? body.supersessionKey : undefined,
           createdBy: agentId,
+          writeChannel: "agent",
           metadata: {
             ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
             source: "callback:memory-upsert",

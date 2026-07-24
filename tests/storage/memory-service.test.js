@@ -51,8 +51,8 @@ test("capture_key makes memory capture idempotent and preserves enriched fields"
     assert.equal(first.memory.captureKey, "handoff:invocation-1:opencode:0");
     assert.deepEqual(first.memory.metadata, { quality: { ok: true } });
 
-    const indexed = storage.recall.getBySource("memory-entry", "memory-1");
-    assert.equal(indexed.windowId, "window-1");
+    const indexed = storage.memories.getSearchProjection("memory-1");
+    assert.ok(indexed);
     assert.equal(indexed.metadata.captureKey, first.memory.captureKey);
     assert.deepEqual(indexed.metadata.quality, { ok: true });
     assert.throws(
@@ -129,7 +129,7 @@ test("supersession only retires active memories with the same explicit topic key
       ["login-v2", "parallel-a", "parallel-b"].sort()
     );
     assert.equal(
-      storage.recall.getBySource("memory-entry", "login-v1").metadata.status,
+      storage.memories.getSearchProjection("login-v1").metadata.status,
       "superseded"
     );
   } finally {
@@ -152,9 +152,10 @@ test("confirm requires auditable provenance and active listing filters retired e
     assert.equal(confirmed.metadata.confirmedBy, "user");
     assert.equal(confirmed.metadata.confirmationSource, "user-message:42");
     assert.equal(
-      storage.recall.getBySource("memory-entry", "confirm-me").metadata.status,
+      storage.memories.getSearchProjection("confirm-me").metadata.status,
       "confirmed"
     );
+    assert.equal(confirmed.authority, "user");
 
     storage.memory.invalidate("confirm-me", {
       invalidatedBy: "user",
@@ -316,7 +317,7 @@ test("createProduct rejects cross-kind supersession keys and cross-thread source
   }
 });
 
-test("capture rolls back new memory, supersession, and recall when projection fails", () => {
+test("capture rolls back new memory and supersession when projection fails", () => {
   const storage = createFixture();
   try {
     capture(storage, {
@@ -324,12 +325,10 @@ test("capture rolls back new memory, supersession, and recall when projection fa
       captureKey: "handoff:old",
       supersessionKey: "handoff:login",
     });
-    const originalUpsert = storage.recall.upsert;
-    let calls = 0;
-    storage.recall.upsert = (...args) => {
-      calls += 1;
-      if (calls === 2) throw new Error("recall unavailable");
-      return originalUpsert(...args);
+    const originalCreate = storage.memories.create.bind(storage.memories);
+    storage.memories.create = (input) => {
+      if (input.id === "login-v2") throw new Error("recall unavailable");
+      return originalCreate(input);
     };
 
     assert.throws(
@@ -344,9 +343,9 @@ test("capture rolls back new memory, supersession, and recall when projection fa
     assert.equal(storage.memories.get("login-v2"), null);
     assert.equal(storage.memories.get("login-v1").status, "captured");
     assert.equal(storage.memories.get("login-v1").supersededBy, null);
-    assert.equal(storage.recall.getBySource("memory-entry", "login-v2"), null);
+    assert.equal(storage.memories.getSearchProjection("login-v2"), null);
     assert.equal(
-      storage.recall.getBySource("memory-entry", "login-v1").metadata.status,
+      storage.memories.getSearchProjection("login-v1").metadata.status,
       "captured"
     );
   } finally {

@@ -47,6 +47,10 @@ function createFixture(fileOverrides = {}) {
     createdBy: "codex",
     sourceInvocationId: "invocation-1",
     createdAt: "2026-07-12T00:00:02.000Z",
+    captureKey: "decision:sqlite-only:1",
+    supersessionKey: "decision:sqlite-only",
+    authority: "agent",
+    activation: "query",
   });
   storage.recall.rebuildThread("thread-1");
 

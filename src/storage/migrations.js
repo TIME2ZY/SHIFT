@@ -6,8 +6,13 @@ function validateMigrations(migrations) {
     if (!migration || migration.version !== expected) {
       throw new Error(`Expected storage migration version ${expected}.`);
     }
-    if (!migration.name || !migration.sql) {
+    if (!migration.name) {
       throw new Error(`Storage migration ${expected} is incomplete.`);
+    }
+    const hasSql = typeof migration.sql === "string" && migration.sql.trim();
+    const hasUp = typeof migration.up === "function";
+    if (!hasSql && !hasUp) {
+      throw new Error(`Storage migration ${expected} needs sql or up().`);
     }
     expected += 1;
   }
@@ -47,14 +52,25 @@ function applyMigrations(db, migrations = MIGRATIONS) {
       continue;
     }
 
-    db.transaction(() => {
-      db.exec(migration.sql);
+    if (typeof migration.up === "function") {
+      // Complex migrations (table rebuilds) may need to toggle foreign_keys and
+      // cannot always run inside an outer transaction.
+      migration.up(db);
       db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
         migration.version,
         migration.name,
         new Date().toISOString()
       );
-    })();
+    } else {
+      db.transaction(() => {
+        db.exec(migration.sql);
+        db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+          migration.version,
+          migration.name,
+          new Date().toISOString()
+        );
+      })();
+    }
   }
 
   return migrations.length;

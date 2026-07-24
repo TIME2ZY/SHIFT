@@ -317,6 +317,322 @@ const MIGRATIONS = Object.freeze([
           AND message_type = 'assistant-final';
     `,
   },
+  {
+    version: 6,
+    name: "memory_foundation_ownership",
+    /**
+     * Table rebuild for memory ownership + purge ledger + memory_search FTS.
+     * See docs/memory-data-contract.md blockers 1–3.
+     */
+    up(db) {
+      migrateMemoryFoundationOwnership(db);
+    },
+  },
 ]);
 
-module.exports = { PRAGMAS, MIGRATIONS };
+function migrateMemoryFoundationOwnership(db) {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_key TEXT PRIMARY KEY,
+        identity_kind TEXT NOT NULL,
+        canonical_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        metadata_json TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS purged_threads (
+        thread_id TEXT PRIMARY KEY,
+        former_project_key TEXT,
+        former_project_canonical_path TEXT,
+        purged_at TEXT NOT NULL,
+        purged_by TEXT,
+        reason TEXT,
+        metadata_json TEXT
+      );
+    `);
+
+    // Thread identity columns (safe ALTER).
+    const threadColumns = db.prepare("PRAGMA table_info(threads)").all().map((c) => c.name);
+    const addThreadCol = (name, sql) => {
+      if (!threadColumns.includes(name)) db.exec(sql);
+    };
+    addThreadCol(
+      "project_key",
+      "ALTER TABLE threads ADD COLUMN project_key TEXT"
+    );
+    addThreadCol(
+      "project_canonical_path",
+      "ALTER TABLE threads ADD COLUMN project_canonical_path TEXT"
+    );
+    addThreadCol(
+      "project_identity_kind",
+      "ALTER TABLE threads ADD COLUMN project_identity_kind TEXT"
+    );
+    addThreadCol(
+      "project_identity_json",
+      "ALTER TABLE threads ADD COLUMN project_identity_json TEXT"
+    );
+
+    db.exec(`
+      CREATE TABLE memory_entries_vNext (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL CHECK (scope IN ('thread', 'project')),
+        owner_thread_id TEXT,
+        project_key TEXT,
+        origin_thread_id TEXT,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL
+          CHECK (status IN ('captured', 'confirmed', 'superseded', 'invalidated')),
+        authority TEXT NOT NULL
+          CHECK (authority IN ('system', 'user', 'agent')),
+        activation TEXT NOT NULL
+          CHECK (activation IN ('always_on', 'query', 'backstop')),
+        content TEXT NOT NULL,
+        summary TEXT,
+        topic TEXT,
+        supersession_key TEXT,
+        capture_key TEXT NOT NULL,
+        content_hash TEXT,
+        anchors_json TEXT,
+        metadata_json TEXT,
+        created_by TEXT NOT NULL,
+        confirmed_by TEXT,
+        created_at TEXT NOT NULL,
+        verified_at TEXT,
+        superseded_by TEXT,
+        source_message_id TEXT,
+        source_invocation_id TEXT,
+        window_id TEXT,
+        CHECK (
+          (scope = 'thread'  AND owner_thread_id IS NOT NULL AND project_key IS NULL)
+          OR
+          (scope = 'project' AND project_key IS NOT NULL AND owner_thread_id IS NULL)
+        ),
+        FOREIGN KEY (owner_thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (origin_thread_id) REFERENCES threads(id) ON DELETE SET NULL,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE RESTRICT,
+        FOREIGN KEY (superseded_by) REFERENCES memory_entries_vNext(id) ON DELETE SET NULL,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+        FOREIGN KEY (source_invocation_id) REFERENCES invocations(id) ON DELETE SET NULL,
+        FOREIGN KEY (window_id) REFERENCES context_windows(id) ON DELETE SET NULL
+      );
+    `);
+
+    const oldRows = db.prepare("SELECT * FROM memory_entries").all();
+    const insert = db.prepare(`
+      INSERT INTO memory_entries_vNext (
+        id, scope, owner_thread_id, project_key, origin_thread_id,
+        kind, status, authority, activation, content, summary, topic,
+        supersession_key, capture_key, content_hash, anchors_json, metadata_json,
+        created_by, confirmed_by, created_at, verified_at, superseded_by,
+        source_message_id, source_invocation_id, window_id
+      ) VALUES (
+        @id, @scope, @ownerThreadId, @projectKey, @originThreadId,
+        @kind, @status, @authority, @activation, @content, @summary, @topic,
+        @supersessionKey, @captureKey, @contentHash, @anchorsJson, @metadataJson,
+        @createdBy, @confirmedBy, @createdAt, @verifiedAt, @supersededBy,
+        @sourceMessageId, @sourceInvocationId, @windowId
+      )
+    `);
+
+    for (const row of oldRows) {
+      const metadata = parseJsonSafe(row.metadata_json);
+      const supersessionKey = row.supersession_key || null;
+      const topic =
+        (metadata && metadata.topic) ||
+        (supersessionKey && supersessionKey.includes(":")
+          ? supersessionKey.slice(supersessionKey.indexOf(":") + 1)
+          : null);
+      const autoKind = row.kind === "handoff" || row.kind === "window-seal";
+      const authority = deriveLegacyAuthority(row.created_by, metadata);
+      const confirmedBy =
+        row.status === "confirmed"
+          ? (metadata && metadata.confirmedBy) || null
+          : null;
+      insert.run({
+        id: row.id,
+        scope: "thread",
+        ownerThreadId: row.thread_id,
+        projectKey: null,
+        originThreadId: row.thread_id,
+        kind: row.kind,
+        status: row.status,
+        authority,
+        activation: autoKind ? "backstop" : "query",
+        content: row.content,
+        summary: null,
+        topic,
+        supersessionKey,
+        captureKey: row.capture_key || `legacy:${row.id}`,
+        contentHash: null,
+        anchorsJson: null,
+        metadataJson: row.metadata_json,
+        createdBy: row.created_by,
+        confirmedBy,
+        createdAt: row.created_at,
+        verifiedAt: confirmedBy && metadata?.confirmedAt ? metadata.confirmedAt : null,
+        supersededBy: row.superseded_by,
+        sourceMessageId: row.source_message_id,
+        sourceInvocationId: row.source_invocation_id,
+        windowId: row.window_id || null,
+      });
+    }
+
+    db.exec(`DROP TABLE memory_entries;`);
+    db.exec(`ALTER TABLE memory_entries_vNext RENAME TO memory_entries;`);
+
+    // Self-FK after rename
+    db.exec(`
+      CREATE UNIQUE INDEX memory_active_thread_supersession
+        ON memory_entries(owner_thread_id, supersession_key)
+        WHERE scope = 'thread'
+          AND supersession_key IS NOT NULL
+          AND status IN ('captured', 'confirmed');
+
+      CREATE UNIQUE INDEX memory_active_project_supersession
+        ON memory_entries(project_key, supersession_key)
+        WHERE scope = 'project'
+          AND supersession_key IS NOT NULL
+          AND status IN ('captured', 'confirmed');
+
+      CREATE UNIQUE INDEX memory_capture_thread
+        ON memory_entries(owner_thread_id, capture_key)
+        WHERE scope = 'thread';
+
+      CREATE UNIQUE INDEX memory_capture_project
+        ON memory_entries(project_key, capture_key)
+        WHERE scope = 'project';
+
+      CREATE INDEX memory_project_active
+        ON memory_entries(project_key, status, kind, created_at)
+        WHERE scope = 'project' AND status IN ('captured', 'confirmed');
+
+      CREATE INDEX memory_thread_active
+        ON memory_entries(owner_thread_id, status, kind, created_at)
+        WHERE scope = 'thread' AND status IN ('captured', 'confirmed');
+
+      CREATE INDEX memory_origin_thread
+        ON memory_entries(origin_thread_id)
+        WHERE origin_thread_id IS NOT NULL;
+    `);
+
+    // Dedicated L2 search projection (not owned by thread CASCADE via origin).
+    db.exec(`
+      CREATE TABLE memory_search (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id TEXT NOT NULL UNIQUE,
+        scope TEXT NOT NULL,
+        owner_thread_id TEXT,
+        project_key TEXT,
+        origin_thread_id TEXT,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        metadata_json TEXT,
+        FOREIGN KEY (memory_id) REFERENCES memory_entries(id) ON DELETE CASCADE
+      );
+
+      CREATE VIRTUAL TABLE memory_search_fts USING fts5(
+        title,
+        content,
+        content='memory_search',
+        content_rowid='id'
+      );
+
+      CREATE TRIGGER memory_search_ai AFTER INSERT ON memory_search BEGIN
+        INSERT INTO memory_search_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+
+      CREATE TRIGGER memory_search_ad AFTER DELETE ON memory_search BEGIN
+        INSERT INTO memory_search_fts(memory_search_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+      END;
+
+      CREATE TRIGGER memory_search_au AFTER UPDATE ON memory_search BEGIN
+        INSERT INTO memory_search_fts(memory_search_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+        INSERT INTO memory_search_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+    `);
+
+    // Backfill memory_search from migrated entries.
+    const searchInsert = db.prepare(`
+      INSERT INTO memory_search (
+        memory_id, scope, owner_thread_id, project_key, origin_thread_id,
+        kind, status, title, content, created_at, metadata_json
+      ) VALUES (
+        @memoryId, @scope, @ownerThreadId, @projectKey, @originThreadId,
+        @kind, @status, @title, @content, @createdAt, @metadataJson
+      )
+    `);
+    for (const row of db.prepare("SELECT * FROM memory_entries").all()) {
+      searchInsert.run({
+        memoryId: row.id,
+        scope: row.scope,
+        ownerThreadId: row.owner_thread_id,
+        projectKey: row.project_key,
+        originThreadId: row.origin_thread_id,
+        kind: row.kind,
+        status: row.status,
+        title: `${row.kind}:${row.status}`,
+        content: row.content,
+        createdAt: row.created_at,
+        metadataJson: JSON.stringify({
+          ...(parseJsonSafe(row.metadata_json) || {}),
+          kind: row.kind,
+          status: row.status,
+          createdBy: row.created_by,
+          captureKey: row.capture_key,
+          supersessionKey: row.supersession_key,
+          authority: row.authority,
+          activation: row.activation,
+          topic: row.topic,
+        }),
+      });
+    }
+
+    // Remove legacy memory projections from thread-owned recall_items.
+    db.prepare("DELETE FROM recall_items WHERE source_kind = 'memory-entry'").run();
+
+    const fkViolations = db.pragma("foreign_key_check");
+    if (Array.isArray(fkViolations) && fkViolations.length > 0) {
+      throw new Error(
+        `memory foundation migration foreign_key_check failed: ${JSON.stringify(fkViolations.slice(0, 5))}`
+      );
+    }
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  const integrity = db.pragma("integrity_check", { simple: true });
+  if (integrity !== "ok") {
+    throw new Error(`memory foundation migration integrity_check failed: ${integrity}`);
+  }
+}
+
+function deriveLegacyAuthority(createdBy, metadata) {
+  const by = String(createdBy || "");
+  if (by === "user" || by.startsWith("user:")) return "user";
+  if (by.startsWith("system:") || by === "system") return "system";
+  if (metadata?.source === "product" && by === "user") return "user";
+  return "agent";
+}
+
+function parseJsonSafe(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { PRAGMAS, MIGRATIONS, migrateMemoryFoundationOwnership };
+

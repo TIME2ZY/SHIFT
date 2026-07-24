@@ -372,7 +372,7 @@ test("memory candidates preserve provenance and default to captured", () => {
   }
 });
 
-test("deleting a thread cascades through durable memory records", () => {
+test("purging a thread cascades through thread-owned durable memory records", () => {
   const { storage } = createFixture();
   try {
     storage.invocations.start({
@@ -393,9 +393,11 @@ test("deleting a thread cascades through durable memory records", () => {
       content: "Keep raw evidence.",
       sourceInvocationId: "invocation-1",
       createdBy: "codex",
+      captureKey: "lesson:evidence:1",
     });
 
-    assert.equal(storage.threads.delete("thread-1"), true);
+    // Default delete is archive (soft); purge hard-deletes thread-owned rows.
+    assert.equal(storage.threads.purge("thread-1"), true);
     assert.equal(
       storage.db.prepare("SELECT COUNT(*) AS count FROM context_windows").get().count,
       0
