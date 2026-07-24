@@ -408,6 +408,72 @@ const MIGRATIONS = Object.freeze([
       );
     `,
   },
+  {
+    version: 10,
+    name: "project_evidence_passages",
+    sql: `
+      CREATE TABLE project_documents (
+        id TEXT PRIMARY KEY,
+        project_key TEXT NOT NULL,
+        path TEXT NOT NULL,
+        title TEXT,
+        kind TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        byte_size INTEGER NOT NULL DEFAULT 0,
+        mtime TEXT,
+        indexed_at TEXT NOT NULL,
+        UNIQUE(project_key, path),
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX project_documents_project
+        ON project_documents(project_key, path);
+
+      CREATE TABLE project_passages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        path TEXT NOT NULL,
+        heading TEXT,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        FOREIGN KEY (document_id) REFERENCES project_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX project_passages_project
+        ON project_passages(project_key, path);
+      CREATE INDEX project_passages_document
+        ON project_passages(document_id);
+
+      CREATE VIRTUAL TABLE project_passages_fts USING fts5(
+        path,
+        heading,
+        content,
+        content='project_passages',
+        content_rowid='id'
+      );
+
+      CREATE TRIGGER project_passages_ai AFTER INSERT ON project_passages BEGIN
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+
+      CREATE TRIGGER project_passages_ad AFTER DELETE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+      END;
+
+      CREATE TRIGGER project_passages_au AFTER UPDATE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

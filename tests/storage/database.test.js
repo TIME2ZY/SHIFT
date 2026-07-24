@@ -23,7 +23,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      9
+      10
     );
     for (const name of [
       "threads",
@@ -36,6 +36,8 @@ test("memory database applies schema and safety pragmas", () => {
       "memory_events",
       "memory_suggestions",
       "thread_digests",
+      "project_documents",
+      "project_passages",
       "projects",
       "purged_threads",
       "recall_items",
@@ -44,8 +46,8 @@ test("memory database applies schema and safety pragmas", () => {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 9);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 9);
+    assert.equal(applyMigrations(db), 10);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 10);
     const memoryColumns = new Set(
       db
         .prepare("PRAGMA table_info(memory_entries)")
@@ -141,7 +143,7 @@ test("storage refuses a database created by newer code", () => {
     db.prepare(
       "INSERT INTO schema_migrations (version, name, applied_at) VALUES (99, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 9/);
+    assert.throws(() => applyMigrations(db), /newer than supported version 10/);
   } finally {
     db.close();
   }
@@ -161,7 +163,7 @@ test("later migrations upgrade a version 2 database without losing memory rows",
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 9);
+    assert.equal(applyMigrations(db), 10);
     const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
     assert.equal(memory.content, "keep me");
     // v6 backfills null capture keys and moves ownership columns.
@@ -191,7 +193,7 @@ test("context usage migration rebases only legacy active model capacities", () =
     insert.run("active-codex", "codex", "codex", "active", 200000);
     insert.run("sealed-gemini", "gemini", "antigravity", "sealed", 200000);
 
-    assert.equal(applyMigrations(db), 9);
+    assert.equal(applyMigrations(db), 10);
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
         .capacity_tokens,
@@ -250,7 +252,7 @@ test("sequence and causality migration backfills counters and message types", ()
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 9);
+    assert.equal(applyMigrations(db), 10);
     assert.equal(
       db.prepare("SELECT next_message_sequence value FROM threads WHERE id = 't'").get().value,
       4

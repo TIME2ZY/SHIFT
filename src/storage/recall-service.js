@@ -14,11 +14,13 @@ const { clampSearchQuery, extractSearchTerms, isWeakQuery } = require("./query-t
 const LAYER_MEMORY = "memory";
 const LAYER_MESSAGE = "message";
 const LAYER_EVIDENCE = "evidence";
-const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE];
+const LAYER_PROJECT_DOC = "project-doc";
+const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE, LAYER_PROJECT_DOC];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
 const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 /** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
 const DEFAULT_MAX_AUTO_MEMORY = 2;
+const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
 function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
   if (!transcript) throw new Error("Transcript fallback is required.");
@@ -324,12 +326,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     includeThinking,
     memoryQuota,
     messageQuota,
+    projectDocQuota,
     memoryScope = "all",
   }) {
     const byLayer = {
       [LAYER_MEMORY]: [],
       [LAYER_MESSAGE]: [],
       [LAYER_EVIDENCE]: [],
+      [LAYER_PROJECT_DOC]: [],
     };
 
     if (layers.includes(LAYER_MEMORY)) {
@@ -366,6 +370,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         includeThinking,
       });
     }
+    if (layers.includes(LAYER_PROJECT_DOC)) {
+      byLayer[LAYER_PROJECT_DOC] = collectProjectDocCandidates({
+        threadId,
+        query,
+        terms,
+        limit: Math.max(limit, DEFAULT_SEARCH_PROJECT_DOC_QUOTA) * 3,
+      });
+    }
 
     const scored = {
       [LAYER_MEMORY]: byLayer[LAYER_MEMORY]
@@ -380,14 +392,35 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         .map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
+      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC]
+        .map((item) => scoreAndMapProjectDoc(item, terms))
+        .filter(Boolean)
+        .sort(compareHits),
     };
 
     return allocateByLayerQuotas(scored, {
       limit,
       memoryQuota: clampQuota(memoryQuota, resolveSearchMemoryQuota()),
       messageQuota: clampQuota(messageQuota, resolveSearchMessageQuota()),
+      projectDocQuota: clampQuota(projectDocQuota, DEFAULT_SEARCH_PROJECT_DOC_QUOTA),
       layers,
     });
+  }
+
+  function collectProjectDocCandidates({ threadId, query, terms, limit }) {
+    if (!storage?.projectEvidence?.search) return [];
+    const projectKey = resolveThreadProjectKey(threadId);
+    if (!projectKey) return [];
+    const termQuery = terms.length > 0 ? terms.join(" ") : query;
+    try {
+      return storage.projectEvidence.search(projectKey, termQuery || query, {
+        limit,
+        matchMode: "or",
+      });
+    } catch (error) {
+      logger.error?.(`[project-evidence] search failed: ${error.message}`);
+      return [];
+    }
   }
 
   function collectLayerCandidates({
@@ -726,7 +759,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
 
 function finalizeSearchResult(hits, { query, limit, weakQuery }) {
   const list = Array.isArray(hits) ? hits : [];
-  const layers = { memory: 0, message: 0, evidence: 0 };
+  const layers = { memory: 0, message: 0, evidence: 0, "project-doc": 0 };
   for (const hit of list) {
     const layer = hit.layer || layerForSourceKind(hit.sourceKind);
     if (layers[layer] !== undefined) layers[layer] += 1;
@@ -740,6 +773,38 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
     limit,
     truncated: list.length >= limit,
     weakQuery: Boolean(weakQuery),
+  };
+}
+
+function scoreAndMapProjectDoc(item, terms) {
+  if (!item) return null;
+  let score = 8;
+  const hay = `${item.path || ""} ${item.heading || ""} ${item.content || ""}`.toLowerCase();
+  for (const term of terms || []) {
+    if (hay.includes(String(term).toLowerCase())) score += 6;
+  }
+  if (item.matchChannel === "exact") score += 10;
+  if (item.matchChannel === "fts") score += 4;
+  return {
+    invocationId: "",
+    eventNo: 0,
+    kind: "project-doc.passage",
+    ts: null,
+    snippet: String(item.snippet || item.content || "").slice(0, 200),
+    sourceKind: "project-doc",
+    sourceId: item.sourceId || `passage:${item.id}`,
+    layer: LAYER_PROJECT_DOC,
+    score,
+    matchChannels: item.matchChannel ? [item.matchChannel] : [],
+    content: String(item.content || "").slice(0, 2048),
+    path: item.path,
+    heading: item.heading,
+    startLine: item.startLine,
+    endLine: item.endLine,
+    metadata: {
+      ...(item.metadata || {}),
+      untrusted: true,
+    },
   };
 }
 
@@ -800,7 +865,10 @@ function kindBoost(kind) {
   }
 }
 
-function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layers }) {
+function allocateByLayerQuotas(
+  scored,
+  { limit, memoryQuota, messageQuota, projectDocQuota = DEFAULT_SEARCH_PROJECT_DOC_QUOTA, layers }
+) {
   const out = [];
   const pushLayer = (layer, quota) => {
     if (!layers.includes(layer) || quota <= 0) return;
@@ -818,7 +886,9 @@ function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layer
   const remainingAfterMemory = limit - out.length;
   pushLayer(LAYER_MESSAGE, Math.min(messageQuota, remainingAfterMemory));
   const remainingAfterMessage = limit - out.length;
-  pushLayer(LAYER_EVIDENCE, remainingAfterMessage);
+  pushLayer(LAYER_PROJECT_DOC, Math.min(projectDocQuota, remainingAfterMessage));
+  const remainingAfterDocs = limit - out.length;
+  pushLayer(LAYER_EVIDENCE, remainingAfterDocs);
 
   // If a layer under-filled, allow later layers already filled only up to remaining.
   // Re-run pass for unused capacity with global score order among leftovers.
@@ -983,6 +1053,7 @@ function isThinkingEvidence(item) {
 function layerForSourceKind(sourceKind) {
   if (sourceKind === "memory-entry") return LAYER_MEMORY;
   if (sourceKind === "message") return LAYER_MESSAGE;
+  if (sourceKind === "project-doc") return LAYER_PROJECT_DOC;
   return LAYER_EVIDENCE;
 }
 
@@ -1090,4 +1161,5 @@ module.exports = {
   LAYER_MEMORY,
   LAYER_MESSAGE,
   LAYER_EVIDENCE,
+  LAYER_PROJECT_DOC,
 };
