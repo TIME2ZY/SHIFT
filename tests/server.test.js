@@ -2448,7 +2448,7 @@ test("frontend index.html exposes explicit worktree mode toggle", () => {
   assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
 });
 
-test("frontend exposes all right-panel tabs in a four-column layout", () => {
+test("frontend exposes all right-panel tabs in a three-column layout", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   const workspaceCss = fs.readFileSync(
     path.join(__dirname, "../public", "styles", "workspace.css"),
@@ -2457,10 +2457,13 @@ test("frontend exposes all right-panel tabs in a four-column layout", () => {
   const boot = require("../public/boot.js");
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
-  assert.match(html, /id="panel-tab-recall"/);
-  assert.match(html, /id="panel-tab-memory"/);
+  assert.match(html, /id="panel-tab-context"/);
+  assert.doesNotMatch(html, /id="panel-tab-recall"/);
+  assert.doesNotMatch(html, /id="panel-tab-memory"/);
+  assert.doesNotMatch(html, /id="memory-create-form"/);
+  assert.match(html, /id="context-panel-inline"/);
   assert.match(html, /id="workspace-panel"/);
-  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(4,/);
+  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(3,/);
   assert.match(html, /src="\/public\/boot\.js"/);
   for (const src of [
     "/public/session-api.js",
@@ -2486,7 +2489,10 @@ test("frontend exposes all right-panel tabs in a four-column layout", () => {
 test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(html, /id="panel-tab-recall"/);
+  assert.match(html, /id="panel-tab-context"/);
+  assert.match(html, /id="context-panel-inline"/);
+  assert.match(html, /context-section-title/);
+  assert.doesNotMatch(html, /id="context-segment-conclusions"/);
   assert.doesNotMatch(html, /id="recall-toggle"/);
   assert.doesNotMatch(js, /const recallToggleEl\s*=\s*\$\("#recall-toggle"\)/);
   assert.doesNotMatch(js, /recallToggleEl\.addEventListener/);
@@ -2496,7 +2502,7 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /SHIFT AGENTS · 交班台/);
   assert.match(html, /本会话规则/);
-  assert.match(html, />\s*协作者\s*</);
+  assert.match(html, />\s*Agents\s*</);
   assert.doesNotMatch(html, /agent-panel-title/);
   // New chat lives in the sidebar only; composer keeps a single Send action.
   assert.match(html, /btn-new-chat/);

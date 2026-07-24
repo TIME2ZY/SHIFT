@@ -1,3 +1,50 @@
+/* Context panel: single scroll — inject + search + conclusions + invocations */
+
+.context-panel-inline {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 8px 10px 10px;
+  gap: 8px;
+}
+
+.context-panel-inline .context-search {
+  flex-shrink: 0;
+}
+
+.context-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.context-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.context-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  text-transform: none;
+}
+
+.context-section .memory-body,
+.context-section .recall-body {
+  min-height: 0;
+  overflow: visible;
+}
+
 /* L3 Memory management panel */
 
 .memory-inject {
@@ -29,22 +76,6 @@
   line-height: 1.35;
 }
 
-.memory-create {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  flex-shrink: 0;
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.memory-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: var(--space-2);
-}
-
-.memory-create label,
 .memory-filters label {
   display: flex;
   flex-direction: column;
@@ -54,9 +85,6 @@
   min-width: 0;
 }
 
-.memory-create select,
-.memory-create input,
-.memory-create textarea,
 .memory-filters select {
   width: 100%;
   padding: 6px 8px;
@@ -68,12 +96,6 @@
   font-size: 12px;
 }
 
-.memory-create textarea {
-  resize: vertical;
-  min-height: 64px;
-}
-
-.memory-create-submit,
 .memory-action {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
@@ -84,7 +106,6 @@
   cursor: pointer;
 }
 
-.memory-create-submit:hover,
 .memory-action:hover {
   border-color: var(--accent);
 }
