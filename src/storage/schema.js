@@ -353,6 +353,45 @@ const MIGRATIONS = Object.freeze([
         WHERE memory_id IS NOT NULL;
     `,
   },
+  {
+    version: 8,
+    name: "memory_suggestions",
+    sql: `
+      CREATE TABLE memory_suggestions (
+        id TEXT PRIMARY KEY,
+        project_key TEXT,
+        origin_thread_id TEXT,
+        proposed_kind TEXT NOT NULL,
+        proposed_scope TEXT NOT NULL
+          CHECK (proposed_scope IN ('thread', 'project')),
+        topic TEXT,
+        summary TEXT,
+        content TEXT NOT NULL,
+        confidence REAL,
+        anchors_json TEXT NOT NULL,
+        extractor_version TEXT,
+        status TEXT NOT NULL
+          CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        reviewed_by TEXT,
+        promoted_memory_id TEXT,
+        metadata_json TEXT,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE SET NULL,
+        FOREIGN KEY (origin_thread_id) REFERENCES threads(id) ON DELETE SET NULL,
+        FOREIGN KEY (promoted_memory_id) REFERENCES memory_entries(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX memory_suggestions_thread_status
+        ON memory_suggestions(origin_thread_id, status, created_at);
+      CREATE INDEX memory_suggestions_project_status
+        ON memory_suggestions(project_key, status, created_at)
+        WHERE project_key IS NOT NULL;
+      CREATE INDEX memory_suggestions_pending
+        ON memory_suggestions(status, created_at)
+        WHERE status = 'pending';
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {
