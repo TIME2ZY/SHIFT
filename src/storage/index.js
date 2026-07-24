@@ -7,6 +7,7 @@ const { createMemoryService } = require("./memory-service");
 const { createMemorySuggestionRepository } = require("./memory-suggestion-repository");
 const { createMemorySuggestionService } = require("./memory-suggestion-service");
 const { createMessageRepository } = require("./message-repository");
+const { createProjectEvidenceRepository, reindexThreadProject } = require("./project-evidence");
 const { createRecallRepository } = require("./recall-repository");
 const { createThreadRepository } = require("./thread-repository");
 const { createWindowRepository } = require("./window-repository");
@@ -24,6 +25,7 @@ function createStorage(options = {}) {
     memories: createMemoryRepository(db, recall),
     suggestions: createMemorySuggestionRepository(db),
     digests: createMemoryDigestRepository(db),
+    projectEvidence: createProjectEvidenceRepository(db),
     memoryEvents,
     recall,
     transaction(work) {
@@ -38,6 +40,8 @@ function createStorage(options = {}) {
   };
   storage.memory = createMemoryService({ storage });
   storage.suggestionService = createMemorySuggestionService({ storage });
+  storage.reindexProjectEvidence = (threadId, reindexOptions) =>
+    reindexThreadProject(storage, threadId, reindexOptions);
   return storage;
 }
 
@@ -48,4 +52,5 @@ module.exports = {
   checkpointMemoryDatabase,
   createMemoryService,
   createMemorySuggestionService,
+  reindexThreadProject,
 };

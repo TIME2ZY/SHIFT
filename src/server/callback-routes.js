@@ -16,7 +16,7 @@ function bumpThreadWriteStat(callbacks, sessionId, field, amount = 1) {
 }
 
 function countHitLayers(hits) {
-  const layers = { memory: 0, message: 0, evidence: 0 };
+  const layers = { memory: 0, message: 0, evidence: 0, "project-doc": 0 };
   for (const hit of hits || []) {
     const layer = hit.layer || "evidence";
     if (layers[layer] !== undefined) layers[layer] += 1;

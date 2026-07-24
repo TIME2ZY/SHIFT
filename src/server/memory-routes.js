@@ -19,6 +19,7 @@ const { PRODUCT_KINDS } = require("../storage/memory-keys");
 function createMemoryRoutes({
   memoryService = null,
   suggestionService = null,
+  storage = null,
   getSession,
   sessionsFile,
   sendJson,
@@ -39,6 +40,40 @@ function createMemoryRoutes({
         readJsonBody,
         logger,
       });
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/memories/project-evidence/reindex"
+    ) {
+      if (!storage?.reindexProjectEvidence) {
+        sendJson(res, 503, { error: "Project evidence indexer unavailable." });
+        return true;
+      }
+      let body = {};
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 400, { error: "Invalid JSON body." });
+        return true;
+      }
+      const sessionId = body.sessionId || body.threadId || url.searchParams.get("sessionId");
+      if (!sessionId || !isValidOpaqueId(sessionId)) {
+        sendJson(res, 400, { error: "sessionId is required." });
+        return true;
+      }
+      if (getSession && !getSession(sessionsFile, sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      try {
+        const result = storage.reindexProjectEvidence(sessionId, body.options || {});
+        sendJson(res, 200, { sessionId, result });
+      } catch (error) {
+        logger.error?.(`[memory-api] project evidence reindex failed: ${error.message}`);
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
     }
 
     if (!memoryService) {
