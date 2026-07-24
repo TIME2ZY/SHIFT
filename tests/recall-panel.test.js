@@ -149,21 +149,24 @@ test("focusEventInTrace highlights process row by data-event-nos", () => {
   assert.ok(row.classList.contains("is-event-focus"));
 });
 
-test("recall list toggle is bound on head not whole row (raw details click safety)", () => {
+test("recall list toggle is bound on head not whole row (event stream click safety)", () => {
   const src = require("node:fs").readFileSync(
     require("node:path").join(__dirname, "../public/recall-panel.js"),
     "utf8"
   );
-  // Expand/collapse must be head-scoped so nested details (原始事件) work.
+  // Expand/collapse must be head-scoped so nested body clicks stay interactive.
   assert.match(src, /head\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/);
   assert.doesNotMatch(
     src,
     /row\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/
   );
   assert.match(src, /stopPropagation/);
+  // Event stream is primary — not behind a second <details>.
+  assert.match(src, /recall-events-panel/);
+  assert.doesNotMatch(src, /createElement\("details"\)[\s\S]{0,80}recall-raw-events/);
 });
 
-test("focusEventInTrace falls back to raw event row", () => {
+test("focusEventInTrace falls back to event row in always-visible stream", () => {
   const rawRow = {
     classList: {
       _set: new Set(),
@@ -179,7 +182,6 @@ test("focusEventInTrace falls back to raw event row", () => {
     },
     scrollIntoView: () => {},
   };
-  const rawDetails = { open: false };
   const root = {
     querySelectorAll(sel) {
       if (sel === ".is-event-focus") return [];
@@ -188,7 +190,6 @@ test("focusEventInTrace falls back to raw event row", () => {
       return [];
     },
     querySelector(sel) {
-      if (sel === ".recall-raw-events") return rawDetails;
       if (String(sel).includes("data-event-no")) return rawRow;
       return null;
     },
@@ -202,6 +203,106 @@ test("focusEventInTrace falls back to raw event row", () => {
     ),
     true
   );
-  assert.equal(rawDetails.open, true);
   assert.ok(rawRow.classList.contains("is-event-focus"));
+});
+
+test("setMemories attaches product conclusions to producing invocation", () => {
+  const g = globalThis;
+  const prevDoc = g.document;
+  // Minimal document for renderInvocationTrace if needed later.
+  g.document = {
+    createElement: (tag) => {
+      const children = [];
+      const el = {
+        tagName: String(tag).toUpperCase(),
+        className: "",
+        textContent: "",
+        open: false,
+        dataset: {},
+        style: {},
+        children,
+        childNodes: children,
+        append(...nodes) {
+          for (const n of nodes) children.push(n);
+          this.childNodes = children;
+        },
+        appendChild(n) {
+          children.push(n);
+          this.childNodes = children;
+          return n;
+        },
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        replaceChildren(...nodes) {
+          children.length = 0;
+          children.push(...nodes);
+          this.childNodes = children;
+        },
+      };
+      return el;
+    },
+  };
+  try {
+    const panel = createRecallPanel({
+      bodyEl: null,
+      searchInputEl: null,
+      state: {},
+      recallApi: {},
+      agentLabel: (a) => a,
+      fmtTime: () => "",
+      escHtml: (s) => s,
+      locale: { locale },
+    });
+    panel.setMemories([
+      {
+        id: "m1",
+        kind: "decision",
+        status: "captured",
+        content: "结算 T+0",
+        sourceInvocationId: "inv-a",
+      },
+      {
+        id: "m2",
+        kind: "fact",
+        status: "captured",
+        content: "orphan",
+        sourceInvocationId: "",
+      },
+      {
+        id: "m3",
+        kind: "handoff",
+        status: "captured",
+        content: "noise",
+        sourceInvocationId: "inv-a",
+      },
+      {
+        id: "m4",
+        kind: "constraint",
+        status: "superseded",
+        content: "old",
+        sourceInvocationId: "inv-a",
+      },
+    ]);
+    const attached = panel.conclusionsFor("inv-a");
+    assert.equal(attached.length, 1);
+    assert.equal(attached[0].id, "m1");
+    assert.equal(panel.conclusionsFor("inv-missing").length, 0);
+
+    const root = panel.renderInvocationTrace(
+      [
+        { eventNo: 0, kind: "text.delta", ts: "2026-07-12T00:00:00.000Z", payload: { text: "hi" } },
+        { eventNo: 1, kind: "tool.started", ts: "2026-07-12T00:00:01.000Z", payload: { toolName: "read" } },
+      ],
+      { conclusions: attached }
+    );
+    assert.equal(root.className, "recall-process-root");
+    // Event stream is a flat panel (not nested details).
+    const hasEventsPanel = (root.childNodes || root.children || []).some(
+      (c) => c && String(c.className || "").includes("recall-events-panel")
+    );
+    assert.ok(hasEventsPanel, "events panel should be present without second open");
+  } finally {
+    if (prevDoc === undefined) delete g.document;
+    else g.document = prevDoc;
+  }
 });

@@ -449,6 +449,18 @@
   max-width: 100%;
 }
 
+/* Expanded recall: keep process panel open; no second click. */
+.recall-item-body .msg-process.is-recall-expanded,
+.msg-recall-panel .msg-process.is-recall-expanded {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-raised);
+}
+
+.recall-item-body .msg-process.is-recall-expanded > .msg-process-summary {
+  pointer-events: none;
+}
+
 .recall-item-body .live-subagents,
 .msg-recall-panel .live-subagents {
   max-width: 100%;
@@ -476,49 +488,98 @@
   word-break: break-word;
 }
 
+/* Always-visible event stream (primary surface after one expand) */
+.recall-events-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-1);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  position: relative;
+  z-index: 1;
+}
+
+.recall-events-panel-title {
+  padding: 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.recall-events-panel .recall-events {
+  margin-top: var(--space-1);
+  max-height: min(40vh, 360px);
+  overflow: auto;
+}
+
+/* Legacy class kept for any residual markup */
 .recall-raw-events {
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--space-1);
   font-size: 11px;
   color: var(--text-tertiary);
-  /* Keep interactive; parent list used to steal clicks via row handlers. */
   position: relative;
   z-index: 1;
 }
 
-.recall-raw-events-summary {
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-  padding: 6px 4px;
-  margin: 0 -4px;
+/* Conclusions attached to the producing agent turn */
+.recall-item-conclusions {
+  margin: 0 0 var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-1);
   border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-raised));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-subtle));
+}
+
+.recall-item-conclusions.is-compact {
+  margin: 0 var(--space-2) var(--space-2) 14px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.recall-item-conclusions-title {
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-secondary);
-  display: block;
+  margin-bottom: 4px;
 }
 
-.recall-raw-events-summary:hover {
+.recall-item-conclusions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recall-conclusion {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.recall-conclusion-kind {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 0 5px;
+  border-radius: 3px;
+  line-height: 1.6;
 }
 
-.recall-raw-events-summary::-webkit-details-marker {
-  display: none;
+.recall-conclusion-text {
+  min-width: 0;
+  word-break: break-word;
 }
 
-.recall-raw-events-summary::before {
-  content: "▸ ";
-  opacity: 0.7;
-}
-
-.recall-raw-events[open] > .recall-raw-events-summary::before {
-  content: "▾ ";
-}
-
-.recall-raw-events .recall-events {
-  margin-top: var(--space-1);
-  max-height: min(28vh, 240px);
-  overflow: auto;
+.recall-item.has-conclusions::after {
+  background: var(--accent);
 }
 
 /* ── Phase B: event / process focus flash ── */

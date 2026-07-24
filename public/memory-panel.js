@@ -31,7 +31,8 @@
     productOnly = true,
     showConfirm = false,
   }) {
-    if (!bodyEl || !memoryApi) {
+    // bodyEl is optional: context UI attaches conclusions to recall turns instead of a list.
+    if (!memoryApi && !injectEl) {
       return {
         load() {},
         bind() {},
@@ -47,6 +48,7 @@
     }
 
     async function load() {
+      if (!bodyEl || !memoryApi) return;
       const sessionId = typeof getSessionId === "function" ? getSessionId() : null;
       const token = ++loadToken;
       if (!sessionId) {

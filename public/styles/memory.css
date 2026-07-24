@@ -1,4 +1,4 @@
-/* Context panel: single scroll — inject + search + conclusions + invocations */
+/* Context panel: inject banner + search + recall (conclusions hang on turns) */
 
 .context-panel-inline {
   display: flex;
@@ -29,6 +29,7 @@
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+  flex: 1;
 }
 
 .context-section-title {
@@ -37,12 +38,18 @@
   letter-spacing: 0.02em;
   color: var(--text-tertiary);
   text-transform: none;
+  flex-shrink: 0;
 }
 
-.context-section .memory-body,
 .context-section .recall-body {
   min-height: 0;
+  flex: 1;
   overflow: visible;
+}
+
+.context-section-recall {
+  flex: 1;
+  min-height: 0;
 }
 
 /* L3 Memory management panel */

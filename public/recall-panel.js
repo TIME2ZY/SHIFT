@@ -129,7 +129,8 @@
       toggleTitle: "定位到本次调用的执行过程",
       noEvents: "无事件记录",
       noTools: "无工具调用",
-      rawEvents: (n) => `原始事件 · ${n}`,
+      eventsTitle: (n) => `事件 · ${n}`,
+      rawEvents: (n) => `事件 · ${n}`,
       pageTruncated: (shown, total) => `仅显示前 ${shown} 条事件，完整记录共 ${total} 条`,
       loading: "加载中…",
       loadFailed: (msg) => `加载失败: ${msg}`,
@@ -138,6 +139,8 @@
       noSession: "暂无会话",
       emptyList: "本会话暂无调用记录",
       noHits: "无匹配结果",
+      conclusions: "本轮结论",
+      conclusionCount: (n) => `${n} 条结论`,
       layerMemory: "记忆",
       layerMessage: "消息",
       layerEvidence: "证据",
@@ -216,12 +219,17 @@
       }
     }
 
-    // 3) Fallback: open raw dump and highlight the event row
-    const raw = root.querySelector(".recall-raw-events");
-    if (raw) raw.open = true;
+    // 3) Fallback: highlight the event row in the always-visible event stream
     const rawRow = root.querySelector(`.recall-event[data-event-no="${no}"]`);
     return flash(rawRow);
   }
+
+  const PRODUCT_KINDS = new Set(["decision", "constraint", "fact"]);
+  const KIND_LABELS = {
+    decision: "决策",
+    constraint: "约束",
+    fact: "事实",
+  };
 
   function createRecallPanel(deps) {
     const {
@@ -242,9 +250,63 @@
       localePack || globalScope.Locale || globalScope.LocaleZhCN || null
     );
     const processHelpers = resolveProcessHelpers();
+    /** @type {Map<string, object[]>} invocationId → product memories from that turn */
+    let memoriesByInvocation = new Map();
 
     function setRecallEmptyAll(msg, isError = false) {
       if (bodyEl) setRecallEmpty(bodyEl, msg, isError, escHtml);
+    }
+
+    /**
+     * Attach product conclusions to the agent turn that produced them.
+     * @param {Array<object>} memories
+     */
+    function setMemories(memories) {
+      const map = new Map();
+      for (const memory of memories || []) {
+        if (!memory || !PRODUCT_KINDS.has(memory.kind)) continue;
+        if (memory.status !== "captured" && memory.status !== "confirmed") continue;
+        const invId = memory.sourceInvocationId || memory.invocationId || "";
+        if (!invId) continue;
+        if (!map.has(invId)) map.set(invId, []);
+        map.get(invId).push(memory);
+      }
+      memoriesByInvocation = map;
+    }
+
+    function conclusionsFor(invocationId) {
+      if (!invocationId) return [];
+      return memoriesByInvocation.get(invocationId) || [];
+    }
+
+    function renderConclusionsBlock(memories, { compact = false } = {}) {
+      if (!memories || memories.length === 0) return null;
+      const block = document.createElement("div");
+      block.className = compact
+        ? "recall-item-conclusions is-compact"
+        : "recall-item-conclusions";
+      if (!compact) {
+        const title = document.createElement("div");
+        title.className = "recall-item-conclusions-title";
+        title.textContent = R.conclusions || "本轮结论";
+        block.appendChild(title);
+      }
+      const list = document.createElement("ul");
+      list.className = "recall-item-conclusions-list";
+      for (const memory of memories) {
+        const li = document.createElement("li");
+        li.className = `recall-conclusion kind-${memory.kind || "fact"}`;
+        const kind = document.createElement("span");
+        kind.className = "recall-conclusion-kind";
+        kind.textContent = KIND_LABELS[memory.kind] || memory.kind || "";
+        const text = document.createElement("span");
+        text.className = "recall-conclusion-text";
+        text.textContent = String(memory.content || "").slice(0, compact ? 72 : 200);
+        li.append(kind, text);
+        list.appendChild(li);
+      }
+      block.appendChild(list);
+      return block;
     }
 
     function renderEventList(events) {
@@ -277,44 +339,49 @@
     }
 
     /**
-     * Primary UI: process panel (same as message hydrate).
-     * Debug: raw event dump in a collapsed <details>.
+     * One open: event stream is primary (always visible).
+     * Tool rows (if any) are expanded process panel — no nested second click.
      * @param {Array} events
-     * @param {{ focusEventNo?: number }} [options]
+     * @param {{ focusEventNo?: number, conclusions?: object[] }} [options]
      */
     function renderInvocationTrace(events, options = {}) {
       const root = document.createElement("div");
       root.className = "recall-process-root";
 
-      let processEl = null;
+      const conclusions = options.conclusions || [];
+      const conclusionsEl = renderConclusionsBlock(conclusions);
+      if (conclusionsEl) root.appendChild(conclusionsEl);
+
+      // Tool/command rows when present — force open so no second expand.
       if (typeof buildProcessPanelFromEvents === "function") {
-        processEl = buildProcessPanelFromEvents(events, {
+        const processEl = buildProcessPanelFromEvents(events, {
           open: true,
-          emptyFallback: true,
+          emptyFallback: false,
         });
-      }
-      if (processEl) {
-        root.appendChild(processEl);
-      } else {
-        // Fallback if renderer not wired (tests / partial boot).
-        const empty = document.createElement("div");
-        empty.className = "recall-process-empty";
-        empty.textContent = R.noTools;
-        root.appendChild(empty);
+        if (processEl) {
+          // Flatten: never leave closed <details> as the only surface.
+          if (processEl.tagName === "DETAILS") processEl.open = true;
+          processEl.classList.add("is-recall-expanded");
+          root.appendChild(processEl);
+        }
       }
 
-      const raw = document.createElement("details");
-      raw.className = "recall-raw-events";
-      // Open raw when we need a non-process event focus fallback later.
-      const summary = document.createElement("summary");
-      summary.className = "recall-raw-events-summary";
+      // Primary: event stream always visible (not behind another <details>).
+      const eventsWrap = document.createElement("div");
+      eventsWrap.className = "recall-events-panel";
+      const eventsHead = document.createElement("div");
+      eventsHead.className = "recall-events-panel-title";
       const n = Array.isArray(events) ? events.length : 0;
-      summary.textContent = typeof R.rawEvents === "function" ? R.rawEvents(n) : `原始事件 · ${n}`;
-      raw.append(summary, renderEventList(events));
-      root.appendChild(raw);
+      eventsHead.textContent =
+        typeof R.eventsTitle === "function"
+          ? R.eventsTitle(n)
+          : typeof R.rawEvents === "function"
+            ? R.rawEvents(n)
+            : `事件 · ${n}`;
+      eventsWrap.append(eventsHead, renderEventList(events));
+      root.appendChild(eventsWrap);
 
       if (options.focusEventNo != null) {
-        // Defer until attached to document so scrollIntoView works.
         const focusNo = options.focusEventNo;
         const run = () => focusEventInTrace(root, focusNo, events, processHelpers);
         if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
@@ -358,6 +425,7 @@
       children.push(
         renderInvocationTrace(page.events, {
           focusEventNo: options.focusEventNo,
+          conclusions: options.conclusions,
         })
       );
       target.replaceChildren(...children);
@@ -457,6 +525,9 @@
           const row = document.createElement("div");
           row.className = "recall-item";
           row.dataset.invocationId = inv.invocationId;
+          const conclusions = conclusionsFor(inv.invocationId);
+          if (conclusions.length) row.classList.add("has-conclusions");
+
           const head = document.createElement("div");
           head.className = "recall-item-head";
           const agent = document.createElement("span");
@@ -467,16 +538,28 @@
           st.textContent = inv.state;
           const meta = document.createElement("span");
           meta.className = "recall-item-meta";
-          meta.textContent = `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
+          const conclusionHint =
+            conclusions.length > 0
+              ? typeof R.conclusionCount === "function"
+                ? R.conclusionCount(conclusions.length)
+                : `${conclusions.length} 条结论`
+              : "";
+          meta.textContent = conclusionHint
+            ? `${inv.eventCount} 事件 · ${conclusionHint} · ${fmtTime(inv.startedAt)}`
+            : `${inv.eventCount} 事件 · ${fmtTime(inv.startedAt)}`;
           const caret = document.createElement("span");
           caret.className = "recall-item-caret";
           caret.textContent = "▸";
           head.append(agent, st, meta, caret);
-          // Toggle only on head — body hosts nested <details> (过程/原始事件).
-          // Row-level click would steal summary clicks and collapse the panel.
+          // Toggle only on head — expanded body is the event stream.
           head.addEventListener("click", () => toggleRecallItem(row, inv.invocationId));
           head.style.cursor = "pointer";
           row.append(head);
+
+          // Peek conclusions on the list row (no separate 结论 panel).
+          const peek = renderConclusionsBlock(conclusions, { compact: true });
+          if (peek) row.appendChild(peek);
+
           return row;
         })
       );
@@ -504,7 +587,9 @@
       row.append(body);
       try {
         const page = await fetchInvocationEvents(invocationId);
-        fillInvocationBody(body, page);
+        fillInvocationBody(body, page, {
+          conclusions: conclusionsFor(invocationId),
+        });
       } catch (e) {
         const err =
           typeof R.loadFailed === "function" ? R.loadFailed(e.message) : `加载失败: ${e.message}`;
@@ -671,6 +756,7 @@
         const page = await fetchInvocationEvents(invocationId);
         fillInvocationBody(body, page, {
           focusEventNo: hit.eventNo != null ? hit.eventNo : undefined,
+          conclusions: conclusionsFor(invocationId),
         });
       } catch (e) {
         const err =
@@ -702,6 +788,8 @@
       runRecallSearch,
       bindSearch,
       setRecallEmptyAll,
+      setMemories,
+      conclusionsFor,
       renderInvocationTrace,
       focusEventInTrace: (root, eventNo, events) =>
         focusEventInTrace(root, eventNo, events, processHelpers),
