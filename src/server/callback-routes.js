@@ -221,8 +221,14 @@ function createCallbackRoutes({
         return true;
       }
 
+      const scopeRaw = String(url.searchParams.get("scope") || url.searchParams.get("memoryScope") || "")
+        .trim()
+        .toLowerCase();
       const searchOptions = { limit, includeRetired, includeThinking };
       if (layers) searchOptions.layers = layers;
+      if (scopeRaw === "thread" || scopeRaw === "project" || scopeRaw === "all") {
+        searchOptions.memoryScope = scopeRaw;
+      }
 
       // Empty/weak query → recency-only (Wave R1). Prefer searchSession when available.
       let body;

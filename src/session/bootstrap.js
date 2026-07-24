@@ -138,7 +138,11 @@ async function buildActiveMemoryCard({
   let memories = [];
   if (memorySource && typeof memorySource.listActive === "function") {
     try {
-      memories = memorySource.listActive(threadId, { limit: recentLimit });
+      const listFn =
+        typeof memorySource.listActiveForTurn === "function"
+          ? memorySource.listActiveForTurn.bind(memorySource)
+          : memorySource.listActive.bind(memorySource);
+      memories = listFn(threadId, { limit: recentLimit, scope: "all", forInject: true });
     } catch (error) {
       logger.error?.(`[memory-bootstrap] listActive failed: ${error.message}`);
       const rendered = [

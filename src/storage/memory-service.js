@@ -255,8 +255,65 @@ function createMemoryService({
     }
   }
 
+  /**
+   * Active memories for inject / recency.
+   *
+   * options.scope:
+   *   - "thread"  — thread-owned only
+   *   - "project" — project-owned only (requires thread project identity)
+   *   - "all"     — thread ∪ project (default, PR-2 cross-thread inject)
+   */
   function listActive(threadId, options = {}) {
-    const items = storage.memories.listActive(requiredString(threadId, "thread id"), options);
+    const id = requiredString(threadId, "thread id");
+    const scope = options.scope === "thread" || options.scope === "project" ? options.scope : "all";
+    const limit = normalizeLimit(options.limit, 100);
+    const kinds = options.kinds;
+
+    let items = [];
+    if (scope === "thread" || scope === "all") {
+      items = items.concat(storage.memories.listActive(id, { limit, kinds }));
+    }
+    if (scope === "project" || scope === "all") {
+      const thread = storage.threads?.get?.(id);
+      if (thread?.projectKey) {
+        items = items.concat(
+          storage.memories.listActiveByProject(thread.projectKey, {
+            limit,
+            kinds,
+          })
+        );
+      }
+    }
+
+    // Deduplicate (same id should not appear twice).
+    const byId = new Map();
+    for (const item of items) {
+      if (!item?.id) continue;
+      if (!byId.has(item.id)) byId.set(item.id, item);
+    }
+    items = [...byId.values()];
+
+    // Inject gate: lesson is project-capable but only confirmed lessons enter Active Card.
+    if (options.forInject !== false) {
+      items = items.filter((item) => {
+        if (item.kind === "lesson") return item.status === "confirmed";
+        return true;
+      });
+    }
+
+    // Prefer confirmed + product kinds, then recency.
+    items.sort((a, b) => {
+      const statusDelta = statusRank(a.status) - statusRank(b.status);
+      if (statusDelta !== 0) return statusDelta;
+      const kindDelta = kindRank(b.kind) - kindRank(a.kind);
+      if (kindDelta !== 0) return kindDelta;
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    });
+
+    if (Number.isFinite(Number(options.limit)) && Number(options.limit) > 0) {
+      items = items.slice(0, Math.floor(Number(options.limit)));
+    }
+
     const maxChars = normalizeMaxChars(options.maxChars);
     if (maxChars === null) return items;
 
@@ -269,6 +326,10 @@ function createMemoryService({
       usedChars += contentChars;
     }
     return selected;
+  }
+
+  function listActiveForTurn(threadId, options = {}) {
+    return listActive(threadId, { ...options, scope: "all", forInject: true });
   }
 
   function list(threadId, options = {}) {
@@ -421,12 +482,38 @@ function createMemoryService({
     capture,
     createProduct,
     listActive,
+    listActiveForTurn,
     list,
     get,
     confirm,
     invalidate,
     PRODUCT_KINDS,
   };
+}
+
+function statusRank(status) {
+  if (status === "confirmed") return 0;
+  if (status === "captured") return 1;
+  return 2;
+}
+
+function kindRank(kind) {
+  switch (kind) {
+    case "decision":
+      return 30;
+    case "constraint":
+      return 28;
+    case "lesson":
+      return 26;
+    case "fact":
+      return 24;
+    case "handoff":
+      return 6;
+    case "window-seal":
+      return 2;
+    default:
+      return 0;
+  }
 }
 
 /**
