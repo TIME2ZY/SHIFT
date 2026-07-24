@@ -1,5 +1,6 @@
 const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
+const { createMemoryDigestRepository } = require("./memory-digest");
 const { createMemoryEventRepository } = require("./memory-event-repository");
 const { createMemoryRepository } = require("./memory-repository");
 const { createMemoryService } = require("./memory-service");
@@ -22,6 +23,7 @@ function createStorage(options = {}) {
     invocations: createInvocationRepository(db),
     memories: createMemoryRepository(db, recall),
     suggestions: createMemorySuggestionRepository(db),
+    digests: createMemoryDigestRepository(db),
     memoryEvents,
     recall,
     transaction(work) {

@@ -17,6 +17,8 @@ const {
   buildMemoryInjectPayload,
 } = require("../storage/memory-metrics");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
+const { extractSuggestionsFromTurn } = require("../storage/memory-extractor");
+const { refreshDigestAndExtract } = require("../storage/memory-digest");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -1040,6 +1042,40 @@ function createChatRoutes({
         });
         logMemoryWriteMetrics(writeMetrics, log);
         sendSse(res, "memory-metrics", writeMetrics);
+
+        // PR-4: heuristic digest + suggestion extractor (suggestions only, never L2).
+        try {
+          const extractResult = refreshDigestAndExtract({
+            storage,
+            threadId: sessionId,
+            userText: rawPrompt,
+            assistantText: assistantContent,
+            userMessageId,
+            assistantMessageId: assistantMessage.id,
+            invocationId,
+            projectKey: storage?.threads?.get?.(sessionId)?.projectKey || null,
+            extractSuggestionsFromTurn,
+            logger: log,
+          });
+          if (extractResult?.extract?.created > 0 || extractResult?.digest) {
+            sendSse(res, "memory-digest", {
+              sessionId,
+              invocationId,
+              digest: extractResult.digest
+                ? {
+                    summary: extractResult.digest.summary,
+                    topics: extractResult.digest.topics,
+                    messageCount: extractResult.digest.messageCount,
+                    updatedAt: extractResult.digest.updatedAt,
+                  }
+                : null,
+              suggestionsCreated: extractResult.extract?.created || 0,
+              suggestionIds: (extractResult.extract?.suggestions || []).map((item) => item.id),
+            });
+          }
+        } catch (error) {
+          log.error?.(`[memory-digest] turn refresh failed: ${error.message}`);
+        }
       }
     } finally {
       if (activeInvocations.get(sessionId) === invocationController) {

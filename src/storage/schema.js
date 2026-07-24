@@ -392,6 +392,22 @@ const MIGRATIONS = Object.freeze([
         WHERE status = 'pending';
     `,
   },
+  {
+    version: 9,
+    name: "thread_digests",
+    sql: `
+      CREATE TABLE thread_digests (
+        thread_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        topics_json TEXT,
+        durable_candidates_json TEXT,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        source TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+      );
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {
