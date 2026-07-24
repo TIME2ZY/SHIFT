@@ -22,6 +22,14 @@ function makeGitRepo() {
   return dir;
 }
 
+function realPath(target) {
+  try {
+    return fs.realpathSync.native(path.resolve(target));
+  } catch {
+    return path.resolve(target);
+  }
+}
+
 test("ensureWorktree creates a managed git worktree for a session", () => {
   const baseDir = makeGitRepo();
   const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
@@ -29,10 +37,10 @@ test("ensureWorktree creates a managed git worktree for a session", () => {
   const meta = manager.ensureWorktree({ baseDir, sessionId: "session-1" });
 
   assert.equal(meta.sessionId, "session-1");
-  assert.equal(meta.baseDir, baseDir);
+  assert.equal(meta.baseDir, realPath(baseDir));
   assert.equal(meta.branch, "codex/session-session-1");
   assert.equal(meta.status, "active");
-  assert.ok(meta.worktreeDir.startsWith(path.resolve(`${baseDir}.worktrees`) + path.sep));
+  assert.ok(meta.worktreeDir.startsWith(realPath(`${baseDir}.worktrees`) + path.sep));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".git")));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".env.local")));
   assert.match(fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"), /SHIFT_WORKTREE=1/);

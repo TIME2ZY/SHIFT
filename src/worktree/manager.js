@@ -25,12 +25,26 @@ function runGit(args, cwd, opts = {}) {
   return (result.stdout || "").trim();
 }
 
+function normalizeFsPath(target) {
+  const resolved = path.resolve(target);
+  try {
+    // Expand Windows 8.3 short paths (e.g. ZHANGC~1) so path compares stay stable.
+    return fs.realpathSync.native(resolved);
+  } catch {
+    try {
+      return fs.realpathSync(resolved);
+    } catch {
+      return resolved;
+    }
+  }
+}
+
 function ensureGitRoot(baseDir) {
-  const resolved = path.resolve(baseDir);
+  const resolved = normalizeFsPath(baseDir);
   if (!fs.existsSync(resolved)) throw new Error(`Directory not found: ${resolved}`);
   if (!fs.statSync(resolved).isDirectory()) throw new Error(`Not a directory: ${resolved}`);
   try {
-    return path.resolve(runGit(["rev-parse", "--show-toplevel"], resolved));
+    return normalizeFsPath(runGit(["rev-parse", "--show-toplevel"], resolved));
   } catch (error) {
     throw new Error(`${resolved} is not a git repository: ${error.message}`);
   }
@@ -54,7 +68,7 @@ function writeState(filePath, state) {
 }
 
 function isInside(parent, child) {
-  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  const rel = path.relative(normalizeFsPath(parent), normalizeFsPath(child));
   return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
@@ -63,7 +77,7 @@ function registeredWorktreePaths(gitRoot) {
     runGit(["worktree", "list", "--porcelain"], gitRoot)
       .split(/\r?\n/)
       .filter((line) => line.startsWith("worktree "))
-      .map((line) => path.resolve(line.slice("worktree ".length)))
+      .map((line) => normalizeFsPath(line.slice("worktree ".length)))
   );
 }
 
@@ -207,11 +221,11 @@ function createWorktreeManager(opts = {}) {
     // Treat the persisted state as untrusted input. Re-validate the repository
     // and require Git to recognize the exact target before any recursive fallback.
     const trustedBaseDir = ensureGitRoot(meta.baseDir);
-    if (trustedBaseDir !== path.resolve(meta.baseDir)) {
+    if (trustedBaseDir !== normalizeFsPath(meta.baseDir)) {
       throw new Error(`Refusing worktree with invalid base repository: ${meta.baseDir}`);
     }
-    const worktreesRoot = path.resolve(opts.worktreesRoot || `${trustedBaseDir}.worktrees`);
-    const resolvedDir = path.resolve(meta.worktreeDir);
+    const worktreesRoot = normalizeFsPath(opts.worktreesRoot || `${trustedBaseDir}.worktrees`);
+    const resolvedDir = normalizeFsPath(meta.worktreeDir);
     if (!isInside(worktreesRoot, resolvedDir)) {
       throw new Error(`Refusing to remove unmanaged path: ${resolvedDir}`);
     }

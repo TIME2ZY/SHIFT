@@ -342,6 +342,18 @@ function createMemoryRepository(db) {
     deleteSearchProjection(memoryId) {
       return deleteSearchByMemory.run(memoryId).changes > 0;
     },
+
+    /** Rebuild memory_search rows for thread-owned + origin memories. */
+    rebuildSearchForThread(threadId) {
+      if (!threadId) return { memories: 0 };
+      return db.transaction(() => {
+        const rows = listByOriginOrOwner.all(threadId, threadId);
+        for (const row of rows) {
+          indexMemorySearch(mapMemory(row));
+        }
+        return { memories: rows.length };
+      })();
+    },
   };
 }
 

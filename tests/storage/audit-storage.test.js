@@ -95,9 +95,15 @@ test("audit detects missing recall and repairs with --repair", () => {
   const storage = createStorage({ file: ":memory:" });
   try {
     seedBase(storage);
-    // Drop projections to simulate drift.
+    // Drop projections to simulate drift (message/event recall + L2 memory_search).
     storage.db.prepare(`DELETE FROM recall_items`).run();
+    storage.db.prepare(`DELETE FROM memory_search`).run();
     storage.db.exec(`INSERT INTO recall_fts(recall_fts) VALUES('rebuild')`);
+    try {
+      storage.db.exec(`INSERT INTO memory_search_fts(memory_search_fts) VALUES('rebuild')`);
+    } catch {
+      // FTS content table may already be empty after DELETE cascade via triggers.
+    }
 
     const dirty = auditSqliteStorage({ storage });
     assert.equal(dirty.ok, false);

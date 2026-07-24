@@ -67,8 +67,15 @@ function createThreadRepository(db) {
     const nextDir =
       projectDir !== undefined ? stringOrEmpty(projectDir) : existing?.projectDir || "";
 
+    // First bind (empty → path) is allowed after L0 exists so users can attach a
+    // project after chatting. Re-binding to a different non-empty path is locked.
     if (existing && projectDir !== undefined && projectDirChanged(existing.projectDir, nextDir)) {
-      if (hasL0Evidence(existing.id) && options.allowProjectChange !== true) {
+      const hadProject = Boolean(String(existing.projectDir || "").trim());
+      if (
+        hadProject &&
+        hasL0Evidence(existing.id) &&
+        options.allowProjectChange !== true
+      ) {
         const error = new Error(
           "Cannot change projectDir after the thread has evidence; create a new thread."
         );

@@ -204,14 +204,15 @@ function auditEventRecall(db, findings) {
 }
 
 function auditMemoryRecall(db, findings) {
+  // L2 memories project into memory_search (not recall_items / memory-entry).
   const missing = db
     .prepare(
       `
-      SELECT m.id, m.thread_id
+      SELECT m.id,
+             COALESCE(m.owner_thread_id, m.origin_thread_id) AS thread_id
       FROM memory_entries m
-      LEFT JOIN recall_items r
-        ON r.source_kind = 'memory-entry' AND r.source_id = m.id
-      WHERE r.id IS NULL
+      LEFT JOIN memory_search s ON s.memory_id = m.id
+      WHERE s.id IS NULL
     `
     )
     .all();
@@ -221,7 +222,7 @@ function auditMemoryRecall(db, findings) {
       severity: "error",
       threadId: row.thread_id,
       sourceId: row.id,
-      message: `memory ${row.id} has no memory recall projection`,
+      message: `memory ${row.id} has no memory_search projection`,
       repair: "rebuild-thread",
     });
   }
@@ -229,10 +230,11 @@ function auditMemoryRecall(db, findings) {
   const orphan = db
     .prepare(
       `
-      SELECT r.source_id, r.thread_id
-      FROM recall_items r
-      LEFT JOIN memory_entries m ON m.id = r.source_id
-      WHERE r.source_kind = 'memory-entry' AND m.id IS NULL
+      SELECT s.memory_id AS source_id,
+             COALESCE(s.owner_thread_id, s.origin_thread_id) AS thread_id
+      FROM memory_search s
+      LEFT JOIN memory_entries m ON m.id = s.memory_id
+      WHERE m.id IS NULL
     `
     )
     .all();
@@ -242,7 +244,28 @@ function auditMemoryRecall(db, findings) {
       severity: "warn",
       threadId: row.thread_id,
       sourceId: row.source_id,
-      message: `memory recall ${row.source_id} has no source memory`,
+      message: `memory_search ${row.source_id} has no source memory`,
+      repair: "rebuild-thread",
+    });
+  }
+
+  // Legacy recall_items memory-entry rows should not survive foundation migration.
+  const legacy = db
+    .prepare(
+      `
+      SELECT source_id, thread_id
+      FROM recall_items
+      WHERE source_kind = 'memory-entry'
+    `
+    )
+    .all();
+  for (const row of legacy) {
+    findings.push({
+      code: "memory-recall-legacy",
+      severity: "warn",
+      threadId: row.thread_id,
+      sourceId: row.source_id,
+      message: `legacy memory-entry recall ${row.source_id} should use memory_search`,
       repair: "rebuild-thread",
     });
   }
@@ -374,7 +397,15 @@ function applyRepairs(storage, findings, repairs, logger) {
   for (const threadId of threadIds) {
     try {
       const result = rebuildThreadRecall(storage, threadId);
-      repairs.push({ action: "rebuild-thread", threadId, result });
+      let memorySearch = null;
+      if (typeof storage.memories?.rebuildSearchForThread === "function") {
+        memorySearch = storage.memories.rebuildSearchForThread(threadId);
+      }
+      repairs.push({
+        action: "rebuild-thread",
+        threadId,
+        result: { ...result, memorySearch },
+      });
     } catch (error) {
       repairs.push({ action: "rebuild-thread", threadId, error: error.message });
       logger.error?.(`[audit-repair] rebuild thread ${threadId}: ${error.message}`);

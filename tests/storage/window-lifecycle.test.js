@@ -322,7 +322,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
   }
 });
 
-test("deleting a thread removes related records transactionally", () => {
+test("deleting a thread archives it (soft) without destroying L0 evidence", () => {
   const storage = createStorage({ file: ":memory:" });
   const recorder = createDualWriteRecorder({ storage });
   const session = sessionFixture();
@@ -346,13 +346,14 @@ test("deleting a thread removes related records transactionally", () => {
     recorder.appendInvocationEvent("inv-del", "text.delta", { text: "payload" });
     recorder.finishInvocation("inv-del", 0, null);
 
+    // Product delete = archive (soft). L0 rows remain; active list hides the thread.
     assert.equal(recorder.deleteThread(session.id), true);
     assert.equal(storage.threads.get(session.id), null);
-    assert.equal(storage.windows.listForThread(session.id).length, 0);
-    assert.equal(storage.messages.listForThread(session.id).length, 0);
-    assert.equal(storage.invocations.get("inv-del"), null);
-    assert.equal(storage.recall.search(session.id, "deleted").length, 0);
-    assert.equal(storage.db.prepare("SELECT COUNT(*) AS c FROM invocation_events").get().c, 0);
+    assert.ok(storage.threads.getIncludingArchived(session.id)?.deletedAt);
+    assert.equal(storage.windows.listForThread(session.id).length, 1);
+    assert.equal(storage.messages.listForThread(session.id).length, 1);
+    assert.equal(storage.invocations.get("inv-del")?.id, "inv-del");
+    assert.ok(storage.db.prepare("SELECT COUNT(*) AS c FROM invocation_events").get().c >= 1);
   } finally {
     recorder.close();
     storage.close();
@@ -374,7 +375,7 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
     });
     assert.equal(recorder.deleteThread(session.id), true);
 
-    // Late dual-write from an in-flight callback / stream.
+    // Late dual-write from an in-flight callback / stream is suppressed in-process.
     assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
     assert.equal(recorder.finishInvocation("inv-race", 0, null), null);
     assert.equal(
@@ -404,10 +405,11 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
       }),
       null
     );
+    // Archive hides the thread from active APIs; L0 of the old invocation remains.
     assert.equal(storage.threads.get(session.id), null);
-    assert.equal(storage.messages.listForThread(session.id).length, 0);
-    assert.equal(storage.invocations.get("inv-race"), null);
+    assert.equal(storage.messages.get("msg-late"), null);
     assert.equal(storage.invocations.get("inv-after-delete"), null);
+    assert.equal(storage.invocations.get("inv-race")?.id, "inv-race");
   } finally {
     recorder.close();
     storage.close();
