@@ -143,6 +143,8 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
       ["limit", "limit"],
       ["layers", "layers"],
       ["include-retired", "includeRetired"],
+      ["scope", "scope"],
+      ["memory-scope", "memoryScope"],
     ]);
   } else if (command === "read-invocation") {
     if (!options.target) throw new Error("read-invocation requires --target");
