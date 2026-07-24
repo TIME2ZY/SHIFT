@@ -76,8 +76,6 @@ function createProjectEvidenceRepository(db) {
     VALUES
       (@documentId, @projectKey, @path, @heading, @startLine, @endLine, @content, @contentHash)
   `);
-  const deletePassagesForDoc = db.prepare("DELETE FROM project_passages WHERE document_id = ?");
-
   function search(projectKey, query, options = {}) {
     const normalizedQuery = typeof query === "string" ? query.trim() : "";
     if (!projectKey || !normalizedQuery) return [];
