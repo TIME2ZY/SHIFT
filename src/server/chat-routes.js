@@ -16,6 +16,9 @@ const {
   logMemoryWriteMetrics,
   buildMemoryInjectPayload,
 } = require("../storage/memory-metrics");
+const { looksLikeDecisionLanguage } = require("../storage/decision-language");
+const { extractSuggestionsFromTurn } = require("../storage/memory-extractor");
+const { refreshDigestAndExtract } = require("../storage/memory-digest");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -78,6 +81,7 @@ function createChatRoutes({
   sessionBootstrap,
   recallService,
   memoryService,
+  storage = null,
   agentIdentity,
   agentHandoff,
   worktreeManager,
@@ -380,6 +384,17 @@ function createChatRoutes({
         messageId: userMessageId,
       },
     });
+    if (looksLikeDecisionLanguage(rawPrompt)) {
+      storage?.memoryEvents?.recordSafe?.({
+        eventType: "decision_language_detected",
+        threadId: sessionId,
+        agentId: requestedAgent,
+        payload: {
+          messageId: userMessageId,
+          chars: rawPrompt.length,
+        },
+      });
+    }
 
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -507,17 +522,25 @@ function createChatRoutes({
         threadCtx.sealer = sealer;
         sendSse(res, "agent-start", { agent, invocationId });
         if (i === 0) {
-          sendSse(
-            res,
-            "memory-inject",
-            buildMemoryInjectPayload({
-              sessionId,
-              agent,
+          const injectPayload = buildMemoryInjectPayload({
+            sessionId,
+            agent,
+            source: "bootstrap",
+            items: bootstrapInject.items,
+            stats: bootstrapInject.stats,
+          });
+          sendSse(res, "memory-inject", injectPayload);
+          storage?.memoryEvents?.recordSafe?.({
+            eventType: "memory_injected",
+            threadId: sessionId,
+            agentId: agent,
+            payload: {
               source: "bootstrap",
-              items: bootstrapInject.items,
-              stats: bootstrapInject.stats,
-            })
-          );
+              count: injectPayload.count,
+              memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
+              availability: injectPayload.availability,
+            },
+          });
         }
 
         let agentPrompt;
@@ -644,17 +667,25 @@ function createChatRoutes({
           logA2AInjectMetrics(injectMetrics, log);
           sendSse(res, "handoff-metrics", injectMetrics);
           if (pending.inject) {
-            sendSse(
-              res,
-              "memory-inject",
-              buildMemoryInjectPayload({
-                sessionId,
-                agent: pending.agent,
+            const a2aInject = buildMemoryInjectPayload({
+              sessionId,
+              agent: pending.agent,
+              source: "a2a",
+              items: pending.inject.items,
+              stats: pending.inject.stats,
+            });
+            sendSse(res, "memory-inject", a2aInject);
+            storage?.memoryEvents?.recordSafe?.({
+              eventType: "memory_injected",
+              threadId: sessionId,
+              agentId: pending.agent,
+              payload: {
                 source: "a2a",
-                items: pending.inject.items,
-                stats: pending.inject.stats,
-              })
-            );
+                count: a2aInject.count,
+                memoryIds: (a2aInject.items || []).map((item) => item.id).filter(Boolean),
+                availability: a2aInject.availability,
+              },
+            });
           }
         }
         threadCtx.currentInvocationId = invocationId;
@@ -1011,6 +1042,40 @@ function createChatRoutes({
         });
         logMemoryWriteMetrics(writeMetrics, log);
         sendSse(res, "memory-metrics", writeMetrics);
+
+        // PR-4: heuristic digest + suggestion extractor (suggestions only, never L2).
+        try {
+          const extractResult = refreshDigestAndExtract({
+            storage,
+            threadId: sessionId,
+            userText: rawPrompt,
+            assistantText: assistantContent,
+            userMessageId,
+            assistantMessageId: assistantMessage.id,
+            invocationId,
+            projectKey: storage?.threads?.get?.(sessionId)?.projectKey || null,
+            extractSuggestionsFromTurn,
+            logger: log,
+          });
+          if (extractResult?.extract?.created > 0 || extractResult?.digest) {
+            sendSse(res, "memory-digest", {
+              sessionId,
+              invocationId,
+              digest: extractResult.digest
+                ? {
+                    summary: extractResult.digest.summary,
+                    topics: extractResult.digest.topics,
+                    messageCount: extractResult.digest.messageCount,
+                    updatedAt: extractResult.digest.updatedAt,
+                  }
+                : null,
+              suggestionsCreated: extractResult.extract?.created || 0,
+              suggestionIds: (extractResult.extract?.suggestions || []).map((item) => item.id),
+            });
+          }
+        } catch (error) {
+          log.error?.(`[memory-digest] turn refresh failed: ${error.message}`);
+        }
       }
     } finally {
       if (activeInvocations.get(sessionId) === invocationController) {

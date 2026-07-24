@@ -286,6 +286,8 @@ function createServer(options = {}) {
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
+    suggestionService: storageContext.storage?.suggestionService || null,
+    storage: storageContext.storage,
     getSession: getSessionForMode,
     sessionsFile,
     sendJson,
@@ -323,6 +325,7 @@ function createServer(options = {}) {
     sessionBootstrap,
     recallService,
     memoryService,
+    storage: storageContext.storage,
     agentIdentity,
     agentHandoff,
     worktreeManager,

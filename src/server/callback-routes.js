@@ -16,7 +16,7 @@ function bumpThreadWriteStat(callbacks, sessionId, field, amount = 1) {
 }
 
 function countHitLayers(hits) {
-  const layers = { memory: 0, message: 0, evidence: 0 };
+  const layers = { memory: 0, message: 0, evidence: 0, "project-doc": 0 };
   for (const hit of hits || []) {
     const layer = hit.layer || "evidence";
     if (layers[layer] !== undefined) layers[layer] += 1;
@@ -221,8 +221,14 @@ function createCallbackRoutes({
         return true;
       }
 
+      const scopeRaw = String(url.searchParams.get("scope") || url.searchParams.get("memoryScope") || "")
+        .trim()
+        .toLowerCase();
       const searchOptions = { limit, includeRetired, includeThinking };
       if (layers) searchOptions.layers = layers;
+      if (scopeRaw === "thread" || scopeRaw === "project" || scopeRaw === "all") {
+        searchOptions.memoryScope = scopeRaw;
+      }
 
       // Empty/weak query → recency-only (Wave R1). Prefer searchSession when available.
       let body;

@@ -328,6 +328,152 @@ const MIGRATIONS = Object.freeze([
       migrateMemoryFoundationOwnership(db);
     },
   },
+  {
+    version: 7,
+    name: "memory_events_telemetry",
+    sql: `
+      CREATE TABLE memory_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        thread_id TEXT,
+        project_key TEXT,
+        memory_id TEXT,
+        invocation_id TEXT,
+        agent_id TEXT,
+        payload_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX memory_events_thread_created
+        ON memory_events(thread_id, created_at);
+      CREATE INDEX memory_events_type_created
+        ON memory_events(event_type, created_at);
+      CREATE INDEX memory_events_memory_created
+        ON memory_events(memory_id, created_at)
+        WHERE memory_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 8,
+    name: "memory_suggestions",
+    sql: `
+      CREATE TABLE memory_suggestions (
+        id TEXT PRIMARY KEY,
+        project_key TEXT,
+        origin_thread_id TEXT,
+        proposed_kind TEXT NOT NULL,
+        proposed_scope TEXT NOT NULL
+          CHECK (proposed_scope IN ('thread', 'project')),
+        topic TEXT,
+        summary TEXT,
+        content TEXT NOT NULL,
+        confidence REAL,
+        anchors_json TEXT NOT NULL,
+        extractor_version TEXT,
+        status TEXT NOT NULL
+          CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        reviewed_by TEXT,
+        promoted_memory_id TEXT,
+        metadata_json TEXT,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE SET NULL,
+        FOREIGN KEY (origin_thread_id) REFERENCES threads(id) ON DELETE SET NULL,
+        FOREIGN KEY (promoted_memory_id) REFERENCES memory_entries(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX memory_suggestions_thread_status
+        ON memory_suggestions(origin_thread_id, status, created_at);
+      CREATE INDEX memory_suggestions_project_status
+        ON memory_suggestions(project_key, status, created_at)
+        WHERE project_key IS NOT NULL;
+      CREATE INDEX memory_suggestions_pending
+        ON memory_suggestions(status, created_at)
+        WHERE status = 'pending';
+    `,
+  },
+  {
+    version: 9,
+    name: "thread_digests",
+    sql: `
+      CREATE TABLE thread_digests (
+        thread_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        topics_json TEXT,
+        durable_candidates_json TEXT,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        source TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+      );
+    `,
+  },
+  {
+    version: 10,
+    name: "project_evidence_passages",
+    sql: `
+      CREATE TABLE project_documents (
+        id TEXT PRIMARY KEY,
+        project_key TEXT NOT NULL,
+        path TEXT NOT NULL,
+        title TEXT,
+        kind TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        byte_size INTEGER NOT NULL DEFAULT 0,
+        mtime TEXT,
+        indexed_at TEXT NOT NULL,
+        UNIQUE(project_key, path),
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX project_documents_project
+        ON project_documents(project_key, path);
+
+      CREATE TABLE project_passages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        path TEXT NOT NULL,
+        heading TEXT,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        FOREIGN KEY (document_id) REFERENCES project_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX project_passages_project
+        ON project_passages(project_key, path);
+      CREATE INDEX project_passages_document
+        ON project_passages(document_id);
+
+      CREATE VIRTUAL TABLE project_passages_fts USING fts5(
+        path,
+        heading,
+        content,
+        content='project_passages',
+        content_rowid='id'
+      );
+
+      CREATE TRIGGER project_passages_ai AFTER INSERT ON project_passages BEGIN
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+
+      CREATE TRIGGER project_passages_ad AFTER DELETE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+      END;
+
+      CREATE TRIGGER project_passages_au AFTER UPDATE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

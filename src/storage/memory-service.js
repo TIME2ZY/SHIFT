@@ -28,7 +28,14 @@ function createMemoryService({
     while (attempt < MAX_SUPERSESSION_RETRIES) {
       attempt += 1;
       try {
-        return captureOnce(input);
+        const outcome = captureOnce(input);
+        if (outcome?.created) {
+          recordMemoryLifecycleEvents(storage, outcome, {
+            agentId: outcome.memory?.createdBy || input.createdBy || null,
+            invocationId: input.sourceInvocationId || null,
+          });
+        }
+        return outcome;
       } catch (error) {
         if (isCaptureKeyConflict(error)) {
           const scope = input.scope === "project" ? "project" : "thread";
@@ -112,7 +119,11 @@ function createMemoryService({
         );
       }
 
-      return { memory, created: true, superseded: previous.map((item) => item.id) };
+      return {
+        memory,
+        created: true,
+        superseded: previous.map((item) => item.id),
+      };
     });
   }
 
@@ -244,8 +255,65 @@ function createMemoryService({
     }
   }
 
+  /**
+   * Active memories for inject / recency.
+   *
+   * options.scope:
+   *   - "thread"  — thread-owned only
+   *   - "project" — project-owned only (requires thread project identity)
+   *   - "all"     — thread ∪ project (default, PR-2 cross-thread inject)
+   */
   function listActive(threadId, options = {}) {
-    const items = storage.memories.listActive(requiredString(threadId, "thread id"), options);
+    const id = requiredString(threadId, "thread id");
+    const scope = options.scope === "thread" || options.scope === "project" ? options.scope : "all";
+    const limit = normalizeLimit(options.limit, 100);
+    const kinds = options.kinds;
+
+    let items = [];
+    if (scope === "thread" || scope === "all") {
+      items = items.concat(storage.memories.listActive(id, { limit, kinds }));
+    }
+    if (scope === "project" || scope === "all") {
+      const thread = storage.threads?.get?.(id);
+      if (thread?.projectKey) {
+        items = items.concat(
+          storage.memories.listActiveByProject(thread.projectKey, {
+            limit,
+            kinds,
+          })
+        );
+      }
+    }
+
+    // Deduplicate (same id should not appear twice).
+    const byId = new Map();
+    for (const item of items) {
+      if (!item?.id) continue;
+      if (!byId.has(item.id)) byId.set(item.id, item);
+    }
+    items = [...byId.values()];
+
+    // Inject gate: lesson is project-capable but only confirmed lessons enter Active Card.
+    if (options.forInject !== false) {
+      items = items.filter((item) => {
+        if (item.kind === "lesson") return item.status === "confirmed";
+        return true;
+      });
+    }
+
+    // Prefer confirmed + product kinds, then recency.
+    items.sort((a, b) => {
+      const statusDelta = statusRank(a.status) - statusRank(b.status);
+      if (statusDelta !== 0) return statusDelta;
+      const kindDelta = kindRank(b.kind) - kindRank(a.kind);
+      if (kindDelta !== 0) return kindDelta;
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    });
+
+    if (Number.isFinite(Number(options.limit)) && Number(options.limit) > 0) {
+      items = items.slice(0, Math.floor(Number(options.limit)));
+    }
+
     const maxChars = normalizeMaxChars(options.maxChars);
     if (maxChars === null) return items;
 
@@ -258,6 +326,10 @@ function createMemoryService({
       usedChars += contentChars;
     }
     return selected;
+  }
+
+  function listActiveForTurn(threadId, options = {}) {
+    return listActive(threadId, { ...options, scope: "all", forInject: true });
   }
 
   function list(threadId, options = {}) {
@@ -314,22 +386,42 @@ function createMemoryService({
         confirmationSource,
       },
     });
-    return enrichMemory(storage.memories.get(id));
+    const confirmed = enrichMemory(storage.memories.get(id));
+    storage.memoryEvents?.recordSafe?.({
+      eventType: "memory_confirmed",
+      threadId: confirmed?.ownerThreadId || confirmed?.originThreadId || confirmed?.threadId,
+      projectKey: confirmed?.projectKey || null,
+      memoryId: confirmed?.id,
+      agentId: confirmedBy,
+      payload: { confirmationSource, previousAuthority: existing.authority },
+    });
+    return confirmed;
   }
 
   function invalidate(id, audit = {}) {
     const existing = storage.memories.get(id);
     if (!existing) return null;
     assertTransitionAllowed(existing, "invalidated");
+    const invalidatedBy = requiredString(audit.invalidatedBy, "memory invalidator");
     storage.memories.transition(id, "invalidated", {
       metadata: {
         ...(existing.metadata || {}),
-        invalidatedBy: requiredString(audit.invalidatedBy, "memory invalidator"),
+        invalidatedBy,
         invalidatedAt: audit.invalidatedAt || nowIso(clock),
         invalidationReason: nullableString(audit.reason),
       },
     });
-    return enrichMemory(storage.memories.get(id));
+    const invalidated = enrichMemory(storage.memories.get(id));
+    storage.memoryEvents?.recordSafe?.({
+      eventType: "memory_invalidated",
+      threadId:
+        invalidated?.ownerThreadId || invalidated?.originThreadId || invalidated?.threadId,
+      projectKey: invalidated?.projectKey || null,
+      memoryId: invalidated?.id,
+      agentId: invalidatedBy,
+      payload: { reason: nullableString(audit.reason) },
+    });
+    return invalidated;
   }
 
   function enrichMemory(memory) {
@@ -390,12 +482,38 @@ function createMemoryService({
     capture,
     createProduct,
     listActive,
+    listActiveForTurn,
     list,
     get,
     confirm,
     invalidate,
     PRODUCT_KINDS,
   };
+}
+
+function statusRank(status) {
+  if (status === "confirmed") return 0;
+  if (status === "captured") return 1;
+  return 2;
+}
+
+function kindRank(kind) {
+  switch (kind) {
+    case "decision":
+      return 30;
+    case "constraint":
+      return 28;
+    case "lesson":
+      return 26;
+    case "fact":
+      return 24;
+    case "handoff":
+      return 6;
+    case "window-seal":
+      return 2;
+    default:
+      return 0;
+  }
 }
 
 /**
@@ -532,9 +650,45 @@ function nullableString(value) {
   return typeof value === "string" && value ? value : null;
 }
 
+function recordMemoryLifecycleEvents(storage, outcome, meta = {}) {
+  if (!storage?.memoryEvents?.recordSafe || !outcome?.memory) return;
+  const memory = outcome.memory;
+  if (outcome.created) {
+    storage.memoryEvents.recordSafe({
+      eventType: "memory_written",
+      threadId: memory.ownerThreadId || memory.originThreadId || memory.threadId,
+      projectKey: memory.projectKey || null,
+      memoryId: memory.id,
+      invocationId: meta.invocationId || memory.sourceInvocationId || null,
+      agentId: meta.agentId || memory.createdBy || null,
+      payload: {
+        kind: memory.kind,
+        scope: memory.scope,
+        status: memory.status,
+        authority: memory.authority,
+        activation: memory.activation,
+        captureKey: memory.captureKey,
+        supersessionKey: memory.supersessionKey,
+      },
+    });
+  }
+  for (const supersededId of outcome.superseded || []) {
+    storage.memoryEvents.recordSafe({
+      eventType: "memory_superseded",
+      threadId: memory.ownerThreadId || memory.originThreadId || memory.threadId,
+      projectKey: memory.projectKey || null,
+      memoryId: supersededId,
+      invocationId: meta.invocationId || null,
+      agentId: meta.agentId || memory.createdBy || null,
+      payload: { supersededBy: memory.id },
+    });
+  }
+}
+
 module.exports = {
   createMemoryService,
   deriveWriteFields,
   resolveProductScope,
+  recordMemoryLifecycleEvents,
   MAX_SUPERSESSION_RETRIES,
 };

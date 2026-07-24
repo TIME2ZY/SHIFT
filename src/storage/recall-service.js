@@ -1,6 +1,7 @@
 const {
   renderActiveMemoryCard,
   resolveA2AMemoryBudget,
+  resolveBudgetBuckets,
   resolveMemoryBudget,
   resolveRecentMemoryLimit,
   resolveRelatedMemoryLimit,
@@ -13,11 +14,13 @@ const { clampSearchQuery, extractSearchTerms, isWeakQuery } = require("./query-t
 const LAYER_MEMORY = "memory";
 const LAYER_MESSAGE = "message";
 const LAYER_EVIDENCE = "evidence";
-const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE];
+const LAYER_PROJECT_DOC = "project-doc";
+const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE, LAYER_PROJECT_DOC];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
 const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 /** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
 const DEFAULT_MAX_AUTO_MEMORY = 2;
+const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
 function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
   if (!transcript) throw new Error("Transcript fallback is required.");
@@ -103,6 +106,13 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         ? resolveSearchIncludeThinking()
         : Boolean(options.includeThinking);
     const layers = normalizeLayers(options.layers);
+    // memoryScope: thread | project | all (default all — PR-2 cross-thread product memory)
+    const memoryScope =
+      options.memoryScope === "thread" || options.memoryScope === "project"
+        ? options.memoryScope
+        : options.scope === "thread" || options.scope === "project"
+          ? options.scope
+          : "all";
     const rawQuery = typeof query === "string" ? query : "";
     const terms = extractSearchTerms(rawQuery, { maxChars: 200, maxTerms: 8 });
     const searchQuery = clampSearchQuery(rawQuery, 200);
@@ -117,6 +127,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           limit,
           layers,
           includeRetired,
+          memoryScope,
         });
         source = "recency";
       } catch (error) {
@@ -138,7 +149,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       }
     } else {
       const sqliteHits = trySqlite("search transcript", () => {
-        if (!storage.recall) return [];
+        if (!storage.recall && !storage.memories) return [];
         return searchSqliteLayers({
           threadId,
           query: searchQuery,
@@ -149,6 +160,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           includeThinking,
           memoryQuota: options.memoryQuota,
           messageQuota: options.messageQuota,
+          memoryScope,
         });
       });
 
@@ -203,6 +215,21 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       }
     }
 
+    storage?.memoryEvents?.recordSafe?.({
+      eventType: "memory_searched",
+      threadId,
+      payload: {
+        query: result.query,
+        weakQuery: result.weakQuery,
+        source,
+        mode,
+        limit,
+        hits: result.hits.length,
+        layers: result.layers,
+        availability: result.availability || null,
+      },
+    });
+
     logSearchMetrics({
       threadId,
       query: result.query,
@@ -239,12 +266,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     else if (typeof logger.log === "function") logger.log(line);
   }
 
-  function listRecencyHits(threadId, { limit, layers, includeRetired }) {
+  function listRecencyHits(threadId, { limit, layers, includeRetired, memoryScope = "all" }) {
     const hits = [];
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
         const recent = storage.memory.listActive(threadId, {
           limit: Math.min(limit, resolveRecentMemoryLimit()),
+          scope: memoryScope,
+          forInject: false,
         });
         for (const memory of recent) {
           if (!includeRetired && RETIRED_STATUSES.has(memory.status)) continue;
@@ -261,11 +290,13 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
               20 +
               recencyBoost(memory.createdAt) +
               (memory.status === "confirmed" ? 10 : 0) +
-              kindBoost(memory.kind),
+              kindBoost(memory.kind) +
+              (memory.scope === "project" ? 4 : 0),
             matchChannels: ["recency"],
             memoryId: memory.id,
             memoryStatus: memory.status || null,
             memoryKind: memory.kind || null,
+            memoryScope: memory.scope || null,
             content: String(memory.content || "").slice(0, 2048),
           });
         }
@@ -275,6 +306,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       }
     }
     return hits.slice(0, limit);
+  }
+
+  function resolveThreadProjectKey(threadId) {
+    try {
+      return storage?.threads?.get?.(threadId)?.projectKey || null;
+    } catch {
+      return null;
+    }
   }
 
   function searchSqliteLayers({
@@ -287,11 +326,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     includeThinking,
     memoryQuota,
     messageQuota,
+    projectDocQuota,
+    memoryScope = "all",
   }) {
     const byLayer = {
       [LAYER_MEMORY]: [],
       [LAYER_MESSAGE]: [],
       [LAYER_EVIDENCE]: [],
+      [LAYER_PROJECT_DOC]: [],
     };
 
     if (layers.includes(LAYER_MEMORY)) {
@@ -303,6 +345,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         limit: Math.max(limit, resolveSearchMemoryQuota()) * 3,
         includeRetired,
         includeThinking: true,
+        memoryScope,
       });
     }
     if (layers.includes(LAYER_MESSAGE)) {
@@ -327,6 +370,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         includeThinking,
       });
     }
+    if (layers.includes(LAYER_PROJECT_DOC)) {
+      byLayer[LAYER_PROJECT_DOC] = collectProjectDocCandidates({
+        threadId,
+        query,
+        terms,
+        limit: Math.max(limit, DEFAULT_SEARCH_PROJECT_DOC_QUOTA) * 3,
+      });
+    }
 
     const scored = {
       [LAYER_MEMORY]: byLayer[LAYER_MEMORY]
@@ -341,14 +392,35 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         .map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
+      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC]
+        .map((item) => scoreAndMapProjectDoc(item, terms))
+        .filter(Boolean)
+        .sort(compareHits),
     };
 
     return allocateByLayerQuotas(scored, {
       limit,
       memoryQuota: clampQuota(memoryQuota, resolveSearchMemoryQuota()),
       messageQuota: clampQuota(messageQuota, resolveSearchMessageQuota()),
+      projectDocQuota: clampQuota(projectDocQuota, DEFAULT_SEARCH_PROJECT_DOC_QUOTA),
       layers,
     });
+  }
+
+  function collectProjectDocCandidates({ threadId, query, terms, limit }) {
+    if (!storage?.projectEvidence?.search) return [];
+    const projectKey = resolveThreadProjectKey(threadId);
+    if (!projectKey) return [];
+    const termQuery = terms.length > 0 ? terms.join(" ") : query;
+    try {
+      return storage.projectEvidence.search(projectKey, termQuery || query, {
+        limit,
+        matchMode: "or",
+      });
+    } catch (error) {
+      logger.error?.(`[project-evidence] search failed: ${error.message}`);
+      return [];
+    }
   }
 
   function collectLayerCandidates({
@@ -359,13 +431,14 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     limit,
     includeRetired,
     includeThinking,
+    memoryScope = "all",
   }) {
     const seen = new Set();
     const out = [];
     const pushAll = (rows) => {
       for (const row of rows) {
         if (!row) continue;
-        const id = row.id ?? row.memoryId;
+        const id = row.memoryId || row.sourceId || row.id;
         if (seen.has(id)) continue;
         if (!includeRetired && isRetiredMemory(row)) continue;
         if (!includeThinking && isThinkingEvidence(row)) continue;
@@ -380,17 +453,34 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       Array.isArray(sourceKinds) &&
       sourceKinds.length > 0 &&
       sourceKinds.every((kind) => kind === "memory-entry");
-    const memorySearch =
-      onlyMemory && storage.memories && typeof storage.memories.searchMemory === "function"
-        ? (q, opts) => storage.memories.searchMemory(q, { ...opts, threadId })
-        : null;
-    const searchFn = memorySearch
-      ? memorySearch
-      : (q, opts) =>
-          storage.recall.search(threadId, q, {
-            ...opts,
-            sourceKinds: sourceKinds?.filter((k) => k !== "memory-entry"),
-          });
+
+    let searchFn;
+    if (onlyMemory && storage.memories && typeof storage.memories.searchMemory === "function") {
+      const projectKey = resolveThreadProjectKey(threadId);
+      searchFn = (q, opts) => {
+        const merged = [];
+        const pushUnique = (rows) => {
+          for (const row of rows || []) {
+            if (!merged.some((item) => (item.memoryId || item.id) === (row.memoryId || row.id))) {
+              merged.push(row);
+            }
+          }
+        };
+        if (memoryScope === "thread" || memoryScope === "all") {
+          pushUnique(storage.memories.searchMemory(q, { ...opts, threadId }));
+        }
+        if ((memoryScope === "project" || memoryScope === "all") && projectKey) {
+          pushUnique(storage.memories.searchMemory(q, { ...opts, projectKey }));
+        }
+        return merged.slice(0, opts.limit || limit);
+      };
+    } else {
+      searchFn = (q, opts) =>
+        storage.recall.search(threadId, q, {
+          ...opts,
+          sourceKinds: sourceKinds?.filter((k) => k !== "memory-entry"),
+        });
+    }
 
     // Prefer OR term recall for multi-term / Chinese prompts; fall back to raw query.
     const termQuery = terms.length > 0 ? terms.join(" ") : query;
@@ -475,11 +565,15 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     let recencyOk = true;
     let relatedOk = true;
 
-    // Channel A — recency (always; also the only channel for weak/empty prompts).
+    // Channel A — recency over thread ∪ project (PR-2).
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
         const recentPool = Math.max(recentLimit * 3, 12);
-        const recent = storage.memory.listActive(threadId, { limit: recentPool });
+        const listFn =
+          typeof storage.memory.listActiveForTurn === "function"
+            ? storage.memory.listActiveForTurn.bind(storage.memory)
+            : storage.memory.listActive.bind(storage.memory);
+        const recent = listFn(threadId, { limit: recentPool, scope: "all", forInject: true });
         for (let index = 0; index < recent.length; index++) {
           noteChannel(recent[index], "recency", Math.max(0, 6 - index));
         }
@@ -489,7 +583,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       }
     }
 
-    // Channel B — related active memories via memory_search index.
+    // Channel B — related active memories via memory_search (thread + project).
     if (!weak && layers.includes(LAYER_MEMORY) && storage?.memories?.searchMemory) {
       try {
         const relatedRows = collectLayerCandidates({
@@ -500,9 +594,12 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           limit: Math.max(relatedLimit * 4, 20),
           includeRetired: false,
           includeThinking: true,
+          memoryScope: "all",
         });
         for (const row of relatedRows.slice(0, relatedLimit * 3)) {
           const memory = memoryFromRecallItem(row, storage);
+          // Inject gate: unconfirmed lessons stay out of the Active Card.
+          if (memory?.kind === "lesson" && memory.status !== "confirmed") continue;
           if (memory) noteChannel(memory, "related", 4);
         }
       } catch (error) {
@@ -539,36 +636,53 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
+    const budgetBuckets = resolveBudgetBuckets(budgetChars);
     const rendered =
       availability.state === "unavailable"
         ? renderUnavailableMemoryCard(availability)
         : availability.state === "degraded"
           ? prependAvailabilityWarning(
-              renderActiveMemoryCard(selected, { budgetChars }),
+              renderActiveMemoryCard(selected, { budgetChars, budgetBuckets }),
               availability
             )
-          : renderActiveMemoryCard(selected, { budgetChars });
+          : renderActiveMemoryCard(selected, { budgetChars, budgetBuckets });
     const usedChars = rendered.length;
     const byKind = {};
     for (const item of selected) {
       byKind[item.kind || "memory"] = (byKind[item.kind || "memory"] || 0) + 1;
     }
 
+    const stats = {
+      usedChars,
+      truncated: /truncated:\s*true/i.test(rendered),
+      byKind,
+      channels: {
+        recency: selected.filter((item) => item.channels?.includes("recency")).length,
+        related: selected.filter((item) => item.channels?.includes("related")).length,
+      },
+      weakQuery: weak,
+      termCount: terms.length,
+      availability,
+      budgetBuckets,
+    };
+
+    storage?.memoryEvents?.recordSafe?.({
+      eventType: "memory_injected",
+      threadId,
+      payload: {
+        source: "retrieveForTurn",
+        count: selected.length,
+        memoryIds: selected.map((item) => item.id).filter(Boolean),
+        availability,
+        usedChars,
+        truncated: stats.truncated,
+      },
+    });
+
     return {
       items: selected,
       rendered,
-      stats: {
-        usedChars,
-        truncated: /truncated:\s*true/i.test(rendered),
-        byKind,
-        channels: {
-          recency: selected.filter((item) => item.channels?.includes("recency")).length,
-          related: selected.filter((item) => item.channels?.includes("related")).length,
-        },
-        weakQuery: weak,
-        termCount: terms.length,
-        availability,
-      },
+      stats,
     };
   }
 
@@ -645,7 +759,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
 
 function finalizeSearchResult(hits, { query, limit, weakQuery }) {
   const list = Array.isArray(hits) ? hits : [];
-  const layers = { memory: 0, message: 0, evidence: 0 };
+  const layers = { memory: 0, message: 0, evidence: 0, "project-doc": 0 };
   for (const hit of list) {
     const layer = hit.layer || layerForSourceKind(hit.sourceKind);
     if (layers[layer] !== undefined) layers[layer] += 1;
@@ -659,6 +773,38 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
     limit,
     truncated: list.length >= limit,
     weakQuery: Boolean(weakQuery),
+  };
+}
+
+function scoreAndMapProjectDoc(item, terms) {
+  if (!item) return null;
+  let score = 8;
+  const hay = `${item.path || ""} ${item.heading || ""} ${item.content || ""}`.toLowerCase();
+  for (const term of terms || []) {
+    if (hay.includes(String(term).toLowerCase())) score += 6;
+  }
+  if (item.matchChannel === "exact") score += 10;
+  if (item.matchChannel === "fts") score += 4;
+  return {
+    invocationId: "",
+    eventNo: 0,
+    kind: "project-doc.passage",
+    ts: null,
+    snippet: String(item.snippet || item.content || "").slice(0, 200),
+    sourceKind: "project-doc",
+    sourceId: item.sourceId || `passage:${item.id}`,
+    layer: LAYER_PROJECT_DOC,
+    score,
+    matchChannels: item.matchChannel ? [item.matchChannel] : [],
+    content: String(item.content || "").slice(0, 2048),
+    path: item.path,
+    heading: item.heading,
+    startLine: item.startLine,
+    endLine: item.endLine,
+    metadata: {
+      ...(item.metadata || {}),
+      untrusted: true,
+    },
   };
 }
 
@@ -706,6 +852,8 @@ function kindBoost(kind) {
       return 30;
     case "constraint":
       return 28;
+    case "lesson":
+      return 26;
     case "fact":
       return 24;
     case "handoff":
@@ -717,7 +865,10 @@ function kindBoost(kind) {
   }
 }
 
-function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layers }) {
+function allocateByLayerQuotas(
+  scored,
+  { limit, memoryQuota, messageQuota, projectDocQuota = DEFAULT_SEARCH_PROJECT_DOC_QUOTA, layers }
+) {
   const out = [];
   const pushLayer = (layer, quota) => {
     if (!layers.includes(layer) || quota <= 0) return;
@@ -735,7 +886,9 @@ function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layer
   const remainingAfterMemory = limit - out.length;
   pushLayer(LAYER_MESSAGE, Math.min(messageQuota, remainingAfterMemory));
   const remainingAfterMessage = limit - out.length;
-  pushLayer(LAYER_EVIDENCE, remainingAfterMessage);
+  pushLayer(LAYER_PROJECT_DOC, Math.min(projectDocQuota, remainingAfterMessage));
+  const remainingAfterDocs = limit - out.length;
+  pushLayer(LAYER_EVIDENCE, remainingAfterDocs);
 
   // If a layer under-filled, allow later layers already filled only up to remaining.
   // Re-run pass for unused capacity with global score order among leftovers.
@@ -857,16 +1010,23 @@ function compareHits(a, b) {
 }
 
 function memoryFromRecallItem(row, storage) {
-  if (!row || row.sourceKind !== "memory-entry") return null;
+  if (!row || (row.sourceKind && row.sourceKind !== "memory-entry")) return null;
+  const memoryId = row.sourceId || row.memoryId;
+  if (!memoryId) return null;
   if (storage?.memories?.get) {
-    const full = storage.memories.get(row.sourceId);
+    const full = storage.memories.get(memoryId);
     if (full) return full;
   }
   return {
-    id: row.sourceId,
-    threadId: row.threadId,
+    id: memoryId,
+    threadId: row.threadId || row.ownerThreadId,
+    ownerThreadId: row.ownerThreadId || null,
+    projectKey: row.projectKey || row.metadata?.projectKey || null,
+    scope: row.scope || row.metadata?.scope || "thread",
     kind: row.metadata?.kind || "memory",
     status: row.metadata?.status || "captured",
+    authority: row.metadata?.authority || null,
+    activation: row.metadata?.activation || null,
     content: row.content,
     sourceMessageId: row.metadata?.sourceMessageId || null,
     sourceInvocationId: row.metadata?.sourceInvocationId || null,
@@ -893,6 +1053,7 @@ function isThinkingEvidence(item) {
 function layerForSourceKind(sourceKind) {
   if (sourceKind === "memory-entry") return LAYER_MEMORY;
   if (sourceKind === "message") return LAYER_MESSAGE;
+  if (sourceKind === "project-doc") return LAYER_PROJECT_DOC;
   return LAYER_EVIDENCE;
 }
 
@@ -1000,4 +1161,5 @@ module.exports = {
   LAYER_MEMORY,
   LAYER_MESSAGE,
   LAYER_EVIDENCE,
+  LAYER_PROJECT_DOC,
 };
