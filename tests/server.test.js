@@ -2643,7 +2643,7 @@ test("frontend routes stderr SSE into a separate system stderr message", () => {
   assert.doesNotMatch(messageView, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
 });
 
-test("frontend recall expand uses shared process panel path not flat dump as primary", () => {
+test("frontend recall expand shows events on open and shares process panel path", () => {
   const recallJs = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const helpersJs = fs.readFileSync(
@@ -2659,12 +2659,17 @@ test("frontend recall expand uses shared process panel path not flat dump as pri
   assert.match(messageViewJs, /function createProcessPanelRenderer/);
   assert.match(appJs, /createProcessPanelRenderer/);
   assert.match(appJs, /buildProcessPanelFromEvents/);
-  // Recall primary UI is process panel; raw dump is secondary <details>.
+  // One open: event stream always visible; process panel only when tools exist.
   assert.match(recallJs, /function renderInvocationTrace/);
   assert.match(recallJs, /buildProcessPanelFromEvents/);
-  assert.match(recallJs, /emptyFallback:\s*true/);
-  assert.match(recallJs, /recall-raw-events/);
-  assert.match(recallJs, /rawEvents/);
+  assert.match(recallJs, /emptyFallback:\s*false/);
+  assert.match(recallJs, /recall-events-panel/);
+  assert.match(recallJs, /eventsTitle|rawEvents/);
+  assert.doesNotMatch(recallJs, /createElement\("details"\)[\s\S]{0,120}recall-raw-events/);
+  // Conclusions attach to producing invocation (not a separate context list).
+  assert.match(recallJs, /function setMemories|setMemories\(/);
+  assert.match(recallJs, /recall-item-conclusions/);
+  assert.match(appJs, /loadContextMemories|setMemories/);
   // Wave R2: search hits grouped by memory/message/evidence layers.
   assert.match(recallJs, /groupHitsByLayer/);
   assert.match(recallJs, /recall-hit-section/);
@@ -2673,7 +2678,8 @@ test("frontend recall expand uses shared process panel path not flat dump as pri
   const recallCss = fs.readFileSync(path.join(__dirname, "../public/styles", "recall.css"), "utf8");
   assert.match(recallCss, /\.recall-layer-chip/);
   assert.match(recallCss, /\.recall-hit-layer\.layer-memory/);
-  // Debug dump helper may remain for raw details, but must not be the only path.
+  assert.match(recallCss, /\.recall-events-panel/);
+  // Event body helper used by the always-visible stream.
   assert.match(recallJs, /function eventBodyText/);
   // Recall copy is locale-driven (N2).
   assert.match(recallJs, /resolveRecallLocale|locale\.recall|R\.toggle/);

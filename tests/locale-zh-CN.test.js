@@ -18,7 +18,9 @@ test("locale.recall covers process-panel and empty states", () => {
   assert.match(locale.recall.toggleTitle, /执行过程|定位/);
   assert.equal(locale.recall.noTools, "无工具调用");
   assert.equal(locale.recall.noEvents, "无事件记录");
-  assert.match(locale.recall.rawEvents(3), /原始事件/);
+  assert.match(locale.recall.rawEvents(3), /事件/);
+  assert.match(locale.recall.eventsTitle(3), /事件 · 3/);
+  assert.match(locale.recall.conclusionCount(2), /2 条结论/);
   assert.match(locale.recall.pageTruncated(200, 500), /200/);
   assert.match(locale.recall.pageTruncated(200, 500), /500/);
   assert.equal(locale.recall.layerMemory, "记忆");

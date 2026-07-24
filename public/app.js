@@ -34,7 +34,7 @@
   const projectDirPath = $("#project-dir-path");
   const worktreeStatusEl = $("#worktree-status");
   const mentionMenuEl = $("#mention-menu");
-  // Context tab: one scroll — conclusions + invocation/search records.
+  // Context tab: one scroll — recall list (conclusions hang on the producing turn).
   const recallBodyEl = contextPanelEl ? contextPanelEl.querySelector(".recall-body") : null;
   const recallSearchInputEl = contextPanelEl
     ? contextPanelEl.querySelector(".context-search input, .recall-search input")
@@ -81,6 +81,8 @@
       selectedAgent: "codex",
       currentSessionId: null,
       skillsMetadata: [],
+      /** Last active skill names (SSE / prompt match). Kept across metadata reloads. */
+      activeSkillNames: [],
       // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
       sessions: {},
       lastPrompt: "",
@@ -419,8 +421,9 @@
   });
   recallPanel.bindSearch();
 
+  // Inject banner only — product conclusions attach to recall turns, not a separate list.
   const memoryPanel = window.MemoryPanel.createMemoryPanel({
-    bodyEl: contextPanelEl ? contextPanelEl.querySelector(".memory-body") : null,
+    bodyEl: null,
     injectEl: $("#memory-inject-inline"),
     memoryApi,
     getSessionId: () => state.currentSessionId,
@@ -438,9 +441,27 @@
   });
   memoryPanel.bind();
 
-  function loadContextPanel() {
-    memoryPanel.load();
-    recallPanel.loadRecallList();
+  async function loadContextMemories() {
+    const sessionId = state.currentSessionId;
+    if (!sessionId || typeof recallPanel.setMemories !== "function") {
+      if (typeof recallPanel.setMemories === "function") recallPanel.setMemories([]);
+      return;
+    }
+    try {
+      const data = await memoryApi.listMemories(sessionId, {
+        includeRetired: false,
+        limit: 200,
+      });
+      if (state.currentSessionId !== sessionId) return;
+      recallPanel.setMemories(data.memories || []);
+    } catch {
+      if (state.currentSessionId === sessionId) recallPanel.setMemories([]);
+    }
+  }
+
+  async function loadContextPanel() {
+    await loadContextMemories();
+    await recallPanel.loadRecallList();
   }
 
   let sessionController = null;
@@ -707,10 +728,34 @@
 
   function renderSkillTags(active) {
     if (!skillsBarEl) return;
-    const set = new Set(active || []);
+    // Persist last active set so a late metadata fetch cannot wipe the bar.
+    if (Array.isArray(active)) {
+      state.activeSkillNames = active.slice();
+    }
     const meta = Array.isArray(state.skillsMetadata) ? state.skillsMetadata : [];
-    const enabled = meta.filter((skill) => set.has(skill.name));
+    const activeSet = new Set(state.activeSkillNames || []);
+    let enabled = meta.filter((skill) => activeSet.has(skill.name));
+    // Idle / no SSE yet: still surface always-on skills from metadata.
+    if (enabled.length === 0 && activeSet.size === 0) {
+      enabled = meta.filter((skill) => skill.always === true);
+      if (enabled.length > 0) {
+        state.activeSkillNames = enabled.map((s) => s.name);
+      }
+    }
     if (enabled.length === 0) {
+      // Names known but metadata missing — show names so SSE is not a no-op.
+      if (activeSet.size > 0) {
+        const tags = [...activeSet].map((name) => {
+          const tag = document.createElement("span");
+          tag.className = "skill-tag";
+          tag.textContent = name;
+          return tag;
+        });
+        skillsBarEl.hidden = false;
+        if (skillsCountEl) skillsCountEl.textContent = String(tags.length);
+        if (skillsTagsEl) skillsTagsEl.replaceChildren(...tags);
+        return;
+      }
       skillsBarEl.hidden = true;
       if (skillsTagsEl) skillsTagsEl.replaceChildren();
       return;
@@ -719,7 +764,7 @@
       const tag = document.createElement("span");
       tag.className = "skill-tag";
       tag.textContent = s.name;
-      tag.title = s.description;
+      tag.title = s.description || "";
       return tag;
     });
     skillsBarEl.hidden = false;
@@ -740,7 +785,12 @@
         const result = await runLatestSkillsRequest.run(() =>
           apiFetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow)
         );
-        if (result.applied) renderSkillTags(result.value.active);
+        if (result.applied) {
+          if (Array.isArray(result.value.skills) && result.value.skills.length) {
+            state.skillsMetadata = result.value.skills;
+          }
+          renderSkillTags(result.value.active || []);
+        }
       } catch (error) {
         console.warn("Active skills load failed:", error);
       }
@@ -853,7 +903,8 @@
     onMemoryEvent: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
-      if (state.rightPanelTab === "context") memoryPanel.load();
+      // Refresh recall so conclusions re-attach to the producing turn.
+      if (state.rightPanelTab === "context") loadContextPanel();
       const action = payload && payload.action;
       const locale = window.Locale || window.LocaleZhCN;
       const t = (path, fallback) =>
@@ -885,7 +936,7 @@
       const sid = (payload && payload.threadId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
       const total = Number(payload && payload.totalWrites) || 0;
-      if (total > 0 && state.rightPanelTab === "context") memoryPanel.load();
+      if (total > 0 && state.rightPanelTab === "context") loadContextPanel();
     },
   });
 
@@ -974,7 +1025,6 @@
   setRightPanelTab("agents");
   loadProjectDir();
   workspacePanel.renderWorkspacePanel();
-  renderSkillTags([]);
   autoGrowPrompt();
   updateRunBar();
   updateWorkspaceTabBadge();
@@ -1004,9 +1054,17 @@
     .then(jsonOrThrow)
     .then((d) => {
       state.skillsMetadata = d.skills || [];
-      renderSkillTags([]);
+      // Prefer server active (always-on); do not pass [] or we hide the bar.
+      if (Array.isArray(d.active) && d.active.length > 0) {
+        renderSkillTags(d.active);
+      } else {
+        renderSkillTags(); // re-render from metadata always-on fallback
+      }
     })
     .catch((e) => console.warn("Skills metadata load failed:", e));
+
+  // Also refresh when composer is empty on boot (always-on).
+  updateActiveSkills(promptEl ? promptEl.value : "");
 
   Promise.all([loadAgents(), sessionController.loadSessions()]).catch(() => {
     setStatus("加载失败", "error");
