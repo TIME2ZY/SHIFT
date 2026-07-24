@@ -305,6 +305,8 @@ function createServer(options = {}) {
     durableRecorder,
     recallService,
     memoryCapture,
+    memoryService,
+    logger,
   });
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,

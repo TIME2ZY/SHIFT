@@ -9,6 +9,8 @@ const COMMANDS = new Set([
   "list-invocations",
   "session-search",
   "read-invocation",
+  "memory-upsert",
+  "memory-invalidate",
 ]);
 
 function parseArgs(argv) {
@@ -51,12 +53,12 @@ function requireEnvironment(env) {
   return { apiUrl, sessionId, invocationId, callbackToken };
 }
 
-function readMessageContent(options, cwd) {
+function readMessageContent(options, cwd, command = "post-message") {
   if (typeof options.content === "string") return options.content;
   if (typeof options["content-file"] === "string") {
     return fs.readFileSync(path.resolve(cwd, options["content-file"]), "utf8");
   }
-  throw new Error("post-message requires --content or --content-file");
+  throw new Error(`${command} requires --content or --content-file`);
 }
 
 function addOptionalSearchParams(params, options, mappings) {
@@ -85,7 +87,49 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
           sessionId: context.sessionId,
           invocationId: context.invocationId,
           callbackToken: context.callbackToken,
-          content: readMessageContent(options, cwd),
+          content: readMessageContent(options, cwd, "post-message"),
+        }),
+      },
+    };
+  }
+
+  if (command === "memory-upsert") {
+    if (!options.kind) throw new Error("memory-upsert requires --kind");
+    if (!options.topic) throw new Error("memory-upsert requires --topic");
+    headers["Content-Type"] = "application/json; charset=utf-8";
+    const body = {
+      sessionId: context.sessionId,
+      invocationId: context.invocationId,
+      callbackToken: context.callbackToken,
+      kind: options.kind,
+      topic: options.topic,
+      content: readMessageContent(options, cwd, "memory-upsert"),
+    };
+    if (options["supersession-key"]) body.supersessionKey = options["supersession-key"];
+    return {
+      url,
+      init: {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      },
+    };
+  }
+
+  if (command === "memory-invalidate") {
+    if (!options.id) throw new Error("memory-invalidate requires --id");
+    headers["Content-Type"] = "application/json; charset=utf-8";
+    return {
+      url,
+      init: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          sessionId: context.sessionId,
+          invocationId: context.invocationId,
+          callbackToken: context.callbackToken,
+          id: options.id,
+          reason: typeof options.reason === "string" ? options.reason : "",
         }),
       },
     };

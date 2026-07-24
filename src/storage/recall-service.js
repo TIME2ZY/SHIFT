@@ -15,6 +15,9 @@ const LAYER_MESSAGE = "message";
 const LAYER_EVIDENCE = "evidence";
 const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
+const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
+/** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
+const DEFAULT_MAX_AUTO_MEMORY = 2;
 
 function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
   if (!transcript) throw new Error("Transcript fallback is required.");
@@ -108,17 +111,31 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
 
     let result;
     if (weak) {
-      const recencyHits = listRecencyHits(threadId, {
-        limit,
-        layers,
-        includeRetired,
-      });
-      source = "recency";
+      let recencyHits = [];
+      try {
+        recencyHits = listRecencyHits(threadId, {
+          limit,
+          layers,
+          includeRetired,
+        });
+        source = "recency";
+      } catch (error) {
+        source = "sqlite-error";
+        logger.error?.(`[searchSession] recency failed: ${error.message}`);
+      }
       result = finalizeSearchResult(recencyHits, {
         query: rawQuery,
         limit,
         weakQuery: true,
       });
+      if (source === "sqlite-error") {
+        result.availability = { state: "unavailable", reason: "recency_failed" };
+      } else {
+        result.availability = {
+          state: "available",
+          empty: recencyHits.length === 0,
+        };
+      }
     } else {
       const sqliteHits = trySqlite("search transcript", () => {
         if (!storage.recall) return [];
@@ -240,7 +257,11 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
             sourceKind: "memory-entry",
             sourceId: memory.id,
             layer: LAYER_MEMORY,
-            score: 20 + recencyBoost(memory.createdAt) + (memory.status === "confirmed" ? 10 : 0),
+            score:
+              20 +
+              recencyBoost(memory.createdAt) +
+              (memory.status === "confirmed" ? 10 : 0) +
+              kindBoost(memory.kind),
             matchChannels: ["recency"],
             memoryId: memory.id,
             memoryStatus: memory.status || null,
@@ -250,6 +271,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         }
       } catch (error) {
         logger.error?.(`[searchSession] recency listActive failed: ${error.message}`);
+        throw error;
       }
     }
     return hits.slice(0, limit);
@@ -342,50 +364,72 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     const out = [];
     const pushAll = (rows) => {
       for (const row of rows) {
-        if (!row || seen.has(row.id)) continue;
+        if (!row) continue;
+        const id = row.id ?? row.memoryId;
+        if (seen.has(id)) continue;
         if (!includeRetired && isRetiredMemory(row)) continue;
         if (!includeThinking && isThinkingEvidence(row)) continue;
-        seen.add(row.id);
-        out.push(row);
+        seen.add(id);
+        out.push(normalizeCandidateRow(row));
         if (out.length >= limit) return true;
       }
       return false;
     };
 
+    const onlyMemory =
+      Array.isArray(sourceKinds) &&
+      sourceKinds.length > 0 &&
+      sourceKinds.every((kind) => kind === "memory-entry");
+    const memorySearch =
+      onlyMemory && storage.memories && typeof storage.memories.searchMemory === "function"
+        ? (q, opts) => storage.memories.searchMemory(q, { ...opts, threadId })
+        : null;
+    const searchFn = memorySearch
+      ? memorySearch
+      : (q, opts) =>
+          storage.recall.search(threadId, q, {
+            ...opts,
+            sourceKinds: sourceKinds?.filter((k) => k !== "memory-entry"),
+          });
+
     // Prefer OR term recall for multi-term / Chinese prompts; fall back to raw query.
     const termQuery = terms.length > 0 ? terms.join(" ") : query;
-    if (
-      pushAll(
-        storage.recall.search(threadId, termQuery, {
-          limit,
-          sourceKinds,
-          matchMode: "or",
-        })
-      )
-    ) {
+    if (pushAll(searchFn(termQuery, { limit, matchMode: "or" }))) {
       return out;
     }
     if (termQuery !== query) {
-      pushAll(
-        storage.recall.search(threadId, query, {
-          limit,
-          sourceKinds,
-          matchMode: "and",
-        })
-      );
+      pushAll(searchFn(query, { limit, matchMode: "and" }));
     }
     // Term-wise contains fallback when FTS is weak on CJK fragments.
     for (const term of terms) {
       if (out.length >= limit) break;
       pushAll(
-        storage.recall.search(threadId, term, {
+        searchFn(term, {
           limit: Math.max(8, limit - out.length),
-          sourceKinds,
           matchMode: "or",
         })
       );
     }
     return out;
+  }
+
+  function normalizeCandidateRow(row) {
+    if (row.sourceKind === "memory-entry" || row.memoryId) {
+      return {
+        id: row.id,
+        threadId: row.threadId || row.ownerThreadId,
+        sourceKind: "memory-entry",
+        sourceId: row.sourceId || row.memoryId,
+        title: row.title,
+        content: row.content,
+        snippet: row.snippet,
+        createdAt: row.createdAt,
+        metadata: row.metadata,
+        rank: row.rank,
+        matchChannel: row.matchChannel,
+      };
+    }
+    return row;
   }
 
   /**
@@ -426,20 +470,27 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       }
     };
 
+    /** @type {{ state: string, reason?: string, empty?: boolean, partial?: boolean }} */
+    let availability = { state: "available", empty: true };
+    let recencyOk = true;
+    let relatedOk = true;
+
     // Channel A — recency (always; also the only channel for weak/empty prompts).
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
-        const recent = storage.memory.listActive(threadId, { limit: recentLimit });
+        const recentPool = Math.max(recentLimit * 3, 12);
+        const recent = storage.memory.listActive(threadId, { limit: recentPool });
         for (let index = 0; index < recent.length; index++) {
           noteChannel(recent[index], "recency", Math.max(0, 6 - index));
         }
       } catch (error) {
+        recencyOk = false;
         logger.error?.(`[retrieveForTurn] listActive failed: ${error.message}`);
       }
     }
 
-    // Channel B — related active memories via recall index.
-    if (!weak && layers.includes(LAYER_MEMORY) && storage?.recall?.search) {
+    // Channel B — related active memories via memory_search index.
+    if (!weak && layers.includes(LAYER_MEMORY) && storage?.memories?.searchMemory) {
       try {
         const relatedRows = collectLayerCandidates({
           threadId,
@@ -455,8 +506,22 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           if (memory) noteChannel(memory, "related", 4);
         }
       } catch (error) {
+        relatedOk = false;
         logger.error?.(`[retrieveForTurn] related search failed: ${error.message}`);
       }
+    }
+
+    if (!recencyOk && byId.size === 0) {
+      availability = { state: "unavailable", reason: "listActive_failed" };
+    } else if (!recencyOk || !relatedOk) {
+      availability = {
+        state: "degraded",
+        reason: !recencyOk ? "listActive_failed" : "related_search_failed",
+        partial: byId.size > 0,
+        empty: byId.size === 0,
+      };
+    } else {
+      availability = { state: "available", empty: byId.size === 0 };
     }
 
     const ranked = [...byId.values()].sort((a, b) => {
@@ -466,14 +531,23 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     });
 
-    // Prefer keeping some recency items when related dominates.
+    // Prefer product memories; cap auto kinds so handoffs cannot fill the pack.
     const selected = selectRetrieveItems(ranked, {
       recentLimit,
       relatedLimit,
       totalLimit: recentLimit + relatedLimit,
+      maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
-    const rendered = renderActiveMemoryCard(selected, { budgetChars });
+    const rendered =
+      availability.state === "unavailable"
+        ? renderUnavailableMemoryCard(availability)
+        : availability.state === "degraded"
+          ? prependAvailabilityWarning(
+              renderActiveMemoryCard(selected, { budgetChars }),
+              availability
+            )
+          : renderActiveMemoryCard(selected, { budgetChars });
     const usedChars = rendered.length;
     const byKind = {};
     for (const item of selected) {
@@ -493,8 +567,29 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         },
         weakQuery: weak,
         termCount: terms.length,
+        availability,
       },
     };
+  }
+
+  function renderUnavailableMemoryCard(availability) {
+    return [
+      "<!-- Active Memories (unavailable) -->",
+      "## 本 thread 活跃记忆（系统注入的历史数据）",
+      "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
+      `原因: ${availability.reason || "unknown"}`,
+      "请稍后重试 session-search；不要假设「尚无记忆」。",
+      "<!-- /Active Memories -->",
+    ].join("\n");
+  }
+
+  function prependAvailabilityWarning(card, availability) {
+    const warning = [
+      "⚠ 记忆检索降级，结果可能不完整。",
+      `degraded: ${availability.reason || "unknown"}`,
+      "",
+    ].join("\n");
+    return warning + card;
   }
 
   async function readInvocationPage(threadId, invocationId, options = {}) {
@@ -567,27 +662,59 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
   };
 }
 
-function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit }) {
+function isProductMemoryKind(kind) {
+  return PRODUCT_MEMORY_KINDS.has(kind);
+}
+
+function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }) {
   const selected = [];
   const seen = new Set();
+  let autoCount = 0;
+  const autoCap = Math.max(0, Number(maxAuto) || 0);
+
   const take = (predicate, max) => {
     let count = 0;
     for (const item of ranked) {
       if (count >= max || selected.length >= totalLimit) break;
       if (seen.has(item.id) || !predicate(item)) continue;
+      const isAuto = !isProductMemoryKind(item.kind);
+      if (isAuto && autoCount >= autoCap) continue;
       selected.push(item);
       seen.add(item.id);
       count += 1;
+      if (isAuto) autoCount += 1;
     }
   };
-  // Keep a recency spine, then fill with related, then any remaining high-score items.
+
+  // Product recency first, then remaining recency (auto capped), then related, then score fill.
+  take((item) => item.channels?.includes("recency") && isProductMemoryKind(item.kind), recentLimit);
   take((item) => item.channels?.includes("recency"), recentLimit);
+  take((item) => item.channels?.includes("related") && isProductMemoryKind(item.kind), relatedLimit);
   take((item) => item.channels?.includes("related"), relatedLimit);
   take(() => true, totalLimit);
   return selected.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    const kindDelta = kindBoost(b.kind) - kindBoost(a.kind);
+    if (kindDelta !== 0) return kindDelta;
     return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   });
+}
+
+function kindBoost(kind) {
+  switch (kind) {
+    case "decision":
+      return 30;
+    case "constraint":
+      return 28;
+    case "fact":
+      return 24;
+    case "handoff":
+      return 6;
+    case "window-seal":
+      return 2;
+    default:
+      return 0;
+  }
 }
 
 function allocateByLayerQuotas(scored, { limit, memoryQuota, messageQuota, layers }) {
@@ -654,6 +781,7 @@ function scoreRecallItem(item, terms) {
   const status = item.metadata?.status;
   if (status === "confirmed") score += 10;
   score += recencyBoost(item.createdAt);
+  score += kindBoost(item.metadata?.kind || item.memoryKind || null);
   if (item.metadata?.quality?.ok) score += 2;
   if (item.metadata?.partial) score -= 2;
   if (String(item.snippet || item.content || "").trim().length < 8) score -= 5;
@@ -677,8 +805,10 @@ function scoreMemoryRecord(memory, terms) {
     content: memory.content,
     snippet: memory.content,
     createdAt: memory.createdAt,
+    memoryKind: memory.kind,
     metadata: {
       status: memory.status,
+      kind: memory.kind,
       quality: memory.metadata?.quality,
       partial: memory.metadata?.partial,
     },

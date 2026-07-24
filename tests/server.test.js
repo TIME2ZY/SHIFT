@@ -1980,7 +1980,7 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   assert.equal(appended.length, 1);
   // sendSse writes two lines per event (event: + data:), so count by event name.
   const eventNames = sseEvents.filter((line) => line.startsWith("event: ")).map((line) => line.trim());
-  assert.deepEqual(eventNames, ["event: message"]);
+  assert.deepEqual(eventNames, ["event: message", "event: memory-metrics"]);
 
   callbacks.unregisterThread(sessionId);
 });
@@ -2389,11 +2389,13 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   });
 });
 
-test("buildCallbackInstructions mentions all 3 recall commands", () => {
+test("buildCallbackInstructions mentions recall and memory-write commands", () => {
   const tpl = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
   assert.match(tpl, /callback-client\.js list-invocations/);
   assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
+  assert.match(tpl, /callback-client\.js memory-upsert/);
+  assert.match(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
 });
 
@@ -2446,7 +2448,7 @@ test("frontend index.html exposes explicit worktree mode toggle", () => {
   assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
 });
 
-test("frontend exposes all right-panel tabs in a four-column layout", () => {
+test("frontend exposes all right-panel tabs in a three-column layout", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   const workspaceCss = fs.readFileSync(
     path.join(__dirname, "../public", "styles", "workspace.css"),
@@ -2455,10 +2457,13 @@ test("frontend exposes all right-panel tabs in a four-column layout", () => {
   const boot = require("../public/boot.js");
   assert.match(html, /id="panel-tab-agents"/);
   assert.match(html, /id="panel-tab-workspace"/);
-  assert.match(html, /id="panel-tab-recall"/);
-  assert.match(html, /id="panel-tab-memory"/);
+  assert.match(html, /id="panel-tab-context"/);
+  assert.doesNotMatch(html, /id="panel-tab-recall"/);
+  assert.doesNotMatch(html, /id="panel-tab-memory"/);
+  assert.doesNotMatch(html, /id="memory-create-form"/);
+  assert.match(html, /id="context-panel-inline"/);
   assert.match(html, /id="workspace-panel"/);
-  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(4,/);
+  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(3,/);
   assert.match(html, /src="\/public\/boot\.js"/);
   for (const src of [
     "/public/session-api.js",
@@ -2484,7 +2489,10 @@ test("frontend exposes all right-panel tabs in a four-column layout", () => {
 test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(html, /id="panel-tab-recall"/);
+  assert.match(html, /id="panel-tab-context"/);
+  assert.match(html, /id="context-panel-inline"/);
+  assert.match(html, /context-section-title/);
+  assert.doesNotMatch(html, /id="context-segment-conclusions"/);
   assert.doesNotMatch(html, /id="recall-toggle"/);
   assert.doesNotMatch(js, /const recallToggleEl\s*=\s*\$\("#recall-toggle"\)/);
   assert.doesNotMatch(js, /recallToggleEl\.addEventListener/);
@@ -2494,7 +2502,7 @@ test("frontend uses unified Chinese console copy in the main shell", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.match(html, /SHIFT AGENTS · 交班台/);
   assert.match(html, /本会话规则/);
-  assert.match(html, />\s*协作者\s*</);
+  assert.match(html, />\s*Agents\s*</);
   assert.doesNotMatch(html, /agent-panel-title/);
   // New chat lives in the sidebar only; composer keeps a single Send action.
   assert.match(html, /btn-new-chat/);
@@ -2698,8 +2706,8 @@ test("frontend caps recall page size and surfaces truncation state", () => {
 test("app.js stays an orchestrator under line budget after P0 split", () => {
   const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
   const lines = js.split(/\r?\n/).length;
-  // Budget raised for run-bar / jump-bottom / toast / auto-grow wiring (still no feature bodies inlined).
-  assert.ok(lines <= 1000, `app.js has ${lines} lines; expected <= 1000 after UX chrome wiring`);
+  // Budget includes memory inject/metrics SSE wiring; still no heavy feature bodies inlined.
+  assert.ok(lines <= 1100, `app.js has ${lines} lines; expected <= 1100 after memory panel wiring`);
   assert.match(js, /createMessageView/);
   assert.match(js, /createWorkspacePanel/);
   assert.match(js, /createRecallPanel/);
@@ -3129,6 +3137,7 @@ test("buildCallbackInstructions includes SHIFT context and recall commands", () 
   assert.match(instructions, /callback-client\.js list-invocations/);
   assert.match(instructions, /callback-client\.js session-search/);
   assert.match(instructions, /callback-client\.js read-invocation/);
+  assert.match(instructions, /callback-client\.js memory-upsert/);
   assert.match(instructions, /layer=memory/);
   assert.match(instructions, /Active Memories/);
   assert.match(instructions, /--layers memory,message,evidence/);

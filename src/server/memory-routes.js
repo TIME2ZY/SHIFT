@@ -95,6 +95,9 @@ function createMemoryRoutes({
           sourceMessageId: body.sourceMessageId,
           sourceInvocationId: body.sourceInvocationId,
           createdBy: body.createdBy || "user",
+          writeChannel: "user",
+          scope: body.scope,
+          anchors: body.anchors,
           metadata: body.metadata,
         });
 

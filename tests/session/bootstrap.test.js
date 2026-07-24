@@ -130,7 +130,7 @@ test("RECALL_RULE contains the three recall steps + key phrases", () => {
 
 test("buildActiveMemoryCard reads only the configured recency window", async () => {
   const calls = [];
-  const card = await buildActiveMemoryCard({
+  const pack = await buildActiveMemoryCard({
     threadId: "thread-memory",
     recentLimit: 4,
     memorySource: {
@@ -151,13 +151,14 @@ test("buildActiveMemoryCard reads only the configured recency window", async () 
   });
 
   assert.deepEqual(calls, [{ threadId: "thread-memory", options: { limit: 4 } }]);
-  assert.match(card, /\[confirmed\]\[decision\] id=decision-1/);
-  assert.match(card, /Use SQLite/);
+  assert.match(pack.rendered, /\[confirmed\]\[decision\] id=decision-1/);
+  assert.match(pack.rendered, /Use SQLite/);
+  assert.equal(pack.items.length, 1);
 });
 
 test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", async () => {
   const errors = [];
-  const card = await buildActiveMemoryCard({
+  const pack = await buildActiveMemoryCard({
     threadId: "thread-memory",
     memorySource: {
       listActive() {
@@ -171,13 +172,15 @@ test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", a
     },
   });
 
-  assert.match(card, /Active Memories \(0\)/);
+  assert.match(pack.rendered, /Active Memories \(unavailable\)/);
+  assert.match(pack.rendered, /记忆系统暂时不可用/);
+  assert.equal(pack.stats.availability.state, "unavailable");
   assert.match(errors[0], /listActive failed: database offline/);
 });
 
 test("buildActiveMemoryCard prefers retrieveForTurn when available", async () => {
   const calls = [];
-  const card = await buildActiveMemoryCard({
+  const pack = await buildActiveMemoryCard({
     threadId: "thread-memory",
     prompt: "继续完成 JWT 过期处理",
     memorySource: {
@@ -190,8 +193,8 @@ test("buildActiveMemoryCard prefers retrieveForTurn when available", async () =>
         calls.push(input);
         return {
           rendered: "<!-- Active Memories (1) -->\nJWT\n<!-- /Active Memories -->",
-          items: [],
-          stats: {},
+          items: [{ id: "m1", kind: "decision", content: "JWT" }],
+          stats: { weakQuery: false },
         };
       },
     },
@@ -200,7 +203,8 @@ test("buildActiveMemoryCard prefers retrieveForTurn when available", async () =>
   assert.equal(calls.length, 1);
   assert.equal(calls[0].threadId, "thread-memory");
   assert.match(calls[0].prompt, /JWT/);
-  assert.match(card, /JWT/);
+  assert.match(pack.rendered, /JWT/);
+  assert.equal(pack.items[0].id, "m1");
 });
 
 // ── buildBootstrapPacket ───────────────────────────────────────
@@ -208,11 +212,12 @@ test("buildActiveMemoryCard prefers retrieveForTurn when available", async () =>
 test(
   "buildBootstrapPacket composes identity + digest + recall rule",
   withTempDir(async () => {
-    const packet = await buildBootstrapPacket({
+    const result = await buildBootstrapPacket({
       threadId: "t1",
       sessionId: "s1",
       agent: { id: "sage", label: "小智" },
     });
+    const packet = result.packet;
 
     // Identity
     assert.match(packet, /<!-- Session Identity -->/);
@@ -221,6 +226,7 @@ test(
 
     // Memory card
     assert.match(packet, /<!-- Active Memories \(0\) -->/);
+    assert.ok(Array.isArray(result.inject.items));
 
     // Digest
     assert.match(packet, /<!-- Digest -->/);
@@ -265,12 +271,12 @@ test("buildBootstrapPacket rejects missing agent", async () => {
 test(
   "buildBootstrapPacket supports custom generation",
   withTempDir(async () => {
-    const packet = await buildBootstrapPacket({
+    const result = await buildBootstrapPacket({
       threadId: "t1",
       sessionId: "s1",
       agent: "sage",
       generation: 5,
     });
-    assert.match(packet, /Generation: 5/);
+    assert.match(result.packet, /Generation: 5/);
   })
 );

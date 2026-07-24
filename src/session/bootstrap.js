@@ -6,6 +6,7 @@ const {
   resolveRecentMemoryLimit,
   resolveRelatedMemoryLimit,
 } = require("../storage/memory-inject");
+const { slimInjectItems } = require("../storage/memory-metrics");
 
 // Recall rule injected into the first agent's prompt of each session. Modeled
 // after cat-cafe-tutorials lesson 08 "Session Chain" — the goal is to prevent
@@ -22,6 +23,19 @@ const RECALL_RULE = `<!-- ══════════════════
 <!-- 新 session 默认不知道上个 session 发生了什么。                  -->
 <!-- 如果不查就猜，多半会错。                                          -->
 <!-- ═══════════════════════════════════════════════════════════ -->`;
+
+function emptyInject() {
+  return {
+    items: [],
+    stats: {
+      usedChars: 0,
+      truncated: false,
+      byKind: {},
+      weakQuery: false,
+      channels: { recency: 0, related: 0 },
+    },
+  };
+}
 
 function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
   const agentName = (agent && (agent.label || agent.id)) || String(agent || "unknown");
@@ -66,6 +80,8 @@ async function buildDigest({ sessionId, invocationSource = transcript }) {
 /**
  * Build Active Memory Card via retrieveForTurn when available (Wave R),
  * otherwise fall back to recency-only listActive (Wave M compatibility).
+ *
+ * @returns {Promise<{ rendered: string, items: object[], stats: object }>}
  */
 async function buildActiveMemoryCard({
   threadId,
@@ -87,9 +103,35 @@ async function buildActiveMemoryCard({
         relatedLimit,
         layers: ["memory"],
       });
-      if (result && typeof result.rendered === "string") return result.rendered;
+      if (result && typeof result.rendered === "string") {
+        return {
+          rendered: result.rendered,
+          items: Array.isArray(result.items) ? result.items : [],
+          stats: result.stats && typeof result.stats === "object" ? result.stats : {},
+        };
+      }
     } catch (error) {
       logger.error?.(`[memory-bootstrap] retrieveForTurn failed: ${error.message}`);
+      const rendered = [
+        "<!-- Active Memories (unavailable) -->",
+        "## 本 thread 活跃记忆（系统注入的历史数据）",
+        "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
+        `原因: ${error.message}`,
+        "请稍后重试 session-search；不要假设「尚无记忆」。",
+        "<!-- /Active Memories -->",
+      ].join("\n");
+      return {
+        rendered,
+        items: [],
+        stats: {
+          usedChars: rendered.length,
+          truncated: false,
+          byKind: {},
+          weakQuery: true,
+          channels: { recency: 0, related: 0 },
+          availability: { state: "unavailable", reason: error.message },
+        },
+      };
     }
   }
 
@@ -99,11 +141,58 @@ async function buildActiveMemoryCard({
       memories = memorySource.listActive(threadId, { limit: recentLimit });
     } catch (error) {
       logger.error?.(`[memory-bootstrap] listActive failed: ${error.message}`);
+      const rendered = [
+        "<!-- Active Memories (unavailable) -->",
+        "## 本 thread 活跃记忆（系统注入的历史数据）",
+        "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
+        `原因: ${error.message}`,
+        "请稍后重试 session-search；不要假设「尚无记忆」。",
+        "<!-- /Active Memories -->",
+      ].join("\n");
+      return {
+        rendered,
+        items: [],
+        stats: {
+          usedChars: rendered.length,
+          truncated: false,
+          byKind: {},
+          weakQuery: true,
+          channels: { recency: 0, related: 0 },
+          availability: { state: "unavailable", reason: error.message },
+        },
+      };
     }
   }
-  return renderActiveMemoryCard(memories, { budgetChars });
+  const rendered = renderActiveMemoryCard(memories, { budgetChars });
+  return {
+    rendered,
+    items: Array.isArray(memories) ? memories : [],
+    stats: {
+      usedChars: rendered.length,
+      truncated: /truncated:\s*true/i.test(rendered),
+      byKind: countByKind(memories),
+      weakQuery: true,
+      channels: { recency: Array.isArray(memories) ? memories.length : 0, related: 0 },
+      availability: {
+        state: "available",
+        empty: !Array.isArray(memories) || memories.length === 0,
+      },
+    },
+  };
 }
 
+function countByKind(items) {
+  const byKind = {};
+  for (const item of items || []) {
+    const kind = item?.kind || "memory";
+    byKind[kind] = (byKind[kind] || 0) + 1;
+  }
+  return byKind;
+}
+
+/**
+ * @returns {Promise<{ packet: string, inject: { items: object[], stats: object } }>}
+ */
 async function buildBootstrapPacket(opts) {
   const {
     threadId,
@@ -123,7 +212,7 @@ async function buildBootstrapPacket(opts) {
   if (!sessionId) throw new Error("sessionId is required");
   if (!agent) throw new Error("agent is required");
   const identity = buildIdentity({ threadId, sessionId, agent, generation });
-  const memoryCard = await buildActiveMemoryCard({
+  const memoryPack = await buildActiveMemoryCard({
     threadId,
     prompt,
     retrieveSource,
@@ -134,7 +223,57 @@ async function buildBootstrapPacket(opts) {
     logger,
   });
   const digest = await buildDigest({ threadId, sessionId, invocationSource });
-  return [identity, memoryCard, digest, RECALL_RULE, ""].join("\n");
+  const packet = [identity, memoryPack.rendered, digest, RECALL_RULE, ""].join("\n");
+  return {
+    packet,
+    inject: {
+      items: memoryPack.items,
+      stats: memoryPack.stats || emptyInject().stats,
+    },
+  };
+}
+
+/** Normalize legacy string or modern object returns for callers/tests. */
+function coerceBootstrapResult(result) {
+  if (typeof result === "string") {
+    return { packet: result, inject: emptyInject() };
+  }
+  if (result && typeof result.packet === "string") {
+    return {
+      packet: result.packet,
+      inject: {
+        items: Array.isArray(result.inject?.items) ? result.inject.items : [],
+        stats: result.inject?.stats || emptyInject().stats,
+      },
+    };
+  }
+  return { packet: "", inject: emptyInject() };
+}
+
+function coerceMemoryCardResult(result) {
+  if (typeof result === "string") {
+    return { rendered: result, items: [], stats: emptyInject().stats };
+  }
+  if (result && typeof result.rendered === "string") {
+    return {
+      rendered: result.rendered,
+      items: Array.isArray(result.items) ? result.items : [],
+      stats: result.stats || emptyInject().stats,
+    };
+  }
+  return { rendered: "", items: [], stats: emptyInject().stats };
+}
+
+function toInjectPreview(inject, { sessionId, agent, source } = {}) {
+  const pack = inject && typeof inject === "object" ? inject : emptyInject();
+  return {
+    sessionId: sessionId || null,
+    agent: agent || null,
+    source: source || "bootstrap",
+    items: slimInjectItems(pack.items),
+    count: Array.isArray(pack.items) ? Math.min(pack.items.length, 12) : 0,
+    stats: pack.stats || emptyInject().stats,
+  };
 }
 
 module.exports = {
@@ -142,6 +281,10 @@ module.exports = {
   buildIdentity,
   buildDigest,
   buildActiveMemoryCard,
+  coerceBootstrapResult,
+  coerceMemoryCardResult,
+  toInjectPreview,
+  emptyInject,
   RECALL_RULE,
   resolveA2AMemoryBudget,
   resolveMemoryBudget,

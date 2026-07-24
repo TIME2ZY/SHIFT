@@ -3,6 +3,13 @@ const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { AGENTS } = require("./catalog");
+const { applyMemoryBlocks } = require("./memory-block");
+const {
+  emptyWriteStats,
+  mergeWriteStats,
+  buildMemoryWriteMetrics,
+  logMemoryWriteMetrics,
+} = require("../storage/memory-metrics");
 
 // Default token TTL: 30 minutes. Long enough for most invocations, short
 // enough to prevent stale tokens from accumulating after the worklist exits.
@@ -182,7 +189,7 @@ function postMessage(
   threadId,
   invocationId,
   content,
-  { appendToSession, durableRecorder, memoryCapture } = {}
+  { appendToSession, durableRecorder, memoryCapture, memoryService } = {}
 ) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
@@ -258,10 +265,37 @@ function postMessage(
     logger: console,
   });
 
+  const blockStats = applyMemoryBlocks({
+    text: content,
+    threadId: callbackSessionId,
+    invocationId: routeInvocationId,
+    agentId: agent,
+    memoryService: memoryService || null,
+    eventStore,
+    sendSse: (event, payload) => sendSse(thread.res, event, payload),
+    logger: console,
+  });
+  const writeStats = mergeWriteStats(thread.memoryWriteStats || emptyWriteStats(), blockStats);
+  thread.memoryWriteStats = emptyWriteStats();
+  const writeMetrics = buildMemoryWriteMetrics({
+    source: "callback",
+    threadId: callbackSessionId,
+    invocationId: routeInvocationId,
+    agent,
+    stats: writeStats,
+  });
+  logMemoryWriteMetrics(writeMetrics, console);
+  sendSse(thread.res, "memory-metrics", writeMetrics);
+
   const result = {
     ok: true,
     messagePosted: true,
     handoff: summarizeHandoffOutcome(finalized),
+    memory: {
+      blockParsed: blockStats.blockParsed,
+      blockWritten: blockStats.blockWritten,
+      blockSkipped: blockStats.blockSkipped,
+    },
   };
   if (currentInvocationId) {
     appendCallbackEvent({
@@ -351,6 +385,47 @@ node scripts/callback-client.js session-search --query "redis 端口" --limit 10
 - 空 query 或仅“继续” → 只返回最近活跃记忆（recency-only），不会扫全量日志
 - 可选 \`includeRetired=1\` 查看已 superseded 的旧记忆；默认不返回
 
+## 写入结构化记忆（L3 product memory）
+
+当确认了「后续 turn 还应遵守」的结论时，立即写入（不要等本轮结束）：
+
+\`\`\`text
+node scripts/callback-client.js memory-upsert --kind decision --topic storage-primary --content "在线读写以 SQLite 为准"
+\`\`\`
+
+多行内容用 \`--content-file <路径>\`。可选 \`--supersession-key decision:storage-primary\`。
+
+参数：
+- \`--kind\`：\`decision\`（拍板）| \`constraint\`（禁止/必须）| \`fact\`（可核对事实）
+- \`--topic\`：**必填**，短稳定主题（中英文均可）；**同主题更新必须复用同一 topic**，系统会 supersede 旧条
+- \`--content\`：一句话结论；必要细节可两行，勿贴大段日志
+
+写入规则：
+1. 用户拍板 / 架构约束 / 已核实的关键事实 → **写**
+2. 临时进度、猜测、一次性 debug 步骤 → **不写**
+3. Active Memories 里已有且未变化 → **不重复写**
+4. 写前不确定是否已有 → 先 \`session-search --layers memory --query "<topic>"\`
+5. 写错 → \`memory-invalidate\`（见下）
+
+否定一条记忆：
+
+\`\`\`text
+node scripts/callback-client.js memory-invalidate --id <memoryId> --reason "决策已撤销"
+\`\`\`
+
+返回 upsert：\`{ ok, created, topic, supersessionKey, memory, superseded }\`。
+返回 invalidate：\`{ ok, memory }\`。
+
+也可以在回复正文中写 fenced 块（turn 结束或 post-message 时自动落库，与 upsert 等价）：
+
+    \`\`\`memory
+    kind: decision
+    topic: storage-primary
+    content: 在线读写以 SQLite 为准
+    \`\`\`
+
+字段：kind / topic / content 均为必填；仅 decision|constraint|fact。
+
 ## 读取某次 invocation 的完整事件流
 
 \`\`\`text
@@ -363,7 +438,8 @@ node scripts/callback-client.js read-invocation --target <invocationId> --from 0
 1. 先读 Active Memories 卡片
 2. 不够 → \`session-search query="关键词"\`，优先 memory 层
 3. 需要过程细节 → \`read-invocation targetInvocationId=<id>\`
-4. 不要凭印象猜 — 先查再说
+4. 确认了可复用结论 → \`memory-upsert\` 或 \`\`\`memory 块写入，供后续 turn 注入
+5. 不要凭印象猜 — 先查再说
 `;
 }
 

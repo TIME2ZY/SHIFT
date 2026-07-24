@@ -78,7 +78,7 @@ function baseDeps(res, overrides = {}) {
     contextHealth: { makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }) },
     sessionSealer: { makeSealer: () => ({ isSealed: () => false, update: () => "active", getState: () => "active", thresholds: { warn: 0.8 } }) },
     sessionBootstrap: {
-      buildBootstrapPacket: async () => "",
+      buildBootstrapPacket: async () => ({ packet: "", inject: { items: [], stats: {} } }),
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
     agentIdentity: {

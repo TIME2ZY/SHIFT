@@ -245,7 +245,18 @@
               aria-controls="agent-panel"
               tabindex="0"
             >
-              协作者
+              Agents
+            </button>
+            <button
+              id="panel-tab-context"
+              class="panel-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="context-panel-inline"
+              tabindex="-1"
+            >
+              上下文
             </button>
             <button
               id="panel-tab-workspace"
@@ -257,28 +268,6 @@
               tabindex="-1"
             >
               工作区<span class="tab-badge" id="workspace-tab-badge" hidden></span>
-            </button>
-            <button
-              id="panel-tab-recall"
-              class="panel-tab"
-              type="button"
-              role="tab"
-              aria-selected="false"
-              aria-controls="recall-panel-inline"
-              tabindex="-1"
-            >
-              回忆
-            </button>
-            <button
-              id="panel-tab-memory"
-              class="panel-tab"
-              type="button"
-              role="tab"
-              aria-selected="false"
-              aria-controls="memory-panel-inline"
-              tabindex="-1"
-            >
-              记忆
             </button>
           </div>
 
@@ -292,103 +281,43 @@
           </section>
 
           <section
+            class="context-panel-inline"
+            id="context-panel-inline"
+            role="tabpanel"
+            aria-labelledby="panel-tab-context"
+            hidden
+          >
+            <div class="memory-inject" id="memory-inject-inline" hidden></div>
+            <div class="recall-search context-search">
+              <input
+                id="recall-search-input-inline"
+                name="recall-search"
+                type="search"
+                placeholder="搜索结论、消息与过程…"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="搜索上下文"
+              />
+            </div>
+            <div class="context-scroll" id="context-scroll">
+              <div class="context-section">
+                <div class="context-section-title">结论</div>
+                <div class="memory-body" id="memory-body-inline"></div>
+              </div>
+              <div class="context-section">
+                <div class="context-section-title">调用记录</div>
+                <div class="recall-body" id="recall-body-inline"></div>
+              </div>
+            </div>
+          </section>
+
+          <section
             class="workspace-panel"
             id="workspace-panel"
             role="tabpanel"
             aria-labelledby="panel-tab-workspace"
             hidden
           ></section>
-
-          <section
-            class="recall-panel-inline"
-            id="recall-panel-inline"
-            role="tabpanel"
-            aria-labelledby="panel-tab-recall"
-            hidden
-          >
-            <div class="recall-search">
-              <input
-                id="recall-search-input-inline"
-                name="recall-search"
-                type="search"
-                placeholder="搜索历史（关键词）…"
-                autocomplete="off"
-                spellcheck="false"
-                aria-label="搜索历史"
-              />
-            </div>
-            <div class="recall-body" id="recall-body-inline"></div>
-          </section>
-
-          <section
-            class="memory-panel-inline"
-            id="memory-panel-inline"
-            role="tabpanel"
-            aria-labelledby="panel-tab-memory"
-            hidden
-          >
-            <form class="memory-create" id="memory-create-form">
-              <div class="memory-create-row">
-                <label>
-                  类型
-                  <select name="kind" aria-label="记忆类型">
-                    <option value="decision">决策</option>
-                    <option value="constraint">约束</option>
-                    <option value="fact" selected>事实</option>
-                  </select>
-                </label>
-                <label>
-                  主题键
-                  <input
-                    name="topic"
-                    type="text"
-                    placeholder="如 storage-primary（可选）"
-                    autocomplete="off"
-                    spellcheck="false"
-                    aria-label="记忆主题键"
-                  />
-                </label>
-              </div>
-              <label class="memory-create-content">
-                内容
-                <textarea
-                  name="content"
-                  rows="3"
-                  placeholder="写入一条应记住的决策 / 约束 / 事实…"
-                  aria-label="记忆内容"
-                ></textarea>
-              </label>
-              <button type="submit" class="memory-create-submit">写入记忆</button>
-            </form>
-            <div class="memory-filters">
-              <label>
-                类型
-                <select id="memory-filter-kind" aria-label="按类型筛选">
-                  <option value="">全部</option>
-                  <option value="decision">决策</option>
-                  <option value="constraint">约束</option>
-                  <option value="fact">事实</option>
-                  <option value="handoff">交接</option>
-                  <option value="window-seal">窗口封存</option>
-                </select>
-              </label>
-              <label>
-                状态
-                <select id="memory-filter-status" aria-label="按状态筛选">
-                  <option value="">全部</option>
-                  <option value="captured">已捕获</option>
-                  <option value="confirmed">已确认</option>
-                  <option value="superseded">已替代</option>
-                  <option value="invalidated">已否定</option>
-                </select>
-              </label>
-              <label class="memory-filter-retired">
-                <input type="checkbox" id="memory-include-retired" checked />
-                含历史
-              </label>
-            </div>
-            <div class="memory-body" id="memory-body-inline"></div>
-          </section>
         </aside>
 
         <section class="composer">

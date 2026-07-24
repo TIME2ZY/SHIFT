@@ -95,11 +95,8 @@ function createRecallRepository(db) {
         .all(threadId);
       for (const event of events) upsert(eventToRecall(event));
 
-      const memories = db
-        .prepare("SELECT * FROM memory_entries WHERE thread_id = ? ORDER BY created_at")
-        .all(threadId);
-      for (const memory of memories) upsert(memoryToRecall(memory));
-      return { messages: messages.length, events: events.length, memories: memories.length };
+      // L2 memories are projected via memory_search (not recall_items).
+      return { messages: messages.length, events: events.length, memories: 0 };
     })();
   }
 

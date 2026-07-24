@@ -20,12 +20,11 @@
   const btnNewChat = $("#btn-new-chat");
   const panelTabAgentsEl = $("#panel-tab-agents");
   const panelTabWorkspaceEl = $("#panel-tab-workspace");
-  const panelTabRecallEl = $("#panel-tab-recall");
-  const panelTabMemoryEl = $("#panel-tab-memory");
+  const panelTabContextEl = $("#panel-tab-context");
   const agentPanelEl = $("#agent-panel");
   const agentTabsEl = $("#agent-tabs");
   const workspacePanelEl = $("#workspace-panel");
-  const memoryPanelInlineEl = $("#memory-panel-inline");
+  const contextPanelEl = $("#context-panel-inline");
   const emptyStateEl = $("#empty-state");
   const spacerEl = messagesEl.querySelector(".messages-spacer");
   const skillsTagsEl = $("#skills-tags");
@@ -35,14 +34,10 @@
   const projectDirPath = $("#project-dir-path");
   const worktreeStatusEl = $("#worktree-status");
   const mentionMenuEl = $("#mention-menu");
-  // The recall UI now lives exclusively inside the right-side panel
-  // (third tab). The legacy standalone drawer and overlay were removed.
-  const recallPanelInlineEl = $("#recall-panel-inline");
-  const recallBodyEl = recallPanelInlineEl
-    ? recallPanelInlineEl.querySelector(".recall-body")
-    : null;
-  const recallSearchInputEl = recallPanelInlineEl
-    ? recallPanelInlineEl.querySelector(".recall-search input")
+  // Context tab: one scroll — conclusions + invocation/search records.
+  const recallBodyEl = contextPanelEl ? contextPanelEl.querySelector(".recall-body") : null;
+  const recallSearchInputEl = contextPanelEl
+    ? contextPanelEl.querySelector(".context-search input, .recall-search input")
     : null;
   const currentSessionTitleEl = $("#current-session-title");
   const contextStatusEl = $("#context-status");
@@ -98,7 +93,7 @@
       mentionMatches: [],
       mentionRange: null,
       recallSearchDebounce: null,
-      rightPanelTab: "agents", // agents | workspace | recall | memory
+      rightPanelTab: "agents", // agents | context | workspace
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
       usageSummary: { available: false, session: {}, agents: [] },
       // NOT live run data — see runtimeStore
@@ -425,13 +420,12 @@
   recallPanel.bindSearch();
 
   const memoryPanel = window.MemoryPanel.createMemoryPanel({
-    bodyEl: memoryPanelInlineEl ? memoryPanelInlineEl.querySelector(".memory-body") : null,
-    filterKindEl: $("#memory-filter-kind"),
-    filterStatusEl: $("#memory-filter-status"),
-    includeRetiredEl: $("#memory-include-retired"),
-    formEl: $("#memory-create-form"),
+    bodyEl: contextPanelEl ? contextPanelEl.querySelector(".memory-body") : null,
+    injectEl: $("#memory-inject-inline"),
     memoryApi,
     getSessionId: () => state.currentSessionId,
+    productOnly: true,
+    showConfirm: false,
     escHtml,
     t: (path, fallback) => {
       const locale = window.Locale || window.LocaleZhCN;
@@ -443,6 +437,11 @@
     },
   });
   memoryPanel.bind();
+
+  function loadContextPanel() {
+    memoryPanel.load();
+    recallPanel.loadRecallList();
+  }
 
   let sessionController = null;
   let chatClient = null;
@@ -635,25 +634,25 @@
     syncComposerControls,
     loadUsageSummary,
     onSessionChanged: () => {
-      if (state.rightPanelTab === "memory") memoryPanel.load();
+      if (state.rightPanelTab === "context") loadContextPanel();
     },
   });
 
-  const RIGHT_TABS = ["agents", "workspace", "recall", "memory"];
+  const RIGHT_TABS = ["agents", "context", "workspace"];
   const tabButtons = {
     agents: panelTabAgentsEl,
+    context: panelTabContextEl,
     workspace: panelTabWorkspaceEl,
-    recall: panelTabRecallEl,
-    memory: panelTabMemoryEl,
   };
 
   function setRightPanelTab(nextTab) {
+    // Migrate legacy tab ids from older sessions / tests.
+    if (nextTab === "recall" || nextTab === "memory") nextTab = "context";
     uiStore.patch({ rightPanelTab: nextTab }, { source: "setRightPanelTab" });
     bus.emit("panel:tab", { tab: nextTab });
     if (agentPanelEl) agentPanelEl.hidden = nextTab !== "agents";
+    if (contextPanelEl) contextPanelEl.hidden = nextTab !== "context";
     if (workspacePanelEl) workspacePanelEl.hidden = nextTab !== "workspace";
-    if (recallPanelInlineEl) recallPanelInlineEl.hidden = nextTab !== "recall";
-    if (memoryPanelInlineEl) memoryPanelInlineEl.hidden = nextTab !== "memory";
 
     for (const id of RIGHT_TABS) {
       const btn = tabButtons[id];
@@ -664,18 +663,15 @@
       btn.tabIndex = active ? 0 : -1;
     }
 
-    // Mobile-only height boost for workspace/recall/memory (CSS gated @media max-width 700px).
-    // Do not apply a desktop max-height via this class — that was a regression that
-    // capped workspace/recall to ~360px while the agents tab stayed full height.
+    // Mobile-only height boost for context/workspace (CSS gated @media max-width 700px).
     if (sidePanelEl) {
       sidePanelEl.classList.toggle(
         "is-expanded",
-        nextTab === "workspace" || nextTab === "recall" || nextTab === "memory"
+        nextTab === "workspace" || nextTab === "context"
       );
     }
 
-    if (nextTab === "recall") recallPanel.loadRecallList();
-    if (nextTab === "memory") memoryPanel.load();
+    if (nextTab === "context") loadContextPanel();
   }
 
   async function activateRightTab(nextTab) {
@@ -685,11 +681,8 @@
 
   panelTabAgentsEl.addEventListener("click", () => activateRightTab("agents"));
   panelTabWorkspaceEl.addEventListener("click", () => activateRightTab("workspace"));
-  if (panelTabRecallEl) {
-    panelTabRecallEl.addEventListener("click", () => activateRightTab("recall"));
-  }
-  if (panelTabMemoryEl) {
-    panelTabMemoryEl.addEventListener("click", () => activateRightTab("memory"));
+  if (panelTabContextEl) {
+    panelTabContextEl.addEventListener("click", () => activateRightTab("context"));
   }
 
   const tablistEl = document.querySelector(".panel-tabs");
@@ -857,6 +850,43 @@
     syncComposerControls,
     onRuntimeStatusChange,
     onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
+    onMemoryEvent: (payload, sessionId) => {
+      const sid = (payload && payload.sessionId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      if (state.rightPanelTab === "context") memoryPanel.load();
+      const action = payload && payload.action;
+      const locale = window.Locale || window.LocaleZhCN;
+      const t = (path, fallback) =>
+        locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+      if (action === "invalidate") {
+        setStatus(t("memory.agentInvalidated", "Agent 已否定一条记忆"), "ok");
+      } else {
+        setStatus(t("memory.agentWrote", "Agent 已写入记忆"), "ok");
+      }
+    },
+    onMemoryInject: (payload, sessionId) => {
+      const sid = (payload && payload.sessionId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      if (typeof memoryPanel.setInjectPreview === "function") {
+        memoryPanel.setInjectPreview(payload);
+      }
+      const count = Number(payload && payload.count) || 0;
+      if (count > 0 && state.rightPanelTab !== "context") {
+        const locale = window.Locale || window.LocaleZhCN;
+        const t = (path, fallback) =>
+          locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+        setStatus(
+          t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count)),
+          "ok"
+        );
+      }
+    },
+    onMemoryMetrics: (payload, sessionId) => {
+      const sid = (payload && payload.threadId) || sessionId;
+      if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
+      const total = Number(payload && payload.totalWrites) || 0;
+      if (total > 0 && state.rightPanelTab === "context") memoryPanel.load();
+    },
   });
 
   /* ═══════════════════════════════════════════════════════════

@@ -30,6 +30,9 @@
       syncComposerControls,
       onRuntimeStatusChange,
       onUsageEvent,
+      onMemoryEvent,
+      onMemoryInject,
+      onMemoryMetrics,
     } = deps;
 
     function store() {
@@ -190,6 +193,21 @@
           if (active) addSystem(text);
           break;
         }
+        case "memory":
+          if (typeof onMemoryEvent === "function") {
+            onMemoryEvent(data, sessionId);
+          }
+          break;
+        case "memory-inject":
+          if (typeof onMemoryInject === "function") {
+            onMemoryInject(data, sessionId);
+          }
+          break;
+        case "memory-metrics":
+          if (typeof onMemoryMetrics === "function") {
+            onMemoryMetrics(data, sessionId);
+          }
+          break;
         case "done":
           finishStream("就绪", sessionId);
           break;

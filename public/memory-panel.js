@@ -1,6 +1,8 @@
 (function initMemoryPanel(globalScope) {
   "use strict";
 
+  const PRODUCT_KINDS = ["decision", "constraint", "fact"];
+
   const KIND_LABELS = {
     decision: "决策",
     constraint: "约束",
@@ -18,20 +20,23 @@
 
   function createMemoryPanel({
     bodyEl,
-    filterKindEl,
-    filterStatusEl,
-    includeRetiredEl,
-    formEl,
+    injectEl,
+    filterKindEl = null,
+    includeRetiredEl = null,
     memoryApi,
     getSessionId,
     escHtml,
     t = (path, fallback) => fallback || path,
     onToast,
+    productOnly = true,
+    showConfirm = false,
   }) {
     if (!bodyEl || !memoryApi) {
       return {
         load() {},
         bind() {},
+        setInjectPreview() {},
+        clearInjectPreview() {},
       };
     }
 
@@ -55,11 +60,9 @@
       )}</div>`;
       try {
         const kind = filterKindEl?.value || "";
-        const status = filterStatusEl?.value || "";
-        const includeRetired = includeRetiredEl ? includeRetiredEl.checked : true;
+        const includeRetired = includeRetiredEl ? includeRetiredEl.checked : false;
         const data = await memoryApi.listMemories(sessionId, {
           kind: kind || undefined,
-          status: status || undefined,
           includeRetired,
           limit: 200,
         });
@@ -69,7 +72,11 @@
         ) {
           return;
         }
-        renderList(data.memories || [], data.counts || {});
+        let memories = data.memories || [];
+        if (productOnly) {
+          memories = memories.filter((item) => PRODUCT_KINDS.includes(item.kind));
+        }
+        renderList(memories, data.counts || {});
       } catch (error) {
         if (
           token !== loadToken ||
@@ -83,19 +90,57 @@
       }
     }
 
-    function renderList(memories, counts) {
+    function renderInjectPreview(payload) {
+      if (!injectEl) return;
+      if (!payload) {
+        injectEl.hidden = true;
+        injectEl.innerHTML = "";
+        return;
+      }
+      const count = Number(payload.count) || (payload.items || []).length || 0;
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const title =
+        count > 0
+          ? t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count))
+          : t("memory.injectedEmpty", "本回合未注入结构化记忆");
+      const list =
+        count > 0
+          ? `<ul class="memory-inject-list">${items
+              .map((item) => {
+                const kind = KIND_LABELS[item.kind] || item.kind || "";
+                const snippet = String(item.content || "").slice(0, 80);
+                return `<li><span class="memory-kind">${escHtml(kind)}</span> ${escHtml(
+                  snippet
+                )}</li>`;
+              })
+              .join("")}</ul>`
+          : "";
+      injectEl.hidden = false;
+      injectEl.innerHTML = `<div class="memory-inject-title">${escHtml(title)}</div>${list}`;
+    }
+
+    function setInjectPreview(payload) {
+      renderInjectPreview(payload);
+    }
+
+    function clearInjectPreview() {
+      renderInjectPreview(null);
+    }
+
+    function renderList(memories) {
       if (!memories.length) {
         bodyEl.innerHTML = `<div class="memory-empty">${escHtml(
-          t("memory.emptyList", "本会话暂无记忆")
+          t(
+            "memory.emptyList",
+            "还没有沉淀的结论。Agent 确认决策后会自动出现在这里。"
+          )
         )}</div>`;
         return;
       }
-      const summary = Object.entries(counts)
-        .map(([status, count]) => `${STATUS_LABELS[status] || status} ${count}`)
-        .join(" · ");
+      const summary = `${memories.length} 条结论`;
       const cards = memories.map((memory) => renderCard(memory)).join("");
       bodyEl.innerHTML = `
-        <div class="memory-summary">${escHtml(summary || `${memories.length} 条`)}</div>
+        <div class="memory-summary">${escHtml(summary)}</div>
         <div class="memory-list">${cards}</div>
       `;
       bodyEl.querySelectorAll("[data-memory-action]").forEach((btn) => {
@@ -103,33 +148,30 @@
       });
     }
 
+    function formatWhen(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return String(iso);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     function renderCard(memory) {
       const kindLabel = KIND_LABELS[memory.kind] || memory.kind;
       const statusLabel = STATUS_LABELS[memory.status] || memory.status;
       const topic = memory.topic || memory.supersessionKey || "";
-      const related =
-        Array.isArray(memory.related) && memory.related.length
-          ? `<div class="memory-meta">替代关系: ${memory.related
-              .map(
-                (item) =>
-                  `${escHtml(item.id.slice(0, 8))}… (${escHtml(STATUS_LABELS[item.status] || item.status)})`
-              )
-              .join(" · ")}</div>`
-          : "";
-      const sources = [
-        memory.sourceMessageId
-          ? `消息 ${escHtml(String(memory.sourceMessageId).slice(0, 10))}…`
-          : "",
-        memory.sourceInvocationId
-          ? `调用 ${escHtml(String(memory.sourceInvocationId).slice(0, 10))}…`
-          : "",
-        memory.createdBy ? `来源 ${escHtml(memory.createdBy)}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      // Prefer human "which turn produced this" over opaque ids.
+      const fromAgent = memory.createdBy ? String(memory.createdBy) : "";
+      const inv = memory.sourceInvocationId ? String(memory.sourceInvocationId) : "";
+      const invShort = inv ? (inv.length > 14 ? `${inv.slice(0, 10)}…` : inv) : "";
+      const originParts = [];
+      if (fromAgent) originParts.push(fromAgent);
+      if (invShort) originParts.push(`调用 ${invShort}`);
+      if (memory.createdAt) originParts.push(formatWhen(memory.createdAt));
+      const origin = originParts.join(" · ");
 
       const actions = [];
-      if (memory.status === "captured") {
+      if (showConfirm && memory.status === "captured") {
         actions.push(
           `<button type="button" class="memory-action" data-memory-action="confirm" data-id="${escHtml(
             memory.id
@@ -154,9 +196,13 @@
           </header>
           <div class="memory-content">${escHtml(memory.content || "")}</div>
           ${topic ? `<div class="memory-meta">主题 ${escHtml(topic)}</div>` : ""}
-          ${sources ? `<div class="memory-meta">${sources}</div>` : ""}
-          ${related}
-          <div class="memory-meta">${escHtml(memory.createdAt || "")}</div>
+          ${
+            origin
+              ? `<div class="memory-meta memory-origin">${escHtml(
+                  t("memory.fromTurn", "来自")
+                )} ${escHtml(origin)}</div>`
+              : ""
+          }
           ${
             actions.length
               ? `<footer class="memory-card-actions">${actions.join("")}</footer>`
@@ -176,7 +222,7 @@
         if (action === "confirm") {
           await memoryApi.confirmMemory(id, {
             confirmedBy: "user",
-            confirmationSource: "ui:memory-panel",
+            confirmationSource: "ui:context-panel",
           });
           toast(t("memory.confirmOk", "已确认记忆"));
         } else if (action === "invalidate") {
@@ -197,53 +243,15 @@
       }
     }
 
-    async function onCreateSubmit(event) {
-      event.preventDefault();
-      const sessionId = typeof getSessionId === "function" ? getSessionId() : null;
-      if (!sessionId) {
-        toast(t("memory.noSession", "暂无会话"), true);
-        return;
-      }
-      const form = event.currentTarget;
-      const kind = form.elements.kind?.value || "fact";
-      const topic = form.elements.topic?.value || "";
-      const content = form.elements.content?.value || "";
-      if (!content.trim()) {
-        toast(t("memory.contentRequired", "请填写记忆内容"), true);
-        return;
-      }
-      const submitBtn = form.querySelector('button[type="submit"]');
-      if (submitBtn) submitBtn.disabled = true;
-      try {
-        await memoryApi.createMemory({
-          sessionId,
-          kind,
-          topic: topic.trim() || undefined,
-          content: content.trim(),
-          createdBy: "user",
-        });
-        form.reset();
-        if (form.elements.kind) form.elements.kind.value = "decision";
-        toast(t("memory.createOk", "已写入记忆"));
-        await load();
-      } catch (error) {
-        toast(error.message || String(error), true);
-      } finally {
-        if (submitBtn) submitBtn.disabled = false;
-      }
-    }
-
     function bind() {
       if (filterKindEl) filterKindEl.addEventListener("change", () => load());
-      if (filterStatusEl) filterStatusEl.addEventListener("change", () => load());
       if (includeRetiredEl) includeRetiredEl.addEventListener("change", () => load());
-      if (formEl) formEl.addEventListener("submit", onCreateSubmit);
     }
 
-    return { load, bind };
+    return { load, bind, setInjectPreview, clearInjectPreview };
   }
 
-  const api = { createMemoryPanel, KIND_LABELS, STATUS_LABELS };
+  const api = { createMemoryPanel, KIND_LABELS, STATUS_LABELS, PRODUCT_KINDS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.MemoryPanel = api;
 })(typeof window !== "undefined" ? window : globalThis);
