@@ -3,6 +3,8 @@ const { createInvocationRepository } = require("./invocation-repository");
 const { createMemoryEventRepository } = require("./memory-event-repository");
 const { createMemoryRepository } = require("./memory-repository");
 const { createMemoryService } = require("./memory-service");
+const { createMemorySuggestionRepository } = require("./memory-suggestion-repository");
+const { createMemorySuggestionService } = require("./memory-suggestion-service");
 const { createMessageRepository } = require("./message-repository");
 const { createRecallRepository } = require("./recall-repository");
 const { createThreadRepository } = require("./thread-repository");
@@ -19,6 +21,7 @@ function createStorage(options = {}) {
     messages: createMessageRepository(db),
     invocations: createInvocationRepository(db),
     memories: createMemoryRepository(db, recall),
+    suggestions: createMemorySuggestionRepository(db),
     memoryEvents,
     recall,
     transaction(work) {
@@ -32,6 +35,7 @@ function createStorage(options = {}) {
     },
   };
   storage.memory = createMemoryService({ storage });
+  storage.suggestionService = createMemorySuggestionService({ storage });
   return storage;
 }
 
@@ -41,4 +45,5 @@ module.exports = {
   withTransaction,
   checkpointMemoryDatabase,
   createMemoryService,
+  createMemorySuggestionService,
 };

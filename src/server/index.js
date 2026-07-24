@@ -286,6 +286,7 @@ function createServer(options = {}) {
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
+    suggestionService: storageContext.storage?.suggestionService || null,
     getSession: getSessionForMode,
     sessionsFile,
     sendJson,
