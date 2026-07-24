@@ -394,9 +394,10 @@ function createServer(options = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/skills") {
+      // Empty prompt still matches always-on skills (UI should show them idle).
       const prompt = url.searchParams.get("prompt") || "";
       const skills = getSkills();
-      const matched = prompt ? matchSkills(prompt, skills) : [];
+      const matched = matchSkills(prompt, skills);
       sendJson(res, 200, {
         skills: publicSkills(),
         active: matched.map((s) => s.name),

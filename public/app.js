@@ -81,6 +81,8 @@
       selectedAgent: "codex",
       currentSessionId: null,
       skillsMetadata: [],
+      /** Last active skill names (SSE / prompt match). Kept across metadata reloads. */
+      activeSkillNames: [],
       // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
       sessions: {},
       lastPrompt: "",
@@ -726,10 +728,34 @@
 
   function renderSkillTags(active) {
     if (!skillsBarEl) return;
-    const set = new Set(active || []);
+    // Persist last active set so a late metadata fetch cannot wipe the bar.
+    if (Array.isArray(active)) {
+      state.activeSkillNames = active.slice();
+    }
     const meta = Array.isArray(state.skillsMetadata) ? state.skillsMetadata : [];
-    const enabled = meta.filter((skill) => set.has(skill.name));
+    const activeSet = new Set(state.activeSkillNames || []);
+    let enabled = meta.filter((skill) => activeSet.has(skill.name));
+    // Idle / no SSE yet: still surface always-on skills from metadata.
+    if (enabled.length === 0 && activeSet.size === 0) {
+      enabled = meta.filter((skill) => skill.always === true);
+      if (enabled.length > 0) {
+        state.activeSkillNames = enabled.map((s) => s.name);
+      }
+    }
     if (enabled.length === 0) {
+      // Names known but metadata missing — show names so SSE is not a no-op.
+      if (activeSet.size > 0) {
+        const tags = [...activeSet].map((name) => {
+          const tag = document.createElement("span");
+          tag.className = "skill-tag";
+          tag.textContent = name;
+          return tag;
+        });
+        skillsBarEl.hidden = false;
+        if (skillsCountEl) skillsCountEl.textContent = String(tags.length);
+        if (skillsTagsEl) skillsTagsEl.replaceChildren(...tags);
+        return;
+      }
       skillsBarEl.hidden = true;
       if (skillsTagsEl) skillsTagsEl.replaceChildren();
       return;
@@ -738,7 +764,7 @@
       const tag = document.createElement("span");
       tag.className = "skill-tag";
       tag.textContent = s.name;
-      tag.title = s.description;
+      tag.title = s.description || "";
       return tag;
     });
     skillsBarEl.hidden = false;
@@ -759,7 +785,12 @@
         const result = await runLatestSkillsRequest.run(() =>
           apiFetch(`/api/skills?prompt=${encodeURIComponent(prompt || "")}`).then(jsonOrThrow)
         );
-        if (result.applied) renderSkillTags(result.value.active);
+        if (result.applied) {
+          if (Array.isArray(result.value.skills) && result.value.skills.length) {
+            state.skillsMetadata = result.value.skills;
+          }
+          renderSkillTags(result.value.active || []);
+        }
       } catch (error) {
         console.warn("Active skills load failed:", error);
       }
@@ -994,7 +1025,6 @@
   setRightPanelTab("agents");
   loadProjectDir();
   workspacePanel.renderWorkspacePanel();
-  renderSkillTags([]);
   autoGrowPrompt();
   updateRunBar();
   updateWorkspaceTabBadge();
@@ -1024,9 +1054,17 @@
     .then(jsonOrThrow)
     .then((d) => {
       state.skillsMetadata = d.skills || [];
-      renderSkillTags([]);
+      // Prefer server active (always-on); do not pass [] or we hide the bar.
+      if (Array.isArray(d.active) && d.active.length > 0) {
+        renderSkillTags(d.active);
+      } else {
+        renderSkillTags(); // re-render from metadata always-on fallback
+      }
     })
     .catch((e) => console.warn("Skills metadata load failed:", e));
+
+  // Also refresh when composer is empty on boot (always-on).
+  updateActiveSkills(promptEl ? promptEl.value : "");
 
   Promise.all([loadAgents(), sessionController.loadSessions()]).catch(() => {
     setStatus("加载失败", "error");
