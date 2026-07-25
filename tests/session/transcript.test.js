@@ -180,6 +180,39 @@ test("payload larger than MAX_LINE_BYTES is truncated with marker", withTempDir(
   assert.ok(events[0].payload.text.length < 300 * 1024);
 }));
 
+test("large tool payload keeps structure and stays within the physical line limit", withTempDir(async (tmpDir) => {
+  const output = "你".repeat(140 * 1024);
+  transcript.appendEvent("s1", "i1", "tool.finished", {
+    type: "tool.finished",
+    protocolVersion: 2,
+    agent: "codex",
+    invocationId: "i1",
+    toolName: "command_execution",
+    toolId: "item-1",
+    args: { command: "rg warning data/runtime" },
+    output,
+    result: output,
+    exitCode: 0,
+    status: "ok",
+    state: "completed",
+  });
+  await transcript.flush();
+
+  const [event] = await transcript.readInvocation("s1", "i1");
+  assert.equal(event.payload._truncated, true);
+  assert.equal(event.payload.toolId, "item-1");
+  assert.equal(event.payload.toolName, "command_execution");
+  assert.equal(event.payload.status, "ok");
+  assert.equal(event.payload.exitCode, 0);
+  assert.equal(event.payload.outputTruncated, true);
+  assert.equal("result" in event.payload, false);
+  assert.ok(event.payload.output.length < output.length);
+
+  const file = path.join(tmpDir, "s1", "invocations", "i1.jsonl");
+  const [line] = fs.readFileSync(file, "utf8").trimEnd().split("\n");
+  assert.ok(Buffer.byteLength(line, "utf8") <= 256 * 1024);
+}));
+
 test("sanitizeId preserves valid IDs and contains path-unsafe values", () => {
   assert.equal(transcript._sanitizeId("abc-def_ghi"), "abc-def_ghi");
   assert.equal(transcript._sanitizeId("abc/def\\ghi"), "_invalid");

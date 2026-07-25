@@ -255,6 +255,26 @@
       const type = data.type || kind;
       if (!type) continue;
 
+      if (type === "diagnostic") {
+        if (data.visibility === "hidden") continue;
+        const id = String(data.fingerprint || data.code || `diagnostic-${toolById.size}`);
+        const prev = toolById.get(id) || {};
+        const count = Math.max(1, Number(data.count) || 1);
+        toolById.set(id, {
+          ...prev,
+          ...data,
+          type: "tool.finished",
+          toolName: count > 1 ? `诊断 × ${count}` : "诊断",
+          toolId: id,
+          args: { description: data.message || data.code || "Provider diagnostic" },
+          status: data.severity === "error" ? "error" : "ok",
+          _eventNos: mergeEventNos(prev, evt),
+          _traceKind: "diagnostic",
+          _traceId: id,
+        });
+        continue;
+      }
+
       if (type.startsWith("subagent.")) {
         const id = String(data.subagentId || data.toolId || data.name || toolById.size);
         const prev = toolById.get(id) || {};

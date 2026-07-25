@@ -40,6 +40,31 @@ function invocationUsageDelta(current = {}, baseline = {}) {
   return usage;
 }
 
+function contextCharsFromEvent(event) {
+  if (!event || typeof event !== "object") return 0;
+  if (event.type === "thinking.delta") {
+    return typeof event.text === "string" ? event.text.length : 0;
+  }
+  if (event.type !== "tool.finished") return 0;
+
+  if (typeof event.originalOutputChars === "number" && event.originalOutputChars > 0) {
+    return event.originalOutputChars;
+  }
+  if (typeof event.originalResultChars === "number" && event.originalResultChars > 0) {
+    return event.originalResultChars;
+  }
+  const value = event.output !== undefined ? event.output : event.result;
+  if (typeof value === "string") return value.length;
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value).length;
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
 const NOOP_DURABLE_RECORDER = Object.freeze({
   enabled: false,
   ensureWindow: () => null,
@@ -782,6 +807,19 @@ function createChatRoutes({
           }
           abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
         };
+        const addObservedContext = (charCount) => {
+          healthTracker.addOutput(charCount);
+          const ratio = healthTracker.getFillRatio();
+          const state = sealer.update(ratio);
+          if (state === sessionSealer.STATE.SEALING && !contextWarned) {
+            sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
+            contextWarned = true;
+          } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
+            sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
+            contextSealedSseSent = true;
+            sealContextWindow(ratio);
+          }
+        };
 
         const { code, signal } = await runChildStream({
           spawnRunner,
@@ -806,6 +844,8 @@ function createChatRoutes({
                 durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
               }
             }
+            const contextChars = contextCharsFromEvent(event);
+            if (contextChars > 0) addObservedContext(contextChars);
             durableCoalescer.accept(event);
           },
           onStderr(text) {
@@ -814,19 +854,7 @@ function createChatRoutes({
             const visible = filterBenignStderr(text);
             if (visible) sendSse(res, "stderr", { agent, text: visible });
           },
-          onHealth(charCount) {
-            healthTracker.addOutput(charCount);
-            const ratio = healthTracker.getFillRatio();
-            const state = sealer.update(ratio);
-            if (state === sessionSealer.STATE.SEALING && !contextWarned) {
-              sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
-              contextWarned = true;
-            } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
-              sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
-              contextSealedSseSent = true;
-              sealContextWindow(ratio);
-            }
-          },
+          onHealth: addObservedContext,
           shouldStop: () => sealer.isSealed(),
         });
 
@@ -1105,4 +1133,5 @@ module.exports = {
   createChatRoutes,
   resolveResumeSessionId,
   invocationUsageDelta,
+  contextCharsFromEvent,
 };

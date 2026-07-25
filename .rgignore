@@ -1,0 +1,9 @@
+# Runtime and generated data are intentionally excluded from broad project searches.
+/data/
+/output/
+/node_modules/
+/.playwright-cli/
+/.git/
+
+# Vendored minified assets overwhelm code-oriented searches.
+/public/vendor/

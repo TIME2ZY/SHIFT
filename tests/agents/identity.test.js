@@ -49,6 +49,15 @@ test("renderIdentityBlock includes markers, role meta, and body", () => {
   assert.ok(!block.includes("你是 **Grok"), "must not leak other agent bodies");
 });
 
+test("Codex identity instructs bounded searches and explicit runtime log access", () => {
+  const block = renderIdentityBlock("codex");
+
+  assert.match(block, /src.*public.*tests.*scripts.*docs/);
+  assert.match(block, /200 行/);
+  assert.match(block, /rg --no-ignore/);
+  assert.match(block, /data\/runtime/);
+});
+
 test("renderIdentityBlock falls back when file missing", () => {
   const block = renderIdentityBlock("ghost", {
     label: "幽灵",
