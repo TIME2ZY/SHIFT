@@ -12,6 +12,7 @@ const {
 const { resolveProxy, proxyEnvVars } = require("../proxy");
 const { createUsageAccumulator } = require("../usage");
 const { windowsUtf8Environment } = require("../windows-runtime");
+const { limitCanonicalEvent } = require("../event-size-policy");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
 
@@ -129,7 +130,7 @@ function createProviderRuntime(config, options = {}) {
     }
     if (lifecycle.terminal) return [];
 
-    let normalized = events.map(normalizeCanonicalEvent);
+    let normalized = events.map(normalizeCanonicalEvent).map(limitCanonicalEvent);
     const needsStart =
       normalized.length > 0 &&
       !lifecycle.started &&

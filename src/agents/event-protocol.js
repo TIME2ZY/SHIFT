@@ -65,6 +65,12 @@ const FIELD_TYPES = {
   affectsRun: "boolean",
   retryable: "boolean",
   count: "number",
+  outputTruncated: "boolean",
+  resultTruncated: "boolean",
+  originalOutputBytes: "number",
+  originalOutputChars: "number",
+  originalResultBytes: "number",
+  originalResultChars: "number",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));

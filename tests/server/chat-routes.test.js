@@ -34,6 +34,35 @@ test("invocationUsageDelta isolates one run from cumulative window billing", () 
   );
 });
 
+test("contextCharsFromEvent counts thinking and tool content without duplicates", () => {
+  assert.equal(chatRoutes.contextCharsFromEvent({ type: "thinking.delta", text: "思考" }), 2);
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({
+      type: "tool.finished",
+      output: "same",
+      result: "same",
+    }),
+    4
+  );
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({
+      type: "tool.finished",
+      output: "short preview",
+      originalOutputChars: 100000,
+    }),
+    100000
+  );
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({
+      type: "tool.finished",
+      result: { status: "ok", rows: [1, 2] },
+    }),
+    JSON.stringify({ status: "ok", rows: [1, 2] }).length
+  );
+  assert.equal(chatRoutes.contextCharsFromEvent({ type: "text.delta", text: "counted elsewhere" }), 0);
+  assert.equal(chatRoutes.contextCharsFromEvent({ type: "usage.update", outputTokens: 5 }), 0);
+});
+
 function makeReq(method, headers = {}) {
   return { method, headers, once() {} };
 }

@@ -842,6 +842,7 @@ test("codex runtime maps command, file, and transport errors into normalized eve
   assert.equal(commandFinished[0].toolName, "command_execution");
   assert.equal(commandFinished[0].args.command, "Get-Content -Raw skill.md");
   assert.equal(commandFinished[0].output, "skill body");
+  assert.equal("result" in commandFinished[0], false);
   assert.equal(commandFinished[0].exitCode, 0);
   assert.equal(commandFinished[0].status, "ok");
   assert.equal(commandFinished[0].state, "completed");
@@ -873,6 +874,34 @@ test("codex runtime maps command, file, and transport errors into normalized eve
       text: "Falling back from WebSockets to HTTPS transport. request timed out",
     },
   ]);
+});
+
+test("codex runtime caps large command output and reports its original size", () => {
+  const { createProviderRuntime } = require("../../src/agents/providers");
+  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
+  const output = "你".repeat(70 * 1024);
+  const events = runtime.transform(
+    {
+      type: "item.completed",
+      item: {
+        id: "item-large",
+        type: "command_execution",
+        command: "rg warning",
+        aggregated_output: output,
+        exit_code: 0,
+        status: "completed",
+      },
+    },
+    { invocationId: "inv-large", agent: "codex" }
+  );
+  const finished = events.find((event) => event.type === "tool.finished");
+
+  assert.ok(finished);
+  assert.equal(finished.outputTruncated, true);
+  assert.equal(finished.originalOutputChars, output.length);
+  assert.equal(finished.originalOutputBytes, Buffer.byteLength(output, "utf8"));
+  assert.ok(Buffer.byteLength(finished.output, "utf8") <= 64 * 1024);
+  assert.equal("result" in finished, false);
 });
 
 test("opencode runtime emits incremental text deltas from repeated parts", () => {

@@ -261,7 +261,6 @@ function createCodexRuntime(cli) {
             toolName: "command_execution",
             toolId,
             args: { command },
-            result: event.item.aggregated_output || "",
             output: event.item.aggregated_output || "",
             exitCode,
             status: failed ? "error" : "ok",

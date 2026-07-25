@@ -3,6 +3,7 @@ const path = require("node:path");
 const { DEFAULT_TRANSCRIPT_DIR } = require("../shared/runtime-paths");
 const { isValidOpaqueId, resolveInside } = require("../server/id-policy");
 const { ENV } = require("../shared/brand");
+const { limitCanonicalEvent, truncateUtf8, utf8Bytes } = require("../agents/event-size-policy");
 const MAX_LINE_BYTES = 256 * 1024;
 
 // Single global write queue. Serializing all appends through one chain
@@ -69,17 +70,112 @@ function enqueueWrite(sessionId, filePath, content) {
 }
 
 function truncatePayload(event, maxBytes) {
-  const text = event.payload && typeof event.payload.text === "string"
-    ? event.payload.text
-    : null;
-  return {
-    ...event,
-    payload: {
-      _truncated: true,
-      _originalBytes: JSON.stringify(event).length,
-      ...(text !== null ? { text: text.slice(0, Math.max(0, maxBytes - 400)) } : {}),
-    },
+  const source = event.payload && typeof event.payload === "object" ? event.payload : {};
+  const hadType = typeof source.type === "string";
+  let payload = limitCanonicalEvent({
+    ...source,
+    type: hadType ? source.type : event.kind,
+  });
+  if (!hadType) delete payload.type;
+
+  const originalBytes = utf8Bytes(JSON.stringify(event));
+  payload = {
+    ...payload,
+    _truncated: true,
+    _originalBytes: originalBytes,
   };
+
+  let candidate = { ...event, payload };
+  if (utf8Bytes(JSON.stringify(candidate)) <= maxBytes) return candidate;
+
+  // Plain stdout/stderr and other text-heavy legacy events do not pass through
+  // the canonical event policy. Keep their envelope and fit only the text body.
+  if (typeof payload.text === "string") {
+    const originalText = payload.text;
+    payload.text = "";
+    payload.textTruncated = true;
+    payload.originalTextBytes = utf8Bytes(originalText);
+    payload.originalTextChars = originalText.length;
+    const shell = JSON.stringify({ ...candidate, payload });
+    const budget = Math.max(0, maxBytes - utf8Bytes(shell) - 32);
+    payload.text = truncateUtf8(originalText, budget).value;
+    candidate = { ...event, payload };
+  }
+  if (utf8Bytes(JSON.stringify(candidate)) <= maxBytes) return candidate;
+
+  // Last-resort structural fallback: retain fields required to identify and
+  // render the event, while replacing only oversized content fields.
+  const structuralKeys = [
+    "type",
+    "protocolVersion",
+    "agent",
+    "invocationId",
+    "toolName",
+    "toolId",
+    "args",
+    "exitCode",
+    "status",
+    "state",
+    "code",
+    "severity",
+    "message",
+    "fingerprint",
+    "count",
+    "affectsRun",
+    "visibility",
+    "retryable",
+    "outputTruncated",
+    "resultTruncated",
+    "originalOutputBytes",
+    "originalOutputChars",
+    "originalResultBytes",
+    "originalResultChars",
+  ];
+  const preserved = {
+    _truncated: true,
+    _originalBytes: originalBytes,
+    _omittedFields: Object.keys(source).filter((key) => !structuralKeys.includes(key)),
+  };
+  for (const key of structuralKeys) {
+    if (payload[key] !== undefined) preserved[key] = payload[key];
+  }
+  if (preserved.args && typeof preserved.args === "object") {
+    const argsJson = JSON.stringify(preserved.args);
+    if (utf8Bytes(argsJson) > 16 * 1024) {
+      const command =
+        typeof preserved.args.command === "string"
+          ? truncateUtf8(preserved.args.command, 8 * 1024).value
+          : undefined;
+      preserved.args = {
+        _truncated: true,
+        _originalBytes: utf8Bytes(argsJson),
+        ...(command ? { command } : {}),
+      };
+    }
+  }
+  if (typeof preserved.message === "string") {
+    preserved.message = truncateUtf8(preserved.message, 8 * 1024).value;
+  }
+  candidate = {
+    ...event,
+    payload: preserved,
+  };
+  if (utf8Bytes(JSON.stringify(candidate)) <= maxBytes) return candidate;
+
+  // Defensive emergency path for malformed provider events with oversized
+  // identity/metadata fields. Keep the event recognizable and drop optional
+  // structural fields in a deterministic order until it fits.
+  delete preserved._omittedFields;
+  for (const key of ["message", "args"]) {
+    if (utf8Bytes(JSON.stringify(candidate)) <= maxBytes) break;
+    delete preserved[key];
+  }
+  for (const key of ["toolName", "toolId", "agent", "invocationId", "code", "fingerprint"]) {
+    if (typeof preserved[key] === "string") {
+      preserved[key] = truncateUtf8(preserved[key], 1024).value;
+    }
+  }
+  return candidate;
 }
 
 function appendEvent(sessionId, invocationId, kind, payload) {
@@ -92,7 +188,7 @@ function appendEvent(sessionId, invocationId, kind, payload) {
     payload: payload || {},
   };
   let line = JSON.stringify(event);
-  if (line.length > MAX_LINE_BYTES) {
+  if (utf8Bytes(line) > MAX_LINE_BYTES) {
     event = truncatePayload(event, MAX_LINE_BYTES);
     line = JSON.stringify(event);
   }

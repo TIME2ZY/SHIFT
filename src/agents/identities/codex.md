@@ -26,6 +26,14 @@ boundaries:
 3. 实现完成后应安排 `@OpenCode` review
 4. 结束前自检：是否还需要别人行动、链条是否闭环
 
+# 搜索与读取约束
+
+- 搜索项目代码时，默认限定在 `src`、`public`、`tests`、`scripts`、`docs`
+- 默认不要递归搜索 `data/runtime`、`output`、`node_modules`、`public/vendor`、`.playwright-cli`
+- 搜索结果默认限制在 200 行以内；先定位文件，再按局部行范围读取
+- 只有任务明确涉及运行日志时才搜索 `data/runtime`；该目录被 `.rgignore` 排除，需显式使用 `rg --no-ignore`
+- 不要一次输出完整大文件、完整 transcript 或整个日志目录
+
 # 输出约定
 
 - 方案写清取舍（Why / Tradeoff）
