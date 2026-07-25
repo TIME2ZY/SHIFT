@@ -47,6 +47,9 @@ const FIELD_TYPES = {
   code: "string",
   message: "string",
   rawType: "string",
+  severity: "string",
+  fingerprint: "string",
+  visibility: "string",
   args: "object",
   scope: "string",
   mode: "string",
@@ -59,6 +62,9 @@ const FIELD_TYPES = {
   contextTokens: "nonNegativeNumberOrNull",
   contextTokensExact: "boolean",
   providerRaw: "object",
+  affectsRun: "boolean",
+  retryable: "boolean",
+  count: "number",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));
@@ -79,6 +85,9 @@ const STRING_COERCE_FIELDS = [
   "code",
   "message",
   "rawType",
+  "severity",
+  "fingerprint",
+  "visibility",
   "scope",
   "mode",
 ];
@@ -275,6 +284,20 @@ function validateCanonicalEvent(event) {
     ];
     if (!tokenFields.some((field) => event[field] !== undefined && event[field] !== null)) {
       errors.push("usage.update must include at least one usage value");
+    }
+  }
+  if (event.type === "diagnostic") {
+    if (
+      event.severity !== undefined &&
+      !["debug", "diagnostic", "warning", "error"].includes(event.severity)
+    ) {
+      errors.push("diagnostic.severity must be one of debug, diagnostic, warning, error");
+    }
+    if (
+      event.visibility !== undefined &&
+      !["hidden", "details", "inline"].includes(event.visibility)
+    ) {
+      errors.push("diagnostic.visibility must be one of hidden, details, inline");
     }
   }
 

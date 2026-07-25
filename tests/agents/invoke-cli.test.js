@@ -1271,6 +1271,88 @@ childProcess.spawn = function spawn() {
   assert.doesNotMatch(result.stderr, /unexpected-kill/);
 });
 
+test("Codex startup diagnostics are coalesced without leaking through stderr", () => {
+  const result = runScriptWithHook(
+    ["hello"],
+    `
+const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+
+childProcess.spawn = function spawn() {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = function kill(signal) {
+    child.emit("close", null, signal);
+    return true;
+  };
+
+  process.nextTick(() => {
+    const prefix = "2026-07-25T13:56:18Z ERROR codex_models_manager::manager: ";
+    const warning = "failed to refresh available models: timeout waiting for child process to exit";
+    child.stderr.write(prefix + "failed to refresh available ");
+    child.stderr.write("models: timeout waiting for child process to exit\\n");
+    child.stderr.write(prefix + warning + "\\n");
+    child.stdout.write(JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "done" }
+    }) + "\\n");
+    child.stdout.end();
+    child.emit("close", 0, null);
+  });
+  return child;
+};
+`
+  );
+
+  assert.equal(result.status, 0);
+  const events = parseOutputEvents(result.stdout);
+  const diagnostic = events.find((event) => event.type === "diagnostic");
+  assert.ok(diagnostic);
+  assert.equal(diagnostic.code, "model_catalog_refresh_timeout");
+  assert.equal(diagnostic.count, 2);
+  assert.equal(diagnostic.visibility, "details");
+  assert.doesNotMatch(result.stderr, /failed to refresh available models/);
+  assert.equal(events.filter((event) => event.type === "run.finished").length, 1);
+});
+
+test("Codex authentication failures emit one actionable error without Recent stderr replay", () => {
+  const result = runScriptWithHook(
+    ["hello"],
+    `
+const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+
+childProcess.spawn = function spawn() {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = function kill(signal) {
+    child.emit("close", null, signal);
+    return true;
+  };
+  process.nextTick(() => {
+    child.stderr.write("2026-07-25T13:31:28Z ERROR manager: 401 Unauthorized: token_invalidated\\n");
+    child.stderr.write("{\\n  \\"status\\": 401\\n}\\n");
+    child.emit("close", 1, null);
+  });
+  return child;
+};
+`
+  );
+
+  assert.equal(result.status, 1);
+  const events = parseOutputEvents(result.stdout);
+  const diagnostic = events.find((event) => event.type === "diagnostic");
+  const failed = events.find((event) => event.type === "run.failed");
+  assert.equal(diagnostic.code, "authentication_invalidated");
+  assert.equal(diagnostic.visibility, "inline");
+  assert.equal(failed.error, "Codex CLI 登录已失效，请重新登录后重试。");
+  assert.doesNotMatch(result.stderr, /401 Unauthorized|Recent stderr/);
+});
+
 test("retries failed child when configured", () => {
   const result = runScriptWithHook(
     ["--retries", "1", "hello"],

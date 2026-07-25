@@ -14,6 +14,115 @@ function buildCodexEnvironment(_options = {}, env = process.env) {
   return codexHome ? { CODEX_HOME: codexHome } : {};
 }
 
+function codexDiagnostic(code, severity, message, options = {}) {
+  return {
+    code,
+    severity,
+    message,
+    fingerprint: `codex:${code}`,
+    affectsRun: false,
+    visibility: severity === "debug" ? "hidden" : "details",
+    retryable: false,
+    ...options,
+  };
+}
+
+function classifyCodexStderr(line) {
+  const text = String(line || "").trim();
+  if (!text) return codexDiagnostic("empty_stderr", "debug", "", { visibility: "hidden" });
+
+  if (
+    /\b(?:401 Unauthorized|token_invalidated|refresh_token_invalidated)\b/i.test(text) ||
+    /(?:Please log in again|access token could not be refreshed|session has ended)/i.test(text)
+  ) {
+    return codexDiagnostic(
+      "authentication_invalidated",
+      "error",
+      "Codex CLI 登录已失效，请重新登录后重试。",
+      {
+        affectsRun: true,
+        visibility: "inline",
+        captureContinuation: true,
+      }
+    );
+  }
+
+  if (text === "Reading additional input from stdin...") {
+    return codexDiagnostic("stdin_notice", "debug", text, { visibility: "hidden" });
+  }
+  if (
+    /\bWARN codex_core_plugins::manifest: ignoring\b/.test(text) ||
+    /\bWARN codex_core_skills::loader: ignoring\b/.test(text)
+  ) {
+    return codexDiagnostic(
+      "duplicate_extension_ignored",
+      "debug",
+      "Codex 忽略了重复的插件或技能定义。",
+      { visibility: "hidden" }
+    );
+  }
+  if (/codex_core::shell_snapshot: Failed to create shell snapshot/i.test(text)) {
+    return codexDiagnostic(
+      "shell_snapshot_failed",
+      "diagnostic",
+      "PowerShell 环境快照创建失败，不影响当前回答。",
+      { retryable: true }
+    );
+  }
+  if (
+    /failed to (?:load models cache|renew cache TTL)/i.test(text) ||
+    /missing field [`'"]?supports_reasoning_summaries/i.test(text)
+  ) {
+    return codexDiagnostic(
+      "model_cache_incompatible",
+      "diagnostic",
+      "Codex 模型缓存与当前 CLI 版本不兼容，将由 CLI 自动刷新。",
+      { retryable: true }
+    );
+  }
+  if (
+    /failed to refresh available models:.*timeout waiting for child process to exit/i.test(text)
+  ) {
+    return codexDiagnostic(
+      "model_catalog_refresh_timeout",
+      "diagnostic",
+      "Codex 模型列表刷新超时，不影响当前回答。",
+      { retryable: true }
+    );
+  }
+  if (/codex_api::endpoint::responses_websocket: failed to connect/i.test(text)) {
+    return codexDiagnostic(
+      "responses_websocket_failed",
+      "warning",
+      "Codex WebSocket 连接失败，CLI 可能自动回退到其他传输方式。",
+      { retryable: true }
+    );
+  }
+  if (
+    /rmcp::transport::worker/i.test(text) &&
+    /(?:worker quit|request failed|Transport channel closed|UnexpectedServerResponse)/i.test(text)
+  ) {
+    return codexDiagnostic("mcp_transport_failed", "warning", "Codex 的可选 MCP 连接不可用。", {
+      retryable: true,
+      captureContinuation: true,
+    });
+  }
+  if (/codex_core::tools::router: error=Exit code:/i.test(text)) {
+    return codexDiagnostic(
+      "tool_router_error",
+      "diagnostic",
+      "Codex 的一个工具命令执行失败，详情已记录在工具结果中。",
+      { captureContinuation: true }
+    );
+  }
+  if (/failed to refresh available models:/i.test(text)) {
+    return codexDiagnostic("model_catalog_refresh_failed", "warning", "Codex 模型列表刷新失败。", {
+      retryable: true,
+    });
+  }
+  return null;
+}
+
 function createCodexRuntime(cli) {
   function fileChangeEvents(base, item) {
     const changes = item && Array.isArray(item.changes) ? item.changes : [];
@@ -292,6 +401,7 @@ const codexProvider = {
   },
   allowedProviderOptions: ["sandbox", "approvalPolicy"],
   createRuntime: createCodexRuntime,
+  classifyStderr: classifyCodexStderr,
   resolveProxy,
   buildEnvironment: buildCodexEnvironment,
   buildInvocation(config, prompt) {
@@ -317,6 +427,7 @@ const codexProvider = {
 
 module.exports = {
   buildCodexEnvironment,
+  classifyCodexStderr,
   createCodexRuntime,
   codexProvider,
 };

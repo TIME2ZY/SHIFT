@@ -1535,9 +1535,26 @@
       }
 
       if (event.type === "diagnostic") {
-        // Non-UI process surface; keep in run for optional debug consumers.
         if (!Array.isArray(run.diagnostics)) run.diagnostics = [];
         run.diagnostics.push(event);
+        if (event.visibility !== "hidden") {
+          const count = Math.max(1, Number(event.count) || 1);
+          upsertProcessRow(
+            event.agent,
+            `diagnostic:${event.fingerprint || event.code}`,
+            {
+              name: count > 1 ? `诊断 × ${count}` : "诊断",
+              status: event.severity === "error" ? "error" : "done",
+              statusText: event.severity === "error" ? msg.failed || "失败" : "提示",
+              task: event.message || event.code || "",
+              summary: "",
+            },
+            sid
+          );
+        }
+        if (event.visibility === "inline" && event.severity === "error") {
+          setLivePending(event.agent, event.message || "执行异常", sid);
+        }
         return;
       }
 
@@ -1579,6 +1596,9 @@
       for (const run of rt.liveRuns.values()) {
         if (!run || run.agent !== agent) continue;
         for (const evt of run.tools || []) {
+          if (evt) flat.push(evt);
+        }
+        for (const evt of run.diagnostics || []) {
           if (evt) flat.push(evt);
         }
       }

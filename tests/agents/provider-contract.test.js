@@ -47,6 +47,7 @@ test("every provider implements the complete adapter contract", () => {
     assert.equal(typeof runtime.transform, "function");
     assert.equal(typeof runtime.extractSessionId, "function");
     assert.equal(typeof runtime.finish, "function");
+    if (adapter.classifyStderr) assert.equal(typeof runtime.classifyStderr, "function");
     assert.ok(Array.isArray(runtime.finish({ agent: "a", invocationId: "i" })));
 
     const envBundle = buildProviderEnvironment(CONFIGS[providerId], { proxy: "" }, {});
@@ -201,6 +202,21 @@ test("grok adapter owns missing-proxy diagnostics and GROK_PROXY env patch", () 
   );
   assert.equal(env.GROK_PROXY, "http://127.0.0.1:7892");
   assert.equal(env.HTTPS_PROXY, "http://127.0.0.1:7892");
+});
+
+test("provider adapter rejects a non-function stderr classifier", () => {
+  assert.throws(
+    () =>
+      assertProviderAdapter({
+        id: "broken",
+        capabilities: {},
+        allowedProviderOptions: [],
+        createRuntime() {},
+        buildInvocation() {},
+        classifyStderr: true,
+      }),
+    /classifyStderr must be a function/
+  );
 });
 
 test("provider startup diagnostics are opt-in", () => {

@@ -141,6 +141,33 @@ test("aggregateProcessBuckets accepts flat live-shaped events", () => {
   assert.equal(buckets.toolById.get("x").type, "tool.finished");
 });
 
+test("aggregateProcessBuckets renders visible diagnostics and skips hidden ones", () => {
+  const buckets = helpers.aggregateProcessBuckets([
+    {
+      type: "diagnostic",
+      code: "model_refresh",
+      fingerprint: "codex:model-refresh",
+      message: "模型列表刷新超时",
+      severity: "diagnostic",
+      visibility: "details",
+      count: 4,
+    },
+    {
+      type: "diagnostic",
+      code: "stdin_notice",
+      fingerprint: "codex:stdin",
+      message: "Reading additional input",
+      severity: "debug",
+      visibility: "hidden",
+    },
+  ]);
+  assert.equal(buckets.toolById.size, 1);
+  const diagnostic = buckets.toolById.get("codex:model-refresh");
+  assert.equal(diagnostic.toolName, "诊断 × 4");
+  assert.equal(diagnostic.args.description, "模型列表刷新超时");
+  assert.equal(diagnostic._traceKind, "diagnostic");
+});
+
 test("textDeltaSummary concatenates and truncates text.delta", () => {
   const summary = helpers.textDeltaSummary(
     [

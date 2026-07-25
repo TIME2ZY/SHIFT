@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const readline = require("node:readline");
 const { createRunLifecycle } = require("./event-protocol");
 const { createUsageAccumulator } = require("./usage");
+const { createDiagnosticCollector } = require("./diagnostics");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -46,6 +47,9 @@ function superviseProviderProcess({
   // One lifecycle per invocation — survives retries.
   const lifecycle = externalLifecycle || createRunLifecycle();
   const sharedRuntimeState = { usageAccumulator: createUsageAccumulator() };
+  const diagnosticCollector = createDiagnosticCollector({
+    providerId: (eventContext && eventContext.agent) || command || "provider",
+  });
   let firstChild;
   let attempt = 0;
 
@@ -71,6 +75,7 @@ function superviseProviderProcess({
     let closed = false;
     let lastActivity = Date.now();
     let stderrTail = "";
+    let stderrLineBuffer = "";
     let killTimer;
 
     const markActivity = () => {
@@ -162,10 +167,23 @@ function superviseProviderProcess({
       for (const outEvent of events) onEvent(outEvent);
     });
 
+    const processStderrLine = (line, newline = "") => {
+      const text = String(line || "").replace(/\r$/, "");
+      if (onRawEvent) onRawEvent({ stream: "stderr", line: text });
+      const handled = diagnosticCollector.add(text, providerRuntime.classifyStderr, eventContext);
+      if (!handled) process.stderr.write(`${text}${newline}`);
+    };
+
     child.stderr.on("data", (chunk) => {
       markActivity();
       appendStderr(chunk);
-      process.stderr.write(chunk);
+      stderrLineBuffer += String(chunk);
+      let newlineIndex;
+      while ((newlineIndex = stderrLineBuffer.indexOf("\n")) !== -1) {
+        const line = stderrLineBuffer.slice(0, newlineIndex);
+        stderrLineBuffer = stderrLineBuffer.slice(newlineIndex + 1);
+        processStderrLine(line, "\n");
+      }
     });
 
     child.on("error", (error) => {
@@ -175,6 +193,10 @@ function superviseProviderProcess({
     });
 
     child.on("close", (code, signal) => {
+      if (stderrLineBuffer) {
+        processStderrLine(stderrLineBuffer);
+        stderrLineBuffer = "";
+      }
       closed = true;
       clearTimers();
       cleanupHandlers.forEach((cleanup) => cleanup());
@@ -185,8 +207,18 @@ function superviseProviderProcess({
           onEvent(outEvent);
         }
       };
+      const flushDiagnostics = (ok) => {
+        const events = diagnosticCollector.flush({ ok, eventContext });
+        const accepted =
+          typeof providerRuntime.acceptDiagnostics === "function"
+            ? providerRuntime.acceptDiagnostics(events, eventContext)
+            : events;
+        for (const event of accepted) onEvent(event);
+        return events;
+      };
 
       if (failedToStart) {
+        flushDiagnostics(false);
         finishProvider({
           terminal: true,
           ok: false,
@@ -198,6 +230,7 @@ function superviseProviderProcess({
       }
 
       if (signal) {
+        flushDiagnostics(false);
         finishProvider({
           terminal: true,
           ok: false,
@@ -217,30 +250,28 @@ function superviseProviderProcess({
         if (canRetry) {
           finishProvider({ terminal: false });
           if (!lifecycle.terminal) {
-            console.error(
-              `${command} ${args.join(" ")} exited with code ${code}; retrying ${attempt}/${retries}.`
-            );
+            console.error(`${command} exited with code ${code}; retrying ${attempt}/${retries}.`);
             startAttempt();
             return;
           }
         }
 
-        console.error(`\n${command} ${args.join(" ")} exited with code ${code}`);
-        if (stderrTail.trim()) {
-          console.error(`Recent stderr:\n${stderrTail.trim()}`);
-        }
+        const diagnostics = flushDiagnostics(false);
+        const primary = diagnostics.find((event) => event.affectsRun || event.severity === "error");
+        console.error(`\n${command} exited with code ${code}`);
         finishProvider({
           terminal: true,
           ok: false,
           exitCode: code,
           signal: null,
-          error: stderrTail.trim() || `${command} exited with code ${code}.`,
+          error: primary?.message || stderrTail.trim() || `${command} exited with code ${code}.`,
         });
         process.exitCode = code;
         return;
       }
 
       if (timedOut) {
+        flushDiagnostics(false);
         finishProvider({
           terminal: true,
           ok: false,
@@ -251,6 +282,7 @@ function superviseProviderProcess({
         return;
       }
 
+      flushDiagnostics(true);
       finishProvider({ terminal: true, ok: true, exitCode: 0, signal: null });
     });
 

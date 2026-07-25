@@ -58,6 +58,24 @@ test("diagnostic and optional fields validate", () => {
   });
   assert.doesNotThrow(() => assertCanonicalEvent(diag));
 
+  const classified = makeEvent("diagnostic", {
+    agent: "codex",
+    invocationId: "i",
+    code: "model_refresh",
+    severity: "warning",
+    visibility: "details",
+    fingerprint: "codex:model-refresh",
+    count: 2,
+    affectsRun: false,
+    retryable: true,
+    providerRaw: { text: "raw warning" },
+  });
+  assert.doesNotThrow(() => assertCanonicalEvent(classified));
+  assert.throws(
+    () => assertCanonicalEvent({ ...classified, severity: "fatal" }),
+    /diagnostic\.severity/
+  );
+
   const started = makeEvent("run.started", {
     agent: "codex",
     invocationId: "i",

@@ -39,6 +39,9 @@ function assertProviderAdapter(adapter) {
       `Provider adapter "${adapter.id}" must declare allowedProviderOptions as an array.`
     );
   }
+  if (adapter.classifyStderr !== undefined && typeof adapter.classifyStderr !== "function") {
+    throw new Error(`Provider adapter "${adapter.id}" classifyStderr must be a function.`);
+  }
   return adapter;
 }
 
@@ -168,6 +171,13 @@ function createProviderRuntime(config, options = {}) {
       typeof runtime.parseStdoutLine === "function"
         ? runtime.parseStdoutLine.bind(runtime)
         : undefined,
+    classifyStderr:
+      typeof adapter.classifyStderr === "function"
+        ? adapter.classifyStderr.bind(adapter)
+        : undefined,
+    acceptDiagnostics(events, context) {
+      return validateEvents(events, context);
+    },
     transform(event, context) {
       if (lifecycle.terminal) return [];
       const sessionId =
