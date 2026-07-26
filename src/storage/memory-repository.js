@@ -34,6 +34,10 @@ function createMemoryRepository(db) {
     WHERE owner_thread_id = ? OR origin_thread_id = ?
     ORDER BY created_at ASC
   `);
+  const listAll = db.prepare(`
+    SELECT * FROM memory_entries
+    ORDER BY created_at ASC, id ASC
+  `);
   const listActiveByThreadSupersession = db.prepare(`
     SELECT * FROM memory_entries
     WHERE scope = 'thread' AND owner_thread_id = ? AND supersession_key = ?
@@ -125,7 +129,9 @@ function createMemoryRepository(db) {
       return db.transaction(() => {
         const scope = input.scope === "project" ? "project" : "thread";
         const ownerThreadId =
-          scope === "thread" ? requiredString(input.ownerThreadId || input.threadId, "owner thread id") : null;
+          scope === "thread"
+            ? requiredString(input.ownerThreadId || input.threadId, "owner thread id")
+            : null;
         const projectKey =
           scope === "project" ? requiredString(input.projectKey, "project key") : null;
         insert.run({
@@ -265,9 +271,7 @@ function createMemoryRepository(db) {
 
     setSupersededBy(ids, newId) {
       if (!Array.isArray(ids) || !newId) return;
-      const stmt = db.prepare(
-        "UPDATE memory_entries SET superseded_by = ? WHERE id = ?"
-      );
+      const stmt = db.prepare("UPDATE memory_entries SET superseded_by = ? WHERE id = ?");
       for (const id of ids) {
         stmt.run(newId, id);
         indexMemorySearch(this.get(id));
@@ -351,6 +355,17 @@ function createMemoryRepository(db) {
         for (const row of rows) {
           indexMemorySearch(mapMemory(row));
         }
+        return { memories: rows.length };
+      })();
+    },
+
+    /** Rebuild the complete memory_search projection from memory_entries. */
+    rebuildAllSearch() {
+      return db.transaction(() => {
+        db.prepare("DELETE FROM memory_search").run();
+        const rows = listAll.all();
+        for (const row of rows) indexMemorySearch(mapMemory(row));
+        db.exec(`INSERT INTO memory_search_fts(memory_search_fts) VALUES('rebuild')`);
         return { memories: rows.length };
       })();
     },

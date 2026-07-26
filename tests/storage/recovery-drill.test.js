@@ -55,6 +55,8 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
     assert.equal(report.mismatches.length, 0);
     assert.equal(report.integrity.ok, true);
     assert.equal(report.audit.ok, true);
+    assert.equal(report.rebuilt.threads, 1);
+    assert.equal(report.rebuilt.digests, 1);
     assert.equal(report.restored.counts.threads, 1);
     assert.equal(report.restored.counts.messages, 1);
     assert.equal(report.restored.counts.invocations, 1);

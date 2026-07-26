@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { checkpointMemoryDatabase } = require("./database");
+const { buildHeuristicDigest } = require("./memory-digest");
 
 /**
  * Storage maintenance helpers for backup, integrity, and recall rebuilds.
@@ -89,6 +90,49 @@ function rebuildFts(storage) {
   return storage.recall.rebuildFts();
 }
 
+function rebuildDerivedModels(storage) {
+  if (!storage?.db?.open || !storage.recall || !storage.memories || !storage.digests) {
+    throw new Error("Open storage with recall, memory, and digest repositories is required.");
+  }
+  const threadIds = storage.db
+    .prepare("SELECT id FROM threads ORDER BY created_at, id")
+    .all()
+    .map((row) => row.id);
+
+  return storage.transaction(() => {
+    storage.db.prepare("DELETE FROM recall_items").run();
+    const recall = [];
+    for (const threadId of threadIds) {
+      recall.push({ threadId, ...storage.recall.rebuildThread(threadId) });
+    }
+    const recallFts = storage.recall.rebuildFts();
+    const memorySearch = storage.memories.rebuildAllSearch();
+
+    storage.db.prepare("DELETE FROM thread_digests").run();
+    let digests = 0;
+    for (const threadId of threadIds) {
+      const built = buildHeuristicDigest({ storage, threadId });
+      storage.digests.upsert({
+        threadId,
+        summary: built.summary,
+        topics: built.topics,
+        durableCandidates: built.durableCandidates,
+        messageCount: built.messageCount,
+        source: built.source,
+      });
+      digests += 1;
+    }
+
+    return {
+      threads: threadIds.length,
+      recall,
+      recallFts,
+      memorySearch,
+      digests,
+    };
+  });
+}
+
 module.exports = {
   integrityCheck,
   checkpoint,
@@ -96,4 +140,5 @@ module.exports = {
   rebuildThreadRecall,
   rebuildAllRecall,
   rebuildFts,
+  rebuildDerivedModels,
 };

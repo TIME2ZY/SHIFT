@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createStorage } = require("./index");
 const { auditSqliteStorage } = require("./audit-storage");
-const { backupDatabase, integrityCheck } = require("./maintenance");
+const { backupDatabase, integrityCheck, rebuildDerivedModels } = require("./maintenance");
 
 const SOURCE_TABLES = Object.freeze([
   "threads",
@@ -43,6 +43,7 @@ async function runSqliteRecoveryDrill({ sourceFile, drillDir, fullIntegrity = tr
   try {
     const restoredSnapshot = snapshot(restoredStorage);
     const integrity = integrityCheck(restoredStorage.db, { full: fullIntegrity });
+    const rebuilt = rebuildDerivedModels(restoredStorage);
     const audit = auditSqliteStorage({
       storage: restoredStorage,
       fullIntegrity,
@@ -62,6 +63,7 @@ async function runSqliteRecoveryDrill({ sourceFile, drillDir, fullIntegrity = tr
       restored: restoredSnapshot,
       mismatches,
       integrity,
+      rebuilt,
       audit: {
         ok: audit.ok,
         summary: audit.summary,
