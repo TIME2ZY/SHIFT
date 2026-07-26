@@ -293,7 +293,7 @@ SQLite transaction
   └─ insert outbox row
         ↓ COMMIT
 outbox flusher
-  ├─ append canonical JSONL
+  ├─ append canonical JSONL to an epoch-safe audit directory
   └─ mark delivered / record retry
 ```
 
@@ -308,7 +308,9 @@ outbox flusher
 - 禁止“先写两边，再用 try/catch 假装原子成功”。
 
 Outbox 的 SQLite 入队、幂等 JSONL flusher、重试、产品 API/UI health 和 delivered row
-保留清理已实现。现有 `dual` 写入仍仅被视为切换验证机制。
+保留清理已实现。SQLite canonical archive 使用独立的
+`audit-transcripts/<epoch-id>/`，不得与 legacy `transcripts/` 共用清理边界。现有
+`dual` 写入仍仅被视为切换验证机制。
 
 ## 11. 读取、恢复和重建
 
@@ -364,6 +366,10 @@ version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢�
 6. CI 和本机验证所需的 legacy 场景已转换为最小化、脱敏 fixture；
 7. 已生成清理清单，列出路径、数据范围、cutover time 和不可恢复性。
 
+清理工具必须从权威 `shift.sqlite` 读取 clean epoch/cutover，同时将 legacy
+`memory.sqlite` 作为独立候选。若 legacy transcript 目录中检测到 post-cutover canonical
+event，或任何候选路径与权威数据库/canonical audit 目录重叠，必须拒绝生成清理清单。
+
 满足门槛后，可以直接永久删除旧 `sessions.json`、旧 transcript、旧 provider session map
 及其旧投影，无需先导入 SQLite。清理操作必须是独立、显式的变更，不得夹带在 schema
 migration 或服务启动逻辑中。最终只保留脱敏 fixture、差异审计摘要和清理记录，不保留
@@ -384,12 +390,15 @@ Transcript 是否开启是独立维度，不应继续由 storage mode 隐式决�
 ```text
 SHIFT_STORAGE_MODE=sqlite
 SHIFT_AUDIT_TRANSCRIPT=on
+SHIFT_AUDIT_TRANSCRIPT_DIR=data/runtime/audit-transcripts
 SHIFT_RAW_EVENT_LOG=off
 ```
 
 `SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
 outbox row，health 显示 `disabled`，不会形成无法投递的假积压。`files/dual` 在退出产品
 模式前仍依赖 legacy transcript，其兼容写入不受该审计开关控制。
+`SHIFT_AUDIT_TRANSCRIPT_DIR` 只承载 post-cutover canonical archive；不得指向 legacy
+`SHIFT_TRANSCRIPT_DIR`。
 
 `dual` 退出条件：
 
@@ -430,7 +439,8 @@ session/transcript；SQLite 读取失败会显式失败或返回 `unavailable`�
 同样禁止在 `sqlite` 模式扫描旧 transcript。
 SQLite canonical events 已与权威事件在同一事务写入 outbox；后台 flusher 使用稳定 event
 ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。outbox health 已暴露到
-产品 API/UI，delivered rows 具备有界保留清理策略。`dual` 的 session 和 invocation
+产品 API/UI，delivered rows 具备有界保留清理策略，canonical archive 已与 legacy
+transcript 物理分离。`dual` 的 session 和 invocation
 在线读取以 legacy 文件为权威且不再按完整度仲裁；SQLite 搜索投影有独立、明确的 owner。
 
 这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大

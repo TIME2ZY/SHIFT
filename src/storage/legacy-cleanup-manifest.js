@@ -1,9 +1,36 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
+const { pathsOverlap } = require("../shared/runtime-paths");
 
 function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = {}) {
+  assertCleanActiveEpoch(epoch);
   const at = validTimestamp(generatedAt) || new Date().toISOString();
+  const authoritativeDbFile = requiredPath(
+    paths.authoritativeDbFile,
+    "authoritative database"
+  );
+  const auditTranscriptDir = optionalPath(paths.auditTranscriptDir);
+  const protectedPaths = [
+    {
+      id: "authoritative-db",
+      path: authoritativeDbFile,
+      description: "active SQLite business truth source",
+    },
+    ...(auditTranscriptDir
+      ? [
+          {
+            id: "canonical-audit",
+            path: auditTranscriptDir,
+            description: "post-cutover canonical JSONL archive",
+          },
+        ]
+      : []),
+  ];
+
+  assertTargetIsSeparated(paths.transcriptDir, auditTranscriptDir, "legacy transcripts");
+  assertLegacyTranscriptOnly(paths.transcriptDir);
+
   const targets = [
     target("sessions", paths.sessionsFile, "legacy session/message JSON"),
     target("invocations", paths.invocationsFile, "legacy invocation registry"),
@@ -11,25 +38,30 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
     target("session-maps", paths.sessionMapRoot, "legacy provider resume mappings"),
   ].filter(Boolean);
 
-  if (["legacy-validation", "pre-epoch-legacy"].includes(epoch?.dataPolicy)) {
-    const database = target(
-      "legacy-validation-db",
-      paths.memoryDbFile,
-      "pre-cutover SQLite validation database"
-    );
-    if (database) targets.push(database);
-    const wal = target(
-      "legacy-validation-db-wal",
-      paths.memoryDbFile ? `${paths.memoryDbFile}-wal` : "",
-      "pre-cutover SQLite write-ahead log"
-    );
-    if (wal) targets.push(wal);
-    const shm = target(
-      "legacy-validation-db-shm",
-      paths.memoryDbFile ? `${paths.memoryDbFile}-shm` : "",
-      "pre-cutover SQLite shared-memory sidecar"
-    );
-    if (shm) targets.push(shm);
+  const legacyDbFile = optionalPath(paths.legacyDbFile);
+  const database = target(
+    "legacy-validation-db",
+    legacyDbFile,
+    "pre-cutover SQLite validation database"
+  );
+  if (database) targets.push(database);
+  const wal = target(
+    "legacy-validation-db-wal",
+    legacyDbFile ? `${legacyDbFile}-wal` : "",
+    "pre-cutover SQLite write-ahead log"
+  );
+  if (wal) targets.push(wal);
+  const shm = target(
+    "legacy-validation-db-shm",
+    legacyDbFile ? `${legacyDbFile}-shm` : "",
+    "pre-cutover SQLite shared-memory sidecar"
+  );
+  if (shm) targets.push(shm);
+
+  for (const item of targets) {
+    for (const protectedItem of protectedPaths) {
+      assertPathsDoNotOverlap(item.path, protectedItem.path, item.id, protectedItem.id);
+    }
   }
 
   return {
@@ -50,6 +82,7 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
     dataRange: epoch?.cutoverTime
       ? { before: epoch.cutoverTime, inclusive: false }
       : { policy: "all pre-cutover legacy data" },
+    protectedPaths,
     recoverability:
       "Permanent deletion is not recoverable unless a separately retained SQLite backup exists.",
     prerequisites: [
@@ -72,6 +105,101 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
       { targets: 0, existing: 0, files: 0, bytes: 0 }
     ),
   };
+}
+
+function assertCleanActiveEpoch(epoch) {
+  if (
+    !epoch ||
+    epoch.dataPolicy !== "clean" ||
+    !epoch.isActive ||
+    !validTimestamp(epoch.cutoverTime)
+  ) {
+    throw new Error(
+      "Cleanup planning requires an active clean authoritative epoch with a cutover time."
+    );
+  }
+}
+
+function requiredPath(value, label) {
+  const resolved = optionalPath(value);
+  if (!resolved) throw new Error(`${label} path is required.`);
+  return resolved;
+}
+
+function optionalPath(value) {
+  return typeof value === "string" && value.trim() ? path.resolve(value) : "";
+}
+
+function assertTargetIsSeparated(targetPath, protectedPath, label) {
+  if (!targetPath || !protectedPath) return;
+  assertPathsDoNotOverlap(targetPath, protectedPath, label, "canonical-audit");
+}
+
+function assertPathsDoNotOverlap(left, right, leftLabel, rightLabel) {
+  const leftPath = path.resolve(left);
+  const rightPath = path.resolve(right);
+  if (!pathsOverlap(leftPath, rightPath)) return;
+  throw new Error(
+    `Cleanup target ${leftLabel} overlaps protected ${rightLabel}: ${leftPath} <> ${rightPath}`
+  );
+}
+
+function assertLegacyTranscriptOnly(transcriptDir) {
+  const resolved = optionalPath(transcriptDir);
+  if (!resolved || !fs.existsSync(resolved)) return;
+  const canonicalFile = findCanonicalAuditFile(resolved);
+  if (!canonicalFile) return;
+  throw new Error(
+    `Legacy transcript cleanup is blocked: canonical audit events were found in ${canonicalFile}. ` +
+      "Move or explicitly retire the mixed archive before deletion."
+  );
+}
+
+function findCanonicalAuditFile(root) {
+  const stats = fs.lstatSync(root);
+  if (!stats.isDirectory()) {
+    return fileContainsCanonicalAudit(root) ? root : "";
+  }
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const child = path.join(directory, entry.name);
+      if (entry.isDirectory()) pending.push(child);
+      else if (entry.isFile() && fileContainsCanonicalAudit(child)) return child;
+    }
+  }
+  return "";
+}
+
+function fileContainsCanonicalAudit(file) {
+  if (path.extname(file).toLowerCase() !== ".jsonl") return false;
+  const descriptor = fs.openSync(file, "r");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let pending = "";
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, null);
+      const lines = (pending + buffer.toString("utf8", 0, bytesRead)).split(/\r?\n/);
+      pending = lines.pop() || "";
+      if (lines.some(lineIsCanonicalAudit)) return true;
+    } while (bytesRead > 0);
+    return lineIsCanonicalAudit(pending);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function lineIsCanonicalAudit(line) {
+  if (!line.trim()) return false;
+  try {
+    const parsed = JSON.parse(line);
+    return typeof parsed?.eventId === "string" && Boolean(parsed.eventId);
+  } catch {
+    return false;
+  }
 }
 
 function target(id, value, description) {
@@ -179,6 +307,8 @@ function readEpochMetadata(databaseFile) {
 
 module.exports = {
   buildLegacyCleanupManifest,
+  findCanonicalAuditFile,
   inspectPath,
+  pathsOverlap,
   readEpochMetadata,
 };

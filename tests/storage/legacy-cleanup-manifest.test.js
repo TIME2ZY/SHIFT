@@ -22,18 +22,20 @@ test("legacy cleanup manifest is read-only and inventories explicit targets", ()
     const manifest = buildLegacyCleanupManifest({
       generatedAt: "2026-07-26T00:00:00.000Z",
       epoch: {
-        epochId: "legacy-1",
+        epochId: "clean-1",
         schemaVersion: 13,
-        dataPolicy: "legacy-validation",
-        cutoverTime: null,
-        isActive: false,
+        dataPolicy: "clean",
+        cutoverTime: "2026-07-25T00:00:00.000Z",
+        isActive: true,
       },
       paths: {
+        authoritativeDbFile: path.join(root, "shift.sqlite"),
         sessionsFile,
         invocationsFile: path.join(root, "invocations.json"),
         transcriptDir,
+        auditTranscriptDir: path.join(root, "audit-transcripts"),
         sessionMapRoot: path.join(root, "session-maps"),
-        memoryDbFile: path.join(root, "memory.sqlite"),
+        legacyDbFile: path.join(root, "memory.sqlite"),
       },
     });
 
@@ -45,6 +47,7 @@ test("legacy cleanup manifest is read-only and inventories explicit targets", ()
     assert.equal(manifest.totals.files, 2);
     assert.ok(manifest.totals.bytes > 0);
     assert.ok(manifest.targets.every((item) => item.deletePolicy === "explicit-post-cutover-only"));
+    assert.equal(manifest.protectedPaths[0].id, "authoritative-db");
     assert.equal(fs.existsSync(sessionsFile), true);
     assert.equal(fs.existsSync(transcriptDir), true);
   } finally {
@@ -62,18 +65,102 @@ test("clean epoch manifest never schedules the authoritative database for deleti
       isActive: true,
     },
     paths: {
+      authoritativeDbFile: "shift.sqlite",
       sessionsFile: "sessions.json",
-      memoryDbFile: "memory.sqlite",
+      legacyDbFile: "memory.sqlite",
     },
   });
   assert.equal(
-    manifest.targets.some((item) => item.id === "legacy-validation-db"),
+    manifest.targets.some(
+      (item) =>
+        item.id === "legacy-validation-db" &&
+        item.path === path.resolve("memory.sqlite")
+    ),
+    true
+  );
+  assert.equal(
+    manifest.targets.some((item) => item.path === path.resolve("shift.sqlite")),
     false
   );
   assert.deepEqual(manifest.dataRange, {
     before: "2026-07-26T00:00:00.000Z",
     inclusive: false,
   });
+});
+
+test("cleanup manifest rejects the authoritative database as a legacy target", () => {
+  const databaseFile = path.resolve("shift.sqlite");
+  assert.throws(
+    () =>
+      buildLegacyCleanupManifest({
+        epoch: {
+          epochId: "epoch-1",
+          schemaVersion: 13,
+          dataPolicy: "clean",
+          cutoverTime: "2026-07-26T00:00:00.000Z",
+          isActive: true,
+        },
+        paths: {
+          authoritativeDbFile: databaseFile,
+          legacyDbFile: databaseFile,
+        },
+      }),
+    /overlaps protected authoritative-db/
+  );
+});
+
+test("cleanup manifest rejects overlapping audit and legacy transcript directories", () => {
+  const transcriptDir = path.resolve("transcripts");
+  assert.throws(
+    () =>
+      buildLegacyCleanupManifest({
+        epoch: {
+          epochId: "epoch-1",
+          schemaVersion: 13,
+          dataPolicy: "clean",
+          cutoverTime: "2026-07-26T00:00:00.000Z",
+          isActive: true,
+        },
+        paths: {
+          authoritativeDbFile: path.resolve("shift.sqlite"),
+          transcriptDir,
+          auditTranscriptDir: transcriptDir,
+        },
+      }),
+    /overlaps protected canonical-audit/
+  );
+});
+
+test("cleanup manifest blocks a legacy transcript directory containing canonical audit events", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-mixed-"));
+  const transcriptDir = path.join(root, "transcripts");
+  fs.mkdirSync(transcriptDir);
+  fs.writeFileSync(
+    path.join(transcriptDir, "mixed.jsonl"),
+    `${JSON.stringify({ eventId: "evt-1", kind: "text.delta" })}\n`
+  );
+  try {
+    assert.throws(
+      () =>
+        buildLegacyCleanupManifest({
+          epoch: {
+            epochId: "epoch-1",
+            schemaVersion: 13,
+            dataPolicy: "clean",
+            cutoverTime: "2026-07-26T00:00:00.000Z",
+            isActive: true,
+          },
+          paths: {
+            authoritativeDbFile: path.join(root, "shift.sqlite"),
+            transcriptDir,
+            auditTranscriptDir: path.join(root, "audit-transcripts"),
+          },
+        }),
+      /canonical audit events were found/
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("epoch inspection opens SQLite read-only without changing the database", () => {

@@ -92,6 +92,33 @@ function worktreeManager() {
   };
 }
 
+test("sqlite server rejects overlapping legacy and canonical transcript roots", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-audit-boundary-"));
+  const databaseFile = path.join(tmpDir, "shift.sqlite");
+  const transcriptDir = path.join(tmpDir, "transcripts");
+  const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  prepareCleanEpoch({ file: databaseFile });
+  process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
+  try {
+    assert.throws(
+      () =>
+        createServer({
+          storageMode: "sqlite",
+          memoryDbFile: databaseFile,
+          sessionsFile: path.join(tmpDir, "sessions.json"),
+          auditTranscriptDir: transcriptDir,
+          worktreeManager: worktreeManager(),
+          uiToken: UI_TOKEN,
+        }),
+      /must not overlap legacy transcripts/
+    );
+  } finally {
+    if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("chat keeps file reads while mirroring durable records into SQLite", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dual-write-server-"));
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;

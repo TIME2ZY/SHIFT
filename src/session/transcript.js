@@ -26,21 +26,29 @@ function sanitizeId(id) {
   return isValidOpaqueId(id) ? id : "_invalid";
 }
 
-function getInvocationPath(sessionId, invocationId) {
+function getInvocationPathAt(rootDir, sessionId, invocationId) {
   return resolveInside(
-    getTranscriptDir(),
+    rootDir,
     sanitizeId(sessionId),
     "invocations",
     `${sanitizeId(invocationId)}.jsonl`
   );
 }
 
+function getInvocationPath(sessionId, invocationId) {
+  return getInvocationPathAt(getTranscriptDir(), sessionId, invocationId);
+}
+
 function getSessionDir(sessionId) {
   return resolveInside(getTranscriptDir(), sanitizeId(sessionId));
 }
 
+function sessionDeleteKeyAt(rootDir, sessionId) {
+  return `${path.resolve(rootDir)}\0${sanitizeId(sessionId)}`;
+}
+
 function sessionDeleteKey(sessionId) {
-  return `${path.resolve(getTranscriptDir())}\0${sanitizeId(sessionId)}`;
+  return sessionDeleteKeyAt(getTranscriptDir(), sessionId);
 }
 
 function deleteSessionData(sessionId) {
@@ -210,7 +218,7 @@ function appendEvent(sessionId, invocationId, kind, payload) {
   enqueueWrite(sessionId, filePath, line + "\n");
 }
 
-function appendCanonicalEvent(event) {
+function appendCanonicalEventAt(rootDir, event, { respectDeleted = false } = {}) {
   if (
     !event?.id ||
     !isValidOpaqueId(event.threadId) ||
@@ -226,10 +234,12 @@ function appendCanonicalEvent(event) {
     kind: event.kind,
     payload: event.payload || {},
   });
-  const filePath = getInvocationPath(event.threadId, event.invocationId);
-  const key = sessionDeleteKey(event.threadId);
+  const filePath = getInvocationPathAt(rootDir, event.threadId, event.invocationId);
+  const key = sessionDeleteKeyAt(rootDir, event.threadId);
   return enqueueStrictTask(async () => {
-    if (deletedSessions.has(key)) throw new Error("Transcript session was deleted.");
+    if (respectDeleted && deletedSessions.has(key)) {
+      throw new Error("Transcript session was deleted.");
+    }
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
     let knownIds = canonicalIdsByFile.get(filePath);
     if (!knownIds) {
@@ -252,6 +262,23 @@ function appendCanonicalEvent(event) {
     await fs.promises.appendFile(filePath, line + "\n", "utf8");
     knownIds.add(event.id);
   });
+}
+
+function appendCanonicalEvent(event) {
+  return appendCanonicalEventAt(getTranscriptDir(), event, { respectDeleted: true });
+}
+
+function createCanonicalTranscriptSink(rootDir) {
+  if (typeof rootDir !== "string" || !rootDir.trim()) {
+    throw new Error("Canonical transcript directory is required.");
+  }
+  const resolvedRoot = path.resolve(rootDir);
+  return {
+    rootDir: resolvedRoot,
+    appendCanonicalEvent(event) {
+      return appendCanonicalEventAt(resolvedRoot, event);
+    },
+  };
 }
 
 async function flush() {
@@ -410,6 +437,7 @@ async function getInvocationStats(sessionId) {
 module.exports = {
   appendEvent,
   appendCanonicalEvent,
+  createCanonicalTranscriptSink,
   deleteSessionData,
   readInvocation,
   readInvocationPage,

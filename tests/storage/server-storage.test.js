@@ -86,6 +86,79 @@ test("sqlite audit transcript switch disables outbox archive independently", () 
   }
 });
 
+test("sqlite outbox writes canonical events only to the dedicated audit sink", async () => {
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  storage.threads.create({ id: "thread-1" });
+  const window = storage.windows.create({
+    id: "window-1",
+    threadId: "thread-1",
+    agentId: "codex",
+    providerKey: "codex",
+    workspaceKey: "base",
+    generation: 1,
+    capacityTokens: 1000,
+  });
+  storage.invocations.start({
+    id: "invocation-1",
+    threadId: "thread-1",
+    windowId: window.id,
+    agentId: "codex",
+  });
+  storage.outbox.enqueue({
+    threadId: "thread-1",
+    invocationId: "invocation-1",
+    sequenceNo: 0,
+    kind: "text.delta",
+    payload: { text: "canonical" },
+    createdAt: new Date().toISOString(),
+  });
+  const legacyWrites = [];
+  const auditWrites = [];
+  const context = createServerStorage({
+    storageMode: "sqlite",
+    storage,
+    transcript: {
+      appendCanonicalEvent(event) {
+        legacyWrites.push(event.id);
+      },
+    },
+    auditTranscriptSink: {
+      appendCanonicalEvent(event) {
+        auditWrites.push(event.id);
+      },
+    },
+  });
+  try {
+    await context.outboxFlusher.flushOnce();
+    assert.deepEqual(legacyWrites, []);
+    assert.equal(auditWrites.length, 1);
+  } finally {
+    context.close();
+    storage.close();
+  }
+});
+
+test("sqlite canonical archive is namespaced by the active storage epoch", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-audit-epoch-"));
+  const databaseFile = path.join(root, "shift.sqlite");
+  const auditRoot = path.join(root, "audit-transcripts");
+  prepareCleanEpoch({ file: databaseFile });
+  const context = createServerStorage({
+    storageMode: "sqlite",
+    memoryDbFile: databaseFile,
+    auditTranscriptDir: auditRoot,
+    outboxIntervalMs: 60_000,
+  });
+  try {
+    const epoch = context.storage.metadata.getCurrent();
+    assert.equal(context.auditTranscriptDir, path.join(auditRoot, epoch.epochId));
+  } finally {
+    context.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("disabling new audit writes still drains previously committed outbox rows", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();

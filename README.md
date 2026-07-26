@@ -91,7 +91,8 @@ npm start
 
 - 界面与 Node 服务都在本机，默认监听 `127.0.0.1:8787`
 - Agent 以本机子进程启动，沿用各自 CLI 的登录与配置
-- 会话、transcript、SQLite 记忆写在 **`data/runtime/`**（已 gitignore）
+- SQLite 业务数据与 canonical audit 写在 **`data/runtime/`**（已 gitignore）；legacy
+  transcript 与新 `audit-transcripts/<epoch-id>/` 物理分离
 - 「改代码」走会话级 worktree；讨论模式默认不写主工作区
 
 ---
@@ -130,6 +131,9 @@ Copy-Item .env.example .env
 | `npm run check`                    | 语法检查                          |
 | `npm run lint`                     | ESLint                            |
 | `npm run format:check`             | 格式检查                          |
+| `npm run audit:storage`            | 审计权威 SQLite 完整性            |
+| `npm run drill:storage:recovery`   | 在空目录演练 SQLite 备份恢复      |
+| `npm run plan:storage:cleanup`     | 只读生成 legacy 清理清单          |
 | `npm run audit:storage:divergence` | 只读比较 legacy 验证语料与 SQLite |
 
 <details>
@@ -138,7 +142,7 @@ Copy-Item .env.example .env
 ```text
 Browser UI ── HTTP / SSE ──► Node.js service ── spawn ──► Local Agent CLIs
                                   │
-                                  ├── data/runtime (sessions / transcript / SQLite)
+                                  ├── data/runtime (SQLite / audit-transcripts / legacy data)
                                   ├── skills / identities / handoff
                                   └── git worktree (optional)
 ```

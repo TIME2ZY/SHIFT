@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { loadProjectEnv } = require("../shared/load-env");
+const { ENV } = require("../shared/brand");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
 const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
@@ -39,6 +40,8 @@ const {
   DEFAULT_SESSIONS_FILE,
   DEFAULT_INVOCATIONS_FILE,
   DEFAULT_SESSION_MAP_ROOT,
+  DEFAULT_TRANSCRIPT_DIR,
+  DEFAULT_AUDIT_TRANSCRIPT_DIR,
   DEFAULT_WORKTREE_STATE_FILE,
 } = runtimePaths;
 
@@ -138,7 +141,31 @@ function createServer(options = {}) {
   const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
   const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
   const logger = options.logger || console;
-  const storageContext = createServerStorage({ ...options, transcript }, sessionsFile, logger);
+  const auditTranscriptDir = path.resolve(
+    options.auditTranscriptDir ||
+      process.env[ENV.AUDIT_TRANSCRIPT_DIR] ||
+      (options.sessionsFile
+        ? path.join(path.dirname(sessionsFile), "audit-transcripts")
+        : DEFAULT_AUDIT_TRANSCRIPT_DIR)
+  );
+  const legacyTranscriptDir = path.resolve(
+    process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR
+  );
+  const storageMode = options.storageMode || process.env[ENV.STORAGE_MODE] || "sqlite";
+  if (
+    storageMode === "sqlite" &&
+    runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)
+  ) {
+    throw new Error(
+      `SQLite canonical audit directory must not overlap legacy transcripts: ` +
+        `${auditTranscriptDir} <> ${legacyTranscriptDir}`
+    );
+  }
+  const storageContext = createServerStorage(
+    { ...options, transcript, auditTranscriptDir },
+    sessionsFile,
+    logger
+  );
   const durableRecorder = storageContext.recorder;
   const eventStore = storageContext.eventStore;
   const sqliteSessionService = storageContext.sessionService;

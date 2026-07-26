@@ -67,6 +67,50 @@ test(
   })
 );
 
+test("canonical transcript sink writes outside the legacy transcript directory", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "canonical-transcript-test-"));
+  const legacyDir = path.join(root, "transcripts");
+  const auditDir = path.join(root, "audit-transcripts");
+  transcript.setTranscriptDir(legacyDir);
+  try {
+    const sink = transcript.createCanonicalTranscriptSink(auditDir);
+    await sink.appendCanonicalEvent({
+      id: "evt-audit-1",
+      threadId: "s1",
+      invocationId: "i1",
+      sequenceNo: 0,
+      kind: "text.delta",
+      payload: { text: "canonical" },
+      createdAt: "2026-07-26T04:00:00.000Z",
+    });
+    await transcript.flush();
+
+    assert.equal(fs.existsSync(legacyDir), false);
+    assert.equal(
+      fs.existsSync(path.join(auditDir, "s1", "invocations", "i1.jsonl")),
+      true
+    );
+    await transcript.deleteSessionData("s1");
+    await sink.appendCanonicalEvent({
+      id: "evt-audit-2",
+      threadId: "s1",
+      invocationId: "i1",
+      sequenceNo: 1,
+      kind: "thread-deleted",
+      payload: {},
+      createdAt: "2026-07-26T04:01:00.000Z",
+    });
+    const archived = fs
+      .readFileSync(path.join(auditDir, "s1", "invocations", "i1.jsonl"), "utf8")
+      .trim()
+      .split(/\r?\n/);
+    assert.equal(archived.length, 2);
+  } finally {
+    transcript.setTranscriptDir("");
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test(
   "appendEvent ignores invalid arguments (no throw, no file created)",
   withTempDir(async (tmpDir) => {

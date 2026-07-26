@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { createCanonicalTranscriptSink } = require("../session/transcript");
 const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/runtime-paths");
 const { ENV } = require("../shared/brand");
 const { createDualWriteRecorder } = require("./dual-write-recorder");
@@ -68,13 +69,14 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   if (mode === "sqlite" && !storage) {
     throw new Error("SHIFT_STORAGE_MODE=sqlite requires a working database.");
   }
+  let activeEpoch = null;
   if (mode === "sqlite") {
     try {
-      const epoch = storage.metadata.getCurrent();
-      if (!epoch.isClean || !epoch.isActive) {
+      activeEpoch = storage.metadata.getCurrent();
+      if (!activeEpoch.isClean || !activeEpoch.isActive) {
         throw new Error(
-          `database epoch ${epoch.epochId} is not an active clean epoch ` +
-            `(policy=${epoch.dataPolicy}, cutover=${epoch.cutoverTime || "missing"})`
+          `database epoch ${activeEpoch.epochId} is not an active clean epoch ` +
+            `(policy=${activeEpoch.dataPolicy}, cutover=${activeEpoch.cutoverTime || "missing"})`
         );
       }
     } catch (error) {
@@ -95,14 +97,24 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   const recorder = createDualWriteRecorder({ storage, eventStore, logger });
   const sessionService = storage ? createSqliteSessionService({ storage, logger }) : null;
   const pendingOutboxAtStart = Number(storage?.outbox?.health?.().pending || 0);
+  const auditTranscriptSink =
+    options.auditTranscriptSink ||
+    (mode === "sqlite" && options.auditTranscriptDir
+      ? createCanonicalTranscriptSink(
+          path.join(
+            path.resolve(options.auditTranscriptDir),
+            safeEpochDirectory(activeEpoch?.epochId)
+          )
+        )
+      : options.transcript || null);
   const outboxFlusher =
     mode === "sqlite" &&
     (auditTranscript || pendingOutboxAtStart > 0) &&
     storage?.outbox &&
-    options.transcript?.appendCanonicalEvent
+    auditTranscriptSink?.appendCanonicalEvent
       ? createOutboxFlusher({
           outbox: storage.outbox,
-          transcript: options.transcript,
+          transcript: auditTranscriptSink,
           logger,
           intervalMs: options.outboxIntervalMs,
           retentionDays: options.outboxRetentionDays,
@@ -115,6 +127,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   return {
     mode,
     auditTranscript: mode === "sqlite" && auditTranscript,
+    auditTranscriptDir: auditTranscriptSink?.rootDir || null,
     storage,
     recorder,
     eventStore,
@@ -169,6 +182,14 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   };
 }
 
+function safeEpochDirectory(epochId) {
+  const value = String(epochId || "").trim();
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new Error(`Unsafe storage epoch id for audit archive: ${value || "(missing)"}`);
+  }
+  return value;
+}
+
 function resolveBoolean(explicit, envValue, fallback) {
   if (typeof explicit === "boolean") return explicit;
   const normalized = String(envValue || "")
@@ -179,4 +200,4 @@ function resolveBoolean(explicit, envValue, fallback) {
   return fallback;
 }
 
-module.exports = { createServerStorage, resolveBoolean };
+module.exports = { createServerStorage, resolveBoolean, safeEpochDirectory };
