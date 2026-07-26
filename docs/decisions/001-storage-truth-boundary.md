@@ -14,7 +14,7 @@ related:
 
 ## 1. 状态
 
-**Accepted — SQLite cutover active; legacy cleanup pending**
+**Accepted — SQLite cutover active; legacy runtime cleanup completed**
 
 本 ADR 冻结 SHIFT 的目标存储边界。当前代码仍保留 `files / dual / sqlite` 兼容模式，默认
 已切换为 `sqlite`；`dual` 仅用于显式验证，不再是产品默认。实现 PR 必须显式说明它推进了哪一条
@@ -393,11 +393,13 @@ event，或任何候选路径与权威数据库/canonical audit 目录重叠，�
 migration 或服务启动逻辑中。最终只保留脱敏 fixture、差异审计摘要和清理记录，不保留
 真实历史业务内容。
 
-第五阶段 D 的清理准备已于 2026-07-26 完成。旧 transcript 中混入的 161 条 canonical
+第五阶段 D 已于 2026-07-26 完成。旧 transcript 中混入的 161 条 canonical
 event 已通过 SQLite outbox 校验并幂等补入 active epoch 的受保护 audit archive，覆盖率
 为 161/161。version 2 清理清单为七个 legacy 目标记录内容指纹；执行器重新核对 epoch、
 固定路径 allowlist、目标指纹和 archive coverage，并要求精确 confirmation token 与
-`--apply`。当前仅完成 validate-only，尚未永久删除。范围与保护项见
+`--apply`。收到明确确认后，旧 session、invocation、transcript、provider session map 和
+legacy validation SQLite 共 378 个文件已永久删除；权威 SQLite、canonical archive、恢复
+演练和脱敏 fixture 均保留。范围、回执与删除后验证见
 `docs/acceptance/005d-legacy-cleanup-readiness-20260726.md`。
 
 ## 13. Storage mode 生命周期
@@ -484,7 +486,7 @@ transcript 物理分离。`dual` 的 session 和 invocation
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
 10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（已完成）
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
-    （清理工具与最终清单已完成；永久删除等待明确确认）
+    （真实 legacy 数据清理已完成；`dual` 兼容模式移除仍待后续独立变更）
 
 每一步都必须可以独立回滚，并在进入下一步前有数据审计证据。
 

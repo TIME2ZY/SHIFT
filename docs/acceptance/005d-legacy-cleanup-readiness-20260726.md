@@ -2,7 +2,8 @@
 
 - 执行日期：2026-07-26
 - 权威 epoch：`epoch-a24f4c2186c3e79c7b5b74b87f38b7f2`
-- 结论：清理前置条件通过，等待明确永久删除确认
+- 删除完成时间：2026-07-26 17:02（Asia/Shanghai）
+- 结论：清理完成
 
 ## 混合 transcript 处理
 
@@ -58,5 +59,17 @@ JSONL 文件。直接删除旧目录会损失这段审计归档，因此先执�
 - 精确 confirmation token；
 - 显式 `--apply`。
 
-当前只执行了 `validate-only`，删除数为 0。永久删除后不可恢复，除非用户另行保留了
-这些 legacy 文件的备份。
+清理前先执行 `validate-only`，删除数为 0；收到明确确认后使用相同 manifest 和
+confirmation token 执行 `--apply`，七个目标全部删除成功：
+
+- 删除 378 个文件、23,049,564 bytes；
+- 删除后七个目标均不存在；
+- 所有保护项仍存在；
+- 权威 SQLite full audit 为 0 errors、0 warnings；
+- canonical archive 保持 236 个唯一 eventId、0 bad JSON lines；
+- 8787 上的现有 SQLite-only 服务继续监听；
+- 删除真实 legacy 数据后全量测试 893/893 通过。
+
+本机删除回执：`data/runtime/legacy-cleanup-deletion-20260726.json`。
+
+永久删除不可恢复；Git 中只保留脱敏 fixture 和本验收摘要，不保留真实历史业务内容。
