@@ -138,11 +138,7 @@ function createServer(options = {}) {
   const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
   const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
   const logger = options.logger || console;
-  const storageContext = createServerStorage(
-    { ...options, transcript },
-    sessionsFile,
-    logger
-  );
+  const storageContext = createServerStorage({ ...options, transcript }, sessionsFile, logger);
   const durableRecorder = storageContext.recorder;
   const eventStore = storageContext.eventStore;
   const sqliteSessionService = storageContext.sessionService;
@@ -158,6 +154,7 @@ function createServer(options = {}) {
     memoryService,
     transcript,
     eventStore,
+    allowTranscriptReplay: storageContext.mode !== "sqlite",
     logger,
   });
   const sessionReader = createSessionReadService({
@@ -193,7 +190,8 @@ function createServer(options = {}) {
   }
 
   function updateProjectDirDual(file, sessionId, projectDir) {
-    if (sqlitePrimary) return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
+    if (sqlitePrimary)
+      return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
     ensureFileShadow(file, sessionId);
     const session = setSessionProjectDir(file, sessionId, projectDir);
     durableRecorder.mirrorThread(session);
@@ -416,7 +414,9 @@ function createServer(options = {}) {
     sendJson(res, 404, { error: "Not found." });
   }
 
-  const server = http.createServer(createSafeRequestListener(handleRequest, { sendJson, sendSse, logger }));
+  const server = http.createServer(
+    createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
+  );
   server.once("close", () => {
     _previewManagers.delete(worktreeManager);
     storageContext.close();

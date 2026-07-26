@@ -1,50 +1,48 @@
 function createSessionReadService({ mode = "dual", storage, fileStore, logger = console } = {}) {
-  if (!fileStore?.getSession || !fileStore?.listSessions) {
+  if (mode === "sqlite" && (!storage?.threads || !storage?.messages)) {
+    throw new Error("SQLite session reads require thread and message repositories.");
+  }
+  if (mode !== "sqlite" && (!fileStore?.getSession || !fileStore?.listSessions)) {
     throw new Error("File session store is required.");
   }
 
   function displayTitle(title) {
     if (!title) return "(空对话)";
-    return typeof fileStore.buildSessionTitle === "function"
+    return typeof fileStore?.buildSessionTitle === "function"
       ? fileStore.buildSessionTitle(title)
       : title;
   }
 
-  function attempt(operation, work) {
-    if (mode !== "sqlite" || !storage) return undefined;
+  function readSqlite(operation, work) {
     try {
       return work();
     } catch (error) {
       logger.error?.(`[sqlite-primary-read] ${operation} failed: ${error.message}`);
-      return undefined;
+      throw error;
     }
   }
 
   function getSession(file, sessionId) {
-    const fileSession = fileStore.getSession(file, sessionId);
-    const sqliteSession = attempt("get session", () => {
+    if (mode !== "sqlite") return fileStore.getSession(file, sessionId);
+    return readSqlite("get session", () => {
       const thread = storage.threads.get(sessionId);
       if (!thread) return null;
       const messages = storage.messages.listForThread(sessionId).map(messageFromSqlite);
-      const selectedMessages =
-        fileSession?.messages?.length > messages.length ? fileSession.messages : messages;
       return {
-        ...(fileSession || {}),
         id: thread.id,
-        title: thread.title || fileSession?.title || "",
+        title: thread.title || "",
         createdAt: thread.createdAt,
-        messages: selectedMessages,
-        worktree: fileSession?.worktree || null,
-        projectDir: thread.projectDir || fileSession?.projectDir || "",
-        lastAgent: thread.lastAgentId || fileSession?.lastAgent || "",
+        messages,
+        worktree: null,
+        projectDir: thread.projectDir || "",
+        lastAgent: thread.lastAgentId || "",
       };
     });
-    return sqliteSession === undefined || sqliteSession === null ? fileSession : sqliteSession;
   }
 
   function listSessions(file) {
-    const fileSessions = fileStore.listSessions(file);
-    const sqliteSessions = attempt("list sessions", () =>
+    if (mode !== "sqlite") return fileStore.listSessions(file);
+    return readSqlite("list sessions", () =>
       storage.threads.listWithMessageCounts().map((thread) => ({
         id: thread.id,
         title: displayTitle(thread.title),
@@ -52,18 +50,6 @@ function createSessionReadService({ mode = "dual", storage, fileStore, logger = 
         messageCount: thread.messageCount,
         lastAgent: thread.lastAgentId || "",
       }))
-    );
-    if (sqliteSessions === undefined) return fileSessions;
-
-    const merged = new Map(fileSessions.map((session) => [session.id, session]));
-    for (const session of sqliteSessions) {
-      const fileSession = merged.get(session.id);
-      if (!fileSession || session.messageCount >= fileSession.messageCount) {
-        merged.set(session.id, session);
-      }
-    }
-    return [...merged.values()].sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
   }
 

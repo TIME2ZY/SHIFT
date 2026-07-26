@@ -411,7 +411,6 @@ SHIFT_RAW_EVENT_LOG=off
 本 ADR 接受时已知的主要差距：
 
 - `SHIFT_STORAGE_MODE` 默认仍为 `dual`；
-- `session-read-service` 在非 sqlite 模式合并 SQLite 与文件会话；
 - `recall-service` 在 dual/files 模式读取并合并 transcript；
 - `event-store` 根据 storage mode 同步写 SQLite/transcript；
 - `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
@@ -419,6 +418,10 @@ SHIFT_RAW_EVENT_LOG=off
 - session map/provider resume 仍有 legacy JSON 路径；
 - outbox 和 archive backlog health 尚未实现；
 - project-memory materialization workflow 尚未实现。
+
+已完成的边界：`sqlite` 模式的 session/message/invocation 在线读取不再读取或回退 legacy
+session/transcript；SQLite 读取失败会显式失败或返回 `unavailable`。在线 memory replay
+同样禁止在 `sqlite` 模式扫描旧 transcript。
 
 这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大
 平级双源范围。

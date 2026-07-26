@@ -23,7 +23,12 @@ const DEFAULT_MAX_AUTO_MEMORY = 2;
 const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
 function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
-  if (!transcript) throw new Error("Transcript fallback is required.");
+  if (mode === "sqlite" && !storage) {
+    throw new Error("SQLite recall requires durable storage.");
+  }
+  if (mode !== "sqlite" && !transcript) {
+    throw new Error("Transcript fallback is required outside sqlite mode.");
+  }
 
   function logSqliteFailure(operation, error) {
     logger.error?.(`[sqlite-recall] ${operation} failed: ${error.message}`);
@@ -43,6 +48,15 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     }
   }
 
+  function readSqlite(operation, work) {
+    try {
+      return work();
+    } catch (error) {
+      logSqliteFailure(operation, error);
+      throw error;
+    }
+  }
+
   async function tryFile(operation, work, fallback) {
     try {
       return await work();
@@ -55,10 +69,9 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   async function listInvocationsWithMeta(threadId) {
     // sqlite mode is strict single-store: never probe transcript for online reads.
     if (mode === "sqlite" && storage) {
-      const sqliteRecords = trySqlite("list invocations", () =>
+      const sqliteRecords = readSqlite("list invocations", () =>
         storage.invocations.listForThreadWithMeta(threadId)
       );
-      if (sqliteRecords === undefined) return [];
       return sqliteRecords
         .map(invocationFromSqlite)
         .sort((a, b) => String(b.startedAt || "").localeCompare(a.startedAt || ""));
@@ -213,6 +226,13 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           result = finalizeSearchResult(merged, { query: searchQuery, limit, weakQuery: false });
         }
       }
+    }
+
+    if (!result.availability) {
+      result.availability =
+        source === "sqlite-error"
+          ? { state: "unavailable", reason: "search_failed" }
+          : { state: "available", empty: result.hits.length === 0 };
     }
 
     storage?.memoryEvents?.recordSafe?.({
@@ -380,20 +400,18 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     }
 
     const scored = {
-      [LAYER_MEMORY]: byLayer[LAYER_MEMORY]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_MEMORY]: byLayer[LAYER_MEMORY].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_MESSAGE]: byLayer[LAYER_MESSAGE]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_MESSAGE]: byLayer[LAYER_MESSAGE].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_EVIDENCE]: byLayer[LAYER_EVIDENCE]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_EVIDENCE]: byLayer[LAYER_EVIDENCE].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC]
-        .map((item) => scoreAndMapProjectDoc(item, terms))
+      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC].map((item) =>
+        scoreAndMapProjectDoc(item, terms)
+      )
         .filter(Boolean)
         .sort(compareHits),
     };
@@ -713,7 +731,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       from: Math.max(0, Number(options.from) || 0),
       limit: options.limit || 200,
     };
-    const sqlitePage = trySqlite("read invocation page", () => {
+    const readPage = () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
       const page = storage.invocations.readEventsPage(invocationId, options);
@@ -727,14 +745,16 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           eventNo: Number.isInteger(event.sequenceNo) ? event.sequenceNo : start + i,
         })),
       };
-    });
+    };
 
     // Strict single-store: never fall back to transcript in sqlite mode.
     if (mode === "sqlite" && storage) {
-      if (sqlitePage === undefined || sqlitePage === null) return emptyPage;
+      const sqlitePage = readSqlite("read invocation page", readPage);
+      if (sqlitePage === null) return emptyPage;
       return sqlitePage;
     }
 
+    const sqlitePage = trySqlite("read invocation page", readPage);
     const filePage = await tryFile(
       "read invocation page",
       () => transcript.readInvocationPage(threadId, invocationId, options),
@@ -812,7 +832,10 @@ function isProductMemoryKind(kind) {
   return PRODUCT_MEMORY_KINDS.has(kind);
 }
 
-function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }) {
+function selectRetrieveItems(
+  ranked,
+  { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }
+) {
   const selected = [];
   const seen = new Set();
   let autoCount = 0;
@@ -835,7 +858,10 @@ function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, ma
   // Product recency first, then remaining recency (auto capped), then related, then score fill.
   take((item) => item.channels?.includes("recency") && isProductMemoryKind(item.kind), recentLimit);
   take((item) => item.channels?.includes("recency"), recentLimit);
-  take((item) => item.channels?.includes("related") && isProductMemoryKind(item.kind), relatedLimit);
+  take(
+    (item) => item.channels?.includes("related") && isProductMemoryKind(item.kind),
+    relatedLimit
+  );
   take((item) => item.channels?.includes("related"), relatedLimit);
   take(() => true, totalLimit);
   return selected.sort((a, b) => {
@@ -923,9 +949,7 @@ function scoreAndMapHit(item, terms) {
     memoryStatus: item.metadata?.status || null,
     memoryKind: item.metadata?.kind || null,
     content:
-      item.sourceKind === "memory-entry"
-        ? String(item.content || "").slice(0, 2048)
-        : undefined,
+      item.sourceKind === "memory-entry" ? String(item.content || "").slice(0, 2048) : undefined,
   };
 }
 
@@ -983,7 +1007,8 @@ function matchScore(item, terms) {
   }
   if (channel === "contains") return 18;
 
-  const haystack = `${item.title || ""}\n${item.content || ""}\n${item.snippet || ""}`.toLowerCase();
+  const haystack =
+    `${item.title || ""}\n${item.content || ""}\n${item.snippet || ""}`.toLowerCase();
   let score = 0;
   for (const term of terms || []) {
     if (haystack.includes(String(term).toLowerCase())) score += 8;

@@ -311,6 +311,87 @@ test("sqlite mode is strict single-store and ignores transcript listings", async
   }
 });
 
+test("sqlite recall does not require a transcript dependency", async () => {
+  const { storage } = createFixture();
+  const service = createRecallService({ mode: "sqlite", storage });
+  try {
+    const listed = await service.listInvocationsWithMeta("thread-1");
+    const page = await service.readInvocationPage("thread-1", "invocation-1");
+    const hits = await service.searchTranscript("thread-1", "sqlite memory");
+
+    assert.equal(listed.length, 1);
+    assert.equal(page.total, 1);
+    assert.ok(hits.length > 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("sqlite invocation reads surface database failures without transcript fallback", async () => {
+  let transcriptCalls = 0;
+  const failTranscript = async () => {
+    transcriptCalls += 1;
+    return [];
+  };
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      invocations: {
+        listForThreadWithMeta() {
+          throw new Error("sqlite unavailable");
+        },
+        get() {
+          throw new Error("sqlite unavailable");
+        },
+      },
+    },
+    transcript: {
+      listInvocationsWithMeta: failTranscript,
+      searchTranscript: failTranscript,
+      readInvocationPage: failTranscript,
+    },
+    logger: { error() {} },
+  });
+
+  await assert.rejects(() => service.listInvocationsWithMeta("thread-1"), /sqlite unavailable/);
+  await assert.rejects(
+    () => service.readInvocationPage("thread-1", "invocation-1"),
+    /sqlite unavailable/
+  );
+  assert.equal(transcriptCalls, 0);
+});
+
+test("sqlite search reports unavailable without scanning transcripts on database failure", async () => {
+  let transcriptCalls = 0;
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      recall: {
+        search() {
+          throw new Error("sqlite unavailable");
+        },
+      },
+    },
+    transcript: {
+      async searchTranscript() {
+        transcriptCalls += 1;
+        return [{ invocationId: "legacy" }];
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  const result = await service.searchSession("thread-1", "database failure", {
+    layers: "evidence",
+  });
+  assert.deepEqual(result.hits, []);
+  assert.deepEqual(result.availability, {
+    state: "unavailable",
+    reason: "search_failed",
+  });
+  assert.equal(transcriptCalls, 0);
+});
+
 test("sqlite mode skips transcript search after filling the requested limit", async () => {
   const { storage } = createFixture();
   let fileSearches = 0;
@@ -446,7 +527,9 @@ test("searchSession empty query returns recency-only memory hits with layer stat
     assert.equal(result.layers.evidence, 0);
     assert.ok(result.hits.every((hit) => hit.layer === "memory"));
     assert.ok(result.hits.some((hit) => hit.sourceId === "memory-recency"));
-    assert.ok(logs.some((line) => line.includes("[recall-search]") && line.includes("source=recency")));
+    assert.ok(
+      logs.some((line) => line.includes("[recall-search]") && line.includes("source=recency"))
+    );
   } finally {
     storage.close();
   }

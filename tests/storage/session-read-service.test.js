@@ -46,38 +46,52 @@ function createFixture() {
   return { storage, fileSession, fileOnly, fileStore };
 }
 
-test("sqlite session reads prefer durable messages and preserve file-only runtime metadata", () => {
-  const { storage, fileStore } = createFixture();
+test("sqlite session reads use only durable state", () => {
+  const { storage } = createFixture();
+  let fileReads = 0;
   try {
-    const service = createSessionReadService({ mode: "sqlite", storage, fileStore });
+    const service = createSessionReadService({
+      mode: "sqlite",
+      storage,
+      fileStore: {
+        getSession() {
+          fileReads += 1;
+          throw new Error("legacy getSession must not run");
+        },
+        listSessions() {
+          fileReads += 1;
+          throw new Error("legacy listSessions must not run");
+        },
+      },
+    });
     const session = service.getSession("sessions.json", "thread-1");
     assert.equal(session.title, "SQLite title");
     assert.equal(session.projectDir, "C:/repo");
     assert.equal(session.lastAgent, "codex");
-    assert.deepEqual(session.worktree, { branch: "worktree-branch" });
+    assert.equal(session.worktree, null);
     assert.equal(session.messages.length, 1);
     assert.equal(session.messages[0].content, "SQLite message");
     assert.deepEqual(session.messages[0].activeSkills, ["memory"]);
+    assert.equal(fileReads, 0);
   } finally {
     storage.close();
   }
 });
 
-test("sqlite session list includes legacy file-only sessions", () => {
-  const { storage, fileOnly, fileStore } = createFixture();
+test("sqlite session list excludes legacy file-only sessions", () => {
+  const { storage } = createFixture();
   try {
-    const service = createSessionReadService({ mode: "sqlite", storage, fileStore });
+    const service = createSessionReadService({ mode: "sqlite", storage });
     const sessions = service.listSessions("sessions.json");
-    assert.equal(sessions.length, 2);
+    assert.equal(sessions.length, 1);
     assert.equal(sessions[0].id, "thread-1");
     assert.equal(sessions[0].messageCount, 1);
-    assert.equal(sessions[1], fileOnly);
   } finally {
     storage.close();
   }
 });
 
-test("files and failed sqlite reads fall back to the file store", () => {
+test("files mode reads the file store while sqlite failures remain visible", () => {
   const { storage, fileSession, fileStore } = createFixture();
   const errors = [];
   try {
@@ -95,12 +109,17 @@ test("files and failed sqlite reads fall back to the file store", () => {
             throw new Error("busy");
           },
         },
+        messages: {
+          listForThread: () => {
+            throw new Error("busy");
+          },
+        },
       },
       fileStore,
       logger: { error: (message) => errors.push(message) },
     });
-    assert.equal(broken.getSession("sessions.json", "thread-1"), fileSession);
-    assert.equal(broken.listSessions("sessions.json").length, 2);
+    assert.throws(() => broken.getSession("sessions.json", "thread-1"), /busy/);
+    assert.throws(() => broken.listSessions("sessions.json"), /busy/);
     assert.equal(errors.length, 2);
   } finally {
     storage.close();
