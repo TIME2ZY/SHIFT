@@ -3,6 +3,7 @@ title: "ADR-001: Storage Truth Boundary"
 status: accepted
 decision_id: ADR-001
 created: 2026-07-26
+amended: 2026-07-26
 scope: sessions, messages, invocations, memory, transcripts, project knowledge, and search projections
 supersedes: []
 related:
@@ -16,8 +17,8 @@ related:
 **Accepted — implementation pending**
 
 本 ADR 冻结 SHIFT 的目标存储边界。当前代码仍支持 `files / dual / sqlite`，默认运行在
-`dual`；这是迁移现状，不是本文定义的终态。实现 PR 必须显式说明它推进了哪一条迁移
-验收条件，不能在代码中重新发明另一套真相语义。
+`dual`；这是切换前的实现现状，不是本文定义的终态。实现 PR 必须显式说明它推进了哪一条
+切换验收条件，不能在代码中重新发明另一套真相语义。
 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
@@ -26,8 +27,8 @@ projection 细节的规范。本 ADR 负责更高一层的全系统边界；两�
 ## 2. 背景
 
 SHIFT 最初以 JSON session 文件和 JSONL transcript 保存本地状态，随后引入 SQLite，
-承载 thread、message、invocation、context window、memory 和 recall projection。为了
-安全迁移和保留旧数据，当前系统同时存在：
+承载 thread、message、invocation、context window、memory 和 recall projection。在架构
+演进和新旧实现验证期间，当前系统同时存在：
 
 - `sessions.json` 文件会话存储；
 - 按 thread/invocation 组织的 JSONL transcript；
@@ -37,7 +38,7 @@ SHIFT 最初以 JSON session 文件和 JSONL transcript 保存本地状态，随
 - SQLite 与文件之间的合并读取、完整度比较和失败回退；
 - session map、worktree state 等普通 JSON 运行文件。
 
-这些机制在迁移阶段有价值，但如果长期将文件和 SQLite 视为同一业务实体的平级来源，
+这些机制在切换验证阶段有价值，但如果长期将文件和 SQLite 视为同一业务实体的平级来源，
 系统就无法稳定回答：
 
 - 一条 message 以哪边为准；
@@ -59,6 +60,7 @@ SHIFT 采用四类明确分工的持久化边界：
 2. **Git 管理的项目文件是正式项目知识和项目内容的真相源。**
 3. **JSONL 是追加式审计、诊断和灾难恢复材料，不参与正常在线仲裁。**
 4. **普通 JSON 仅用于配置、迁移 checkpoint 或可重建的本机绑定；不得承载核心业务真相。**
+5. **现有 legacy 运行数据不迁移到新存储 epoch；它只作为临时验证语料，切换验收后清除。**
 
 Recall、FTS、passage、digest 和 usage summary 是派生读模型，可以从权威来源重建。
 
@@ -243,7 +245,7 @@ JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什�
 - migration checkpoint；
 - crash-safe bootstrap hint；
 - 可从 Git/SQLite/运行环境重新发现的绑定；
-- legacy 数据导入。
+- 隔离环境中的兼容性测试 fixture。
 
 普通 JSON 不得继续作为以下数据的终态存储：
 
@@ -254,8 +256,10 @@ JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什�
 - 结构化长期 memory；
 - 需要并发更新和事务一致性的状态。
 
-`sessions.json` 和 legacy provider session map 属于迁移输入。迁移完成后，正常服务不应
-依赖它们读取权威状态。
+现有 `sessions.json`、legacy provider session map 和旧 transcript 不作为生产迁移输入。
+它们在切换前保持只读，仅用于验证字段映射和新旧行为差异；切换完成后，正常服务不得
+依赖它们，真实历史数据按 §12.1 清除。确需覆盖 legacy 格式时，只保留最小化、脱敏的
+测试 fixture。
 
 ## 9. 派生投影
 
@@ -303,7 +307,7 @@ outbox flusher
 - 超过容量/时长阈值时向用户显示 degraded 状态；
 - 禁止“先写两边，再用 try/catch 假装原子成功”。
 
-Outbox 尚未实现。在引入 outbox 前，现有 `dual` 写入仅被视为迁移机制。
+Outbox 尚未实现。在引入 outbox 前，现有 `dual` 写入仅被视为切换验证机制。
 
 ## 11. 读取、恢复和重建
 
@@ -335,6 +339,9 @@ scan → validate protocol/checksum → deduplicate by stable ID
 - 输出 imported/skipped/conflicted/failed 统计；
 - 完成后恢复为 SQLite-only 正常读取。
 
+这里的恢复契约只适用于新 storage epoch 产生的 canonical JSONL。旧 session/transcript
+不会通过该流程导入新 epoch，也不纳入恢复承诺。
+
 ## 12. 删除、归档和隐私
 
 - 普通“删除会话”默认遵循 Memory Data Contract 的 archive/purge 语义；
@@ -346,15 +353,36 @@ scan → validate protocol/checksum → deduplicate by stable ID
 - JSONL 应按 thread/session/invocation 分区，以支持有边界的导出与永久删除；
 - 删除工具必须输出删除范围和可恢复性。
 
+### 12.1 Legacy 数据断代清理
+
+本次存储重构采用 clean cutover，不迁移切换前的 session、message、invocation、memory
+或 transcript。新系统必须写入明确的 storage epoch（至少包含稳定 epoch ID、schema
+version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢复。
+
+旧数据在验收前只作为只读验证语料，不允许被在线 API 合并、回退或写回。清除门槛为：
+
+1. 新写入和正常读取均以 SQLite 为唯一来源；
+2. 进程重启后 source tables 保持完整；
+3. recall、FTS、digest 和 memory search 可从新 epoch 的 source 重建；
+4. SQLite 备份、空目录恢复和完整性检查完成一次演练；
+5. canonical JSONL outbox 可重试，失败状态可观测；
+6. CI 和本机验证所需的 legacy 场景已转换为最小化、脱敏 fixture；
+7. 已生成清理清单，列出路径、数据范围、cutover time 和不可恢复性。
+
+满足门槛后，可以直接永久删除旧 `sessions.json`、旧 transcript、旧 provider session map
+及其旧投影，无需先导入 SQLite。清理操作必须是独立、显式的变更，不得夹带在 schema
+migration 或服务启动逻辑中。最终只保留脱敏 fixture、差异审计摘要和清理记录，不保留
+真实历史业务内容。
+
 ## 13. Storage mode 生命周期
 
 现有模式重新定义为：
 
-| 模式     | 定位                                         | 终态               |
-| -------- | -------------------------------------------- | ------------------ |
-| `files`  | legacy compatibility、迁移测试、恢复工具输入 | 不作为正常产品模式 |
-| `dual`   | 迁移观察期、差异审计                         | 临时               |
-| `sqlite` | 正常在线业务模式                             | 唯一正式模式       |
+| 模式     | 定位                            | 终态               |
+| -------- | ------------------------------- | ------------------ |
+| `files`  | legacy compatibility 和隔离验证 | 不作为正常产品模式 |
+| `dual`   | 切换观察期、差异审计            | 临时               |
+| `sqlite` | 正常在线业务模式                | 唯一正式模式       |
 
 Transcript 是否开启是独立维度，不应继续由 storage mode 隐式决定。目标配置语义类似：
 
@@ -366,16 +394,17 @@ SHIFT_RAW_EVENT_LOG=off
 
 `dual` 退出条件：
 
-1. legacy sessions/transcripts 已完成可重复迁移；
-2. session/message/invocation/memory 数量与因果审计通过；
-3. SQLite-only 路径覆盖正常 API；
-4. transcript replay 可在空库恢复受支持的 canonical 数据；
-5. tombstone 能阻止旧事件复活；
-6. recall/FTS 可从 source 重建；
+1. 新 storage epoch、schema version 和 cutover time 已落库；
+2. SQLite-only 路径覆盖正常 API；
+3. 新 epoch 的 session/message/invocation/memory 因果与完整性审计通过；
+4. 新 canonical transcript 可在空库恢复受支持的数据；
+5. tombstone 能阻止已清除或已 purge 的事件复活；
+6. recall/FTS/memory search 可从新 epoch source 重建；
 7. SQLite 失败和归档积压有可见健康状态；
 8. outbox 已接管 canonical JSONL；
-9. CI 不再依赖 online file fallback；
-10. 至少一个发布周期的差异指标无未解释 divergence。
+9. CI 不再依赖 online file fallback 或真实 legacy 数据；
+10. legacy 行为场景已转换为最小化、脱敏 fixture；
+11. 备份恢复演练通过，并已生成旧数据清理清单。
 
 ## 14. 当前实现差距
 
@@ -385,27 +414,28 @@ SHIFT_RAW_EVENT_LOG=off
 - `session-read-service` 在非 sqlite 模式合并 SQLite 与文件会话；
 - `recall-service` 在 dual/files 模式读取并合并 transcript；
 - `event-store` 根据 storage mode 同步写 SQLite/transcript；
-- `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的迁移语义；
+- `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
 - chat route 仍拥有多处按 `sqlitePrimary` 分支；
 - session map/provider resume 仍有 legacy JSON 路径；
 - outbox 和 archive backlog health 尚未实现；
 - project-memory materialization workflow 尚未实现。
 
-这些差距不是违反 ADR 的存量 bug；它们是后续迁移工作的明确清单。新增功能不得扩大
+这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大
 平级双源范围。
 
 ## 15. 实现顺序
 
 1. 建立 storage audit 和 dual divergence 指标，不改变行为；
-2. 为每个在线 API 标记 authoritative read path；
-3. 增加 transactional outbox 和 archive health；
-4. 将 session/message/invocation 正常读取切到 SQLite；
-5. 将 recall/detail 正常读取切到 SQLite；
-6. 保留并强化显式 migrate/recover/rebuild 工具；
-7. 将 transcript 开关与 storage mode 解耦；
-8. 将默认模式改为 `sqlite`；
-9. 移除正常服务中的 file merge/fallback；
-10. 在满足退出条件后删除 `dual` 产品模式，保留离线 legacy importer。
+2. 定义并持久化 storage epoch、schema version 和 cutover time；
+3. 为每个在线 API 标记 authoritative read path；
+4. 增加 transactional outbox 和 archive health；
+5. 将 session/message/invocation 正常读取切到 SQLite；
+6. 将 recall/detail 正常读取切到 SQLite；
+7. 实现新 epoch canonical JSONL 的 recover/rebuild 工具；
+8. 将 transcript 开关与 storage mode 解耦；
+9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；
+10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；
+11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
 
 每一步都必须可以独立回滚，并在进入下一步前有数据审计证据。
 
@@ -431,7 +461,7 @@ SHIFT_RAW_EVENT_LOG=off
 ### 正面
 
 - 正常读取和故障语义更容易解释；
-- 删除、恢复和迁移不会互相复活数据；
+- 删除、恢复和断代切换不会互相复活数据；
 - SQLite 事务真正保护 message/invocation/memory 一致性；
 - JSONL 仍保留可审计、可导出和灾难恢复价值；
 - 正式项目知识可以跟随 Git 分支、review 和跨机器传播；
@@ -441,11 +471,11 @@ SHIFT_RAW_EVENT_LOG=off
 ### 代价
 
 - 需要 outbox、恢复工具和健康监控；
-- legacy file 数据必须完成一次可审计迁移；
+- 放弃旧历史查询与恢复能力，并需要一次可审计的断代清理；
 - materialization 需要审批、diff 和 source-hash 生命周期；
 - SQLite 成为正式依赖，数据库故障不能再由旧文件静默掩盖；
 - 永久删除必须同时处理数据库和审计归档；
-- 迁移期间仍需维护有限时间的双路径测试。
+- 切换期间仍需维护有限时间的双路径验证。
 
 ## 18. 非目标
 
