@@ -15,6 +15,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "audit:storage:divergence": "node scripts/audit-dual-storage.js",
     "vendor:md": "node scripts/vendor-md.js"
   },
   "devDependencies": {

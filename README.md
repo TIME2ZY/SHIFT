@@ -123,13 +123,14 @@ Copy-Item .env.example .env
 
 ## 开发命令
 
-| 命令                   | 用途           |
-| ---------------------- | -------------- |
-| `npm start`            | 启动控制台     |
-| `npm test`             | 运行测试       |
-| `npm run check`        | 语法检查       |
-| `npm run lint`         | ESLint         |
-| `npm run format:check` | 格式检查       |
+| 命令                               | 用途                           |
+| ---------------------------------- | ------------------------------ |
+| `npm start`                        | 启动控制台                     |
+| `npm test`                         | 运行测试                       |
+| `npm run check`                    | 语法检查                       |
+| `npm run lint`                     | ESLint                         |
+| `npm run format:check`             | 格式检查                       |
+| `npm run audit:storage:divergence` | 只读检查文件与 SQLite 镜像差异 |
 
 <details>
 <summary><strong>技术轮廓</strong></summary>
