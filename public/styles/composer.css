@@ -233,6 +233,37 @@
   padding: 0 var(--space-1) var(--space-1);
 }
 
+.composer-mention-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--btn-height-sm);
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.composer-mention-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.composer-mention-btn:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
 .worktree-mode {
   display: inline-flex;
   align-items: center;

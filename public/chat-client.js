@@ -24,6 +24,7 @@
       appendLive,
       applyAgentEvent,
       addDebug,
+      addToast,
       finishStream,
       finalizeLiveAgent,
       agentLabel,
@@ -33,6 +34,9 @@
       onMemoryEvent,
       onMemoryInject,
       onMemoryMetrics,
+      restoreDraft,
+      /** Optional: when true, sendPrompt refuses to start a new run. */
+      isContextBlocked,
     } = deps;
 
     function store() {
@@ -53,7 +57,7 @@
       }
     }
 
-    function parseSse(buffer, onEvent) {
+    function parseSse(buffer, onEvent, stats) {
       let rest = String(buffer || "").replace(/\r\n/g, "\n");
       let idx;
       while ((idx = rest.indexOf("\n\n")) !== -1) {
@@ -68,8 +72,10 @@
         try {
           onEvent(eventLine.slice(7), JSON.parse(dataLines.join("\n")));
         } catch (error) {
-          // Malformed frame must not kill the whole stream reader.
-          console.warn("[chat-client] skip bad SSE frame:", error && error.message);
+          // Malformed frame must not kill the whole stream reader, but track it
+          // so the user can learn events were dropped.
+          if (stats && typeof stats.malformed === "number") stats.malformed += 1;
+          else console.warn("[chat-client] skip bad SSE frame:", error && error.message);
         }
       }
       return rest;
@@ -214,12 +220,26 @@
       }
     }
 
-    async function sendPrompt() {
-      const prompt = promptEl.value.trim();
+    async function sendPrompt(sourcePrompt) {
+      const prompt = (sourcePrompt != null ? String(sourcePrompt) : promptEl.value).trim();
       if (!prompt) return;
 
       const activeRt = store().getOrCreate(state.currentSessionId || "_pending");
       if (activeRt.controller) return;
+
+      // Central guard: button/Enter both funnel here — block when the active
+      // agent's context budget is saturated (UI also disables send for a11y).
+      const blocked =
+        typeof isContextBlocked === "function"
+          ? !!isContextBlocked()
+          : !!(state && state.contextBlocked);
+      if (blocked) {
+        if (isActiveSession(state.currentSessionId)) {
+          showToastMaybe("上下文已满 · 切换 Agent 或开新会话后再发送", { ttl: 7000 });
+          setStatus("上下文已满", "error");
+        }
+        return;
+      }
 
       const resolved = resolvePromptAgent(prompt);
       const targetAgent = resolved && resolved.agent ? resolved.agent : resolved;
@@ -230,17 +250,18 @@
         return;
       }
 
-      if (!state.currentSessionId) {
+      let sid = state.currentSessionId;
+      if (!sid) {
         try {
           const session = await sessionApi.createSession();
-          state.currentSessionId = session.id;
+          sid = session.id;
+          state.currentSessionId = sid;
         } catch (error) {
           addSystem(error.message, "error");
           return;
         }
       }
 
-      const sid = state.currentSessionId;
       if (!state.sessions) state.sessions = {};
       if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
       state.sessions[sid].lastPrompt = prompt;
@@ -252,8 +273,11 @@
       const controller = new AbortController();
       const rt = store().beginRun(sid, controller);
       const streamCtx = { sessionId: sid };
+      const runStats = { malformed: 0, seenDone: false };
 
       createMessage({ role: "user", agent: targetAgent.id, content: prompt });
+      // Always clear the composer: the prompt now lives in the transcript bubble.
+      // Callers restore it separately when they wish to surface a re-send draft.
       promptEl.value = "";
       hideMentionMenu();
       notifyStatus(sid);
@@ -271,6 +295,8 @@
             useWorktree: useWorktreeInput.checked,
           }),
           signal: controller.signal,
+          retryable: false,
+          timeoutMs: Infinity, // streaming response, server may sit silent on long-running tool calls
         });
 
         if (!res.ok) {
@@ -292,7 +318,19 @@
           const { value, done } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
-          buf = parseSse(buf, (event, data) => handleSseEvent(event, data, streamCtx));
+          buf = parseSse(
+            buf,
+            (event, data) => {
+              if (event === "done") runStats.seenDone = true;
+              handleSseEvent(event, data, streamCtx);
+            },
+            runStats
+          );
+        }
+        if (runStats.malformed > 0 && isActiveSession(sid)) {
+          showToastMaybe(`丢失 ${runStats.malformed} 个事件（流可能不完整）`, {
+            ttl: 7000,
+          });
         }
       } catch (error) {
         flushPendingLiveRender(sid);
@@ -303,11 +341,22 @@
             setStatus("已停止");
             addSystem("已停止", "error");
           }
+          // Restore the prompt so the user keeps their work after a manual stop.
+          // Only fill the composer if the user has not started a new draft.
+          if (isActiveSession(sid) && promptEl && !promptEl.value.trim()) {
+            const stored = lastSlotPrompt(sid);
+            if (stored) fillComposer(sid, stored);
+          }
         } else {
           store().endRun(sid, { controller, status: "error", error: error.message || "连接中断" });
           if (isActiveSession(sid)) {
             setStatus("错误", "error");
             addSystem(error.message || "连接中断", "error");
+          }
+          // Run dropped mid-flight without completing — surface a non-blocking
+          // recovery affordance instead of silently leaving a dead bubble.
+          if (isActiveSession(sid)) {
+            offerRetry(sid, "连接中断 · 重试本轮");
           }
         }
         // Prefer full finalize (deferred MD for long text) over wiping bubble.innerHTML.
@@ -326,11 +375,12 @@
         const current = store().get(sid);
         const stillOwnController = current && current.controller === controller;
         if (stillOwnController) {
-          if (!current.doneReceived && !controller.signal.aborted) {
+          if (!current.doneReceived && !controller.signal.aborted && !runStats.seenDone) {
             store().endRun(sid, { controller, status: "error", error: "连接意外中断" });
             if (isActiveSession(sid)) {
               setStatus("错误", "error");
               addSystem("连接意外中断", "error");
+              offerRetry(sid, "连接意外中断 · 重试本轮");
             }
           } else if (controller.signal.aborted) {
             store().endRun(sid, { controller, status: "idle", aborted: true });
@@ -346,10 +396,71 @@
       }
     }
 
+    // Injected restoreDraft carries (sid, value). If value omitted, callers
+    // expect lastPrompt to be restored from the session slot. The injected
+    // implementation is responsible for re-running autoGrow / skills refresh.
+    function fillComposer(sid, value) {
+      if (!promptEl) return;
+      if (typeof restoreDraft === "function") {
+        try {
+          restoreDraft(sid, value);
+          return;
+        } catch {
+          /* fall through to direct set below */
+        }
+      }
+      promptEl.value = value != null ? String(value) : lastSlotPrompt(sid);
+      if (typeof promptEl.dispatchEvent === "function") {
+        promptEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+
+    function lastSlotPrompt(sid) {
+      const slot = state.sessions && state.sessions[sid || ""];
+      return slot && slot.lastPrompt ? slot.lastPrompt : "";
+    }
+
+    function lastSlotAgent(sid) {
+      const slot = state.sessions && state.sessions[sid || ""];
+      return slot && slot.lastAgent ? slot.lastAgent : state.selectedAgent || "codex";
+    }
+
+    function showToastMaybe(message, options) {
+      if (typeof addToast === "function") addToast(message, options || {});
+    }
+
+    // Surface a non-blocking recovery affordance after a network-failed run.
+    // Pre-fill the last prompt (unless the user is already composing), then
+    // offer an explicit CTA that re-sends. We never auto-send on failure so a
+    // mid-draft is not clobbered without a deliberate click.
+    function offerRetry(sid, message) {
+      const stored = lastSlotPrompt(sid);
+      if (!stored) return;
+      const activeEl =
+        typeof globalScope.document !== "undefined" && globalScope.document
+          ? globalScope.document.activeElement
+          : null;
+      const userIsComposing = promptEl && promptEl === activeEl && promptEl.value.trim().length > 0;
+      if (!userIsComposing) fillComposer(sid, stored);
+      showToastMaybe(message, {
+        ttl: 12_000,
+        actionLabel: "填回并重试",
+        onClick: () => {
+          if (!isActiveSession(sid)) return;
+          fillComposer(sid, stored);
+          if (promptEl && typeof promptEl.focus === "function") promptEl.focus();
+          // Fire-and-forget: sendPrompt is async; errors surface via its own path.
+          Promise.resolve(sendPrompt(stored)).catch(() => {});
+        },
+      });
+    }
+
     return {
       parseSse,
       handleSseEvent,
       sendPrompt,
+      lastSlotPrompt,
+      lastSlotAgent,
     };
   }
 

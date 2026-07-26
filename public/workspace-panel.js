@@ -73,15 +73,36 @@
       WorkspaceDiff,
       confirmImpl,
       onAfterDiscard,
+      onToast,
+      onRequestWorktree,
       VirtualList,
     } = deps;
 
-    const confirmFn = typeof confirmImpl === "function"
-      ? confirmImpl
-      : (msg) => (typeof confirm === "function" ? confirm(msg) : false);
+    const confirmFn =
+      typeof confirmImpl === "function"
+        ? confirmImpl
+        : (msg) => (typeof confirm === "function" ? confirm(msg) : false);
 
-    const virtualListApi = VirtualList
-      || (typeof globalScope !== "undefined" ? globalScope.VirtualList : null);
+    const virtualListApi =
+      VirtualList || (typeof globalScope !== "undefined" ? globalScope.VirtualList : null);
+
+    function toast(message, isError) {
+      if (typeof onToast !== "function") return;
+      try {
+        onToast(message, !!isError);
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    function lockDiscardButtons(locked) {
+      if (!panelEl) return;
+      const btns = panelEl.querySelectorAll("button.workspace-discard-btn, button.btn-cmd.danger");
+      btns.forEach((b) => {
+        b.disabled = !!locked;
+        b.classList.toggle("is-disabled", !!locked);
+      });
+    }
 
     /** @type {null | { wrap: HTMLElement, summaryHost: HTMLElement, actionsHost: HTMLElement, metaHost: HTMLElement, filesHost: HTMLElement, diffHost: HTMLElement, mode: string }} */
     let shell = null;
@@ -91,7 +112,9 @@
     let diffExpanded = false;
 
     function getDiffApi() {
-      return WorkspaceDiff || (typeof globalScope !== "undefined" ? globalScope.WorkspaceDiff : null);
+      return (
+        WorkspaceDiff || (typeof globalScope !== "undefined" ? globalScope.WorkspaceDiff : null)
+      );
     }
 
     function destroyVirtualList() {
@@ -174,7 +197,7 @@
 
       const discardBtn = document.createElement("button");
       discardBtn.type = "button";
-      discardBtn.className = "btn-cmd danger";
+      discardBtn.className = "btn-cmd danger workspace-discard-btn";
       discardBtn.textContent = "丢弃 worktree";
       discardBtn.addEventListener("click", () => discardWorkspace());
       actions.appendChild(discardBtn);
@@ -347,6 +370,40 @@
       panelEl.append(wrap);
     }
 
+    // Specialized empty state for "no worktree yet": surface a clear CTA back to
+    // the composer's "改代码" checkbox instead of leaving the relationship implicit.
+    function renderEmptyStateWithWorktreeCta() {
+      resetShell();
+      const wrap = document.createElement("div");
+      wrap.className = "workspace-panel-body";
+      const empty = document.createElement("div");
+      empty.className = "workspace-empty workspace-empty-cta-box";
+      const title = document.createElement("div");
+      title.className = "workspace-empty-title";
+      title.textContent = "当前会话尚未创建 worktree";
+      empty.append(title);
+      const hint = document.createElement("div");
+      hint.className = "workspace-empty-hint";
+      hint.textContent = "在下方勾选「改代码」后再次发送，会让 Agent 在隔离 worktree 中改动。";
+      empty.append(hint);
+      const cta = document.createElement("button");
+      cta.type = "button";
+      cta.className = "btn-cmd primary workspace-empty-cta-btn";
+      cta.textContent = "勾选「改代码」";
+      cta.addEventListener("click", () => {
+        if (typeof onRequestWorktree === "function") {
+          try {
+            onRequestWorktree();
+          } catch {
+            /* non-fatal */
+          }
+        }
+      });
+      empty.append(cta);
+      wrap.append(empty);
+      panelEl.append(wrap);
+    }
+
     function renderSimpleEmpty(message) {
       resetShell();
       const wrap = document.createElement("div");
@@ -382,7 +439,7 @@
       refreshBtn.addEventListener("click", () => loadWorkspaceState());
       const discardBtn = document.createElement("button");
       discardBtn.type = "button";
-      discardBtn.className = "btn-cmd danger";
+      discardBtn.className = "btn-cmd danger workspace-discard-btn";
       discardBtn.textContent = "丢弃 worktree";
       discardBtn.addEventListener("click", () => discardWorkspace());
       actions.append(refreshBtn, discardBtn);
@@ -408,7 +465,7 @@
         return;
       }
       if (!status) {
-        renderEmptyState("当前会话尚未创建 worktree");
+        renderEmptyStateWithWorktreeCta();
         return;
       }
       if (status.clean) {
@@ -463,7 +520,9 @@
         const diffText = diffData.diff || "";
         const diffApi = getDiffApi();
         const files = diffApi ? diffApi.parseUnifiedDiff(diffText) : [];
-        const keepSelected = files.some((f) => f.path === prevSelected) ? prevSelected : (files[0]?.path || "");
+        const keepSelected = files.some((f) => f.path === prevSelected)
+          ? prevSelected
+          : files[0]?.path || "";
 
         state.workspace = {
           status,
@@ -485,15 +544,28 @@
 
     async function discardWorkspace() {
       if (!state.currentSessionId) return;
-      const ok = await Promise.resolve(confirmFn("确认丢弃当前 worktree 吗？", {
-        title: "丢弃 worktree",
-        danger: true,
-        confirmLabel: "丢弃",
-      }));
-      if (!ok) return;
-      await worktreeApi.discard(state.currentSessionId);
-      if (typeof onAfterDiscard === "function") await onAfterDiscard();
-      await loadWorkspaceState();
+      if (discardWorkspace._busy) return;
+      discardWorkspace._busy = true;
+      lockDiscardButtons(true);
+      try {
+        // prettier-ignore
+        const ok = await Promise.resolve(confirmFn("确认丢弃当前 worktree 吗？", {
+          title: "丢弃 worktree",
+          danger: true,
+          confirmLabel: "丢弃",
+        }));
+        if (!ok) return;
+        // Optimistic guard: while awaiting discard, ignore other clicks (locked above).
+        await worktreeApi.discard(state.currentSessionId);
+        toast("已丢弃 worktree 改动 · 如需找回见 git reflog");
+        if (typeof onAfterDiscard === "function") await onAfterDiscard();
+        await loadWorkspaceState();
+      } catch (error) {
+        toast("丢弃失败: " + ((error && error.message) || error), true);
+      } finally {
+        discardWorkspace._busy = false;
+        lockDiscardButtons(false);
+      }
     }
 
     return {

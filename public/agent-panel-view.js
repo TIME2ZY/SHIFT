@@ -19,6 +19,7 @@
       setDefaultAgent,
       insertAgentMention,
       promptEl,
+      onContextBlockedChange,
     } = deps;
 
     function compactTokens(value) {
@@ -69,40 +70,60 @@
       const context = entry.context;
       const billing = entry.billing || {};
       const sessionUsage = item.querySelector(".agent-session-usage");
-      const sessionTotal = Number(billing.totalTokens || 0);
-      sessionUsage.querySelector("strong").textContent =
-        sessionTotal > 0 ? `${compactTokens(sessionTotal)} tokens` : "—";
-      sessionUsage.title = [
-        `本会话输入 ${compactTokens(billing.inputTokens)}`,
-        `输出 ${compactTokens(billing.outputTokens)}`,
-        `缓存 ${compactTokens(billing.cachedInputTokens)}`,
-        `推理 ${compactTokens(billing.reasoningTokens)}`,
-      ].join(" · ");
+      if (sessionUsage) {
+        const sessionTotal = Number(billing.totalTokens || 0);
+        sessionUsage.querySelector("strong").textContent =
+          sessionTotal > 0 ? `${compactTokens(sessionTotal)} tokens` : "—";
+        sessionUsage.title = [
+          `本会话输入 ${compactTokens(billing.inputTokens)}`,
+          `输出 ${compactTokens(billing.outputTokens)}`,
+          `缓存 ${compactTokens(billing.cachedInputTokens)}`,
+          `推理 ${compactTokens(billing.reasoningTokens)}`,
+        ].join(" · ");
+      }
       const { usedPercent, remainingPercent } = budgetRailSegments(context.budgetFillRatio);
       const budget = item.querySelector(".agent-tab-budget");
       const rail = item.querySelector(".context-rail");
-      budget.hidden = false;
-      rail.style.setProperty("--context-used", `${usedPercent}%`);
-      rail.style.setProperty("--context-remaining", `${remainingPercent}%`);
-      rail.setAttribute("aria-valuenow", String(Math.round(context.contextUsedTokens)));
-      rail.setAttribute("aria-valuemax", String(Math.round(context.usableContextTokens)));
+      if (budget) budget.hidden = false;
+      if (rail) {
+        rail.style.setProperty("--context-used", `${usedPercent}%`);
+        rail.style.setProperty("--context-remaining", `${remainingPercent}%`);
+        rail.setAttribute("aria-valuenow", String(Math.round(context.contextUsedTokens)));
+        rail.setAttribute("aria-valuemax", String(Math.round(context.usableContextTokens)));
+      }
       const source = context.contextUsageSource === "provider_exact" ? "精确" : "估算";
-      item.querySelector(".agent-budget-used").textContent =
-        `${compactTokens(context.contextUsedTokens)} 已用`;
-      item.querySelector(".agent-budget-remaining").textContent =
-        `${compactTokens(context.remainingTokens)} 剩余`;
-      item.querySelector(".agent-budget-source").textContent = source;
+      const usedEl = item.querySelector(".agent-budget-used");
+      const remEl = item.querySelector(".agent-budget-remaining");
+      const srcEl = item.querySelector(".agent-budget-source");
+      if (usedEl) usedEl.textContent = `${compactTokens(context.contextUsedTokens)} 已用`;
+      if (remEl) remEl.textContent = `${compactTokens(context.remainingTokens)} 剩余`;
+      if (srcEl) srcEl.textContent = source;
       item.classList.toggle(
         "context-warning",
         context.budgetFillRatio >= 0.9 && context.budgetFillRatio < 1
       );
       item.classList.toggle("context-full", context.budgetFillRatio >= 1);
-      budget.title = `物理窗口 ${compactTokens(context.contextWindowTokens)} · 可用 ${compactTokens(context.usableContextTokens)} · 预留 ${compactTokens(context.reserveTokens)} · ${source}`;
+      if (budget)
+        budget.title = `物理窗口 ${compactTokens(context.contextWindowTokens)} · 可用 ${compactTokens(context.usableContextTokens)} · 预留 ${compactTokens(context.reserveTokens)} · ${source}`;
     }
 
     function colorFor(id) {
       if (typeof agentColorIndex === "function") return String(agentColorIndex(id));
       return "1";
+    }
+
+    let lastContextBlocked = false;
+
+    function notifyContextBlocked(blocked) {
+      if (blocked === lastContextBlocked) return;
+      lastContextBlocked = blocked;
+      if (typeof onContextBlockedChange === "function") {
+        try {
+          onContextBlockedChange(blocked);
+        } catch {
+          /* non-fatal */
+        }
+      }
     }
 
     function renderCurrentAgent() {
@@ -112,12 +133,14 @@
           label: state.selectedAgent || "codex",
         };
       const label = agentLabel(agent.id);
+      const context = usageEntry(agent).context;
+      const ratio = Math.max(0, context.budgetFillRatio || 0);
+      const blocked = ratio >= 1;
+      notifyContextBlocked(blocked);
       if (contextStatusEl) {
-        const context = usageEntry(agent).context;
-        const ratio = Math.max(0, context.budgetFillRatio || 0);
         contextStatusEl.hidden = false;
         contextStatusEl.classList.toggle("context-warning", ratio >= 0.9 && ratio < 1);
-        contextStatusEl.classList.toggle("context-full", ratio >= 1);
+        contextStatusEl.classList.toggle("context-full", blocked);
         const value = contextStatusEl.querySelector("#context-status-value");
         if (value)
           value.textContent = `${Math.round(ratio * 100)}% · 余 ${compactTokens(context.remainingTokens)}`;
@@ -125,23 +148,26 @@
       }
     }
 
-    function renderAgentTabs() {
-      if (!agentTabsEl) return;
-      agentTabsEl.replaceChildren(
-        ...state.agents.map((a) => {
-          const item = document.createElement("article");
-          const isSelected = a.id === state.selectedAgent;
-          item.className = "agent-tab" + (isSelected ? " is-selected" : "");
-          item.dataset.agentColor = colorFor(a.id);
-          item.dataset.agentId = a.id;
-          item.setAttribute("role", "button");
-          item.tabIndex = 0;
-          item.setAttribute("aria-pressed", isSelected ? "true" : "false");
-          item.title = a.description
-            ? `${a.label} (${a.id}) — ${a.description}\n点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`
-            : `点击设为默认 Agent · Shift+点击插入 @${agentMention(a)}`;
-          // Order: name → model → capability tag
-          item.innerHTML = `
+    function applySelection(item, isSelected) {
+      if (!item) return;
+      item.classList.toggle("is-selected", isSelected);
+      item.setAttribute("aria-checked", isSelected ? "true" : "false");
+      item.tabIndex = isSelected ? 0 : -1;
+    }
+
+    function buildAgentTab(agent) {
+      const item = document.createElement("article");
+      item.dataset.agentColor = colorFor(agent.id);
+      item.dataset.agentId = agent.id;
+      // Single-select agent group — radiogroup/radio conveys the "default agent"
+      // selection better than button + aria-pressed.
+      item.setAttribute("role", "radio");
+      item.setAttribute("aria-checked", "false");
+      item.tabIndex = -1;
+      item.title =
+        (agent.description ? `${agent.label} (${agent.id}) — ${agent.description}\n` : "") +
+        `点击设为默认 Agent · Shift+点击插入 @${agentMention(agent)}`;
+      item.innerHTML = `
           <span class="agent-tab-avatar-slot"></span>
           <span class="agent-tab-name"></span>
           <span class="agent-tab-model"></span>
@@ -159,40 +185,119 @@
               <span class="agent-budget-source"></span>
             </div>
           </div>`;
-          item.querySelector(".agent-tab-name").textContent = agentLabel(a.id);
-          if (globalScope.AgentAvatar) {
-            const avatar = globalScope.AgentAvatar.createAgentAvatar(a.id, {
-              label: agentLabel(a.id),
-              className: "agent-avatar-panel",
-            });
-            const slot = item.querySelector(".agent-tab-avatar-slot");
-            if (slot && avatar) slot.appendChild(avatar);
-          }
-          item.querySelector(".agent-tab-model").textContent = agentMeta(a);
-          item.querySelector(".agent-tab-role").textContent = agentRoleSummary(a);
-          renderBudget(item, a);
-          item.addEventListener("click", (e) => {
-            if (e.shiftKey) {
-              insertAgentMention(a);
-              return;
-            }
-            setDefaultAgent(a.id);
+      item.querySelector(".agent-tab-name").textContent = agentLabel(agent.id);
+      if (globalScope.AgentAvatar) {
+        const avatar = globalScope.AgentAvatar.createAgentAvatar(agent.id, {
+          label: agentLabel(agent.id),
+          className: "agent-avatar-panel",
+        });
+        const slot = item.querySelector(".agent-tab-avatar-slot");
+        if (slot && avatar) slot.appendChild(avatar);
+      }
+      item.querySelector(".agent-tab-model").textContent = agentMeta(agent);
+      item.querySelector(".agent-tab-role").textContent = agentRoleSummary(agent);
+      item.addEventListener("click", (e) => {
+        if (e.shiftKey) {
+          insertAgentMention(agent);
+          return;
+        }
+        setDefaultAgent(agent.id);
+        if (promptEl) promptEl.focus();
+      });
+      item.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (e.shiftKey) insertAgentMention(agent);
+          else {
+            setDefaultAgent(agent.id);
             if (promptEl) promptEl.focus();
-          });
-          item.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              if (e.shiftKey) insertAgentMention(a);
-              else {
-                setDefaultAgent(a.id);
-                if (promptEl) promptEl.focus();
-              }
-            }
-          });
-          return item;
-        })
+          }
+        }
+      });
+      return item;
+    }
+
+    function refreshAgentTab(item, agent) {
+      if (!item || !agent) return;
+      // Cheap in-place update — preserves DOM identity so keyboard focus and any
+      // pending transitions are not lost when usage refreshes after each turn.
+      item.dataset.agentColor = colorFor(agent.id);
+      item.title =
+        (agent.description ? `${agent.label} (${agent.id}) — ${agent.description}\n` : "") +
+        `点击设为默认 Agent · Shift+点击插入 @${agentMention(agent)}`;
+      const nameEl = item.querySelector(".agent-tab-name");
+      if (nameEl && nameEl.textContent !== agentLabel(agent.id)) {
+        nameEl.textContent = agentLabel(agent.id);
+      }
+      const modelEl = item.querySelector(".agent-tab-model");
+      if (modelEl) modelEl.textContent = agentMeta(agent);
+      const roleEl = item.querySelector(".agent-tab-role");
+      if (roleEl) roleEl.textContent = agentRoleSummary(agent);
+      renderBudget(item, agent);
+      applySelection(item, agent.id === state.selectedAgent);
+    }
+
+    function renderAgentTabs() {
+      if (!agentTabsEl) return;
+      // Treat the tab strip as a single-select radiogroup of agents.
+      agentTabsEl.setAttribute("role", "radiogroup");
+      agentTabsEl.setAttribute(
+        "aria-label",
+        agentTabsEl.getAttribute("aria-label") || "可用 Agents"
       );
+      const knownIds = new Set(state.agents.map((a) => a && a.id).filter(Boolean));
+      // Drop stale tabs whose agents have gone (e.g. catalog reload removed one).
+      for (const stale of Array.from(agentTabsEl.children)) {
+        const id = stale.dataset && stale.dataset.agentId;
+        if (!id || !knownIds.has(id)) stale.remove();
+      }
+      const existing = new Map(
+        Array.from(agentTabsEl.children).map((el) => [el.dataset.agentId, el])
+      );
+      // Rebuild in the agents' canonical order using replaceChildren with the
+      // already-built elements to preserve event bindings & avatarInstances.
+      const ordered = state.agents.map((agent) => {
+        const cached = existing.get(agent.id);
+        if (cached) {
+          refreshAgentTab(cached, agent);
+          existing.delete(agent.id);
+          return cached;
+        }
+        return buildAgentTab(agent);
+      });
+      agentTabsEl.replaceChildren(...ordered);
       renderCurrentAgent();
+    }
+
+    // Add keyboard navigation once for the lifecycle of the container.
+    if (agentTabsEl && !agentTabsEl.__shiftRadioBound) {
+      agentTabsEl.__shiftRadioBound = true;
+      agentTabsEl.addEventListener("keydown", (e) => {
+        if (
+          e.key !== "ArrowUp" &&
+          e.key !== "ArrowDown" &&
+          e.key !== "ArrowLeft" &&
+          e.key !== "ArrowRight" &&
+          e.key !== "Home" &&
+          e.key !== "End"
+        )
+          return;
+        const ids = state.agents.map((a) => a.id).filter(Boolean);
+        if (ids.length === 0) return;
+        e.preventDefault();
+        const cur = ids.indexOf(state.selectedAgent);
+        let next = cur < 0 ? 0 : cur;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (cur + 1) % ids.length;
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+          next = (cur - 1 + ids.length) % ids.length;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = ids.length - 1;
+        const targetId = ids[next];
+        if (!targetId) return;
+        setDefaultAgent(targetId);
+        const el = agentTabsEl.querySelector(`[data-agent-id="${targetId}"]`);
+        if (el && typeof el.focus === "function") el.focus();
+      });
     }
 
     return { renderAgentTabs, renderCurrentAgent };

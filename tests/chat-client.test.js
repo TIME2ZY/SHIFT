@@ -452,6 +452,68 @@ test("sendPrompt rejects when no agent can be resolved", async () => {
   assert.equal(deps.promptEl.focused, 1);
 });
 
+test("sendPrompt refuses when context budget is blocked", async () => {
+  let fetched = 0;
+  const toasts = [];
+  const statuses = [];
+  const deps = makeDeps({
+    promptEl: {
+      value: "hello",
+      disabled: false,
+      focus() {},
+    },
+    isContextBlocked: () => true,
+    resolvePromptAgent: () => ({ id: "codex" }),
+    fetchImpl: async () => {
+      fetched += 1;
+      throw new Error("should not fetch when blocked");
+    },
+    addToast(message, options) {
+      toasts.push({ message, options });
+    },
+    setStatus(text, variant) {
+      statuses.push([text, variant]);
+    },
+  });
+  const client = chatClientModule.createChatClient(deps);
+
+  await client.sendPrompt();
+
+  assert.equal(fetched, 0);
+  assert.equal(statuses[0][0], "上下文已满");
+  assert.equal(statuses[0][1], "error");
+  assert.ok(toasts.some((t) => /上下文已满/.test(t.message)));
+});
+
+test("sendPrompt respects state.contextBlocked without isContextBlocked hook", async () => {
+  let fetched = 0;
+  const runtimeStore = createRuntimeStore();
+  const deps = makeDeps({
+    runtimeStore,
+    promptEl: { value: "hello", disabled: false, focus() {} },
+    state: {
+      currentSessionId: "s1",
+      contextBlocked: true,
+      rightPanelTab: "agents",
+      runtimeStore,
+      sessions: {},
+      projectDir: "",
+      selectedAgent: "codex",
+      lastAgent: "codex",
+    },
+    resolvePromptAgent: () => ({ id: "codex" }),
+    fetchImpl: async () => {
+      fetched += 1;
+      return { ok: true };
+    },
+    setStatus() {},
+    addToast() {},
+  });
+  const client = chatClientModule.createChatClient(deps);
+  await client.sendPrompt();
+  assert.equal(fetched, 0);
+});
+
 test("sendPrompt uses a resolved default agent without requiring @mention", async () => {
   const bodies = [];
   const runtimeStore = createRuntimeStore();

@@ -448,6 +448,19 @@
   color: var(--accent);
 }
 
+.toast-error {
+  border-color: color-mix(in srgb, var(--danger, #e85d5d) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger, #e85d5d) 12%, var(--surface-canvas));
+}
+
+.toast-error .toast-action {
+  color: var(--danger, #e85d5d);
+}
+
+.toast-ok {
+  border-color: color-mix(in srgb, var(--ok, #3ecf8e) 40%, var(--border));
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -1043,6 +1056,7 @@
   }
 
   .worktree-mode-chip,
+  .composer-mention-btn,
   .btn-cmd.primary {
     min-height: 44px;
   }

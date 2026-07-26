@@ -162,12 +162,24 @@
   cursor: pointer;
 }
 
-.agent-tab-avatar-slot { grid-area: avatar; }
-.agent-tab-name { grid-area: name; }
-.agent-tab-model { grid-area: model; }
-.agent-session-usage { grid-area: usage; }
-.agent-tab-role { grid-area: role; }
-.agent-tab-budget { grid-area: budget; }
+.agent-tab-avatar-slot {
+  grid-area: avatar;
+}
+.agent-tab-name {
+  grid-area: name;
+}
+.agent-tab-model {
+  grid-area: model;
+}
+.agent-session-usage {
+  grid-area: usage;
+}
+.agent-tab-role {
+  grid-area: role;
+}
+.agent-tab-budget {
+  grid-area: budget;
+}
 
 .agent-avatar-panel {
   width: 32px;
@@ -632,4 +644,29 @@
   text-align: center;
   font-size: 12px;
   font-family: var(--font-ui);
+}
+
+.workspace-empty-cta-box {
+  padding: var(--space-5);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  text-align: center;
+}
+
+.workspace-empty-title {
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.workspace-empty-hint {
+  margin-bottom: var(--space-3);
+  line-height: 1.5;
+}
+
+.workspace-empty-cta-btn {
+  margin-top: var(--space-1);
 }

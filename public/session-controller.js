@@ -50,6 +50,31 @@
       applySessionAgent(sessionId, lastAgent || "");
     }
 
+    function ensureSlot(sid) {
+      if (!sid) return null;
+      if (!state.sessions) state.sessions = {};
+      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
+      return state.sessions[sid];
+    }
+
+    function saveDraftFor(sid) {
+      if (!sid || !promptEl) return;
+      const slot = ensureSlot(sid);
+      if (!slot) return;
+      slot.draftPrompt = promptEl.value;
+    }
+
+    function restoreDraftFor(sid) {
+      if (!sid || !promptEl) return;
+      const slot = ensureSlot(sid);
+      promptEl.value = slot.draftPrompt || "";
+      if (typeof window !== "undefined" && window.document) {
+        promptEl.dispatchEvent(new Event("input", { bubbles: true }));
+      } else if (typeof promptEl.dispatchEvent === "function") {
+        promptEl.dispatchEvent(new Event("input"));
+      }
+    }
+
     async function refreshSessionList() {
       try {
         const sessions = await sessionApi.listSessions();
@@ -67,6 +92,8 @@
       // Do not abort the previous session's background run. Only change the
       // display target; each session keeps its own controller/live state.
       const previousSessionId = state.currentSessionId;
+      // Preserve an unsent draft so switching away does not lose work.
+      saveDraftFor(previousSessionId);
       state.currentSessionId = id;
       if (typeof onSessionChanged === "function") onSessionChanged(id);
       messagesEl.replaceChildren();
@@ -160,6 +187,8 @@
         await loadWorkspaceState();
       }
       if (typeof syncComposerControls === "function") syncComposerControls();
+      // Restore any draft the user had saved for this session, after the UI has settled.
+      restoreDraftFor(id);
     }
 
     async function loadSessions() {
@@ -173,6 +202,9 @@
 
     async function newSession() {
       try {
+        // Preserve the leaving session's unsent draft (same as switchSession).
+        const previousSessionId = state.currentSessionId;
+        saveDraftFor(previousSessionId);
         const session = await sessionApi.createSession();
         state.currentSessionId = session.id;
         if (typeof onSessionChanged === "function") onSessionChanged(session.id);
@@ -194,7 +226,13 @@
         setStatus("就绪");
         await refreshSessionList();
         if (typeof syncComposerControls === "function") syncComposerControls();
-        promptEl.focus();
+        // New session starts with a clean draft.
+        const newSlot = ensureSlot(session.id);
+        if (newSlot) newSlot.draftPrompt = "";
+        if (promptEl) {
+          promptEl.value = "";
+          promptEl.focus();
+        }
         closeSidebarIfMobile();
       } catch (error) {
         addSystem("创建会话失败: " + error.message, "error");
@@ -233,6 +271,9 @@
       switchSession,
       newSession,
       deleteSession,
+      // Exposed so the chat-client can restore an aborted/failed prompt back
+      // into the composer instead of silently dropping it.
+      restoreDraftFor,
     };
   }
 

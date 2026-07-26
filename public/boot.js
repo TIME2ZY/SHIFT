@@ -16,6 +16,7 @@
     "/public/api-client.js",
     "/public/storage-health.js",
     "/public/display-helpers.js",
+    "/public/empty-state.js",
     "/public/agent-avatar.js",
     "/public/agent-routing.js",
     "/public/session-runtime.js",
@@ -32,6 +33,7 @@
     "/public/virtual-list.js",
     "/public/theme.js",
     "/public/ui-confirm.js",
+    "/public/toast.js",
     "/public/mention-composer.js",
     "/public/session-list-view.js",
     "/public/project-header.js",
@@ -74,10 +76,44 @@
     );
   }
 
+  function showBootFallback(message) {
+    if (typeof document === "undefined") return;
+    let host = document.getElementById("boot-fallback");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "boot-fallback";
+      host.style.cssText =
+        "position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#0b0d12;color:#e8eaed;z-index:9999;";
+      document.body.appendChild(host);
+    }
+    host.replaceChildren();
+    const title = document.createElement("strong");
+    title.textContent = "SHIFT 控制台加载失败";
+    title.style.fontSize = "1.1rem";
+    host.appendChild(title);
+    const body = document.createElement("span");
+    body.textContent = message || "未知错误";
+    body.style.color = "#b6bac3";
+    body.style.maxWidth = "60ch";
+    body.style.textAlign = "center";
+    host.appendChild(body);
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "重试加载";
+    retry.style.cssText =
+      "margin-top:8px;padding:8px 16px;border:1px solid #3a3f4b;border-radius:6px;background:#1b1f27;color:#e8eaed;cursor:pointer;";
+    retry.addEventListener("click", () => {
+      host.remove();
+      start();
+    });
+    host.appendChild(retry);
+  }
+
   function start() {
     if (typeof document === "undefined") return Promise.resolve([]);
     return loadSequential(MODULES).catch((err) => {
       console.error("[frontend boot]", err);
+      showBootFallback(err && err.message ? err.message : String(err));
       throw err;
     });
   }

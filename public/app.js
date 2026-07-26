@@ -1,15 +1,12 @@
 (function () {
   "use strict";
 
-  /* ═══════════════════════════════════════════════════════════
-     DOM REFS + shared clients
-     ═══════════════════════════════════════════════════════════ */
-
   const $ = (sel) => document.querySelector(sel);
 
   const messagesEl = $("#messages");
   const promptEl = $("#prompt");
   const btnSend = $("#btn-send");
+  const btnMention = $("#btn-mention");
   const useWorktreeInput = $("#use-worktree");
   const skillsBarEl = $("#skills-bar");
   const statusEl = $("#status");
@@ -34,7 +31,6 @@
   const projectDirPath = $("#project-dir-path");
   const worktreeStatusEl = $("#worktree-status");
   const mentionMenuEl = $("#mention-menu");
-  // Context tab: one scroll — recall list (conclusions hang on the producing turn).
   const recallBodyEl = contextPanelEl ? contextPanelEl.querySelector(".recall-body") : null;
   const recallSearchInputEl = contextPanelEl
     ? contextPanelEl.querySelector(".context-search input, .recall-search input")
@@ -65,25 +61,15 @@
   const confirmImpl = window.UiConfirm.createConfirm();
   const sidePanelEl = $("#side-panel");
 
-  /* ═══════════════════════════════════════════════════════════
-     STATE ownership (see design §4.1)
-     - uiStore/state: serializable UI selection only
-     - runtimeStore: per-session live runs (not mirrored into state)
-     - bus: pub/sub for ui:change / runtime:status
-     - DOM: pure derived views; do not treat DOM as source of truth
-     ═══════════════════════════════════════════════════════════ */
-
+  // uiStore = serializable UI; runtimeStore = live runs; DOM is derived only.
   const uiStore = window.UiStore.createUiStore({
     bus,
     initial: {
-      // UI selection (serializable)
       agents: [],
       selectedAgent: "codex",
       currentSessionId: null,
       skillsMetadata: [],
-      /** Last active skill names (SSE / prompt match). Kept across metadata reloads. */
       activeSkillNames: [],
-      // Per-session UI slots (lastPrompt/lastAgent for retry) — not live run data
       sessions: {},
       lastPrompt: "",
       lastAgent: "codex",
@@ -95,10 +81,10 @@
       mentionMatches: [],
       mentionRange: null,
       recallSearchDebounce: null,
-      rightPanelTab: "agents", // agents | context | workspace
+      rightPanelTab: "agents",
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
       usageSummary: { available: false, session: {}, agents: [] },
-      // NOT live run data — see runtimeStore
+      contextBlocked: false,
       runtimeStore,
     },
   });
@@ -126,10 +112,6 @@
   theme.init();
   theme.bindClick();
 
-  /* ═══════════════════════════════════════════════════════════
-     Orchestrator helpers
-     ═══════════════════════════════════════════════════════════ */
-
   function sessionSlot() {
     const sid = state.currentSessionId || "_pending";
     if (!state.sessions[sid]) {
@@ -140,6 +122,10 @@
 
   const localePack = window.Locale || window.LocaleZhCN;
   const L = (localePack && localePack.locale) || {};
+  const t = (path, fallback) => {
+    const locale = window.Locale || window.LocaleZhCN || localePack;
+    return locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+  };
 
   function formatElapsed(ms) {
     const sec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -209,28 +195,10 @@
     promptEl.style.height = `${next}px`;
   }
 
+  const toastHost = window.Toast ? window.Toast.createToastHost(toastHostEl) : null;
+
   function showToast(message, options = {}) {
-    if (!toastHostEl || !message) return;
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "toast";
-    el.textContent = message;
-    if (options.actionLabel) {
-      const act = document.createElement("span");
-      act.className = "toast-action";
-      act.textContent = options.actionLabel;
-      el.appendChild(act);
-    }
-    const dismiss = () => {
-      el.remove();
-    };
-    el.addEventListener("click", () => {
-      if (typeof options.onClick === "function") options.onClick();
-      dismiss();
-    });
-    toastHostEl.appendChild(el);
-    const ttl = typeof options.ttl === "number" ? options.ttl : 5200;
-    setTimeout(dismiss, ttl);
+    if (toastHost) toastHost.show(message, options || {});
   }
 
   function updateWorkspaceTabBadge() {
@@ -252,7 +220,6 @@
 
   function updateJumpBottomVisibility() {
     if (!jumpBottomEl || !messageView || typeof messageView.isNearBottom !== "function") return;
-    // Hide when empty state is showing or already near bottom.
     const emptyVisible = emptyStateEl && emptyStateEl.parentNode === messagesEl;
     if (emptyVisible) {
       jumpBottomEl.hidden = true;
@@ -261,34 +228,49 @@
     jumpBottomEl.hidden = messageView.isNearBottom();
   }
 
-  // Filled after messageView is created.
   let messageView = null;
 
   function syncComposerControls() {
     const rt = runtimeStore.get(state.currentSessionId || "_pending");
     const running = !!(rt && rt.controller);
-    // Keep the textarea editable while generating so users can draft the next prompt.
+    const blocked = !!state.contextBlocked && !running;
     promptEl.disabled = false;
-    const sendLabel = running
+    btnSend.textContent = running
       ? (L.composer && L.composer.stop) || "停止"
       : (L.composer && L.composer.send) || "发送";
-    btnSend.textContent = sendLabel;
     btnSend.setAttribute("aria-busy", running ? "true" : "false");
     btnSend.setAttribute(
       "aria-label",
       running ? (L.composer && L.composer.stopGenerate) || "停止生成" : "发送"
     );
-    if (running) btnSend.classList.add("danger");
-    else btnSend.classList.remove("danger");
+    btnSend.classList.toggle("danger", running);
+    btnSend.disabled = blocked;
+    btnSend.classList.toggle("is-disabled", blocked);
+    btnSend.title = blocked ? "上下文已满 · 切换 Agent 或开新会话" : "";
     if (running) {
       promptEl.setAttribute(
         "title",
         (L.composer && L.composer.draftWhileRunning) || "生成中仍可编辑草稿"
       );
+    } else if (blocked) {
+      promptEl.setAttribute("title", "当前 Agent 上下文已满 · 输入 @点名其它 Agent 或开新会话");
     } else {
       promptEl.removeAttribute("title");
     }
     updateRunBar();
+  }
+
+  function toastContextBlocked() {
+    showToast("上下文已满 · 切换 Agent 或开新会话后再发送", { ttl: 7000, variant: "error" });
+  }
+
+  function submitComposerPrompt() {
+    if (state.contextBlocked) {
+      toastContextBlocked();
+      return;
+    }
+    chatClient.sendPrompt();
+    autoGrowPrompt();
   }
 
   function setStatus(text, cls) {
@@ -357,10 +339,6 @@
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════
-     Feature modules
-     ═══════════════════════════════════════════════════════════ */
-
   const projectHeader = window.ProjectHeader.createProjectHeader({
     projectDirEl,
     projectDirPath,
@@ -368,6 +346,8 @@
     state,
     sessionApi,
     worktreeApi,
+    onToast: (message, isError) =>
+      showToast(message, isError ? { ttl: 7000, variant: "error" } : {}),
   });
   projectHeader.bindProjectDirEdit();
   const {
@@ -398,12 +378,18 @@
       await loadWorktreeStatus();
       updateWorkspaceTabBadge();
     },
+    onToast: (message, isError) =>
+      showToast(message, isError ? { ttl: 7000, variant: "error" } : {}),
+    onRequestWorktree: () => {
+      if (!useWorktreeInput) return;
+      useWorktreeInput.checked = true;
+      if (promptEl) promptEl.focus();
+      showToast("已开启「改代码」· 再次发送即可在隔离 worktree 中改动");
+    },
   });
 
-  // One process-panel renderer for message hydrate + recall expand (locale injected).
   const processPanelRenderer = window.MessageView.createProcessPanelRenderer();
 
-  // Lazy bind: messageView.focusProcessPanel is available after createMessageView.
   let focusProcessPanelRef = null;
 
   const recallPanel = window.RecallPanel.createRecallPanel({
@@ -421,7 +407,6 @@
   });
   recallPanel.bindSearch();
 
-  // Inject banner only — product conclusions attach to recall turns, not a separate list.
   const memoryPanel = window.MemoryPanel.createMemoryPanel({
     bodyEl: null,
     injectEl: $("#memory-inject-inline"),
@@ -697,10 +682,7 @@
 
     // Mobile-only height boost for context/workspace (CSS gated @media max-width 700px).
     if (sidePanelEl) {
-      sidePanelEl.classList.toggle(
-        "is-expanded",
-        nextTab === "workspace" || nextTab === "context"
-      );
+      sidePanelEl.classList.toggle("is-expanded", nextTab === "workspace" || nextTab === "context");
     }
 
     if (nextTab === "context") loadContextPanel();
@@ -846,12 +828,31 @@
     setDefaultAgent,
     insertAgentMention,
     promptEl,
+    onContextBlockedChange: (blocked) => {
+      state.contextBlocked = !!blocked;
+      syncComposerControls();
+    },
   });
   renderAgentTabs = agentPanelView.renderAgentTabs;
   renderCurrentAgent = agentPanelView.renderCurrentAgent;
 
   if (contextStatusEl) {
     contextStatusEl.addEventListener("click", () => activateRightTab("agents"));
+  }
+
+  if (btnMention) {
+    btnMention.addEventListener("click", () => {
+      if (!promptEl) return;
+      const start = promptEl.selectionStart || promptEl.value.length;
+      const end = promptEl.selectionEnd || start;
+      const insert = start > 0 && !/\s$/.test(promptEl.value.slice(0, start)) ? " @" : "@";
+      promptEl.value = promptEl.value.slice(0, start) + insert + promptEl.value.slice(end);
+      promptEl.setSelectionRange(start + insert.length, start + insert.length);
+      autoGrowPrompt();
+      updateActiveSkills(promptEl.value);
+      mentionComposer.update();
+      promptEl.focus();
+    });
   }
 
   async function loadAgents() {
@@ -865,6 +866,7 @@
       state.lastAgent = state.selectedAgent;
       renderAgentTabs();
       renderCurrentAgent();
+      renderEmptyChips();
     } catch (e) {
       addSystem("加载 Agent 列表失败: " + e.message, "error");
       setStatus("加载 Agent 失败", "error");
@@ -905,38 +907,40 @@
     appendLive,
     applyAgentEvent,
     addDebug,
+    addToast: showToast,
     finishStream,
     finalizeLiveAgent,
     agentLabel,
     syncComposerControls,
     onRuntimeStatusChange,
+    isContextBlocked: () => !!state.contextBlocked,
+    restoreDraft(sessionId, value) {
+      if (!promptEl || !sessionId) return;
+      const slot = state.sessions && state.sessions[sessionId];
+      const text = value != null ? String(value) : (slot && slot.lastPrompt) || "";
+      promptEl.value = text;
+      autoGrowPrompt();
+      updateActiveSkills(promptEl.value);
+      if (slot) slot.draftPrompt = text;
+    },
     onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
     onMemoryEvent: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
-      // Refresh recall so conclusions re-attach to the producing turn.
       if (state.rightPanelTab === "context") loadContextPanel();
-      const action = payload && payload.action;
-      const locale = window.Locale || window.LocaleZhCN;
-      const t = (path, fallback) =>
-        locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
-      if (action === "invalidate") {
-        setStatus(t("memory.agentInvalidated", "Agent 已否定一条记忆"), "ok");
-      } else {
-        setStatus(t("memory.agentWrote", "Agent 已写入记忆"), "ok");
-      }
+      setStatus(
+        (payload && payload.action) === "invalidate"
+          ? t("memory.agentInvalidated", "Agent 已否定一条记忆")
+          : t("memory.agentWrote", "Agent 已写入记忆"),
+        "ok"
+      );
     },
     onMemoryInject: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
-      if (typeof memoryPanel.setInjectPreview === "function") {
-        memoryPanel.setInjectPreview(payload);
-      }
+      if (typeof memoryPanel.setInjectPreview === "function") memoryPanel.setInjectPreview(payload);
       const count = Number(payload && payload.count) || 0;
       if (count > 0 && state.rightPanelTab !== "context") {
-        const locale = window.Locale || window.LocaleZhCN;
-        const t = (path, fallback) =>
-          locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
         setStatus(
           t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count)),
           "ok"
@@ -951,10 +955,6 @@
     },
   });
 
-  /* ═══════════════════════════════════════════════════════════
-     Event bindings + init
-     ═══════════════════════════════════════════════════════════ */
-
   function abortActiveRun() {
     runtimeStore.abort(state.currentSessionId);
   }
@@ -966,33 +966,27 @@
       abortActiveRun();
       return;
     }
-    chatClient.sendPrompt();
-    autoGrowPrompt();
+    submitComposerPrompt();
   });
-  if (runBarStopEl) {
-    runBarStopEl.addEventListener("click", () => abortActiveRun());
-  }
+  if (runBarStopEl) runBarStopEl.addEventListener("click", () => abortActiveRun());
 
   if (jumpBottomEl) {
     jumpBottomEl.addEventListener("click", () => {
-      if (messageView && typeof messageView.scrollDown === "function") {
-        messageView.scrollDown(true);
-      }
+      if (messageView && typeof messageView.scrollDown === "function") messageView.scrollDown(true);
       jumpBottomEl.hidden = true;
     });
   }
-  messagesEl.addEventListener(
-    "scroll",
-    () => {
-      updateJumpBottomVisibility();
-    },
-    { passive: true }
-  );
+  messagesEl.addEventListener("scroll", () => updateJumpBottomVisibility(), { passive: true });
 
   promptEl.addEventListener("input", () => {
     autoGrowPrompt();
     updateActiveSkills(promptEl.value);
     mentionComposer.update();
+    const sid = state.currentSessionId;
+    if (!sid) return;
+    if (!state.sessions) state.sessions = {};
+    if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
+    state.sessions[sid].draftPrompt = promptEl.value;
   });
   promptEl.addEventListener("click", () => mentionComposer.update());
   promptEl.addEventListener("keyup", (e) => {
@@ -1000,20 +994,16 @@
     mentionComposer.update();
   });
   promptEl.addEventListener("keydown", (e) => {
-    // IME composition: skip shortcuts while composing CJK candidates.
     if (e.isComposing || e.keyCode === 229) return;
     if (mentionComposer.handleKeydown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       const rt = runtimeStore.get(state.currentSessionId || "_pending");
-      // While generating, Enter does not send (draft stays); use 停止 to abort.
-      if (rt && rt.controller) return;
-      chatClient.sendPrompt();
-      autoGrowPrompt();
+      if (rt && rt.controller) return; // generating: keep draft; use 停止 to abort
+      submitComposerPrompt();
     }
   });
 
-  // After send clears the textarea (chat-client), re-fit height.
   const promptValueDesc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
   if (promptValueDesc && promptValueDesc.set) {
     const nativeSet = promptValueDesc.set;
@@ -1042,39 +1032,32 @@
   updateJumpBottomVisibility();
 
   const emptyChipsEl = $("#empty-state-chips");
-  if (emptyChipsEl) {
-    emptyChipsEl.addEventListener("click", (e) => {
-      const chip = e.target && e.target.closest ? e.target.closest(".empty-chip") : null;
-      if (!chip || !promptEl) return;
-      const text = chip.getAttribute("data-prompt") || chip.textContent || "";
-      if (!text.trim()) return;
-      promptEl.value = text.trim();
-      promptEl.focus();
-      autoGrowPrompt();
-      updateActiveSkills(promptEl.value);
-      const len = promptEl.value.length;
-      try {
-        promptEl.setSelectionRange(len, len);
-      } catch {
-        /* ignore */
-      }
-    });
+  window.__shiftState = state;
+  const emptyStateModule = window.EmptyState
+    ? window.EmptyState.createEmptyState({
+        chipsEl: emptyChipsEl,
+        promptEl,
+        onAfterFill: (el) => {
+          autoGrowPrompt();
+          updateActiveSkills(el.value);
+        },
+      })
+    : null;
+  if (emptyStateModule) emptyStateModule.bindClick();
+  function renderEmptyChips() {
+    if (emptyStateModule) emptyStateModule.renderEmptyChips(state.agents);
   }
+  renderEmptyChips();
 
   apiFetch("/api/skills")
     .then(jsonOrThrow)
     .then((d) => {
       state.skillsMetadata = d.skills || [];
-      // Prefer server active (always-on); do not pass [] or we hide the bar.
-      if (Array.isArray(d.active) && d.active.length > 0) {
-        renderSkillTags(d.active);
-      } else {
-        renderSkillTags(); // re-render from metadata always-on fallback
-      }
+      if (Array.isArray(d.active) && d.active.length > 0) renderSkillTags(d.active);
+      else renderSkillTags();
     })
     .catch((e) => console.warn("Skills metadata load failed:", e));
 
-  // Also refresh when composer is empty on boot (always-on).
   updateActiveSkills(promptEl ? promptEl.value : "");
 
   Promise.all([loadAgents(), sessionController.loadSessions()]).catch(() => {

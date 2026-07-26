@@ -28,6 +28,7 @@
     escHtml,
     t = (path, fallback) => fallback || path,
     onToast,
+    promptImpl,
     productOnly = true,
     showConfirm = false,
   }) {
@@ -99,21 +100,16 @@
       if (!payload) return "";
       const count = Number(payload.count) || (payload.items || []).length || 0;
       const items = Array.isArray(payload.items) ? payload.items : [];
-      const availability =
-        payload.availability || payload.stats?.availability || { state: "available" };
+      const availability = payload.availability ||
+        payload.stats?.availability || { state: "available" };
       let title =
         count > 0
           ? t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count))
           : t("memory.injectedEmpty", "本回合未注入结构化记忆");
       if (availability.state === "unavailable") {
-        title = t(
-          "memory.injectedUnavailable",
-          "记忆系统暂时不可用（非空库）"
-        );
+        title = t("memory.injectedUnavailable", "记忆系统暂时不可用（非空库）");
       } else if (availability.state === "degraded") {
-        title =
-          t("memory.injectedDegraded", "记忆检索降级") +
-          (count > 0 ? ` · ${count}` : "");
+        title = t("memory.injectedDegraded", "记忆检索降级") + (count > 0 ? ` · ${count}` : "");
       }
       const list =
         count > 0
@@ -203,10 +199,7 @@
     function renderList(memories) {
       if (!memories.length) {
         bodyEl.innerHTML = `<div class="memory-empty">${escHtml(
-          t(
-            "memory.emptyList",
-            "还没有沉淀的结论。Agent 确认决策后会自动出现在这里。"
-          )
+          t("memory.emptyList", "还没有沉淀的结论。Agent 确认决策后会自动出现在这里。")
         )}</div>`;
         return;
       }
@@ -277,9 +270,7 @@
               : ""
           }
           ${
-            actions.length
-              ? `<footer class="memory-card-actions">${actions.join("")}</footer>`
-              : ""
+            actions.length ? `<footer class="memory-card-actions">${actions.join("")}</footer>` : ""
           }
         </article>
       `;
@@ -299,10 +290,27 @@
           });
           toast(t("memory.confirmOk", "已确认记忆"));
         } else if (action === "invalidate") {
-          const reason =
-            typeof globalScope.prompt === "function"
-              ? globalScope.prompt(t("memory.invalidatePrompt", "否定原因（可选）"), "")
-              : "";
+          // Don't block on a native prompt() dialog. Callers inject a
+          // promptImpl returning { reason, cancelled }; without one, fall
+          // back to an empty reason and toast about the limitation.
+          let reason = "";
+          if (typeof promptImpl === "function") {
+            try {
+              const out = await promptImpl({
+                message: t("memory.invalidatePrompt", "否定原因（可选）"),
+                defaultValue: "",
+              });
+              if (out && out.cancelled) {
+                btn.disabled = false;
+                return;
+              }
+              reason = (out && out.reason) || "";
+            } catch {
+              /* user dismissed — keep flow with empty reason */
+            }
+          } else if (typeof globalScope.prompt === "function") {
+            reason = globalScope.prompt(t("memory.invalidatePrompt", "否定原因（可选）"), "") || "";
+          }
           await memoryApi.invalidateMemory(id, {
             invalidatedBy: "user",
             reason: reason || "",
