@@ -259,7 +259,7 @@ function createServer(options = {}) {
     try {
       worktreeManager.discardWorktree(sessionId);
     } catch {}
-    deleteSessionMap(sessionId, sessionMapRoot);
+    if (!sqliteAuthoritative) deleteSessionMap(sessionId, sessionMapRoot);
     await transcript.deleteSessionData(sessionId);
     invocationRegistry.deleteForSession(sessionId);
   }

@@ -466,17 +466,23 @@ function createChatRoutes({
         }
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
-        const sessionMap = readSessionMap(sessionId, sessionMapRoot);
         const providerId = agentConfig.providerId || "";
         const providerKey =
           providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
-        const resumeSessionId = resolveResumeSessionId(
-          sessionMap,
-          agent,
-          workspaceKey,
-          providerKey
-        );
+        const durableWindow = sqliteAuthoritative
+          ? storage?.windows?.getOpen?.({
+              threadId: sessionId,
+              agentId: agent,
+              providerKey,
+              workspaceKey,
+            })
+          : null;
+        const sessionMap = sqliteAuthoritative ? null : readSessionMap(sessionId, sessionMapRoot);
+        const resumeSessionId = sqliteAuthoritative
+          ? durableWindow?.providerSessionId || ""
+          : resolveResumeSessionId(sessionMap, agent, workspaceKey, providerKey);
         let assistantContent = "";
+        let observedProviderSessionId = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
         let contextSealHandled = false;
@@ -729,8 +735,10 @@ function createChatRoutes({
           [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
           [ENV.BRANCH]: runWorkspace.branch || "",
           INVOKE_SESSION_ID: resumeSessionId,
-          INVOKE_SESSION_FILE: getSessionMapPath(sessionId, sessionMapRoot),
           INVOKE_WORKSPACE_KEY: workspaceKey,
+          ...(sqliteAuthoritative
+            ? {}
+            : { INVOKE_SESSION_FILE: getSessionMapPath(sessionId, sessionMapRoot) }),
         };
 
         // SQLite start event is written by durable.startInvocation. Emit the
@@ -809,7 +817,9 @@ function createChatRoutes({
           if (capture?.captured) {
             sendSse(res, "memory-captured", capture.event);
           }
-          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+          if (!sqliteAuthoritative) {
+            abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
+          }
         };
         const addObservedContext = (charCount) => {
           healthTracker.addOutput(charCount);
@@ -837,6 +847,15 @@ function createChatRoutes({
           onEvent(event) {
             // Realtime path first — UI should not wait on durable batching.
             sendSse(res, "agent-event", event);
+            if (
+              sqliteAuthoritative &&
+              typeof event.sessionId === "string" &&
+              event.sessionId &&
+              durableRun?.window?.id
+            ) {
+              observedProviderSessionId = event.sessionId;
+              durable.bindProviderSession(durableRun.window.id, event.sessionId);
+            }
             if (event.type === "text.delta") {
               const text = typeof event.text === "string" ? event.text : "";
               assistantContent += text;
@@ -875,13 +894,14 @@ function createChatRoutes({
         if (sealer.isSealed()) {
           sealContextWindow(healthTracker.getFillRatio());
         } else if (durableRun) {
-          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
-          const persistedProviderSessionId = resolveResumeSessionId(
-            updatedSessionMap,
-            agent,
-            workspaceKey,
-            providerKey
-          );
+          const persistedProviderSessionId = sqliteAuthoritative
+            ? observedProviderSessionId || durableRun.window.providerSessionId || ""
+            : resolveResumeSessionId(
+                readSessionMap(sessionId, sessionMapRoot),
+                agent,
+                workspaceKey,
+                providerKey
+              );
           durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
         }
 

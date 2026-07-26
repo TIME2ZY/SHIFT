@@ -33,6 +33,29 @@ function successfulSpawn() {
   return child;
 }
 
+function providerSessionSpawn(calls) {
+  return (_command, _args, options) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    const sessionId = `provider-session-${calls.length + 1}`;
+    calls.push({
+      resumeSessionId: options.env.INVOKE_SESSION_ID || "",
+      sessionFile: options.env.INVOKE_SESSION_FILE || "",
+      sessionId,
+    });
+    process.nextTick(() => {
+      child.stdout.write(`${JSON.stringify({ type: "run.started", sessionId })}\n`);
+      child.stdout.write(`${JSON.stringify({ type: "text.delta", text: "hello" })}\n`);
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", 0, null);
+    });
+    return child;
+  };
+}
+
 function spawnText(text) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -346,6 +369,7 @@ test("sqlite mode restores sessions after file loss and continues the message se
   const transcriptDir = path.join(tmpDir, "transcripts");
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
+  const providerCalls = [];
 
   function startServer() {
     const server = createServer({
@@ -354,7 +378,7 @@ test("sqlite mode restores sessions after file loss and continues the message se
       sessionMapRoot: path.join(tmpDir, "session-maps"),
       storageMode: "sqlite",
       memoryDbFile,
-      spawnRunner: successfulSpawn,
+      spawnRunner: providerSessionSpawn(providerCalls),
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,
     });
@@ -385,6 +409,9 @@ test("sqlite mode restores sessions after file loss and continues the message se
       false,
       "sqlite mode must not create the legacy invocation registry"
     );
+    assert.equal(providerCalls[0].resumeSessionId, "");
+    assert.equal(providerCalls[0].sessionFile, "");
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     await new Promise((resolve) => firstServer.close(resolve));
     firstServer = null;
 
@@ -416,6 +443,9 @@ test("sqlite mode restores sessions after file loss and continues the message se
         prompt: "continued after restart",
       }),
     }).then((response) => response.text());
+    assert.equal(providerCalls[1].resumeSessionId, "provider-session-1");
+    assert.equal(providerCalls[1].sessionFile, "");
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     const continued = await apiFetch(`${secondUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
