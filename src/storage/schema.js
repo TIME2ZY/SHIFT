@@ -549,6 +549,14 @@ const MIGRATIONS = Object.freeze([
         ON storage_outbox(status, next_attempt_at, created_at);
     `,
   },
+  {
+    version: 13,
+    name: "storage_outbox_retention",
+    sql: `
+      CREATE INDEX storage_outbox_delivered
+        ON storage_outbox(status, delivered_at);
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

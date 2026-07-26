@@ -159,3 +159,51 @@ test("pending outbox rows survive restart and are delivered later", async () => 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("delivered outbox cleanup respects retention boundary, batch limit, and pending rows", () => {
+  const storage = createStorage({ file: ":memory:" });
+  seed(storage);
+  try {
+    for (let sequenceNo = 0; sequenceNo < 4; sequenceNo += 1) {
+      storage.outbox.enqueue({
+        threadId: "thread-1",
+        invocationId: "inv-1",
+        sequenceNo,
+        kind: "text.delta",
+        payload: { sequenceNo },
+        createdAt: `2026-01-0${sequenceNo + 1}T00:00:00.000Z`,
+      });
+    }
+    const rows = storage.outbox.listPending({ now: "2026-02-01T00:00:00.000Z" });
+    storage.outbox.markDelivered(rows[0].id, "2026-01-01T00:00:00.000Z");
+    storage.outbox.markDelivered(rows[1].id, "2026-01-02T00:00:00.000Z");
+    storage.outbox.markDelivered(rows[2].id, "2026-01-03T00:00:00.000Z");
+
+    assert.equal(
+      storage.outbox.cleanupDelivered({
+        before: "2026-01-03T00:00:00.000Z",
+        limit: 1,
+      }),
+      1
+    );
+    assert.equal(
+      storage.outbox.cleanupDelivered({
+        before: "2026-01-03T00:00:00.000Z",
+        limit: 10,
+      }),
+      1,
+      "the exact boundary is retained"
+    );
+    assert.equal(storage.outbox.listPending().length, 1, "pending rows are never cleaned");
+    assert.equal(
+      storage.outbox.cleanupDelivered({
+        before: "2026-01-03T00:00:00.000Z",
+        limit: 10,
+      }),
+      0,
+      "cleanup is idempotent"
+    );
+  } finally {
+    storage.close();
+  }
+});

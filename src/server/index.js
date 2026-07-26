@@ -21,6 +21,7 @@ const invocationStore = require("./invocation-store");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
 const { createMemoryRoutes } = require("./memory-routes");
+const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const skills = require("./skills");
@@ -293,6 +294,11 @@ function createServer(options = {}) {
     eventStore,
     logger,
   });
+  const handleStorageRoutes = createStorageRoutes({
+    storageContext,
+    sendJson,
+    readJsonBody,
+  });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
     transcript,
@@ -380,6 +386,10 @@ function createServer(options = {}) {
 
     if (req.method === "GET" && url.pathname === "/api/agents") {
       sendJson(res, 200, { agents: publicAgents() });
+      return;
+    }
+
+    if (await handleStorageRoutes(req, res, url)) {
       return;
     }
 

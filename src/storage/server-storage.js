@@ -71,6 +71,9 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
           transcript: options.transcript,
           logger,
           intervalMs: options.outboxIntervalMs,
+          retentionDays: options.outboxRetentionDays,
+          cleanupIntervalMs: options.outboxCleanupIntervalMs,
+          cleanupBatchSize: options.outboxCleanupBatchSize,
         })
       : null;
   outboxFlusher?.start();
@@ -82,6 +85,26 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     eventStore,
     outboxFlusher,
     outboxHealth: () => storage?.outbox?.health?.() || { state: "unavailable", pending: 0 },
+    cleanupDeliveredOutbox(options) {
+      if (!storage?.outbox?.cleanupDelivered) {
+        return { available: false, deleted: 0 };
+      }
+      if (outboxFlusher?.cleanupDelivered) {
+        return { available: true, ...outboxFlusher.cleanupDelivered(options) };
+      }
+      const retentionDays = Math.max(
+        1,
+        Math.min(Number(options?.retentionDays) || Number(options?.days) || 7, 365)
+      );
+      const now = options?.now ? new Date(options.now) : new Date();
+      const before = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+      return {
+        available: true,
+        deleted: storage.outbox.cleanupDelivered({ before, limit: options?.limit }),
+        before,
+        retentionDays,
+      };
+    },
     sessionService,
     close() {
       outboxFlusher?.stop();

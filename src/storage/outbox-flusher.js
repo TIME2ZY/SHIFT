@@ -4,12 +4,30 @@ function createOutboxFlusher({
   logger = console,
   intervalMs = 1000,
   batchSize = 100,
+  retentionDays = 7,
+  cleanupIntervalMs = 60 * 60 * 1000,
+  cleanupBatchSize = 1000,
 } = {}) {
   if (!outbox?.listPending || !transcript?.appendCanonicalEvent) {
     throw new Error("Outbox flusher requires an outbox and canonical transcript sink.");
   }
   let timer = null;
   let running = null;
+  let lastCleanupAt = 0;
+
+  function cleanupDelivered(options = {}) {
+    if (!outbox.cleanupDelivered) return { deleted: 0, before: null };
+    const days = Math.max(1, Math.min(Number(options.retentionDays) || retentionDays, 365));
+    const now = options.now ? new Date(options.now) : new Date();
+    if (!Number.isFinite(now.getTime())) throw new Error("Outbox cleanup now must be valid.");
+    const before = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+    const deleted = outbox.cleanupDelivered({
+      before,
+      limit: options.limit || cleanupBatchSize,
+    });
+    lastCleanupAt = now.getTime();
+    return { deleted, before, retentionDays: days };
+  }
 
   async function flushOnce() {
     if (running) return running;
@@ -29,7 +47,11 @@ function createOutboxFlusher({
           logger.error?.(`[storage-outbox] delivery failed for ${row.id}: ${error.message}`);
         }
       }
-      return { delivered, failed, health: outbox.health() };
+      let cleanup = null;
+      if (Date.now() - lastCleanupAt >= cleanupIntervalMs) {
+        cleanup = cleanupDelivered();
+      }
+      return { delivered, failed, cleanup, health: outbox.health() };
     })();
     try {
       return await running;
@@ -60,7 +82,14 @@ function createOutboxFlusher({
     await flushOnce();
   }
 
-  return { start, stop, flushOnce, close, health: () => outbox.health() };
+  return {
+    start,
+    stop,
+    flushOnce,
+    cleanupDelivered,
+    close,
+    health: () => outbox.health(),
+  };
 }
 
 module.exports = { createOutboxFlusher };

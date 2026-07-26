@@ -34,6 +34,17 @@ function createOutboxRepository(db) {
       MAX(CASE WHEN status = 'pending' THEN last_error END) AS last_error
     FROM storage_outbox
   `);
+  const cleanupDelivered = db.prepare(`
+    DELETE FROM storage_outbox
+    WHERE id IN (
+      SELECT id
+      FROM storage_outbox
+      WHERE status = 'delivered'
+        AND delivered_at < @before
+      ORDER BY delivered_at, id
+      LIMIT @limit
+    )
+  `);
 
   return {
     enqueue(input) {
@@ -86,6 +97,14 @@ function createOutboxRepository(db) {
         oldestPendingAt: row.oldest_pending_at || null,
         lastError: row.last_error || null,
       };
+    },
+    cleanupDelivered(options = {}) {
+      const before = new Date(options.before);
+      if (!Number.isFinite(before.getTime())) {
+        throw new Error("Outbox cleanup requires a valid before timestamp.");
+      }
+      const limit = Math.max(1, Math.min(Number(options.limit) || 1000, 10_000));
+      return cleanupDelivered.run({ before: before.toISOString(), limit }).changes;
     },
   };
 }
