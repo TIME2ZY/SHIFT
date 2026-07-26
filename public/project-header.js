@@ -2,7 +2,25 @@
   "use strict";
 
   function createProjectHeader(deps) {
-    const { projectDirEl, projectDirPath, worktreeStatusEl, state, sessionApi, worktreeApi } = deps;
+    const {
+      projectDirEl,
+      projectDirPath,
+      worktreeStatusEl,
+      state,
+      sessionApi,
+      worktreeApi,
+      onToast,
+    } = deps;
+
+    function toast(message, isError) {
+      if (typeof onToast === "function") {
+        try {
+          onToast(message, !!isError);
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
 
     async function loadProjectDir(sessionId = state.currentSessionId) {
       if (!sessionId) {
@@ -12,9 +30,13 @@
       try {
         state.projectDir = await sessionApi.readProjectDir(sessionId);
         projectDirPath.textContent = state.projectDir || "(当前目录)";
-      } catch {
+      } catch (error) {
+        // Surface the failure rather than silently misrepresenting the path as
+        // "(当前目录)" — that left users thinking a configured path was absent.
         state.projectDir = "";
-        projectDirPath.textContent = "(当前目录)";
+        projectDirPath.textContent = "(加载失败)";
+        projectDirPath.title = error && error.message ? error.message : "加载项目目录失败";
+        toast("加载项目目录失败", true);
       }
     }
 
@@ -56,9 +78,13 @@
           allowMissing: true,
         });
         renderWorktreeStatus();
-      } catch {
+      } catch (error) {
+        // Distinguish "no worktree yet" (allowMissing handled upstream) from
+        // a load failure (network/server error). Without this branch, the UI
+        // showed the same empty chip for both cases.
         state.worktreeStatus = null;
         renderWorktreeStatus();
+        toast("加载工作区状态失败", true);
       }
     }
 
@@ -98,7 +124,11 @@
               state.projectDir = await sessionApi.updateProjectDir(state.currentSessionId, val);
               projectDirPath.textContent = state.projectDir;
             } catch (e) {
-              alert("设置失败: " + e.message);
+              // Reverting the displayed path so it no longer pretends the just-typed
+              // path is the persisted value, and surfacing the failure via toast.
+              projectDirPath.textContent = state.projectDir || "(当前目录)";
+              const msg = (e && e.message) || "设置失败";
+              toast(`项目目录设置失败: ${msg}`, true);
             }
           }
         };
@@ -109,9 +139,14 @@
             done(true);
           }
           if (e.key === "Escape") {
+            e.preventDefault();
             done(false);
           }
         });
+        // Commit on blur unless the user is still focused; commits an unfinished
+        // path silently. Escape cancels explicitly. Also, only commit when the
+        // input is non-empty OR unchanged so blur on an empty transient does not
+        // wipe the path.
         input.addEventListener("blur", () => done(true));
       };
       projectDirEl.addEventListener("click", beginEdit);

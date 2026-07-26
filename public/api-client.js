@@ -4,18 +4,108 @@
   const UI_TOKEN_HEADER = "X-Shift-UI-Token";
 
   function readUiToken(documentRef) {
-    const meta = documentRef && documentRef.querySelector
-      ? documentRef.querySelector('meta[name="shift-ui-token"]')
-      : null;
+    const meta =
+      documentRef && documentRef.querySelector
+        ? documentRef.querySelector('meta[name="shift-ui-token"]')
+        : null;
     return meta ? meta.getAttribute("content") || "" : "";
   }
 
-  function createApiFetch(fetchImpl, uiToken) {
+  const DEFAULT_TIMEOUT_MS = 30_000;
+  // Methods safe to retry without risk of duplicate side-effects. Streaming/POST
+  // endpoints (e.g. /api/chat) opt out by passing { retryable: false }.
+  const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
+
+  function linkAbort(parent, child) {
+    if (!parent || parent.signal.aborted) {
+      child.abort();
+      return;
+    }
+    const onParentAbort = () => child.abort();
+    parent.addEventListener("abort", onParentAbort, { once: true });
+    child.signal.addEventListener("abort", () =>
+      parent.removeEventListener("abort", onParentAbort)
+    );
+  }
+
+  /**
+   * Wraps fetchImpl with: UI-token header, default timeout, and bounded retries
+   * for safe read-only methods. Streaming endpoints pass { retryable: false,
+   * timeoutMs: Infinity } to keep long-lived requests unguarded.
+   */
+  function createApiFetch(fetchImpl, uiToken, defaults = {}) {
     if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
-    return function apiFetch(input, init = {}) {
+    const baseTimeout = Number(defaults.timeoutMs) || DEFAULT_TIMEOUT_MS;
+    const baseRetries = Number.isFinite(defaults.retries) ? defaults.retries : 2;
+
+    async function sleep(ms, signal) {
+      if (ms <= 0) return;
+      await new Promise((resolve, reject) => {
+        let t;
+        const onAbort = () => {
+          clearTimeout(t);
+          reject(new Error("aborted"));
+        };
+        if (signal && signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal && signal.addEventListener("abort", onAbort, { once: true });
+        t = setTimeout(() => {
+          signal && signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, ms);
+      });
+    }
+
+    async function attemptOnce(input, init, timeoutMs) {
       const headers = new Headers(init.headers || {});
       headers.set(UI_TOKEN_HEADER, uiToken || "");
-      return fetchImpl(input, { ...init, headers });
+      const callerSignal = init.signal || null;
+      const timeoutController = new AbortController();
+      linkAbort(callerSignal, timeoutController);
+      const timer =
+        Number(timeoutMs) > 0 ? setTimeout(() => timeoutController.abort(), timeoutMs) : null;
+      try {
+        return await fetchImpl(input, { ...init, headers, signal: timeoutController.signal });
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
+    return async function apiFetch(input, init = {}) {
+      const method = (init.method || (typeof input === "string" ? "GET" : "GET")).toUpperCase();
+      const retryable =
+        init.retryable !== undefined ? !!init.retryable : RETRYABLE_METHODS.has(method);
+      const timeoutMs =
+        init.timeoutMs !== undefined
+          ? Number(init.timeoutMs)
+          : Number(init.timeoutForMethod) || baseTimeout;
+      const userRetries = Number.isFinite(init.retries) ? Number(init.retries) : baseRetries;
+      const maxAttempts = retryable ? Math.max(1, userRetries + 1) : 1;
+
+      let lastErr;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const res = await attemptOnce(input, init, timeoutMs);
+          if (retryable && (res.status === 503 || res.status === 502) && attempt < maxAttempts) {
+            await sleep(Math.min(800 * attempt, 2000));
+            continue;
+          }
+          return res;
+        } catch (err) {
+          lastErr = err;
+          const callerAborted = !!(init.signal && init.signal.aborted);
+          if (callerAborted) {
+            const e = new Error("aborted");
+            e.name = "AbortError";
+            throw e;
+          }
+          if (!retryable || attempt >= maxAttempts) throw err;
+          await sleep(Math.min(800 * attempt, 2000));
+        }
+      }
+      throw lastErr || new Error("fetch failed");
     };
   }
 

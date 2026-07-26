@@ -209,28 +209,10 @@
     promptEl.style.height = `${next}px`;
   }
 
+  const toastHost = window.Toast ? window.Toast.createToastHost(toastHostEl) : null;
+
   function showToast(message, options = {}) {
-    if (!toastHostEl || !message) return;
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "toast";
-    el.textContent = message;
-    if (options.actionLabel) {
-      const act = document.createElement("span");
-      act.className = "toast-action";
-      act.textContent = options.actionLabel;
-      el.appendChild(act);
-    }
-    const dismiss = () => {
-      el.remove();
-    };
-    el.addEventListener("click", () => {
-      if (typeof options.onClick === "function") options.onClick();
-      dismiss();
-    });
-    toastHostEl.appendChild(el);
-    const ttl = typeof options.ttl === "number" ? options.ttl : 5200;
-    setTimeout(dismiss, ttl);
+    if (toastHost) toastHost.show(message, options || {});
   }
 
   function updateWorkspaceTabBadge() {
@@ -368,6 +350,10 @@
     state,
     sessionApi,
     worktreeApi,
+    onToast: (message, isError) => {
+      if (isError) showToast(message, { ttl: 7000 });
+      else showToast(message);
+    },
   });
   projectHeader.bindProjectDirEdit();
   const {
@@ -697,10 +683,7 @@
 
     // Mobile-only height boost for context/workspace (CSS gated @media max-width 700px).
     if (sidePanelEl) {
-      sidePanelEl.classList.toggle(
-        "is-expanded",
-        nextTab === "workspace" || nextTab === "context"
-      );
+      sidePanelEl.classList.toggle("is-expanded", nextTab === "workspace" || nextTab === "context");
     }
 
     if (nextTab === "context") loadContextPanel();
@@ -865,6 +848,7 @@
       state.lastAgent = state.selectedAgent;
       renderAgentTabs();
       renderCurrentAgent();
+      renderEmptyChips();
     } catch (e) {
       addSystem("加载 Agent 列表失败: " + e.message, "error");
       setStatus("加载 Agent 失败", "error");
@@ -905,11 +889,24 @@
     appendLive,
     applyAgentEvent,
     addDebug,
+    addToast: showToast,
     finishStream,
     finalizeLiveAgent,
     agentLabel,
     syncComposerControls,
     onRuntimeStatusChange,
+    restoreDraft(sessionId, value) {
+      if (!promptEl) return;
+      if (!sessionId) return;
+      const slot = state.sessions && state.sessions[sessionId];
+      const text = value != null ? String(value) : slot ? slot.lastPrompt || "" : "";
+      promptEl.value = text;
+      // Replicate the textarea input handler so autoGrow, skills, mentions react.
+      autoGrowPrompt();
+      updateActiveSkills(promptEl.value);
+      // Persist as draft so a subsequent session switch also restores this text.
+      if (slot) slot.draftPrompt = text;
+    },
     onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
     onMemoryEvent: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
@@ -993,6 +990,13 @@
     autoGrowPrompt();
     updateActiveSkills(promptEl.value);
     mentionComposer.update();
+    // Persist the in-progress draft so switching sessions keeps the work.
+    const sid = state.currentSessionId;
+    if (sid) {
+      if (!state.sessions) state.sessions = {};
+      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
+      state.sessions[sid].draftPrompt = promptEl.value;
+    }
   });
   promptEl.addEventListener("click", () => mentionComposer.update());
   promptEl.addEventListener("keyup", (e) => {
@@ -1042,24 +1046,23 @@
   updateJumpBottomVisibility();
 
   const emptyChipsEl = $("#empty-state-chips");
-  if (emptyChipsEl) {
-    emptyChipsEl.addEventListener("click", (e) => {
-      const chip = e.target && e.target.closest ? e.target.closest(".empty-chip") : null;
-      if (!chip || !promptEl) return;
-      const text = chip.getAttribute("data-prompt") || chip.textContent || "";
-      if (!text.trim()) return;
-      promptEl.value = text.trim();
-      promptEl.focus();
-      autoGrowPrompt();
-      updateActiveSkills(promptEl.value);
-      const len = promptEl.value.length;
-      try {
-        promptEl.setSelectionRange(len, len);
-      } catch {
-        /* ignore */
-      }
-    });
+  // Allow EmptyState module to read agents lazily without a circular dep.
+  window.__shiftState = state;
+  const emptyStateModule = window.EmptyState
+    ? window.EmptyState.createEmptyState({
+        chipsEl: emptyChipsEl,
+        promptEl,
+        onAfterFill: (el) => {
+          autoGrowPrompt();
+          updateActiveSkills(el.value);
+        },
+      })
+    : null;
+  if (emptyStateModule) emptyStateModule.bindClick();
+  function renderEmptyChips() {
+    if (emptyStateModule) emptyStateModule.renderEmptyChips(state.agents);
   }
+  renderEmptyChips();
 
   apiFetch("/api/skills")
     .then(jsonOrThrow)
