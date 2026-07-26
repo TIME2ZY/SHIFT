@@ -16,7 +16,8 @@ test("runtime paths live under data/runtime", () => {
   assert.equal(runtimePaths.DEFAULT_TRANSCRIPT_DIR, path.join(runtimeDir, "transcripts"));
   assert.equal(runtimePaths.DEFAULT_WORKTREE_STATE_FILE, path.join(runtimeDir, "worktrees.json"));
   assert.equal(runtimePaths.DEFAULT_RAW_EVENTS_DIR, path.join(runtimeDir, "raw-events"));
-  assert.equal(runtimePaths.DEFAULT_MEMORY_DB_FILE, path.join(runtimeDir, "memory.sqlite"));
+  assert.equal(runtimePaths.LEGACY_MEMORY_DB_FILE, path.join(runtimeDir, "memory.sqlite"));
+  assert.equal(runtimePaths.DEFAULT_MEMORY_DB_FILE, path.join(runtimeDir, "shift.sqlite"));
 });
 
 test("worktreeStateFileFor nests under root/data/runtime", () => {

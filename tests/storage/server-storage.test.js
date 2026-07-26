@@ -4,7 +4,9 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { createStorage } = require("../../src/storage");
+const { createStorage, openMemoryDatabase } = require("../../src/storage");
+const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { MIGRATIONS } = require("../../src/storage/schema");
 const { createServerStorage, resolveBoolean } = require("../../src/storage/server-storage");
 
 test("audit transcript boolean accepts explicit and environment-style values", () => {
@@ -22,13 +24,15 @@ test("files storage mode does not open SQLite", () => {
   context.close();
 });
 
-test("dual storage uses an isolated database beside a custom sessions file", () => {
+test("default storage mode uses an activated SQLite database beside a custom sessions file", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-"));
+  const databaseFile = path.join(tmpDir, "shift.sqlite");
+  prepareCleanEpoch({ file: databaseFile });
   const context = createServerStorage({}, path.join(tmpDir, "sessions.json"));
   try {
-    assert.equal(context.mode, "dual");
+    assert.equal(context.mode, "sqlite");
     assert.equal(context.recorder.enabled, true);
-    assert.equal(fs.existsSync(path.join(tmpDir, "memory.sqlite")), true);
+    assert.equal(fs.existsSync(databaseFile), true);
   } finally {
     context.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -37,8 +41,10 @@ test("dual storage uses an isolated database beside a custom sessions file", () 
 
 test("sqlite storage mode opens the durable database", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-"));
+  const databaseFile = path.join(tmpDir, "shift.sqlite");
+  prepareCleanEpoch({ file: databaseFile });
   const context = createServerStorage(
-    { storageMode: "sqlite" },
+    { storageMode: "sqlite", memoryDbFile: databaseFile },
     path.join(tmpDir, "sessions.json")
   );
   try {
@@ -57,6 +63,7 @@ test("sqlite storage mode opens the durable database", () => {
 
 test("sqlite audit transcript switch disables outbox archive independently", () => {
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const context = createServerStorage({
     storageMode: "sqlite",
     storage,
@@ -81,6 +88,7 @@ test("sqlite audit transcript switch disables outbox archive independently", () 
 
 test("disabling new audit writes still drains previously committed outbox rows", async () => {
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   storage.threads.create({ id: "thread-1" });
   const window = storage.windows.create({
     id: "window-1",
@@ -131,7 +139,7 @@ test("dual storage fails open when SQLite initialization fails", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-failure-"));
   const errors = [];
   const context = createServerStorage(
-    { memoryDbFile: tmpDir },
+    { storageMode: "dual", memoryDbFile: tmpDir },
     path.join(tmpDir, "sessions.json"),
     { error: (message) => errors.push(message) }
   );
@@ -157,5 +165,38 @@ test("sqlite storage mode fails hard when SQLite initialization fails", () => {
       ),
     /SHIFT_STORAGE_MODE=sqlite requires a working database/
   );
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("sqlite mode refuses a missing, inactive, or legacy-validation database", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-epoch-gate-"));
+  const missing = path.join(tmpDir, "missing.sqlite");
+  assert.throws(
+    () => createServerStorage({ storageMode: "sqlite", memoryDbFile: missing }),
+    /active clean epoch database does not exist/
+  );
+  assert.equal(fs.existsSync(missing), false);
+
+  const inactive = createStorage({ file: ":memory:" });
+  try {
+    assert.throws(
+      () => createServerStorage({ storageMode: "sqlite", storage: inactive }),
+      /requires an active clean epoch/
+    );
+  } finally {
+    inactive.close();
+  }
+
+  const legacyFile = path.join(tmpDir, "legacy.sqlite");
+  const legacy = openMemoryDatabase({ file: legacyFile, migrations: MIGRATIONS.slice(0, 10) });
+  legacy
+    .prepare("INSERT INTO threads (id, created_at, updated_at) VALUES (?, ?, ?)")
+    .run("legacy-thread", "2026-07-26T00:00:00.000Z", "2026-07-26T00:00:00.000Z");
+  legacy.close();
+  assert.throws(
+    () => createServerStorage({ storageMode: "sqlite", memoryDbFile: legacyFile }),
+    /policy=legacy-validation/
+  );
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

@@ -88,6 +88,7 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: mapRoot,
+    storageMode: "dual",
     storage,
     logger: {
       info(line) {
@@ -175,7 +176,9 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
         "dual-loop-e2e-token"
       )}&layers=memory`
     ).then((response) => response.json());
-    assert.ok(search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry"));
+    assert.ok(
+      search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry")
+    );
 
     // --- Step 3: force seal and capture window-seal ---
     const firstWindow = storage.windows.listForThread(session.id)[0];

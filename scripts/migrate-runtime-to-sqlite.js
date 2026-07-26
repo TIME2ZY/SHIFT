@@ -11,7 +11,7 @@ const path = require("node:path");
 const {
   DEFAULT_SESSIONS_FILE,
   DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_MEMORY_DB_FILE,
+  LEGACY_MEMORY_DB_FILE,
 } = require("../src/shared/runtime-paths");
 const { migrateRuntimeToSqlite } = require("../src/storage/migrate-runtime");
 
@@ -19,7 +19,7 @@ function parseArgs(argv) {
   const options = {
     sessionsFile: DEFAULT_SESSIONS_FILE,
     transcriptDir: DEFAULT_TRANSCRIPT_DIR,
-    memoryDbFile: DEFAULT_MEMORY_DB_FILE,
+    memoryDbFile: LEGACY_MEMORY_DB_FILE,
     dryRun: false,
     json: false,
   };
@@ -42,7 +42,7 @@ function printHelp() {
 Options:
   --sessions <path>      sessions.json (default: data/runtime/sessions.json)
   --transcripts <path>   transcript root (default: data/runtime/transcripts)
-  --db <path>            memory.sqlite (default: data/runtime/memory.sqlite)
+  --db <path>            legacy validation target (default: data/runtime/memory.sqlite)
   --dry-run              report diffs without writing
   --json                 print full JSON report
   -h, --help             show help
@@ -90,7 +90,9 @@ async function main() {
         .join(" ")
     );
     for (const thread of report.threads) {
-      const summary = thread.diffs.find((item) => item.kind === "summary" || item.kind === "preview");
+      const summary = thread.diffs.find(
+        (item) => item.kind === "summary" || item.kind === "preview"
+      );
       if (!summary) continue;
       console.log(
         `  thread ${thread.threadId}: msg+${thread.messagesImported} evt+${thread.eventsImported} inv+${thread.invocationsCreated}`

@@ -8,6 +8,8 @@ const test = require("node:test");
 const { createServer, ensureSession } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
+const { createStorage } = require("../src/storage");
+const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -72,14 +74,28 @@ async function withServer(options, fn) {
   const initialSessionIds = Array.isArray(options.initialSessionIds) ? options.initialSessionIds : [];
   const serverOptions = { ...options };
   delete serverOptions.initialSessionIds;
-  for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
+  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
+  const storageMode = serverOptions.storageMode || "sqlite";
+  if (storageMode === "sqlite") {
+    prepareCleanEpoch({ file: memoryDbFile });
+    if (initialSessionIds.length > 0) {
+      const storage = createStorage({ file: memoryDbFile });
+      try {
+        for (const sessionId of initialSessionIds) storage.threads.create({ id: sessionId });
+      } finally {
+        storage.close();
+      }
+    }
+  } else {
+    for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
+  }
   const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
     process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
     sessionsFile,
-    memoryDbFile: path.join(tmpDir, "memory.sqlite"),
+    memoryDbFile,
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
@@ -126,6 +142,7 @@ test("top-level request errors return 500 without stopping the server", async ()
     await withServer(
       {
         sessionsFile: path.join(blocker, "sessions.json"),
+        storageMode: "files",
         logger: { error() {}, warn() {}, log() {} },
       },
       async (baseUrl) => {
@@ -1169,6 +1186,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
     sessionsFile,
     invocationsFile,
     sessionMapRoot,
+    storageMode: "files",
     worktreeManager: {
       ensureWorktree({ sessionId }) {
         return {
@@ -1255,6 +1273,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     sessionsFile,
     invocationsFile,
     sessionMapRoot,
+    storageMode: "files",
     worktreeManager: {
       ensureWorktree({ sessionId }) {
         return {
@@ -2005,6 +2024,7 @@ test("chat endpoint writes transcript events (invocation-start, stdout, invocati
 
     await withServer(
       {
+        storageMode: "dual",
         spawnRunner(_command, _args) {
           const child = createMockChild();
           process.nextTick(() => {
@@ -2182,6 +2202,7 @@ async function withActiveChat(fn) {
             return true;
           };
           captured.kill = () => child.kill("SIGTERM");
+          captured.child = child;
           return child;
         },
       },
@@ -2365,13 +2386,21 @@ test("/api/callbacks/read-invocation requires targetInvocationId", async () => {
 
 test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
-    // Inject a bunch of stdout events so pagination has something to slice
-    const transcript = require("../src/session/transcript");
+    // Feed hard-boundary canonical provider events through the active
+    // SQLite-only chat path so pagination never relies on transcript fallback
+    // or waits for text-delta coalescing at invocation end.
     const invId = captured.env.SHIFT_INVOCATION_ID;
     for (let i = 0; i < 10; i++) {
-      transcript.appendEvent(sid, invId, "stdout", { text: `chunk-${i}` });
+      captured.child.stdout.write(
+        `${JSON.stringify({
+          type: "tool.started",
+          toolName: "read",
+          toolId: `pagination-tool-${i}`,
+          args: { path: `file-${i}.js` },
+        })}\n`
+      );
     }
-    await transcript.flush();
+    await new Promise((r) => setTimeout(r, 100));
 
     const resp = await fetch(
       `${baseUrl}/api/callbacks/read-invocation?` +
@@ -3078,6 +3107,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
     await withServer(
       {
         initialSessionIds: [sessionId],
+        storageMode: "dual",
         spawnRunner(command, args) {
           if (!firstPrompts) firstPrompts = [args[args.length - 1]];
           const child = createMockChild();
@@ -3103,6 +3133,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
     await withServer(
       {
         initialSessionIds: [sessionId],
+        storageMode: "dual",
         spawnRunner(command, args) {
           secondPrompt = args[args.length - 1];
           const child = createMockChild();

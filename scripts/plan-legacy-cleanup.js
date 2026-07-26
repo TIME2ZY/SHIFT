@@ -9,7 +9,7 @@ const runtimePaths = require("../src/shared/runtime-paths");
 
 function parseArgs(argv) {
   const options = {
-    memoryDbFile: runtimePaths.DEFAULT_MEMORY_DB_FILE,
+    memoryDbFile: runtimePaths.LEGACY_MEMORY_DB_FILE,
     sessionsFile: runtimePaths.DEFAULT_SESSIONS_FILE,
     invocationsFile: runtimePaths.DEFAULT_INVOCATIONS_FILE,
     transcriptDir: runtimePaths.DEFAULT_TRANSCRIPT_DIR,

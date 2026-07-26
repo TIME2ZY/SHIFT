@@ -14,10 +14,10 @@ related:
 
 ## 1. 状态
 
-**Accepted — implementation pending**
+**Accepted — SQLite cutover active; legacy cleanup pending**
 
-本 ADR 冻结 SHIFT 的目标存储边界。当前代码仍支持 `files / dual / sqlite`，默认运行在
-`dual`；这是切换前的实现现状，不是本文定义的终态。实现 PR 必须显式说明它推进了哪一条
+本 ADR 冻结 SHIFT 的目标存储边界。当前代码仍保留 `files / dual / sqlite` 兼容模式，默认
+已切换为 `sqlite`；`dual` 仅用于显式验证，不再是产品默认。实现 PR 必须显式说明它推进了哪一条
 切换验收条件，不能在代码中重新发明另一套真相语义。
 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
@@ -418,7 +418,7 @@ clean epoch。
 
 本 ADR 接受时已知的主要差距：
 
-- `SHIFT_STORAGE_MODE` 默认仍为 `dual`；
+- `SHIFT_STORAGE_MODE` 默认已切换为 `sqlite`；
 - `event-store` 根据 storage mode 同步写 SQLite/transcript；
 - `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
 - chat route 仍拥有按 storage authority 分支；
@@ -446,7 +446,7 @@ ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。outbo
 6. 将 recall/detail 正常读取切到 SQLite；
 7. 实现 SQLite backup 的空目录恢复演练和 recovery report；
 8. 将 transcript 开关与 storage mode 解耦；
-9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；
+9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
 10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
 

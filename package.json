@@ -15,6 +15,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "audit:storage": "node scripts/audit-sqlite-storage.js",
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",

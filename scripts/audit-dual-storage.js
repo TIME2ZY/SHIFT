@@ -9,7 +9,7 @@
  */
 const path = require("node:path");
 const {
-  DEFAULT_MEMORY_DB_FILE,
+  LEGACY_MEMORY_DB_FILE,
   DEFAULT_SESSIONS_FILE,
   DEFAULT_TRANSCRIPT_DIR,
 } = require("../src/shared/runtime-paths");
@@ -17,7 +17,7 @@ const { auditDualStorage } = require("../src/storage/audit-dual-storage");
 
 function parseArgs(argv) {
   const options = {
-    memoryDbFile: DEFAULT_MEMORY_DB_FILE,
+    memoryDbFile: LEGACY_MEMORY_DB_FILE,
     sessionsFile: DEFAULT_SESSIONS_FILE,
     transcriptDir: DEFAULT_TRANSCRIPT_DIR,
     json: false,

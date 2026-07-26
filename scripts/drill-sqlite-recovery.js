@@ -26,7 +26,7 @@ function printHelp() {
   console.log(`Usage: node scripts/drill-sqlite-recovery.js --dir <empty-directory> [options]
 
 Options:
-  --db <path>   source memory.sqlite
+  --db <path>   source authoritative SQLite (default: data/runtime/shift.sqlite)
   --dir <path>  required empty directory for backup and restored database
   --quick       skip full integrity_check
   --json        print the complete recovery report

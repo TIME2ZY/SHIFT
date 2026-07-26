@@ -9,6 +9,7 @@ const test = require("node:test");
 const { createServer } = require("../../src/server");
 const { readSessionMap, writeSessionMap } = require("../../src/server/session-map-store");
 const { createStorage } = require("../../src/storage");
+const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
 
 const UI_TOKEN = "dual-write-test-token";
 
@@ -94,6 +95,7 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
+    storageMode: "dual",
     storage,
     spawnRunner: successfulSpawn,
     worktreeManager: worktreeManager(),
@@ -184,6 +186,7 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
+    storageMode: "dual",
     storage,
     spawnRunner() {
       run += 1;
@@ -248,6 +251,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: mapRoot,
+    storageMode: "dual",
     storage,
     spawnRunner(_command, args) {
       prompts.push(args[args.length - 1]);
@@ -362,7 +366,7 @@ test("files mode abandons an exhausted provider session", async () => {
   }
 });
 
-test("sqlite mode restores sessions after file loss and continues the message sequence", async () => {
+test("default sqlite mode restores sessions after restart without legacy writes", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-primary-server-"));
   const sessionsFile = path.join(tmpDir, "sessions.json");
   const memoryDbFile = path.join(tmpDir, "memory.sqlite");
@@ -370,13 +374,13 @@ test("sqlite mode restores sessions after file loss and continues the message se
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
   const providerCalls = [];
+  prepareCleanEpoch({ file: memoryDbFile });
 
   function startServer() {
     const server = createServer({
       sessionsFile,
       invocationsFile: path.join(tmpDir, "invocations.json"),
       sessionMapRoot: path.join(tmpDir, "session-maps"),
-      storageMode: "sqlite",
       memoryDbFile,
       spawnRunner: providerSessionSpawn(providerCalls),
       worktreeManager: worktreeManager(),

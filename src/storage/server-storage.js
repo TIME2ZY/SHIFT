@@ -1,3 +1,4 @@
+const fs = require("node:fs");
 const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/runtime-paths");
 const { ENV } = require("../shared/brand");
@@ -8,7 +9,7 @@ const { createStorage } = require("./index");
 const { createSqliteSessionService } = require("./sqlite-session-service");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
-  const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "dual";
+  const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "sqlite";
   const auditTranscript = resolveBoolean(
     options.auditTranscript,
     process.env[ENV.AUDIT_TRANSCRIPT],
@@ -44,9 +45,15 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
       options.memoryDbFile ||
       process.env[ENV.MEMORY_DB] ||
       (sessionsFile && path.resolve(sessionsFile) !== path.resolve(DEFAULT_SESSIONS_FILE)
-        ? path.join(path.dirname(sessionsFile), "memory.sqlite")
+        ? path.join(path.dirname(sessionsFile), "shift.sqlite")
         : DEFAULT_MEMORY_DB_FILE);
     try {
+      if (mode === "sqlite" && file !== ":memory:" && !fs.existsSync(file)) {
+        throw new Error(
+          `active clean epoch database does not exist: ${path.resolve(file)}; ` +
+            "create it with npm run prepare:storage:epoch -- --db <new-file>"
+        );
+      }
       storage = createStorage({ file });
     } catch (error) {
       logger.error(`[sqlite-storage] initialization failed: ${error.message}`);
@@ -60,6 +67,22 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
 
   if (mode === "sqlite" && !storage) {
     throw new Error("SHIFT_STORAGE_MODE=sqlite requires a working database.");
+  }
+  if (mode === "sqlite") {
+    try {
+      const epoch = storage.metadata.getCurrent();
+      if (!epoch.isClean || !epoch.isActive) {
+        throw new Error(
+          `database epoch ${epoch.epochId} is not an active clean epoch ` +
+            `(policy=${epoch.dataPolicy}, cutover=${epoch.cutoverTime || "missing"})`
+        );
+      }
+    } catch (error) {
+      if (ownsStorage && storage) storage.close();
+      throw new Error(
+        `SHIFT_STORAGE_MODE=sqlite requires an active clean epoch (${error.message})`
+      );
+    }
   }
 
   const eventStore = createEventStore({
