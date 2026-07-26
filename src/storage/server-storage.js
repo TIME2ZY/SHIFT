@@ -3,6 +3,7 @@ const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/run
 const { ENV } = require("../shared/brand");
 const { createDualWriteRecorder } = require("./dual-write-recorder");
 const { createEventStore } = require("./event-store");
+const { createOutboxFlusher } = require("./outbox-flusher");
 const { createStorage } = require("./index");
 const { createSqliteSessionService } = require("./sqlite-session-service");
 
@@ -46,9 +47,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
       // sqlite mode is single-write: never continue with a black-hole event sink.
       // dual mode may degrade to file-only writes.
       if (mode === "sqlite") {
-        throw new Error(
-          `SHIFT_STORAGE_MODE=sqlite requires a working database (${error.message})`
-        );
+        throw new Error(`SHIFT_STORAGE_MODE=sqlite requires a working database (${error.message})`);
       }
     }
   }
@@ -65,14 +64,27 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   });
   const recorder = createDualWriteRecorder({ storage, eventStore, logger });
   const sessionService = storage ? createSqliteSessionService({ storage, logger }) : null;
+  const outboxFlusher =
+    mode === "sqlite" && storage?.outbox && options.transcript?.appendCanonicalEvent
+      ? createOutboxFlusher({
+          outbox: storage.outbox,
+          transcript: options.transcript,
+          logger,
+          intervalMs: options.outboxIntervalMs,
+        })
+      : null;
+  outboxFlusher?.start();
 
   return {
     mode,
     storage,
     recorder,
     eventStore,
+    outboxFlusher,
+    outboxHealth: () => storage?.outbox?.health?.() || { state: "unavailable", pending: 0 },
     sessionService,
     close() {
+      outboxFlusher?.stop();
       recorder.close();
       eventStore.close();
       sessionService?.close?.();

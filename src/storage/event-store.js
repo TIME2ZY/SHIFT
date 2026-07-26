@@ -165,7 +165,18 @@ function createEventStore({
         agentId: invocation.agentId,
         createdAt: event.createdAt,
       });
-      return event;
+      const outboxId =
+        mode === "sqlite" && storage.outbox
+          ? storage.outbox.enqueue({
+              threadId: invocation.threadId,
+              invocationId,
+              sequenceNo: event.sequenceNo,
+              kind,
+              payload,
+              createdAt: event.createdAt,
+            })
+          : null;
+      return { event, outboxId };
     };
 
     // Nested transactions become savepoints under better-sqlite3, so this is
@@ -175,9 +186,11 @@ function createEventStore({
 
     return {
       ok: true,
-      event: stored,
+      event: stored.event,
       sqlite: true,
       transcript: transcriptWritten,
+      outbox: Boolean(stored.outboxId),
+      outboxId: stored.outboxId,
     };
   }
 

@@ -307,7 +307,9 @@ outbox flusher
 - 超过容量/时长阈值时向用户显示 degraded 状态；
 - 禁止“先写两边，再用 try/catch 假装原子成功”。
 
-Outbox 尚未实现。在引入 outbox 前，现有 `dual` 写入仅被视为切换验证机制。
+Outbox 的 SQLite 入队、幂等 JSONL flusher、重试和内部 health 已实现。产品 API/UI 告警
+及按保留策略清理 delivered rows 尚待后续实现；在此之前，现有 `dual` 写入仍仅被视为
+切换验证机制。
 
 ## 11. 读取、恢复和重建
 
@@ -416,12 +418,14 @@ SHIFT_RAW_EVENT_LOG=off
 - `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
 - chat route 仍拥有多处按 `sqlitePrimary` 分支；
 - session map/provider resume 仍有 legacy JSON 路径；
-- outbox 和 archive backlog health 尚未实现；
+- outbox backlog health 尚未暴露至产品 API/UI；
 - project-memory materialization workflow 尚未实现。
 
 已完成的边界：`sqlite` 模式的 session/message/invocation 在线读取不再读取或回退 legacy
 session/transcript；SQLite 读取失败会显式失败或返回 `unavailable`。在线 memory replay
 同样禁止在 `sqlite` 模式扫描旧 transcript。
+SQLite canonical events 已与权威事件在同一事务写入 outbox；后台 flusher 使用稳定 event
+ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。
 
 这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大
 平级双源范围。

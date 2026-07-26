@@ -27,7 +27,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      11
+      MIGRATIONS.length
     );
     for (const name of [
       "threads",
@@ -45,14 +45,18 @@ test("memory database applies schema and safety pragmas", () => {
       "projects",
       "purged_threads",
       "storage_metadata",
+      "storage_outbox",
       "recall_items",
       "recall_fts",
     ]) {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 11);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 11);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count,
+      MIGRATIONS.length
+    );
     const memoryColumns = new Set(
       db
         .prepare("PRAGMA table_info(memory_entries)")
@@ -186,10 +190,10 @@ test("database with existing runtime rows is marked legacy validation, not cut o
       "INSERT INTO threads (id, created_at, updated_at) VALUES ('legacy-thread', 'now', 'now')"
     ).run();
 
-    assert.equal(applyMigrations(db), 11);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     const metadata = db.prepare("SELECT * FROM storage_metadata WHERE singleton = 1").get();
     assert.match(metadata.epoch_id, /^legacy-[0-9a-f]{32}$/);
-    assert.equal(metadata.schema_version, 11);
+    assert.equal(metadata.schema_version, MIGRATIONS.length);
     assert.equal(metadata.data_policy, "legacy-validation");
     assert.equal(metadata.cutover_at, null);
     const storage = createStorage({ db });
@@ -221,17 +225,17 @@ test("storage metadata schema version follows later migrations", () => {
     const futureMigrations = [
       ...MIGRATIONS,
       {
-        version: 12,
+        version: MIGRATIONS.length + 1,
         name: "test_future_schema",
         sql: "CREATE TABLE test_future_schema (id INTEGER PRIMARY KEY);",
       },
     ];
 
-    assert.equal(applyMigrations(db, futureMigrations), 12);
+    assert.equal(applyMigrations(db, futureMigrations), MIGRATIONS.length + 1);
     assert.equal(
       db.prepare("SELECT schema_version FROM storage_metadata WHERE singleton = 1").get()
         .schema_version,
-      12
+      MIGRATIONS.length + 1
     );
   } finally {
     db.close();
@@ -255,7 +259,10 @@ test("storage refuses a database created by newer code", () => {
     db.prepare(
       "INSERT INTO schema_migrations (version, name, applied_at) VALUES (99, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 11/);
+    assert.throws(
+      () => applyMigrations(db),
+      new RegExp(`newer than supported version ${MIGRATIONS.length}`)
+    );
   } finally {
     db.close();
   }
@@ -275,7 +282,7 @@ test("later migrations upgrade a version 2 database without losing memory rows",
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 11);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
     assert.equal(memory.content, "keep me");
     // v6 backfills null capture keys and moves ownership columns.
@@ -305,7 +312,7 @@ test("context usage migration rebases only legacy active model capacities", () =
     insert.run("active-codex", "codex", "codex", "active", 200000);
     insert.run("sealed-gemini", "gemini", "antigravity", "sealed", 200000);
 
-    assert.equal(applyMigrations(db), 11);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
         .capacity_tokens,
@@ -364,7 +371,7 @@ test("sequence and causality migration backfills counters and message types", ()
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 11);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     assert.equal(
       db.prepare("SELECT next_message_sequence value FROM threads WHERE id = 't'").get().value,
       4

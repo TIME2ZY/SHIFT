@@ -522,6 +522,33 @@ const MIGRATIONS = Object.freeze([
       );
     `,
   },
+  {
+    version: 12,
+    name: "storage_outbox",
+    sql: `
+      CREATE TABLE storage_outbox (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        invocation_id TEXT NOT NULL,
+        sequence_no INTEGER NOT NULL CHECK (sequence_no >= 0),
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'delivered')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        next_attempt_at TEXT,
+        last_error TEXT,
+        delivered_at TEXT,
+        UNIQUE (invocation_id, sequence_no),
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (invocation_id) REFERENCES invocations(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX storage_outbox_pending
+        ON storage_outbox(status, next_attempt_at, created_at);
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

@@ -11,6 +11,8 @@ const MAX_LINE_BYTES = 256 * 1024;
 // concurrent mkdir(recursive:true) calls on the same path can collide.
 let writeChain = Promise.resolve();
 const deletedSessions = new Set();
+const canonicalIdsByFile = new Map();
+const canonicalFilesLoaded = new Set();
 
 function getTranscriptDir() {
   return process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR;
@@ -46,17 +48,29 @@ function deleteSessionData(sessionId) {
   const key = sessionDeleteKey(sessionId);
   deletedSessions.add(key);
   const sessionDir = getSessionDir(sessionId);
+  for (const filePath of canonicalIdsByFile.keys()) {
+    if (filePath.startsWith(sessionDir + path.sep)) {
+      canonicalIdsByFile.delete(filePath);
+      canonicalFilesLoaded.delete(filePath);
+    }
+  }
   return enqueueTask(() => fs.promises.rm(sessionDir, { recursive: true, force: true }));
 }
 
 function enqueueTask(task) {
-  const next = writeChain
-    .then(task)
-    .catch((err) => {
-      console.error(`[transcript] queued operation failed: ${err.message}`);
-    });
+  const next = writeChain.then(task).catch((err) => {
+    console.error(`[transcript] queued operation failed: ${err.message}`);
+  });
   writeChain = next;
   return next;
+}
+
+function enqueueStrictTask(task) {
+  const operation = writeChain.then(task);
+  writeChain = operation.catch((err) => {
+    console.error(`[transcript] queued operation failed: ${err.message}`);
+  });
+  return operation;
 }
 
 function enqueueWrite(sessionId, filePath, content) {
@@ -196,6 +210,50 @@ function appendEvent(sessionId, invocationId, kind, payload) {
   enqueueWrite(sessionId, filePath, line + "\n");
 }
 
+function appendCanonicalEvent(event) {
+  if (
+    !event?.id ||
+    !isValidOpaqueId(event.threadId) ||
+    !isValidOpaqueId(event.invocationId) ||
+    typeof event.kind !== "string" ||
+    !event.kind
+  ) {
+    return Promise.reject(new Error("Canonical transcript event is invalid."));
+  }
+  const line = JSON.stringify({
+    eventId: event.id,
+    ts: event.createdAt,
+    kind: event.kind,
+    payload: event.payload || {},
+  });
+  const filePath = getInvocationPath(event.threadId, event.invocationId);
+  const key = sessionDeleteKey(event.threadId);
+  return enqueueStrictTask(async () => {
+    if (deletedSessions.has(key)) throw new Error("Transcript session was deleted.");
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+    let knownIds = canonicalIdsByFile.get(filePath);
+    if (!knownIds) {
+      knownIds = new Set();
+      canonicalIdsByFile.set(filePath, knownIds);
+    }
+    if (!canonicalFilesLoaded.has(filePath)) {
+      if (fs.existsSync(filePath)) {
+        const existing = await fs.promises.readFile(filePath, "utf8");
+        for (const entry of existing.split(/\r?\n/).filter(Boolean)) {
+          try {
+            const eventId = JSON.parse(entry).eventId;
+            if (eventId) knownIds.add(eventId);
+          } catch {}
+        }
+      }
+      canonicalFilesLoaded.add(filePath);
+    }
+    if (knownIds.has(event.id)) return;
+    await fs.promises.appendFile(filePath, line + "\n", "utf8");
+    knownIds.add(event.id);
+  });
+}
+
 async function flush() {
   await writeChain;
 }
@@ -225,9 +283,7 @@ async function listInvocations(sessionId) {
   const dir = path.join(getSessionDir(sessionId), "invocations");
   if (!fs.existsSync(dir)) return [];
   const files = await fs.promises.readdir(dir);
-  return files
-    .filter((f) => f.endsWith(".jsonl"))
-    .map((f) => f.replace(/\.jsonl$/, ""));
+  return files.filter((f) => f.endsWith(".jsonl")).map((f) => f.replace(/\.jsonl$/, ""));
 }
 
 // Read a single invocation's metadata (agent, timing, lifecycle state) by scanning
@@ -278,11 +334,13 @@ async function readInvocationPage(sessionId, invocationId, opts = {}) {
   const sliceEnd = limit > 0 ? Math.min(events.length, start + limit) : events.length;
   // Stamp absolute eventNo so clients can focus search hits (Phase B).
   return {
-    events: events.slice(start, sliceEnd).map((evt, i) =>
-      evt && typeof evt === "object" && !Number.isInteger(evt.eventNo)
-        ? { ...evt, eventNo: start + i }
-        : evt
-    ),
+    events: events
+      .slice(start, sliceEnd)
+      .map((evt, i) =>
+        evt && typeof evt === "object" && !Number.isInteger(evt.eventNo)
+          ? { ...evt, eventNo: start + i }
+          : evt
+      ),
     total,
     from: start,
     limit,
@@ -351,6 +409,7 @@ async function getInvocationStats(sessionId) {
 
 module.exports = {
   appendEvent,
+  appendCanonicalEvent,
   deleteSessionData,
   readInvocation,
   readInvocationPage,
