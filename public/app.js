@@ -35,7 +35,6 @@
   const projectDirPath = $("#project-dir-path");
   const worktreeStatusEl = $("#worktree-status");
   const mentionMenuEl = $("#mention-menu");
-  // Context tab: one scroll — recall list (conclusions hang on the producing turn).
   const recallBodyEl = contextPanelEl ? contextPanelEl.querySelector(".recall-body") : null;
   const recallSearchInputEl = contextPanelEl
     ? contextPanelEl.querySelector(".context-search input, .recall-search input")
@@ -100,7 +99,6 @@
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
       usageSummary: { available: false, session: {}, agents: [] },
       contextBlocked: false, // active agent's context budget saturated
-      // NOT live run data — see runtimeStore
       runtimeStore,
     },
   });
@@ -240,7 +238,6 @@
 
   function updateJumpBottomVisibility() {
     if (!jumpBottomEl || !messageView || typeof messageView.isNearBottom !== "function") return;
-    // Hide when empty state is showing or already near bottom.
     const emptyVisible = emptyStateEl && emptyStateEl.parentNode === messagesEl;
     if (emptyVisible) {
       jumpBottomEl.hidden = true;
@@ -392,12 +389,17 @@
       await loadWorktreeStatus();
       updateWorkspaceTabBadge();
     },
+    onToast: (message, isError) => showToast(message, isError ? { ttl: 7000 } : {}),
+    onRequestWorktree: () => {
+      if (!useWorktreeInput) return;
+      useWorktreeInput.checked = true;
+      if (promptEl) promptEl.focus();
+      showToast("已开启「改代码」· 再次发送即可在隔离 worktree 中改动");
+    },
   });
 
-  // One process-panel renderer for message hydrate + recall expand (locale injected).
   const processPanelRenderer = window.MessageView.createProcessPanelRenderer();
 
-  // Lazy bind: messageView.focusProcessPanel is available after createMessageView.
   let focusProcessPanelRef = null;
 
   const recallPanel = window.RecallPanel.createRecallPanel({
@@ -415,7 +417,6 @@
   });
   recallPanel.bindSearch();
 
-  // Inject banner only — product conclusions attach to recall turns, not a separate list.
   const memoryPanel = window.MemoryPanel.createMemoryPanel({
     bodyEl: null,
     injectEl: $("#memory-inject-inline"),
@@ -1059,7 +1060,6 @@
   updateJumpBottomVisibility();
 
   const emptyChipsEl = $("#empty-state-chips");
-  // Allow EmptyState module to read agents lazily without a circular dep.
   window.__shiftState = state;
   const emptyStateModule = window.EmptyState
     ? window.EmptyState.createEmptyState({
