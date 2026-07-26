@@ -130,7 +130,7 @@ function auditMessageRecall(db, findings) {
 }
 
 function auditEventRecall(db, findings) {
-  // Indexable: any event with non-empty plain-text projection (matches dual-write policy).
+  // Indexable: any event with a non-empty plain-text projection.
   const events = db
     .prepare(
       `

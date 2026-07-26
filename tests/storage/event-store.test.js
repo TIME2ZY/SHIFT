@@ -26,13 +26,12 @@ function seedInvocation(storage, { threadId = "thread-1", invocationId = "inv-1"
   return window;
 }
 
-test("event store dual mode writes SQLite recall and transcript", () => {
+test("event store writes SQLite recall and never writes transcripts directly", () => {
   const storage = createStorage({ file: ":memory:" });
   const transcriptEvents = [];
   seedInvocation(storage);
   const eventStore = createEventStore({
     storage,
-    mode: "dual",
     transcript: {
       appendEvent(threadId, invocationId, kind, payload) {
         transcriptEvents.push({ threadId, invocationId, kind, payload });
@@ -49,10 +48,9 @@ test("event store dual mode writes SQLite recall and transcript", () => {
       payload: { to: "gemini", goal: "ship" },
     });
     assert.equal(result.sqlite, true);
-    assert.equal(result.transcript, true);
     assert.equal(storage.invocations.listEvents("inv-1").length, 1);
     assert.equal(storage.invocations.listEvents("inv-1")[0].kind, "handoff");
-    assert.equal(transcriptEvents.length, 1);
+    assert.equal(transcriptEvents.length, 0);
     assert.equal(storage.recall.search("thread-1", "ship").length, 1);
   } finally {
     eventStore.close();
@@ -60,13 +58,12 @@ test("event store dual mode writes SQLite recall and transcript", () => {
   }
 });
 
-test("event store sqlite mode skips transcript", () => {
+test("event store exposes a fixed sqlite-only contract", () => {
   const storage = createStorage({ file: ":memory:" });
   const transcriptEvents = [];
   seedInvocation(storage);
   const eventStore = createEventStore({
     storage,
-    mode: "sqlite",
     transcript: {
       appendEvent(threadId, invocationId, kind, payload) {
         transcriptEvents.push({ threadId, invocationId, kind, payload });
@@ -83,7 +80,7 @@ test("event store sqlite mode skips transcript", () => {
       payload: { from: "codex", to: "gemini" },
     });
     assert.equal(result.sqlite, true);
-    assert.equal(result.transcript, false);
+    assert.equal(eventStore.mode, "sqlite");
     assert.equal(transcriptEvents.length, 0);
     assert.equal(storage.invocations.listEvents("inv-1")[0].kind, "a2a-route");
   } finally {
@@ -92,12 +89,11 @@ test("event store sqlite mode skips transcript", () => {
   }
 });
 
-test("event store skips SQLite for synthetic invocation ids", () => {
+test("event store rejects synthetic invocation ids", () => {
   const storage = createStorage({ file: ":memory:" });
   const transcriptEvents = [];
   const eventStore = createEventStore({
     storage,
-    mode: "dual",
     transcript: {
       appendEvent(threadId, invocationId, kind, payload) {
         transcriptEvents.push({ threadId, invocationId, kind, payload });
@@ -113,8 +109,8 @@ test("event store skips SQLite for synthetic invocation ids", () => {
       payload: { content: "hi" },
     });
     assert.equal(result.sqlite, false);
-    assert.equal(result.transcript, true);
-    assert.equal(transcriptEvents[0].kind, "user-prompt");
+    assert.equal(result.ok, false);
+    assert.equal(transcriptEvents.length, 0);
   } finally {
     eventStore.close();
     storage.close();
@@ -128,7 +124,7 @@ test("event store propagates SQLite write failures so outer transactions roll ba
   storage.recall.upsert = () => {
     throw new Error("recall projection failed");
   };
-  const eventStore = createEventStore({ storage, mode: "sqlite", transcript: null });
+  const eventStore = createEventStore({ storage });
 
   try {
     eventStore.registerInvocation("inv-1", "thread-1");
@@ -159,52 +155,11 @@ test("event store propagates SQLite write failures so outer transactions roll ba
   }
 });
 
-test("event store respects writeSqlite/writeTranscript overrides", () => {
-  const storage = createStorage({ file: ":memory:" });
-  const transcriptEvents = [];
-  seedInvocation(storage);
-  const eventStore = createEventStore({
-    storage,
-    mode: "dual",
-    transcript: {
-      appendEvent(threadId, invocationId, kind, payload) {
-        transcriptEvents.push({ threadId, invocationId, kind, payload });
-      },
-    },
-  });
-
-  try {
-    eventStore.registerInvocation("inv-1", "thread-1");
-    eventStore.append({
-      threadId: "thread-1",
-      invocationId: "inv-1",
-      kind: "invocation-start",
-      payload: { agent: "codex" },
-      sequenceNo: 0,
-      writeTranscript: false,
-    });
-    eventStore.append({
-      threadId: "thread-1",
-      invocationId: "inv-1",
-      kind: "invocation-start",
-      payload: { agent: "codex", promptBytes: 12 },
-      writeSqlite: false,
-    });
-    assert.equal(storage.invocations.listEvents("inv-1").length, 1);
-    assert.equal(transcriptEvents.length, 1);
-    assert.equal(transcriptEvents[0].payload.promptBytes, 12);
-  } finally {
-    eventStore.close();
-    storage.close();
-  }
-});
-
 test("sqlite audit transcript can be disabled without disabling authoritative events", () => {
   const storage = createStorage({ file: ":memory:" });
   seedInvocation(storage);
   const eventStore = createEventStore({
     storage,
-    mode: "sqlite",
     auditTranscript: false,
   });
 

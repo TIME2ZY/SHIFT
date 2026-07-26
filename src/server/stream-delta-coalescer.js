@@ -1,6 +1,6 @@
 /**
- * Coalesce high-frequency streaming deltas before durable sinks (transcript /
- * SQLite / in-memory invocation registry). Live SSE stays unbatched at the
+ * Coalesce high-frequency streaming deltas before durable SQLite writes.
+ * Live SSE stays unbatched at the
  * call site — this helper only decides *what* to write, not what to emit.
  *
  * Coalesce kinds: text.delta, thinking.delta.

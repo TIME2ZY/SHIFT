@@ -14,15 +14,12 @@ related:
 
 ## 1. 状态
 
-**Accepted — storage truth cutover completed; compatibility-mode retirement pending**
+**Accepted — implemented and closed**
 
-本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离和
-真实 legacy 数据清理均已完成，当前在线服务只使用 `shift.sqlite`。从业务数据和运行
-安全角度，本次存储重构的核心目标已经完成。
-
-工程收尾尚有一个明确任务：代码仍接受 `files / dual / sqlite` 三种 mode，并保留
-file/dual 的在线分支。`files`/`dual` 已没有真实运行数据，只服务于兼容测试和旧格式工具；
-在这些分支从产品 composition root 移除前，本 ADR 的实现工作不标记为完全关闭。
+本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离、
+真实 legacy 数据清理和在线兼容模式退役均已完成。产品 composition root 只接受 SQLite；
+thread/message/invocation、provider resume、memory 和 recall 均不再读写 legacy 文件。
+`files/dual` 只作为历史术语存在于离线 migrate、divergence audit 和脱敏 fixture 中。
 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
@@ -407,15 +404,15 @@ legacy validation SQLite 共 378 个文件已永久删除；权威 SQLite、cano
 
 ## 13. Storage mode 生命周期
 
-现有模式重新定义为：
+历史模式的最终处置为：
 
 | 模式     | 定位                    | 终态                         |
 | -------- | ----------------------- | ---------------------------- |
-| `files`  | legacy fixture 兼容测试 | 从产品 composition root 移除 |
-| `dual`   | legacy 差异测试         | 从产品 composition root 移除 |
+| `files`  | legacy fixture 历史语义 | 已从产品 composition root 移除 |
+| `dual`   | legacy 差异历史语义     | 已从产品 composition root 移除 |
 | `sqlite` | 正常在线业务模式        | 唯一正式模式                 |
 
-Transcript 是否开启是独立维度，不应继续由 storage mode 隐式决定。目标配置语义类似：
+Canonical audit 是否开启是独立维度，不由 storage mode 隐式决定。在线配置语义为：
 
 ```text
 SHIFT_STORAGE_MODE=sqlite
@@ -425,8 +422,8 @@ SHIFT_RAW_EVENT_LOG=off
 ```
 
 `SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
-outbox row，health 显示 `disabled`，不会形成无法投递的假积压。兼容测试中的
-`files/dual` 仍依赖 fixture transcript，其写入不受该审计开关控制。
+outbox row，health 显示 `disabled`，不会形成无法投递的假积压。离线 migrate/audit
+测试可读取 fixture transcript，但它们不是产品服务的存储模式，也不参与在线读取。
 `SHIFT_AUDIT_TRANSCRIPT_DIR` 只承载 post-cutover canonical archive；不得指向 legacy
 `SHIFT_TRANSCRIPT_DIR`。
 
@@ -444,8 +441,7 @@ outbox row，health 显示 `disabled`，不会形成无法投递的假积压。�
 10. legacy 行为场景已转换为最小化、脱敏 fixture；
 11. 备份恢复演练通过，并已生成旧数据清理清单。
 
-以上退出条件已全部满足，真实 legacy 数据也已删除。因此移除 `files/dual` 不再是数据
-切换或正确性风险，而是删除不可达产品分支、收敛配置面和降低维护成本的工程收尾。
+以上退出条件已全部满足，真实 legacy 数据已删除，`files/dual` 在线产品分支也已退役。
 
 Clean cutover 必须指向一个不存在的新数据库文件，并通过显式命令创建、激活：
 
@@ -456,20 +452,21 @@ npm run prepare:storage:epoch -- --db <new-storage.sqlite>
 命令拒绝覆盖已有数据库及其 WAL/SHM sidecar。旧 validation DB 不得原地激活或复用为
 clean epoch。
 
-## 14. 当前实现差距
+## 14. 实现关闭状态
 
 SQLite 正式路径的 truth boundary 已完成：session/message/invocation、provider resume、
 memory 和 recall/detail 正常读取均不访问 legacy 文件；SQLite 错误 fail closed；canonical
 event 通过 transactional outbox 幂等归档；health、retention、恢复演练和 legacy 清理均
 已有验收证据。
 
-剩余差距只属于兼容代码收尾：
+兼容代码收尾已完成：
 
-- `createServerStorage` 和 `event-store` 仍接受 `files/dual`；
-- composition root、chat route、session read 和 recall service 仍有 mode branch；
-- `dual-write-recorder` 仍保留过渡期容错语义；
-- legacy session-map 仍可由非 SQLite 兼容分支调用；
-- dual audit、legacy migrate 和脱敏 fixture 仍需保留为离线工具/测试，不能再由产品服务调用。
+- `createServerStorage` 明确拒绝非 SQLite 在线模式，`event-store` 只写 SQLite；
+- composition root、chat route 和 recall service 已移除 storage mode branch；
+- 旧 session read wrapper 已删除，产品直接使用 SQLite session service；
+- `dual-write-recorder` 已收敛并更名为 fail-closed durable recorder；
+- 产品不再读取 session-map、legacy invocation registry 或 legacy transcript；
+- dual audit、legacy migrate、cleanup tooling 和脱敏 fixture 仅保留为离线工具/测试。
 
 project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决定，不是本次 SQLite
 真相源切换的关闭条件。新增功能不得扩大或重新激活平级双源范围。
@@ -487,7 +484,7 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
 10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（已完成）
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
-    （真实 legacy 数据清理已完成；`dual` 兼容模式移除仍待后续独立变更）
+    （已完成）
 
 每一步都必须可以独立回滚，并在进入下一步前有数据审计证据。
 
@@ -518,7 +515,7 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 - JSONL 仍保留可审计、可导出和恢复后核对价值；
 - 正式项目知识可以跟随 Git 分支、review 和跨机器传播；
 - recall、摘要和未来 embedding 可以安全重建；
-- 存储代码可以逐步删除 mode branch 和重复合并逻辑。
+- 存储代码已删除在线 mode branch 和重复合并逻辑。
 
 ### 代价
 
@@ -527,7 +524,7 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 - materialization 需要审批、diff 和 source-hash 生命周期；
 - SQLite 成为正式依赖，数据库故障不能再由旧文件静默掩盖；
 - 永久删除必须同时处理数据库和审计归档；
-- 切换期间仍需维护有限时间的双路径验证。
+- 离线 legacy 工具和 fixture 仍需维护，但不会进入产品服务路径。
 
 ## 18. 非目标
 

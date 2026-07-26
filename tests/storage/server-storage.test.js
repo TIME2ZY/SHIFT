@@ -32,12 +32,15 @@ test("epoch audit directory rejects dot segments and remains inside its root", (
   );
 });
 
-test("files storage mode does not open SQLite", () => {
-  const context = createServerStorage({ storageMode: "files" }, "sessions.json");
-  assert.equal(context.mode, "files");
-  assert.equal(context.storage, null);
-  assert.equal(context.recorder.enabled, false);
-  context.close();
+test("online storage rejects retired files and dual modes", () => {
+  assert.throws(
+    () => createServerStorage({ storageMode: "files" }, "sessions.json"),
+    /only accepts sqlite/
+  );
+  assert.throws(
+    () => createServerStorage({ storageMode: "dual" }, "sessions.json"),
+    /only accepts sqlite/
+  );
 });
 
 test("default storage mode uses an activated SQLite database beside a custom sessions file", () => {
@@ -68,8 +71,6 @@ test("sqlite storage mode opens the durable database", () => {
     assert.equal(context.recorder.enabled, true);
     assert.ok(context.storage);
     assert.ok(context.eventStore);
-    assert.equal(context.eventStore.writeSqlite, true);
-    assert.equal(context.eventStore.writeTranscript, false);
     assert.ok(context.sessionService);
   } finally {
     context.close();
@@ -207,7 +208,7 @@ test("disabling new audit writes still drains previously committed outbox rows",
     storageMode: "sqlite",
     storage,
     auditTranscript: false,
-    transcript: {
+    auditTranscriptSink: {
       appendCanonicalEvent(event) {
         delivered.push(event.id);
       },
@@ -221,25 +222,6 @@ test("disabling new audit writes still drains previously committed outbox rows",
   } finally {
     context.close();
     storage.close();
-  }
-});
-
-test("dual storage fails open when SQLite initialization fails", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-failure-"));
-  const errors = [];
-  const context = createServerStorage(
-    { storageMode: "dual", memoryDbFile: tmpDir },
-    path.join(tmpDir, "sessions.json"),
-    { error: (message) => errors.push(message) }
-  );
-  try {
-    assert.equal(context.storage, null);
-    assert.equal(context.recorder.enabled, false);
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /initialization failed/);
-  } finally {
-    context.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createDualWriteRecorder } = require("../../src/storage/dual-write-recorder");
+const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createStorage } = require("../../src/storage");
 
 function sessionFixture() {
@@ -15,9 +15,9 @@ function sessionFixture() {
   };
 }
 
-test("dual-write recorder mirrors thread, window, message, and invocation data", () => {
+test("durable recorder writes thread, window, message, and invocation data", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   try {
     const window = recorder.ensureWindow({
@@ -92,7 +92,7 @@ test("dual-write recorder mirrors thread, window, message, and invocation data",
 
 test("finishWithAssistantMessage writes finish event and final message atomically", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   try {
     session.messages.push({
@@ -126,20 +126,23 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       return originalUpsert(item);
     };
 
-    const failed = recorder.finishWithAssistantMessage({
-      invocationId: "invocation-atomic",
-      code: 0,
-      signal: null,
-      session,
-      message: {
-        id: "message-assistant",
-        role: "assistant",
-        agent: "codex",
-        content: "done",
-        createdAt: "2026-07-12T00:00:03.000Z",
-      },
-    });
-    assert.equal(failed, null);
+    assert.throws(
+      () =>
+        recorder.finishWithAssistantMessage({
+          invocationId: "invocation-atomic",
+          code: 0,
+          signal: null,
+          session,
+          message: {
+            id: "message-assistant",
+            role: "assistant",
+            agent: "codex",
+            content: "done",
+            createdAt: "2026-07-12T00:00:03.000Z",
+          },
+        }),
+      /message recall failed/
+    );
     assert.equal(storage.invocations.get("invocation-atomic").state, "active");
     assert.equal(storage.messages.get("message-assistant"), null);
     assert.equal(
@@ -163,7 +166,6 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
             agent: "codex",
             content: "done",
           },
-          failClosed: true,
         }),
       /strict sqlite failure/
     );
@@ -197,33 +199,32 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
   }
 });
 
-test("dual-write failures are contained and reported", () => {
+test("durable write failures are reported and fail closed", () => {
   const errors = [];
-  const storage = {
-    threads: {
-      upsert() {
-        throw new Error("database unavailable");
-      },
-      delete() {
-        throw new Error("database unavailable");
-      },
-    },
-  };
-  const recorder = createDualWriteRecorder({
+  const storage = createStorage({ file: ":memory:" });
+  const recorder = createDurableRecorder({
     storage,
     logger: { error: (message) => errors.push(message) },
   });
 
-  assert.equal(recorder.mirrorThread(sessionFixture()), null);
-  assert.equal(recorder.deleteThread("thread-1"), null);
+  storage.threads.upsert = () => {
+    throw new Error("database unavailable");
+  };
+  storage.threads.delete = () => {
+    throw new Error("database unavailable");
+  };
+  assert.throws(() => recorder.mirrorThread(sessionFixture()), /database unavailable/);
+  assert.throws(() => recorder.deleteThread("thread-1"), /database unavailable/);
   assert.equal(errors.length, 2);
   assert.match(errors[0], /mirror thread failed: database unavailable/);
+  recorder.close();
+  storage.close();
 });
 
 test("deleting a thread suppresses late writes from its active invocation", () => {
   const storage = createStorage({ file: ":memory:" });
   const errors = [];
-  const recorder = createDualWriteRecorder({
+  const recorder = createDurableRecorder({
     storage,
     logger: { error: (message) => errors.push(message) },
   });

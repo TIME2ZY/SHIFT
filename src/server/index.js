@@ -9,16 +9,12 @@ const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
 const callbacks = require("../agents/callbacks");
-const transcript = require("../session/transcript");
 const contextHealth = require("../session/health");
 const sessionSealer = require("../session/sealer");
 const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
 const runtimePaths = require("../shared/runtime-paths");
-const sessionStore = require("./session-store");
-const sessionMapStore = require("./session-map-store");
 const projectDirService = require("./project-dir");
-const invocationStore = require("./invocation-store");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
 const { createMemoryRoutes } = require("./memory-routes");
@@ -29,17 +25,13 @@ const skills = require("./skills");
 const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
 const { serveIndex, serveStatic } = require("./static-assets");
 const { createInvokeArgsBuilder } = require("./invoke-args");
-const { createInvocationRegistry } = require("./invocation-registry");
 const { runChildStream, filterBenignStderr } = require("./child-stream");
 const { createServerStorage } = require("../storage/server-storage");
 const { createMemoryCapture } = require("../storage/memory-capture");
 const { createRecallService } = require("../storage/recall-service");
-const { createSessionReadService } = require("../storage/session-read-service");
 const {
   ROOT,
   DEFAULT_SESSIONS_FILE,
-  DEFAULT_INVOCATIONS_FILE,
-  DEFAULT_SESSION_MAP_ROOT,
   DEFAULT_TRANSCRIPT_DIR,
   DEFAULT_AUDIT_TRANSCRIPT_DIR,
   DEFAULT_WORKTREE_STATE_FILE,
@@ -60,31 +52,9 @@ const {
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 } = skills;
-const {
-  readSessions,
-  writeSessions,
-  createSession,
-  ensureSession,
-  listSessions,
-  getSession,
-  setSessionProjectDir,
-  setSessionWorktree,
-  deleteSession,
-  appendToSession,
-} = sessionStore;
-const { getSessionMapPath, readSessionMap, deleteSessionMap } = sessionMapStore;
 const { validateProjectDir } = projectDirService;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
-const {
-  readInvocationsFile,
-  writeInvocationsFile,
-  recordInvocationEvent,
-  finalizeInvocationEvent,
-  listInvocationsFromMap,
-  searchInvocationsInMap,
-  readInvocationFromMap,
-} = invocationStore;
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 // Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
@@ -138,8 +108,6 @@ function createServer(options = {}) {
       rootDir: ROOT,
       stateFile: DEFAULT_WORKTREE_STATE_FILE,
     });
-  const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
-  const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
   const logger = options.logger || console;
   const auditTranscriptDir = path.resolve(
     options.auditTranscriptDir ||
@@ -151,121 +119,68 @@ function createServer(options = {}) {
   const legacyTranscriptDir = path.resolve(
     process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR
   );
-  const storageMode = options.storageMode || process.env[ENV.STORAGE_MODE] || "sqlite";
-  if (
-    storageMode === "sqlite" &&
-    runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)
-  ) {
+  if (runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)) {
     throw new Error(
       `SQLite canonical audit directory must not overlap legacy transcripts: ` +
         `${auditTranscriptDir} <> ${legacyTranscriptDir}`
     );
   }
   const storageContext = createServerStorage(
-    { ...options, transcript, auditTranscriptDir },
+    { ...options, auditTranscriptDir },
     sessionsFile,
     logger
   );
   const durableRecorder = storageContext.recorder;
   const eventStore = storageContext.eventStore;
   const sqliteSessionService = storageContext.sessionService;
-  // Thread/message/invocation authority is explicit: dual keeps legacy files
-  // authoritative and uses SQLite as their validation mirror; sqlite never
-  // reads or writes those legacy stores.
-  const sqliteAuthoritative = storageContext.mode === "sqlite" && Boolean(sqliteSessionService);
+  if (!sqliteSessionService) {
+    throw new Error("SQLite session service is required.");
+  }
   const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
-    transcript,
-    mode: storageContext.mode,
     logger,
   });
   const memoryCapture = createMemoryCapture({
     memoryService,
-    transcript,
     eventStore,
-    allowTranscriptReplay: storageContext.mode !== "sqlite",
-    logger,
-  });
-  const sessionReader = createSessionReadService({
-    mode: storageContext.mode,
-    storage: storageContext.storage,
-    fileStore: { getSession, listSessions },
+    allowTranscriptReplay: false,
     logger,
   });
   const activeInvocations = new Map();
-  const invocationRegistry = sqliteAuthoritative
-    ? {
-        events: new Map(),
-        persist() {},
-        deleteForSession() {},
-      }
-    : createInvocationRegistry({
-        file: invocationsFile,
-        readFile: readInvocationsFile,
-        writeFile: writeInvocationsFile,
-      });
   const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
   });
   _previewManagers.add(worktreeManager);
 
-  function createSessionDual(file) {
-    if (sqliteAuthoritative) return sqliteSessionService.createSession(file);
-    const session = createSession(file);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function createSessionDurable(file) {
+    return sqliteSessionService.createSession(file);
   }
 
-  function updateProjectDirDual(file, sessionId, projectDir) {
-    if (sqliteAuthoritative)
-      return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
-    const session = setSessionProjectDir(file, sessionId, projectDir);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function updateProjectDirDurable(file, sessionId, projectDir) {
+    return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
   }
 
-  function updateWorktreeDual(file, sessionId, worktree) {
-    if (sqliteAuthoritative)
-      return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
-    const session = setSessionWorktree(file, sessionId, worktree);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function updateWorktreeDurable(file, sessionId, worktree) {
+    return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
   }
 
-  function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
-    if (sqliteAuthoritative) {
-      return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
-    }
-    const session = appendToSession(file, sessionId, message, appendOptions);
-    durableRecorder.mirrorLastMessage(session, {
-      windowId: appendOptions.windowId,
-      invocationId: message.invocationId,
-    });
-    return session;
+  function appendToSessionDurable(file, sessionId, message, appendOptions = {}) {
+    return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
   }
 
-  function deleteSessionDual(file, sessionId) {
-    if (sqliteAuthoritative) {
-      const deleted = sqliteSessionService.deleteSession(file, sessionId);
-      // Keep recorder/event-store process guards in sync even when the row is
-      // already gone (cascade deleted with the thread).
-      durableRecorder.deleteThread(sessionId);
-      return deleted;
-    }
-    const deleted = deleteSession(file, sessionId);
-    if (deleted) durableRecorder.deleteThread(sessionId);
+  function deleteSessionDurable(file, sessionId) {
+    const deleted = sqliteSessionService.deleteSession(file, sessionId);
+    durableRecorder.deleteThread(sessionId);
     return deleted;
   }
 
-  function getSessionForMode(file, sessionId) {
-    if (sqliteAuthoritative) return sqliteSessionService.getSession(file, sessionId);
-    return sessionReader.getSession(file, sessionId);
+  function getSessionDurable(file, sessionId) {
+    return sqliteSessionService.getSession(file, sessionId);
   }
 
-  function listSessionsForMode(file) {
-    if (sqliteAuthoritative) return sqliteSessionService.listSessions(file);
-    return sessionReader.listSessions(file);
+  function listSessionsDurable(file) {
+    return sqliteSessionService.listSessions(file);
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -286,9 +201,6 @@ function createServer(options = {}) {
     try {
       worktreeManager.discardWorktree(sessionId);
     } catch {}
-    if (!sqliteAuthoritative) deleteSessionMap(sessionId, sessionMapRoot);
-    await transcript.deleteSessionData(sessionId);
-    invocationRegistry.deleteForSession(sessionId);
   }
 
   const handleSessionRoutes = createSessionRoutes({
@@ -298,20 +210,20 @@ function createServer(options = {}) {
     cleanupSessionRuntime,
     sendJson,
     readJsonBody,
-    listSessions: listSessionsForMode,
-    createSession: createSessionDual,
-    getSession: getSessionForMode,
-    deleteSession: deleteSessionDual,
-    setSessionWorktree: updateWorktreeDual,
+    listSessions: listSessionsDurable,
+    createSession: createSessionDurable,
+    getSession: getSessionDurable,
+    deleteSession: deleteSessionDurable,
+    setSessionWorktree: updateWorktreeDurable,
     validateProjectDir,
-    setSessionProjectDir: updateProjectDirDual,
+    setSessionProjectDir: updateProjectDirDurable,
     usageStorage: storageContext.storage,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
     suggestionService: storageContext.storage?.suggestionService || null,
     storage: storageContext.storage,
-    getSession: getSessionForMode,
+    getSession: getSessionDurable,
     sessionsFile,
     sendJson,
     readJsonBody,
@@ -325,10 +237,9 @@ function createServer(options = {}) {
   });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
-    transcript,
     eventStore,
-    appendToSession: appendToSessionDual,
-    getSession: getSessionForMode,
+    appendToSession: appendToSessionDurable,
+    getSession: getSessionDurable,
     sessionsFile,
     sendJson,
     readJsonBody,
@@ -341,12 +252,9 @@ function createServer(options = {}) {
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,
     selfGitRoot: SELF_GIT_ROOT,
-    sessionMapRoot,
-    invocationEvents: invocationRegistry.events,
     options: { ...options, sessionsFile },
     AGENTS,
     callbacks,
-    transcript,
     eventStore,
     contextHealth,
     sessionSealer,
@@ -370,20 +278,14 @@ function createServer(options = {}) {
     filterBenignStderr,
     runChildStream,
     spawnRunner,
-    getSession: getSessionForMode,
-    createSession: createSessionDual,
-    setSessionProjectDir: updateProjectDirDual,
+    getSession: getSessionDurable,
+    createSession: createSessionDurable,
+    setSessionProjectDir: updateProjectDirDurable,
     validateProjectDir,
-    setSessionWorktree: updateWorktreeDual,
-    appendToSession: appendToSessionDual,
-    getSessionMapPath,
-    readSessionMap,
-    recordInvocationEvent,
-    finalizeInvocationEvent,
-    persistInvocations: invocationRegistry.persist,
+    setSessionWorktree: updateWorktreeDurable,
+    appendToSession: appendToSessionDurable,
     durableRecorder,
     memoryCapture,
-    storageMode: storageContext.mode,
     logger,
   });
 
@@ -477,20 +379,4 @@ module.exports = {
   augmentPrompt,
   parseSkillFrontmatter,
   buildAugmentedPrompt,
-  readSessions,
-  writeSessions,
-  createSession,
-  ensureSession,
-  listSessions,
-  getSession,
-  setSessionWorktree,
-  deleteSession,
-  appendToSession,
-  readInvocationsFile,
-  writeInvocationsFile,
-  recordInvocationEvent,
-  finalizeInvocationEvent,
-  listInvocationsFromMap,
-  searchInvocationsInMap,
-  readInvocationFromMap,
 };

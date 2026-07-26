@@ -63,7 +63,7 @@ function createFixture(fileOverrides = {}) {
   return { storage, service: createRecallService({ storage, transcript }) };
 }
 
-test("dual recall search uses the SQLite-owned search projection", async () => {
+test("recall search uses the SQLite-owned search projection", async () => {
   const { storage, service } = createFixture();
   try {
     const hits = await service.searchTranscript("thread-1", "sqlite memory");
@@ -97,7 +97,7 @@ test("recall service returns SQLite-only user messages and memory entries", asyn
   }
 });
 
-test("dual mode prefers healthy SQLite search and skips file scans", async () => {
+test("recall skips transcript scans when SQLite search is healthy", async () => {
   let fileSearches = 0;
   const { storage, service } = createFixture({
     searchTranscript: async () => {
@@ -121,87 +121,6 @@ test("dual mode prefers healthy SQLite search and skips file scans", async () =>
     assert.ok(hits.some((hit) => hit.invocationId === "invocation-1"));
     assert.ok(hits.every((hit) => hit.layer === "evidence"));
     assert.ok(typeof hits[0].score === "number");
-  } finally {
-    storage.close();
-  }
-});
-
-test("files mode can still merge file hits when requested", async () => {
-  const fileOnly = {
-    invocationId: "legacy-invocation",
-    eventNo: 4,
-    kind: "stderr",
-    ts: "2026-07-11T00:00:00.000Z",
-    snippet: "legacy sqlite memory",
-  };
-  const { storage } = createFixture({
-    searchTranscript: async () => [fileOnly],
-  });
-  const filesService = createRecallService({
-    storage,
-    transcript: {
-      listInvocationsWithMeta: async () => [],
-      searchTranscript: async () => [fileOnly],
-      readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
-    },
-    mode: "files",
-  });
-  try {
-    const hits = await filesService.searchTranscript("thread-1", "sqlite memory");
-    assert.ok(hits.some((hit) => hit.invocationId === "invocation-1"));
-    assert.ok(hits.some((hit) => hit.invocationId === "legacy-invocation"));
-  } finally {
-    storage.close();
-  }
-});
-
-test("dual invocation listing uses the file authority without SQLite arbitration", async () => {
-  const fileRecord = {
-    invocationId: "invocation-1",
-    agent: "codex",
-    startedAt: "2026-07-12T00:00:00.000Z",
-    endedAt: "2026-07-12T00:01:00.000Z",
-    state: "completed",
-    eventCount: 5,
-  };
-  const { storage, service } = createFixture({
-    listInvocationsWithMeta: async () => [fileRecord],
-  });
-  try {
-    const result = await service.listInvocationsWithMeta("thread-1");
-    assert.equal(result[0], fileRecord);
-  } finally {
-    storage.close();
-  }
-});
-
-test("dual invocation detail uses the file authority without SQLite arbitration", async () => {
-  const fileEvent = { ts: "file", kind: "extra", payload: {} };
-  const { storage, service } = createFixture({
-    readInvocationPage: async () => ({
-      events: [{ ts: "file", kind: "text.delta", payload: {} }, fileEvent],
-      total: 2,
-      from: 0,
-      limit: 200,
-    }),
-  });
-  try {
-    const filePreferred = await service.readInvocationPage("thread-1", "invocation-1");
-    assert.equal(filePreferred.total, 2);
-    assert.equal(filePreferred.events[1], fileEvent);
-
-    const sqliteOnly = createRecallService({
-      mode: "sqlite",
-      storage,
-      transcript: {
-        listInvocationsWithMeta: async () => [],
-        searchTranscript: async () => [],
-        readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
-      },
-    });
-    const sqlitePreferred = await sqliteOnly.readInvocationPage("thread-1", "invocation-1");
-    assert.equal(sqlitePreferred.total, 1);
-    assert.equal(sqlitePreferred.events[0].kind, "text.delta");
   } finally {
     storage.close();
   }

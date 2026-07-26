@@ -318,7 +318,7 @@ function createCallbackRoutes({
       }
       if (!memoryService) {
         sendJson(res, 503, {
-          error: "Memory service unavailable. Enable SQLite storage (dual or sqlite mode).",
+          error: "Memory service unavailable. SQLite storage is required.",
         });
         return true;
       }
@@ -466,7 +466,7 @@ function createCallbackRoutes({
       }
       if (!memoryService) {
         sendJson(res, 503, {
-          error: "Memory service unavailable. Enable SQLite storage (dual or sqlite mode).",
+          error: "Memory service unavailable. SQLite storage is required.",
         });
         return true;
       }

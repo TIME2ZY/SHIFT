@@ -7,11 +7,10 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const { createServer } = require("../../src/server");
-const { readSessionMap, writeSessionMap } = require("../../src/server/session-map-store");
 const { createStorage } = require("../../src/storage");
 const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
 
-const UI_TOKEN = "dual-write-test-token";
+const UI_TOKEN = "sqlite-storage-test-token";
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
@@ -119,16 +118,17 @@ test("sqlite server rejects overlapping legacy and canonical transcript roots", 
   }
 });
 
-test("chat keeps file reads while mirroring durable records into SQLite", async () => {
+test("chat reads and writes thread state only through SQLite", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dual-write-server-"));
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
-    storageMode: "dual",
+    storageMode: "sqlite",
     storage,
     spawnRunner: successfulSpawn,
     worktreeManager: worktreeManager(),
@@ -150,13 +150,16 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
     });
     await chatResponse.text();
 
-    const fileMessages = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then(
+    const durableMessages = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
     assert.deepEqual(
-      fileMessages.messages.map((message) => message.content),
+      durableMessages.messages.map((message) => message.content),
       ["Hi", "hello"]
     );
+    assert.equal(fs.existsSync(path.join(tmpDir, "sessions.json")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "invocations.json")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     assert.equal(storage.threads.list().length, 1);
     assert.equal(storage.windows.listForThread(session.id).length, 1);
     assert.equal(storage.messages.listForThread(session.id).length, 2);
@@ -177,9 +180,7 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
-    // Search has its own SQLite-owned projections; removing JSONL proves this
-    // does not change thread/message/invocation authority in dual mode.
-    fs.rmSync(process.env.SHIFT_TRANSCRIPT_DIR, { recursive: true, force: true });
+    // Legacy transcript state is absent; search still comes from SQLite projections.
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
     ).then((response) => response.json());
@@ -214,12 +215,13 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
 test("routed structured handoff is captured in SQLite and announced over SSE", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   let run = 0;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
-    storageMode: "dual",
+    storageMode: "sqlite",
     storage,
     spawnRunner() {
       run += 1;
@@ -277,14 +279,13 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
 
 test("chat seals from cumulative window usage and starts the next generation", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "window-runtime-server-"));
-  const mapRoot = path.join(tmpDir, "session-maps");
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const prompts = [];
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: mapRoot,
-    storageMode: "dual",
+    storageMode: "sqlite",
     storage,
     spawnRunner(_command, args) {
       prompts.push(args[args.length - 1]);
@@ -313,13 +314,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
     storage.windows.addUsage(firstWindow.id, {
       inputChars: Math.max(0, targetChars - persistedChars),
     });
-    writeSessionMap(session.id, mapRoot, {
-      codex: {
-        sessionId: "provider-session-old",
-        workspaceKey: firstWindow.workspaceKey,
-        providerKey: firstWindow.providerKey,
-      },
-    });
+    storage.windows.bindProviderSession(firstWindow.id, "provider-session-old");
 
     const sealedStream = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -327,11 +322,11 @@ test("chat seals from cumulative window usage and starts the next generation", a
     }).then((response) => response.text());
     assert.match(sealedStream, /event: sealed/);
     assert.equal(storage.windows.get(firstWindow.id).state, "sealed");
-    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
     const rotatedWindows = storage.windows.listForThread(session.id);
     assert.equal(rotatedWindows.length, 2);
     assert.equal(rotatedWindows[1].generation, 2);
     assert.equal(rotatedWindows[1].state, "active");
+    assert.equal(rotatedWindows[1].providerSessionId, null);
     assert.ok(storage.windows.get(firstWindow.id).outputChars > firstWindow.outputChars);
     const sealMemories = storage.memories
       .listForThread(session.id)
@@ -355,46 +350,6 @@ test("chat seals from cumulative window usage and starts the next generation", a
   } finally {
     await new Promise((resolve) => server.close(resolve));
     storage.close();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("files mode abandons an exhausted provider session", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "files-window-server-"));
-  const mapRoot = path.join(tmpDir, "session-maps");
-  const previousCapacity = process.env.SHIFT_TEST_CAPACITY;
-  process.env.SHIFT_TEST_CAPACITY = "20";
-  const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
-    invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: mapRoot,
-    storageMode: "files",
-    spawnRunner: successfulSpawn,
-    worktreeManager: worktreeManager(),
-    uiToken: UI_TOKEN,
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
-
-  try {
-    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      body: "{}",
-    }).then((response) => response.json());
-    writeSessionMap(session.id, mapRoot, {
-      codex: { sessionId: "provider-session-old" },
-    });
-
-    const stream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "overflow" }),
-    }).then((response) => response.text());
-    assert.match(stream, /event: sealed/);
-    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-    if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
-    else process.env.SHIFT_TEST_CAPACITY = previousCapacity;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

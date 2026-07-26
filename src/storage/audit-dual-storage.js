@@ -16,12 +16,10 @@ const MIRRORED_EVENT_KINDS = new Set([
 ]);
 
 /**
- * Read-only divergence audit for the temporary `dual` storage era.
+ * Read-only divergence audit for artifacts from the retired `dual` storage era.
  *
- * SQLite and legacy files intentionally remain independent sinks today. This
- * audit measures whether the parts expected to mirror (active threads,
- * messages, invocations, and canonical event kinds) have drifted. It never
- * repairs or changes either source.
+ * This offline audit measures whether historical SQLite and legacy snapshots
+ * drifted. It never repairs or changes either source.
  */
 function auditDualStorage(options = {}) {
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
