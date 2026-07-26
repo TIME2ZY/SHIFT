@@ -2,42 +2,38 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { loadProjectEnv } = require("../shared/load-env");
+const { ENV } = require("../shared/brand");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
 const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
 const callbacks = require("../agents/callbacks");
-const transcript = require("../session/transcript");
 const contextHealth = require("../session/health");
 const sessionSealer = require("../session/sealer");
 const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
 const runtimePaths = require("../shared/runtime-paths");
-const sessionStore = require("./session-store");
-const sessionMapStore = require("./session-map-store");
 const projectDirService = require("./project-dir");
-const invocationStore = require("./invocation-store");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
 const { createMemoryRoutes } = require("./memory-routes");
+const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const skills = require("./skills");
 const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
 const { serveIndex, serveStatic } = require("./static-assets");
 const { createInvokeArgsBuilder } = require("./invoke-args");
-const { createInvocationRegistry } = require("./invocation-registry");
 const { runChildStream, filterBenignStderr } = require("./child-stream");
 const { createServerStorage } = require("../storage/server-storage");
 const { createMemoryCapture } = require("../storage/memory-capture");
 const { createRecallService } = require("../storage/recall-service");
-const { createSessionReadService } = require("../storage/session-read-service");
 const {
   ROOT,
   DEFAULT_SESSIONS_FILE,
-  DEFAULT_INVOCATIONS_FILE,
-  DEFAULT_SESSION_MAP_ROOT,
+  DEFAULT_TRANSCRIPT_DIR,
+  DEFAULT_AUDIT_TRANSCRIPT_DIR,
   DEFAULT_WORKTREE_STATE_FILE,
 } = runtimePaths;
 
@@ -56,32 +52,9 @@ const {
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 } = skills;
-const {
-  readSessions,
-  writeSessions,
-  createSession,
-  restoreSession,
-  ensureSession,
-  listSessions,
-  getSession,
-  setSessionProjectDir,
-  setSessionWorktree,
-  deleteSession,
-  appendToSession,
-} = sessionStore;
-const { getSessionMapPath, readSessionMap, deleteSessionMap } = sessionMapStore;
 const { validateProjectDir } = projectDirService;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
-const {
-  readInvocationsFile,
-  writeInvocationsFile,
-  recordInvocationEvent,
-  finalizeInvocationEvent,
-  listInvocationsFromMap,
-  searchInvocationsInMap,
-  readInvocationFromMap,
-} = invocationStore;
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 // Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
@@ -135,114 +108,79 @@ function createServer(options = {}) {
       rootDir: ROOT,
       stateFile: DEFAULT_WORKTREE_STATE_FILE,
     });
-  const invocationsFile = options.invocationsFile || DEFAULT_INVOCATIONS_FILE;
-  const sessionMapRoot = path.resolve(options.sessionMapRoot || DEFAULT_SESSION_MAP_ROOT);
   const logger = options.logger || console;
+  const auditTranscriptDir = path.resolve(
+    options.auditTranscriptDir ||
+      process.env[ENV.AUDIT_TRANSCRIPT_DIR] ||
+      (options.sessionsFile
+        ? path.join(path.dirname(sessionsFile), "audit-transcripts")
+        : DEFAULT_AUDIT_TRANSCRIPT_DIR)
+  );
+  const legacyTranscriptDir = path.resolve(
+    process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR
+  );
+  if (runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)) {
+    throw new Error(
+      `SQLite canonical audit directory must not overlap legacy transcripts: ` +
+        `${auditTranscriptDir} <> ${legacyTranscriptDir}`
+    );
+  }
   const storageContext = createServerStorage(
-    { ...options, transcript },
+    { ...options, auditTranscriptDir },
     sessionsFile,
     logger
   );
   const durableRecorder = storageContext.recorder;
   const eventStore = storageContext.eventStore;
   const sqliteSessionService = storageContext.sessionService;
-  const sqlitePrimary = storageContext.mode === "sqlite" && Boolean(sqliteSessionService);
+  if (!sqliteSessionService) {
+    throw new Error("SQLite session service is required.");
+  }
   const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
-    transcript,
-    mode: storageContext.mode,
     logger,
   });
   const memoryCapture = createMemoryCapture({
     memoryService,
-    transcript,
     eventStore,
-    logger,
-  });
-  const sessionReader = createSessionReadService({
-    mode: storageContext.mode,
-    storage: storageContext.storage,
-    fileStore: { getSession, listSessions },
+    allowTranscriptReplay: false,
     logger,
   });
   const activeInvocations = new Map();
-  const invocationRegistry = createInvocationRegistry({
-    file: invocationsFile,
-    readFile: readInvocationsFile,
-    writeFile: writeInvocationsFile,
-  });
   const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
   });
   _previewManagers.add(worktreeManager);
 
-  function createSessionDual(file) {
-    if (sqlitePrimary) return sqliteSessionService.createSession(file);
-    const session = createSession(file);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function createSessionDurable(file) {
+    return sqliteSessionService.createSession(file);
   }
 
-  function ensureFileShadow(file, sessionId) {
-    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
-    const existing = getSession(file, sessionId);
-    if (existing || storageContext.mode !== "sqlite") return existing;
-    const recovered = sessionReader.getSession(file, sessionId);
-    return recovered ? restoreSession(file, recovered) : null;
+  function updateProjectDirDurable(file, sessionId, projectDir) {
+    return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
   }
 
-  function updateProjectDirDual(file, sessionId, projectDir) {
-    if (sqlitePrimary) return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
-    ensureFileShadow(file, sessionId);
-    const session = setSessionProjectDir(file, sessionId, projectDir);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function updateWorktreeDurable(file, sessionId, worktree) {
+    return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
   }
 
-  function updateWorktreeDual(file, sessionId, worktree) {
-    if (sqlitePrimary) return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
-    ensureFileShadow(file, sessionId);
-    const session = setSessionWorktree(file, sessionId, worktree);
-    durableRecorder.mirrorThread(session);
-    return session;
+  function appendToSessionDurable(file, sessionId, message, appendOptions = {}) {
+    return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
   }
 
-  function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
-    if (sqlitePrimary) {
-      return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
-    }
-    if (appendOptions.allowCreate === false) ensureFileShadow(file, sessionId);
-    const session = appendToSession(file, sessionId, message, appendOptions);
-    durableRecorder.mirrorLastMessage(session, {
-      windowId: appendOptions.windowId,
-      invocationId: message.invocationId,
-    });
-    return session;
-  }
-
-  function deleteSessionDual(file, sessionId) {
-    if (sqlitePrimary) {
-      const deleted = sqliteSessionService.deleteSession(file, sessionId);
-      // Keep recorder/event-store process guards in sync even when the row is
-      // already gone (cascade deleted with the thread).
-      durableRecorder.deleteThread(sessionId);
-      return deleted;
-    }
-    ensureFileShadow(file, sessionId);
-    const deleted = deleteSession(file, sessionId);
-    if (deleted) durableRecorder.deleteThread(sessionId);
+  function deleteSessionDurable(file, sessionId) {
+    const deleted = sqliteSessionService.deleteSession(file, sessionId);
+    durableRecorder.deleteThread(sessionId);
     return deleted;
   }
 
-  function getSessionForMode(file, sessionId) {
-    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
-    return sessionReader.getSession(file, sessionId);
+  function getSessionDurable(file, sessionId) {
+    return sqliteSessionService.getSession(file, sessionId);
   }
 
-  function listSessionsForMode(file) {
-    if (sqlitePrimary) return sqliteSessionService.listSessions(file);
-    return sessionReader.listSessions(file);
+  function listSessionsDurable(file) {
+    return sqliteSessionService.listSessions(file);
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -263,9 +201,6 @@ function createServer(options = {}) {
     try {
       worktreeManager.discardWorktree(sessionId);
     } catch {}
-    deleteSessionMap(sessionId, sessionMapRoot);
-    await transcript.deleteSessionData(sessionId);
-    invocationRegistry.deleteForSession(sessionId);
   }
 
   const handleSessionRoutes = createSessionRoutes({
@@ -275,32 +210,36 @@ function createServer(options = {}) {
     cleanupSessionRuntime,
     sendJson,
     readJsonBody,
-    listSessions: listSessionsForMode,
-    createSession: createSessionDual,
-    getSession: getSessionForMode,
-    deleteSession: deleteSessionDual,
-    setSessionWorktree: updateWorktreeDual,
+    listSessions: listSessionsDurable,
+    createSession: createSessionDurable,
+    getSession: getSessionDurable,
+    deleteSession: deleteSessionDurable,
+    setSessionWorktree: updateWorktreeDurable,
     validateProjectDir,
-    setSessionProjectDir: updateProjectDirDual,
+    setSessionProjectDir: updateProjectDirDurable,
     usageStorage: storageContext.storage,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
     suggestionService: storageContext.storage?.suggestionService || null,
     storage: storageContext.storage,
-    getSession: getSessionForMode,
+    getSession: getSessionDurable,
     sessionsFile,
     sendJson,
     readJsonBody,
     eventStore,
     logger,
   });
+  const handleStorageRoutes = createStorageRoutes({
+    storageContext,
+    sendJson,
+    readJsonBody,
+  });
   const handleCallbackRoutes = createCallbackRoutes({
     callbacks,
-    transcript,
     eventStore,
-    appendToSession: appendToSessionDual,
-    getSession: getSessionForMode,
+    appendToSession: appendToSessionDurable,
+    getSession: getSessionDurable,
     sessionsFile,
     sendJson,
     readJsonBody,
@@ -313,12 +252,9 @@ function createServer(options = {}) {
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,
     selfGitRoot: SELF_GIT_ROOT,
-    sessionMapRoot,
-    invocationEvents: invocationRegistry.events,
     options: { ...options, sessionsFile },
     AGENTS,
     callbacks,
-    transcript,
     eventStore,
     contextHealth,
     sessionSealer,
@@ -342,20 +278,14 @@ function createServer(options = {}) {
     filterBenignStderr,
     runChildStream,
     spawnRunner,
-    getSession: getSessionForMode,
-    createSession: createSessionDual,
-    setSessionProjectDir: updateProjectDirDual,
+    getSession: getSessionDurable,
+    createSession: createSessionDurable,
+    setSessionProjectDir: updateProjectDirDurable,
     validateProjectDir,
-    setSessionWorktree: updateWorktreeDual,
-    appendToSession: appendToSessionDual,
-    getSessionMapPath,
-    readSessionMap,
-    recordInvocationEvent,
-    finalizeInvocationEvent,
-    persistInvocations: invocationRegistry.persist,
+    setSessionWorktree: updateWorktreeDurable,
+    appendToSession: appendToSessionDurable,
     durableRecorder,
     memoryCapture,
-    storageMode: storageContext.mode,
     logger,
   });
 
@@ -382,6 +312,10 @@ function createServer(options = {}) {
 
     if (req.method === "GET" && url.pathname === "/api/agents") {
       sendJson(res, 200, { agents: publicAgents() });
+      return;
+    }
+
+    if (await handleStorageRoutes(req, res, url)) {
       return;
     }
 
@@ -416,7 +350,9 @@ function createServer(options = {}) {
     sendJson(res, 404, { error: "Not found." });
   }
 
-  const server = http.createServer(createSafeRequestListener(handleRequest, { sendJson, sendSse, logger }));
+  const server = http.createServer(
+    createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
+  );
   server.once("close", () => {
     _previewManagers.delete(worktreeManager);
     storageContext.close();
@@ -443,20 +379,4 @@ module.exports = {
   augmentPrompt,
   parseSkillFrontmatter,
   buildAugmentedPrompt,
-  readSessions,
-  writeSessions,
-  createSession,
-  ensureSession,
-  listSessions,
-  getSession,
-  setSessionWorktree,
-  deleteSession,
-  appendToSession,
-  readInvocationsFile,
-  writeInvocationsFile,
-  recordInvocationEvent,
-  finalizeInvocationEvent,
-  listInvocationsFromMap,
-  searchInvocationsInMap,
-  readInvocationFromMap,
 };

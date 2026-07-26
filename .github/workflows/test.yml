@@ -14,6 +14,10 @@ jobs:
     name: Syntax, lint, test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Product and CI share the same authority path. Legacy-mode tests must
+      # opt into files/dual explicitly instead of inheriting a fallback.
+      SHIFT_STORAGE_MODE: sqlite
 
     strategy:
       matrix:

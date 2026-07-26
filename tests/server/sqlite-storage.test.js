@@ -7,10 +7,10 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const { createServer } = require("../../src/server");
-const { readSessionMap, writeSessionMap } = require("../../src/server/session-map-store");
 const { createStorage } = require("../../src/storage");
+const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
 
-const UI_TOKEN = "dual-write-test-token";
+const UI_TOKEN = "sqlite-storage-test-token";
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
@@ -31,6 +31,35 @@ function successfulSpawn() {
     child.emit("close", 0, null);
   });
   return child;
+}
+
+function providerSessionSpawn(calls, responseTexts = []) {
+  return (_command, _args, options) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    const sessionId = `provider-session-${calls.length + 1}`;
+    calls.push({
+      resumeSessionId: options.env.INVOKE_SESSION_ID || "",
+      sessionFile: options.env.INVOKE_SESSION_FILE || "",
+      sessionId,
+      prompt: _args[_args.length - 1],
+    });
+    process.nextTick(() => {
+      child.stdout.write(`${JSON.stringify({ type: "run.started", sessionId })}\n`);
+      child.stdout.write(
+        `${JSON.stringify({
+          type: "text.delta",
+          text: responseTexts[calls.length - 1] || "hello",
+        })}\n`
+      );
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", 0, null);
+    });
+    return child;
+  };
 }
 
 function spawnText(text) {
@@ -62,15 +91,44 @@ function worktreeManager() {
   };
 }
 
-test("chat keeps file reads while mirroring durable records into SQLite", async () => {
+test("sqlite server rejects overlapping legacy and canonical transcript roots", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-audit-boundary-"));
+  const databaseFile = path.join(tmpDir, "shift.sqlite");
+  const transcriptDir = path.join(tmpDir, "transcripts");
+  const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
+  prepareCleanEpoch({ file: databaseFile });
+  process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
+  try {
+    assert.throws(
+      () =>
+        createServer({
+          storageMode: "sqlite",
+          memoryDbFile: databaseFile,
+          sessionsFile: path.join(tmpDir, "sessions.json"),
+          auditTranscriptDir: transcriptDir,
+          worktreeManager: worktreeManager(),
+          uiToken: UI_TOKEN,
+        }),
+      /must not overlap legacy transcripts/
+    );
+  } finally {
+    if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
+    else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("chat reads and writes thread state only through SQLite", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dual-write-server-"));
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
+    storageMode: "sqlite",
     storage,
     spawnRunner: successfulSpawn,
     worktreeManager: worktreeManager(),
@@ -92,13 +150,16 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
     });
     await chatResponse.text();
 
-    const fileMessages = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then(
+    const durableMessages = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
     assert.deepEqual(
-      fileMessages.messages.map((message) => message.content),
+      durableMessages.messages.map((message) => message.content),
       ["Hi", "hello"]
     );
+    assert.equal(fs.existsSync(path.join(tmpDir, "sessions.json")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "invocations.json")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     assert.equal(storage.threads.list().length, 1);
     assert.equal(storage.windows.listForThread(session.id).length, 1);
     assert.equal(storage.messages.listForThread(session.id).length, 2);
@@ -110,7 +171,16 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
-    fs.rmSync(process.env.SHIFT_TRANSCRIPT_DIR, { recursive: true, force: true });
+    const invocationId = storage.invocations.listForThread(session.id)[0].id;
+    const replay = await apiFetch(
+      `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
+    ).then((response) => response.json());
+    assert.deepEqual(
+      replay.events.map((event) => event.kind),
+      ["invocation-start", "text.delta", "invocation-end"]
+    );
+
+    // Legacy transcript state is absent; search still comes from SQLite projections.
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
     ).then((response) => response.json());
@@ -123,15 +193,6 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
     const userHit = userSearch.hits.find((hit) => hit.sourceKind === "message");
     assert.ok(userHit);
     assert.equal(userHit.kind, "message.user");
-
-    const invocationId = storage.invocations.listForThread(session.id)[0].id;
-    const replay = await apiFetch(
-      `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
-    ).then((response) => response.json());
-    assert.deepEqual(
-      replay.events.map((event) => event.kind),
-      ["invocation-start", "text.delta", "invocation-end"]
-    );
 
     const deleteResponse = await apiFetch(`${baseUrl}/api/sessions/${session.id}`, {
       method: "DELETE",
@@ -154,11 +215,13 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
 test("routed structured handoff is captured in SQLite and announced over SSE", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   let run = 0;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
+    storageMode: "sqlite",
     storage,
     spawnRunner() {
       run += 1;
@@ -216,13 +279,13 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
 
 test("chat seals from cumulative window usage and starts the next generation", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "window-runtime-server-"));
-  const mapRoot = path.join(tmpDir, "session-maps");
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const prompts = [];
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: mapRoot,
+    storageMode: "sqlite",
     storage,
     spawnRunner(_command, args) {
       prompts.push(args[args.length - 1]);
@@ -251,13 +314,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
     storage.windows.addUsage(firstWindow.id, {
       inputChars: Math.max(0, targetChars - persistedChars),
     });
-    writeSessionMap(session.id, mapRoot, {
-      codex: {
-        sessionId: "provider-session-old",
-        workspaceKey: firstWindow.workspaceKey,
-        providerKey: firstWindow.providerKey,
-      },
-    });
+    storage.windows.bindProviderSession(firstWindow.id, "provider-session-old");
 
     const sealedStream = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -265,11 +322,11 @@ test("chat seals from cumulative window usage and starts the next generation", a
     }).then((response) => response.text());
     assert.match(sealedStream, /event: sealed/);
     assert.equal(storage.windows.get(firstWindow.id).state, "sealed");
-    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
     const rotatedWindows = storage.windows.listForThread(session.id);
     assert.equal(rotatedWindows.length, 2);
     assert.equal(rotatedWindows[1].generation, 2);
     assert.equal(rotatedWindows[1].state, "active");
+    assert.equal(rotatedWindows[1].providerSessionId, null);
     assert.ok(storage.windows.get(firstWindow.id).outputChars > firstWindow.outputChars);
     const sealMemories = storage.memories
       .listForThread(session.id)
@@ -297,62 +354,24 @@ test("chat seals from cumulative window usage and starts the next generation", a
   }
 });
 
-test("files mode abandons an exhausted provider session", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "files-window-server-"));
-  const mapRoot = path.join(tmpDir, "session-maps");
-  const previousCapacity = process.env.SHIFT_TEST_CAPACITY;
-  process.env.SHIFT_TEST_CAPACITY = "20";
-  const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
-    invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: mapRoot,
-    storageMode: "files",
-    spawnRunner: successfulSpawn,
-    worktreeManager: worktreeManager(),
-    uiToken: UI_TOKEN,
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
-
-  try {
-    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      body: "{}",
-    }).then((response) => response.json());
-    writeSessionMap(session.id, mapRoot, {
-      codex: { sessionId: "provider-session-old" },
-    });
-
-    const stream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "overflow" }),
-    }).then((response) => response.text());
-    assert.match(stream, /event: sealed/);
-    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-    if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
-    else process.env.SHIFT_TEST_CAPACITY = previousCapacity;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("sqlite mode restores sessions after file loss and continues the message sequence", async () => {
+test("default sqlite mode restores sessions after restart without legacy writes", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-primary-server-"));
   const sessionsFile = path.join(tmpDir, "sessions.json");
   const memoryDbFile = path.join(tmpDir, "memory.sqlite");
   const transcriptDir = path.join(tmpDir, "transcripts");
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
+  const providerCalls = [];
+  const firstConclusion = "结论：SQLite restart context survives。";
+  prepareCleanEpoch({ file: memoryDbFile });
 
   function startServer() {
     const server = createServer({
       sessionsFile,
       invocationsFile: path.join(tmpDir, "invocations.json"),
       sessionMapRoot: path.join(tmpDir, "session-maps"),
-      storageMode: "sqlite",
       memoryDbFile,
-      spawnRunner: successfulSpawn,
+      spawnRunner: providerSessionSpawn(providerCalls, [firstConclusion, "hello"]),
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,
     });
@@ -378,6 +397,14 @@ test("sqlite mode restores sessions after file loss and continues the message se
         prompt: "durable first prompt",
       }),
     }).then((response) => response.text());
+    assert.equal(
+      fs.existsSync(path.join(tmpDir, "invocations.json")),
+      false,
+      "sqlite mode must not create the legacy invocation registry"
+    );
+    assert.equal(providerCalls[0].resumeSessionId, "");
+    assert.equal(providerCalls[0].sessionFile, "");
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     await new Promise((resolve) => firstServer.close(resolve));
     firstServer = null;
 
@@ -398,7 +425,7 @@ test("sqlite mode restores sessions after file loss and continues the message se
     );
     assert.deepEqual(
       recovered.messages.map((message) => message.content),
-      ["durable first prompt", "hello"]
+      ["durable first prompt", firstConclusion]
     );
 
     await apiFetch(`${secondUrl}/api/chat`, {
@@ -409,12 +436,17 @@ test("sqlite mode restores sessions after file loss and continues the message se
         prompt: "continued after restart",
       }),
     }).then((response) => response.text());
+    assert.equal(providerCalls[1].resumeSessionId, "provider-session-1");
+    assert.equal(providerCalls[1].sessionFile, "");
+    assert.match(providerCalls[1].prompt, /SQLite restart context survives/);
+    assert.match(providerCalls[1].prompt, /SHIFT_DERIVED_DIGEST_DATA/);
+    assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     const continued = await apiFetch(`${secondUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
     assert.deepEqual(
       continued.messages.map((message) => message.content),
-      ["durable first prompt", "hello", "continued after restart", "hello"]
+      ["durable first prompt", firstConclusion, "continued after restart", "hello"]
     );
     // sqlite mode is true single-write: no sessions.json / transcript resurrection.
     assert.equal(fs.existsSync(sessionsFile), false);

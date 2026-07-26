@@ -1,5 +1,4 @@
 const { assertValidOpaqueId } = require("./id-policy");
-const { resolveResumeSessionId, abandonProviderSession } = require("./session-map-store");
 const {
   createStreamDeltaCoalescer,
   resolveCoalesceOptionsFromEnv,
@@ -80,9 +79,7 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
 });
 
 const NOOP_EVENT_STORE = Object.freeze({
-  append: () => ({ ok: false, event: null, sqlite: false, transcript: false }),
-  writeSqlite: false,
-  writeTranscript: false,
+  append: () => ({ ok: false, event: null, sqlite: false }),
 });
 
 const NOOP_MEMORY_CAPTURE = Object.freeze({
@@ -94,12 +91,9 @@ const NOOP_MEMORY_CAPTURE = Object.freeze({
 function createChatRoutes({
   rootDir,
   selfGitRoot,
-  sessionMapRoot,
-  invocationEvents,
   options,
   AGENTS,
   callbacks,
-  transcript,
   eventStore,
   contextHealth,
   sessionSealer,
@@ -129,21 +123,14 @@ function createChatRoutes({
   validateProjectDir,
   setSessionWorktree,
   appendToSession,
-  getSessionMapPath,
-  readSessionMap,
-  recordInvocationEvent,
-  finalizeInvocationEvent,
-  persistInvocations,
   durableRecorder,
   memoryCapture,
-  storageMode = "dual",
   logger = console,
 }) {
   const durable = durableRecorder || NOOP_DURABLE_RECORDER;
   const events = eventStore || durable.eventStore || NOOP_EVENT_STORE;
   const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
   const log = logger || options?.logger || console;
-  const sqlitePrimary = storageMode === "sqlite";
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -350,7 +337,8 @@ function createChatRoutes({
         agent: AGENTS[requestedAgent],
         generation: initialWindow?.generation || 1,
         prompt: rawPrompt,
-        invocationSource: recallService || transcript,
+        invocationSource: recallService,
+        digestSource: storage?.digests || null,
         retrieveSource: recallService || null,
         memorySource: memoryService || null,
       });
@@ -465,17 +453,18 @@ function createChatRoutes({
         }
         const agent = worklist[i];
         const agentConfig = AGENTS[agent] || { id: agent, label: agent, description: "" };
-        const sessionMap = readSessionMap(sessionId, sessionMapRoot);
         const providerId = agentConfig.providerId || "";
         const providerKey =
           providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
-        const resumeSessionId = resolveResumeSessionId(
-          sessionMap,
-          agent,
+        const durableWindow = storage?.windows?.getOpen?.({
+          threadId: sessionId,
+          agentId: agent,
+          providerKey,
           workspaceKey,
-          providerKey
-        );
+        });
+        const resumeSessionId = durableWindow?.providerSessionId || "";
         let assistantContent = "";
+        let observedProviderSessionId = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
         let contextSealHandled = false;
@@ -485,31 +474,9 @@ function createChatRoutes({
         const queuedCause = threadCtx.a2aCauses[i] || null;
         const parentInvocationId =
           i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
-        const triggerType =
-          i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
+        const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
         const triggerMessageId =
           i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
-        invocationEvents.set(invocationId, {
-          invocationId,
-          sessionId,
-          agent,
-          startedAt,
-          endedAt: null,
-          state: "active",
-          events: [
-            {
-              ts: startedAt,
-              kind: "invocation-start",
-              payload: {
-                agent,
-                resumeSessionId: resumeSessionId || null,
-                parentInvocationId,
-                triggerMessageId,
-                triggerType,
-              },
-            },
-          ],
-        });
         const durableRun = durable.startInvocation({
           session,
           invocationId,
@@ -525,7 +492,7 @@ function createChatRoutes({
           triggerMessageId,
           triggerType,
         });
-        if (sqlitePrimary && !durableRun) {
+        if (!durableRun) {
           throw new Error(`Failed to persist invocation start for ${invocationId}.`);
         }
         const healthTracker = contextHealth.makeTracker(agent, {
@@ -727,31 +694,11 @@ function createChatRoutes({
           [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
           [ENV.BRANCH]: runWorkspace.branch || "",
           INVOKE_SESSION_ID: resumeSessionId,
-          INVOKE_SESSION_FILE: getSessionMapPath(sessionId, sessionMapRoot),
           INVOKE_WORKSPACE_KEY: workspaceKey,
         };
 
-        // SQLite start event is written by durable.startInvocation. Emit the
-        // richer runtime payload to transcript only (dual/files) so dual mode
-        // does not create a second SQLite sequence row.
-        events.append({
-          threadId: sessionId,
-          invocationId,
-          kind: "invocation-start",
-          payload: {
-            agent,
-            resumeSessionId: resumeSessionId || null,
-            promptBytes: promptForAgent.length,
-            fillRatioAtStart: healthTracker.getFillRatio(),
-            parentInvocationId,
-            triggerMessageId,
-            triggerType,
-          },
-          writeSqlite: false,
-        });
-
-        // Live SSE stays fine-grained; only durable sinks (transcript / registry /
-        // SQLite+recall) go through the coalescer. Strategy A + A1: merge adjacent
+        // Live SSE stays fine-grained; durable SQLite+recall writes go through
+        // the coalescer. Strategy A + A1: merge adjacent
         // same-kind deltas, flush on kind switch / hard boundary / maxChars /
         // explicit end; idle off by default so long monologues are not chopped;
         // usage.update is passthrough and does not end an open streak.
@@ -760,10 +707,8 @@ function createChatRoutes({
             events.append({ threadId: sessionId, invocationId, kind, payload });
           } catch (error) {
             log.error?.(`[event-store] durable event failed: ${error.message}`);
-            // sqlite single-write: surface failure; dual keeps fail-open stream path.
-            if (sqlitePrimary) throw error;
+            throw error;
           }
-          recordInvocationEvent(invocationEvents, invocationId, kind, payload);
         };
         const durableCoalescer = createStreamDeltaCoalescer({
           ...resolveCoalesceOptionsFromEnv(),
@@ -805,7 +750,6 @@ function createChatRoutes({
           if (capture?.captured) {
             sendSse(res, "memory-captured", capture.event);
           }
-          abandonProviderSession(sessionId, sessionMapRoot, agent, workspaceKey);
         };
         const addObservedContext = (charCount) => {
           healthTracker.addOutput(charCount);
@@ -833,6 +777,14 @@ function createChatRoutes({
           onEvent(event) {
             // Realtime path first — UI should not wait on durable batching.
             sendSse(res, "agent-event", event);
+            if (
+              typeof event.sessionId === "string" &&
+              event.sessionId &&
+              durableRun?.window?.id
+            ) {
+              observedProviderSessionId = event.sessionId;
+              durable.bindProviderSession(durableRun.window.id, event.sessionId);
+            }
             if (event.type === "text.delta") {
               const text = typeof event.text === "string" ? event.text : "";
               assistantContent += text;
@@ -871,18 +823,10 @@ function createChatRoutes({
         if (sealer.isSealed()) {
           sealContextWindow(healthTracker.getFillRatio());
         } else if (durableRun) {
-          const updatedSessionMap = readSessionMap(sessionId, sessionMapRoot);
-          const persistedProviderSessionId = resolveResumeSessionId(
-            updatedSessionMap,
-            agent,
-            workspaceKey,
-            providerKey
-          );
+          const persistedProviderSessionId =
+            observedProviderSessionId || durableRun.window.providerSessionId || "";
           durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
         }
-
-        finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
-        persistInvocations();
 
         const invocationUsage = invocationUsageDelta(
           healthTracker.snapshot().billing,
@@ -899,13 +843,6 @@ function createChatRoutes({
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           // Still close the invocation durably; skip assistant-final on abort.
           durable.finishInvocation(invocationId, code, signal, endPayload);
-          events.append({
-            threadId: sessionId,
-            invocationId,
-            kind: "invocation-end",
-            payload: { code, signal, ...endPayload },
-            writeSqlite: false,
-          });
           aborted = true;
           previousInvocationId = invocationId;
           break;
@@ -935,56 +872,18 @@ function createChatRoutes({
                 session,
                 windowId: durableRun?.window?.id || null,
                 message: assistantMessage,
-                failClosed: sqlitePrimary,
               })
             : null;
 
         if (completed?.message?.id) assistantMessage.id = completed.message.id;
 
         if (completed) {
-          // SQLite already wrote invocation-end; emit transcript-only end line.
-          events.append({
-            threadId: sessionId,
-            invocationId,
-            kind: "invocation-end",
-            payload: { code, signal, ...endPayload },
-            writeSqlite: false,
-          });
-          if (sqlitePrimary) {
-            session = {
-              ...session,
-              messages: [...(session.messages || []), assistantMessage],
-            };
-          } else {
-            const afterAssistant = appendToSession(
-              options.sessionsFile || undefined,
-              sessionId,
-              assistantMessage,
-              { allowCreate: false, windowId: durableRun?.window?.id }
-            );
-            if (afterAssistant) session = afterAssistant;
-          }
+          session = {
+            ...session,
+            messages: [...(session.messages || []), assistantMessage],
+          };
         } else {
-          if (sqlitePrimary) {
-            throw new Error(`Failed to atomically persist completion for ${invocationId}.`);
-          }
-          // files/dual compatibility path — split writes are not used by
-          // strict SQLite single-write mode.
-          durable.finishInvocation(invocationId, code, signal, endPayload);
-          events.append({
-            threadId: sessionId,
-            invocationId,
-            kind: "invocation-end",
-            payload: { code, signal, ...endPayload },
-            writeSqlite: false,
-          });
-          const afterAssistant = appendToSession(
-            options.sessionsFile || undefined,
-            sessionId,
-            assistantMessage,
-            { allowCreate: false, windowId: durableRun?.window?.id }
-          );
-          if (afterAssistant) session = afterAssistant;
+          throw new Error(`Failed to atomically persist completion for ${invocationId}.`);
         }
         previousInvocationId = invocationId;
         sendSse(res, "agent-exit", { agent, code, signal, invocationId, usage: invocationUsage });
@@ -1027,7 +926,6 @@ function createChatRoutes({
           a2aCount: threadCtx.a2aCount,
           maxDepth,
           memoryCapture: memories,
-          transcript,
           eventStore: events,
           durableRecorder: durable,
           sendSse: (event, payload) => sendSse(res, event, payload),
@@ -1114,7 +1012,6 @@ function createChatRoutes({
       }
     }
 
-    await transcript.flush();
     threadCtx.currentInvocationId = null;
     threadCtx.windowId = null;
     if (!aborted) {
@@ -1131,7 +1028,6 @@ function generateMessageId() {
 
 module.exports = {
   createChatRoutes,
-  resolveResumeSessionId,
   invocationUsageDelta,
   contextCharsFromEvent,
 };

@@ -19,7 +19,7 @@ This contract is the single source of truth for memory ownership, schema, purge/
 
 PR-0 **does**:
 
-- schema rebuild + ownership
+- target schema + ownership（新 epoch 直接建表；兼容升级时 rebuild）
 - project identity resolution + thread freeze
 - archive vs purge
 - purge ledger + source_deleted resolution
@@ -27,7 +27,7 @@ PR-0 **does**:
 - supersession transaction order + dual-connection concurrency policy
 - availability tri-state (available / degraded / unavailable)
 - server-side derivation of authority / activation (no client forge)
-- legacy capture_key backfill
+- optional legacy capture_key backfill（仅兼容导入）
 
 PR-0 **does not**:
 
@@ -52,9 +52,9 @@ Fixtures may write `scope=project` to prove ownership and search survival after 
 
 ---
 
-## 2. Blocker 1 — `memory_entries` table rebuild (mandatory)
+## 2. Blocker 1 — `memory_entries` target schema（mandatory）
 
-### 2.1 Why ALTER is insufficient
+### 2.1 Clean epoch 与兼容升级
 
 SQLite cannot change via ordinary `ALTER TABLE`:
 
@@ -64,9 +64,13 @@ SQLite cannot change via ordinary `ALTER TABLE`:
 
 Current foundation (v1): `memory_entries.thread_id NOT NULL` + `REFERENCES threads(id) ON DELETE CASCADE`.
 
-Therefore **M2 = full table rebuild**.
+ADR-001 选择 clean cutover，因此产品切换的默认路径是在新 storage epoch 直接创建目标表，
+不复制旧运行数据。只有显式选择保留数据的开发/兼容升级，才执行 **M2 full table rebuild**。
 
-### 2.2 Rebuild procedure (migration must follow)
+### 2.2 Target creation / optional compatibility rebuild
+
+新 epoch 直接创建 §2.3 的目标 schema、索引与投影。若显式启用兼容升级，必须使用以下
+安全边界，不能用不完整的 `ALTER TABLE` 模拟：
 
 ```text
 BEGIN;
@@ -92,7 +96,7 @@ PRAGMA foreign_keys = ON;
 PRAGMA integrity_check;
 ```
 
-Post-migration audit:
+Post-creation/import audit:
 
 - every project row has `project_key IS NOT NULL` and `owner_thread_id IS NULL`
 - every thread row has `owner_thread_id IS NOT NULL` and `project_key IS NULL`
@@ -105,11 +109,11 @@ Post-migration audit:
 
 **Do not keep a long-lived ambiguous `thread_id`.**
 
-| Column | Role | Nullability |
-|--------|------|-------------|
-| `owner_thread_id` | Thread-scope **owner** | required when `scope=thread`; **NULL** when `scope=project` |
-| `project_key` | Project-scope **owner** | required when `scope=project`; **NULL** when `scope=thread` |
-| `origin_thread_id` | Provenance only | always nullable; `ON DELETE SET NULL` |
+| Column             | Role                    | Nullability                                                 |
+| ------------------ | ----------------------- | ----------------------------------------------------------- |
+| `owner_thread_id`  | Thread-scope **owner**  | required when `scope=thread`; **NULL** when `scope=project` |
+| `project_key`      | Project-scope **owner** | required when `scope=project`; **NULL** when `scope=thread` |
+| `origin_thread_id` | Provenance only         | always nullable; `ON DELETE SET NULL`                       |
 
 Owner CHECK (database-enforced):
 
@@ -215,9 +219,14 @@ CREATE INDEX memory_thread_active
   WHERE scope = 'thread' AND status IN ('captured', 'confirmed');
 ```
 
-### 2.5 Legacy row mapping (rebuild SELECT)
+### 2.5 Legacy row mapping（可选兼容路径）
 
-All existing rows migrate as **thread scope** (safe default; no silent project promotion):
+ADR-001 采用 clean cutover，切换前的真实运行数据不要求导入新 storage epoch。新部署可以
+建立空的目标表；以下 mapping 仅用于保留数据的兼容性测试、开发环境升级或显式选择的
+导入，不是本次产品切换的验收条件。
+
+When compatibility import is explicitly enabled, existing rows migrate as **thread scope**
+(safe default; no silent project promotion):
 
 ```text
 scope            = 'thread'
@@ -258,10 +267,10 @@ After project memory survives thread purge, **search projection still dies** →
 
 **Chosen approach:** keep `recall_items` for message/event evidence; give **L2 memory its own FTS** owned by memory scope.
 
-| Layer | Storage | Owner key |
-|-------|---------|-----------|
-| L2 memory search | `memory_fts` (content=`memory_entries`) or dedicated projection table without thread CASCADE | `scope` + `owner_thread_id` / `project_key` |
-| L0 message / event search | `recall_items` (+ existing FTS) | `thread_id` (thread-owned evidence) |
+| Layer                     | Storage                                                                                      | Owner key                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| L2 memory search          | `memory_fts` (content=`memory_entries`) or dedicated projection table without thread CASCADE | `scope` + `owner_thread_id` / `project_key` |
+| L0 message / event search | `recall_items` (+ existing FTS)                                                              | `thread_id` (thread-owned evidence)         |
 
 Rationale:
 
@@ -339,10 +348,10 @@ Search path changes (can land in PR-0 as internal API, public cross-thread UX in
 
 Given project memory M created from thread A:
 
-1. purge A  
-2. M still in `memory_entries`  
-3. M still in `memory_search`  
-4. FTS still returns M for query on content/topic  
+1. purge A
+2. M still in `memory_entries`
+3. M still in `memory_search`
+4. FTS still returns M for query on content/topic
 5. `origin_thread_id` is NULL; anchors resolve per §4
 
 ---
@@ -353,11 +362,11 @@ Given project memory M created from thread A:
 
 If purge only nulls `origin_thread_id` and deletes messages/invocations, remaining anchors are bare missing IDs. Cannot distinguish:
 
-| Case | Needed label |
-|------|----------------|
-| Evidence existed, user purged thread | `source_deleted` |
-| Anchor never valid / wrong id | `source_missing` |
-| Transient store lag / corruption | not silently labeled deleted |
+| Case                                 | Needed label                 |
+| ------------------------------------ | ---------------------------- |
+| Evidence existed, user purged thread | `source_deleted`             |
+| Anchor never valid / wrong id        | `source_missing`             |
+| Transient store lag / corruption     | not silently labeled deleted |
 
 ### 4.2 `purged_threads` ledger (required)
 
@@ -392,7 +401,7 @@ When writing anchors at capture time, freeze:
   "type": "invocation",
   "ref": "inv-...",
   "originThreadId": "thread-...",
-  "capturedProjectKey": "wt:abc..." 
+  "capturedProjectKey": "wt:abc..."
 }
 ```
 
@@ -466,12 +475,12 @@ Sharing across worktrees is opt-in future work.
 
 ### 6.1 Three distinct fields
 
-| Field | Meaning |
-|-------|---------|
-| `created_by` | Who produced the text / write path (`user`, `agent:codex`, `extractor:v1`, `system:...`) |
-| `authority` | Who is **responsible for the current conclusion** for ranking: `system` \| `user` \| `agent` |
-| `confirmed_by` | Who confirmed (`user` when status becomes confirmed via user action); nullable |
-| `status` | Lifecycle: `captured` \| `confirmed` \| `superseded` \| `invalidated` |
+| Field          | Meaning                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `created_by`   | Who produced the text / write path (`user`, `agent:codex`, `extractor:v1`, `system:...`)     |
+| `authority`    | Who is **responsible for the current conclusion** for ranking: `system` \| `user` \| `agent` |
+| `confirmed_by` | Who confirmed (`user` when status becomes confirmed via user action); nullable               |
+| `status`       | Lifecycle: `captured` \| `confirmed` \| `superseded` \| `invalidated`                        |
 
 ### 6.2 Suggestion promotion (frozen)
 
@@ -491,12 +500,12 @@ Reason: ranking should treat user-accepted institutional memory as user-responsi
 
 ### 6.3 Direct writes
 
-| Entry | created_by | authority | status |
-|-------|------------|-----------|--------|
-| UI user create | `user` | `user` | `captured` (or `confirmed` if UI "confirm on write") |
-| Agent upsert / ```memory | `agent:<id>` | `agent` | `captured` |
-| User later confirms agent memory | unchanged created_by | **`user`** | `confirmed`, `confirmed_by=user` |
-| System iron rules | `system:...` | `system` | `confirmed`, activation `always_on` |
+| Entry                            | created_by           | authority  | status                                               |
+| -------------------------------- | -------------------- | ---------- | ---------------------------------------------------- |
+| UI user create                   | `user`               | `user`     | `captured` (or `confirmed` if UI "confirm on write") |
+| Agent upsert / ```memory         | `agent:<id>`         | `agent`    | `captured`                                           |
+| User later confirms agent memory | unchanged created_by | **`user`** | `confirmed`, `confirmed_by=user`                     |
+| System iron rules                | `system:...`         | `system`   | `confirmed`, activation `always_on`                  |
 
 User confirm of agent text **raises authority to user** (same rule as suggestion accept). Provenance stays in `created_by` + anchors.
 
@@ -528,11 +537,11 @@ When PR-3+ implements filters:
 
 ### 7.2 Defaults by kind
 
-| kind | default activation |
-|------|--------------------|
-| decision / constraint / fact / lesson | `query` |
-| handoff / window-seal / digest | `backstop` |
-| system iron rules only | `always_on` |
+| kind                                  | default activation |
+| ------------------------------------- | ------------------ |
+| decision / constraint / fact / lesson | `query`            |
+| handoff / window-seal / digest        | `backstop`         |
+| system iron rules only                | `always_on`        |
 
 ### 7.3 Server-side derivation (no client forge)
 
@@ -542,12 +551,12 @@ Clients **must not** successfully set arbitrary:
 { "authority": "system", "activation": "always_on" }
 ```
 
-| Writer | Max authority | Max activation |
-|--------|---------------|----------------|
-| Agent callback / ```memory | `agent` | `query` (backstop only for auto kinds) |
-| UI user | `user` | `query` (user may not set always_on in v1) |
-| System bootstrap / migration / built-in seed | `system` | `always_on` |
-| Extractor | cannot write `memory_entries` | suggestions only |
+| Writer                                       | Max authority                 | Max activation                             |
+| -------------------------------------------- | ----------------------------- | ------------------------------------------ |
+| Agent callback / ```memory                   | `agent`                       | `query` (backstop only for auto kinds)     |
+| UI user                                      | `user`                        | `query` (user may not set always_on in v1) |
+| System bootstrap / migration / built-in seed | `system`                      | `always_on`                                |
+| Extractor                                    | cannot write `memory_entries` | suggestions only                           |
 
 Service maps trusted `writeChannel` → fields. Ignore or strip client-supplied authority/activation outside allowlist.
 
@@ -560,13 +569,13 @@ It cannot consume the entire card; query-matched and thread segments retain rese
 
 ## 8. Default scope by kind (frozen)
 
-| kind | default scope | inject gate |
-|------|---------------|-------------|
-| decision | project if identity ≠ none else thread | active statuses |
-| constraint | project if identity ≠ none else thread | active statuses |
-| lesson | project if identity ≠ none else thread | **confirmed only** |
-| fact | **thread** (explicit project opt-in) | active statuses |
-| handoff / window-seal / digest | thread | backstop + caps |
+| kind                           | default scope                          | inject gate        |
+| ------------------------------ | -------------------------------------- | ------------------ |
+| decision                       | project if identity ≠ none else thread | active statuses    |
+| constraint                     | project if identity ≠ none else thread | active statuses    |
+| lesson                         | project if identity ≠ none else thread | **confirmed only** |
+| fact                           | **thread** (explicit project opt-in)   | active statuses    |
+| handoff / window-seal / digest | thread                                 | backstop + caps    |
 
 ---
 
@@ -612,10 +621,10 @@ DoD is not only “one active at end” but **documented retry semantics**.
 
 ## 10. Archive vs purge (frozen)
 
-| Operation | UI default | Thread row | L0 evidence | Thread memory | Project memory | Purge ledger |
-|-----------|------------|------------|-------------|---------------|----------------|--------------|
-| archive | yes | `deleted_at` set; hidden | kept | kept | kept | no |
-| purge | explicit confirm | removed | deleted | deleted | kept; origin nulled | **yes** |
+| Operation | UI default       | Thread row               | L0 evidence | Thread memory | Project memory      | Purge ledger |
+| --------- | ---------------- | ------------------------ | ----------- | ------------- | ------------------- | ------------ |
+| archive   | yes              | `deleted_at` set; hidden | kept        | kept          | kept                | no           |
+| purge     | explicit confirm | removed                  | deleted     | deleted       | kept; origin nulled | **yes**      |
 
 Default “delete session” = **archive**.  
 Hard `DELETE FROM threads` without ledger is forbidden for product API after PR-0.
@@ -699,15 +708,15 @@ PR-0 may create the empty table or defer DDL to PR-3; if deferred, document in m
 
 ## 15. PR sequence (frozen)
 
-| PR | Name |
-|----|------|
+| PR       | Name                                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------- |
 | **PR-0** | Foundation: rebuild, projection, purge ledger, project lock, availability, supersession, authz derivation |
-| **PR-1** | Telemetry events + budgets + degraded UX polish |
-| **PR-2** | Cross-thread inject/search product behavior |
-| **PR-3** | Suggestions + governance fields usage |
-| **PR-4** | Digest + extractor (suggestions only) |
-| **PR-5** | Project evidence passages |
-| **PR-6** | Embedding if eval fails FTS on synonym/cross-lingual cases |
+| **PR-1** | Telemetry events + budgets + degraded UX polish                                                           |
+| **PR-2** | Cross-thread inject/search product behavior                                                               |
+| **PR-3** | Suggestions + governance fields usage                                                                     |
+| **PR-4** | Digest + extractor (suggestions only)                                                                     |
+| **PR-5** | Project evidence passages                                                                                 |
+| **PR-6** | Embedding if eval fails FTS on synonym/cross-lingual cases                                                |
 
 ---
 
@@ -715,12 +724,12 @@ PR-0 may create the empty table or defer DDL to PR-3; if deferred, document in m
 
 ### Ownership & rebuild
 
-- [ ] `memory_entries` rebuilt; no project row owned by Thread CASCADE
+- [ ] `memory_entries` 以目标 schema 创建或兼容重建；project row 不由 Thread CASCADE
 - [ ] owner CHECK enforced
 - [ ] no ambiguous long-lived `thread_id` column
-- [ ] legacy NULL `capture_key` migrates via `legacy:<id>`
+- [ ] 若启用兼容导入，legacy NULL `capture_key` 通过 `legacy:<id>` 回填
 - [ ] `PRAGMA foreign_key_check` clean; `integrity_check` ok
-- [ ] recall/memory search audit passes after migration
+- [ ] 新 storage epoch 的 recall/memory search rebuild audit 通过
 
 ### Projection
 

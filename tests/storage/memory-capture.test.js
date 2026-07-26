@@ -230,6 +230,34 @@ test("replay restores transcript-only memory without stale foreign keys", async 
   }
 });
 
+test("disabled transcript replay never reads legacy memory events", async () => {
+  let reads = 0;
+  const capture = createMemoryCapture({
+    memoryService: { capture() {} },
+    eventStore: { append() {} },
+    allowTranscriptReplay: false,
+    transcript: {
+      async listInvocations() {
+        reads += 1;
+        return ["legacy-invocation"];
+      },
+      async readInvocation() {
+        reads += 1;
+        return [];
+      },
+    },
+  });
+
+  assert.deepEqual(await capture.replayThread("thread-1"), {
+    replayed: 0,
+    existing: 0,
+    failed: 0,
+    available: false,
+    reason: "transcript-replay-disabled",
+  });
+  assert.equal(reads, 0);
+});
+
 test("replay applies supersession in createdAt order even when invocations are listed reverse", async () => {
   const events = [
     {

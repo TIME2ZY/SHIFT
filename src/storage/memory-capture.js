@@ -6,6 +6,7 @@ function createMemoryCapture({
   memoryService = null,
   transcript,
   eventStore = null,
+  allowTranscriptReplay = true,
   logger = console,
   idFactory = crypto.randomUUID,
 } = {}) {
@@ -134,6 +135,15 @@ function createMemoryCapture({
   }
 
   async function replayThread(threadId) {
+    if (!allowTranscriptReplay) {
+      return {
+        replayed: 0,
+        existing: 0,
+        failed: 0,
+        available: false,
+        reason: "transcript-replay-disabled",
+      };
+    }
     if (replayedThreads.has(threadId)) return { replayed: 0, existing: 0, failed: 0, cached: true };
     if (
       !memoryService ||
@@ -178,9 +188,7 @@ function createMemoryCapture({
           else existing += 1;
         } catch (error) {
           failed += 1;
-          logger.error?.(
-            `[memory-capture] replay failed for ${item.captureKey}: ${error.message}`
-          );
+          logger.error?.(`[memory-capture] replay failed for ${item.captureKey}: ${error.message}`);
         }
       }
     } catch (error) {

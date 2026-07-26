@@ -10,7 +10,7 @@ function createMessageRepository(db) {
     SET next_message_sequence = MAX(next_message_sequence, ?)
     WHERE id = ? AND deleted_at IS NULL
   `);
-  // Idempotent upsert: replaying dual-write / migration must not create
+  // Idempotent upsert: replaying an offline migration must not create
   // duplicate message rows (PRIMARY KEY id + UNIQUE thread/sequence).
   const insert = db.prepare(`
     INSERT INTO messages

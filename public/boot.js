@@ -14,6 +14,7 @@
     "/public/event-bus.js",
     "/public/ui-store.js",
     "/public/api-client.js",
+    "/public/storage-health.js",
     "/public/display-helpers.js",
     "/public/agent-avatar.js",
     "/public/agent-routing.js",
@@ -62,10 +63,13 @@
   function loadSequential(urls) {
     const list = Array.isArray(urls) ? urls : MODULES;
     return list.reduce(
-      (chain, src) => chain.then((done) => loadScript(src).then((loaded) => {
-        done.push(loaded);
-        return done;
-      })),
+      (chain, src) =>
+        chain.then((done) =>
+          loadScript(src).then((loaded) => {
+            done.push(loaded);
+            return done;
+          })
+        ),
       Promise.resolve([])
     );
   }

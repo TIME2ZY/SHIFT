@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { createStorage } = require("../../src/storage");
-const { createDualWriteRecorder } = require("../../src/storage/dual-write-recorder");
+const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createRecallService } = require("../../src/storage/recall-service");
 const {
   resolveResumeSessionId,
@@ -41,7 +41,7 @@ function baseCoordinate(overrides = {}) {
 
 test("after seal the next invocation does not carry the old provider_session_id", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate();
   try {
@@ -100,7 +100,7 @@ test("after seal the next invocation does not carry the old provider_session_id"
 
 test("generation increments and capacity is persisted across seal-and-rotate", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate({ capacityTokens: 128000 });
   try {
@@ -180,7 +180,7 @@ test("sealed windows accept final usage accounting from their active invocation"
 
 test("different agents and base/worktree workspaces keep independent windows", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   try {
     const architectBase = recorder.ensureWindow({
@@ -239,7 +239,7 @@ test("different agents and base/worktree workspaces keep independent windows", (
 
 test("across 10 sealed windows original messages remain searchable and invocations readable", async () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate();
   const uniqueToken = "cross-window-needle-42";
@@ -295,6 +295,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
     assert.equal(eventHits[0].metadata.invocationId, targetInvocationId);
 
     const service = createRecallService({
+      mode: "sqlite",
       storage,
       transcript: {
         listInvocationsWithMeta: async () => [],
@@ -324,7 +325,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
 
 test("deleting a thread archives it (soft) without destroying L0 evidence", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate();
   try {
@@ -362,7 +363,7 @@ test("deleting a thread archives it (soft) without destroying L0 evidence", () =
 
 test("concurrent-style callback after delete cannot resurrect data", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate();
   try {
@@ -416,27 +417,8 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
   }
 });
 
-test("database exceptions do not present memory as empty when file data exists", async () => {
+test("database exceptions stay visible without transcript fallback", async () => {
   const errors = [];
-  const fileHits = [
-    {
-      invocationId: "file-inv",
-      eventNo: 0,
-      kind: "text.delta",
-      ts: "2026-07-12T00:00:00.000Z",
-      snippet: "file memory payload",
-    },
-  ];
-  const fileInvocations = [
-    {
-      invocationId: "file-inv",
-      agent: "codex",
-      startedAt: "2026-07-12T00:00:00.000Z",
-      endedAt: null,
-      state: null,
-      eventCount: 1,
-    },
-  ];
   const brokenStorage = {
     invocations: {
       listForThreadWithMeta() {
@@ -457,33 +439,15 @@ test("database exceptions do not present memory as empty when file data exists",
   };
   const service = createRecallService({
     storage: brokenStorage,
-    transcript: {
-      listInvocationsWithMeta: async () => fileInvocations,
-      searchTranscript: async () => fileHits,
-      readInvocationPage: async () => ({
-        events: [{ ts: "t", kind: "text.delta", payload: { text: "file" } }],
-        total: 1,
-        from: 0,
-        limit: 200,
-      }),
-    },
     logger: { error: (message) => errors.push(message) },
   });
 
-  const listed = await service.listInvocationsWithMeta("thread-1");
-  assert.deepEqual(listed, fileInvocations);
-  const searched = await service.searchTranscript("thread-1", "memory");
-  // File fallback must still surface hits (not an empty "memory missing" result).
-  // Wave R enriches file hits with layer/score; compare the durable identity fields.
-  assert.equal(searched.length, 1);
-  assert.equal(searched[0].invocationId, "file-inv");
-  assert.equal(searched[0].kind, "text.delta");
-  assert.equal(searched[0].snippet, "file memory payload");
-  assert.equal(searched[0].layer, "evidence");
-  assert.equal(typeof searched[0].score, "number");
-  const page = await service.readInvocationPage("thread-1", "file-inv");
-  assert.equal(page.total, 1);
-  assert.ok(errors.length >= 2);
+  await assert.rejects(() => service.listInvocationsWithMeta("thread-1"), /sqlite busy/);
+  const result = await service.searchSession("thread-1", "memory");
+  assert.deepEqual(result.hits, []);
+  assert.equal(result.availability.state, "unavailable");
+  await assert.rejects(() => service.readInvocationPage("thread-1", "file-inv"), /sqlite busy/);
+  assert.equal(errors.length, 3);
   assert.match(errors[0], /sqlite-recall/);
 });
 
@@ -541,9 +505,9 @@ test("FTS index corruption can be rebuilt from recall_items source projection", 
   }
 });
 
-test("replaying message dual-write does not create duplicate rows", () => {
+test("replaying a migrated message does not create duplicate rows", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage });
+  const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   const coord = baseCoordinate();
   try {
@@ -570,7 +534,7 @@ test("replaying message dual-write does not create duplicate rows", () => {
 
 test("fact writes roll back when the recall projection cannot be updated", () => {
   const storage = createStorage({ file: ":memory:" });
-  const recorder = createDualWriteRecorder({ storage, logger: { error() {} } });
+  const recorder = createDurableRecorder({ storage, logger: { error() {} } });
   const session = sessionFixture();
   try {
     const run = recorder.startInvocation({
@@ -586,9 +550,9 @@ test("fact writes roll back when the recall projection cannot be updated", () =>
       throw new Error("projection unavailable");
     };
 
-    assert.equal(
-      recorder.appendInvocationEvent("inv-atomic", "text.delta", { text: "must rollback" }),
-      false
+    assert.throws(
+      () => recorder.appendInvocationEvent("inv-atomic", "text.delta", { text: "must rollback" }),
+      /projection unavailable/
     );
     assert.equal(storage.invocations.listEvents("inv-atomic").length, 1);
 
@@ -598,7 +562,10 @@ test("fact writes roll back when the recall projection cannot be updated", () =>
       content: "must rollback",
       createdAt: "2026-07-12T00:00:01.000Z",
     });
-    assert.equal(recorder.mirrorLastMessage(session, { windowId: run.window.id }), null);
+    assert.throws(
+      () => recorder.mirrorLastMessage(session, { windowId: run.window.id }),
+      /projection unavailable/
+    );
     assert.equal(storage.messages.get("msg-atomic"), null);
     storage.recall.upsert = originalUpsert;
   } finally {

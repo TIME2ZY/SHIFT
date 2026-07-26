@@ -7,7 +7,7 @@ const {
   DEFAULT_TRANSCRIPT_DIR,
   DEFAULT_MEMORY_DB_FILE,
 } = require("../shared/runtime-paths");
-const { durableMessageMetadata } = require("./dual-write-recorder");
+const { durableMessageMetadata } = require("./durable-recorder");
 const { integrityCheck, rebuildThreadRecall } = require("./maintenance");
 
 // Lazy require avoids circular load if tooling ever re-exports migrate from index.

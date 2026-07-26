@@ -10,7 +10,11 @@ const {
   extractSuggestionsFromTurn,
   EXTRACTOR_VERSION,
 } = require("../../src/storage/memory-extractor");
-const { refreshDigestAndExtract, buildHeuristicDigest } = require("../../src/storage/memory-digest");
+const {
+  refreshDigestAndExtract,
+  buildHeuristicDigest,
+  summarizeAssistantOutcome,
+} = require("../../src/storage/memory-digest");
 
 function createFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-extract-"));
@@ -112,6 +116,23 @@ test("refreshDigestAndExtract updates digest and pending candidates", () => {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("semantic digest keeps review conclusions beyond the opening chatter", () => {
+  const summary = summarizeAssistantOutcome(
+    [
+      "我先检查代码和测试。",
+      "再核对启动流程。",
+      "## 结论: request-changes",
+      "P1 — README 缺少 SQLite 初始化步骤。",
+      "### 下一步",
+      "先修 README，再交给 OpenCode 复审。",
+    ].join("\n")
+  );
+
+  assert.match(summary, /request-changes/);
+  assert.match(summary, /README 缺少 SQLite 初始化/);
+  assert.match(summary, /下一步/);
 });
 
 test("dedupes pending suggestions by kind:topic", () => {

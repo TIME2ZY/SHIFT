@@ -63,14 +63,9 @@ function createFixture(fileOverrides = {}) {
   return { storage, service: createRecallService({ storage, transcript }) };
 }
 
-test("recall service serves SQLite invocation metadata and event search", async () => {
+test("recall search uses the SQLite-owned search projection", async () => {
   const { storage, service } = createFixture();
   try {
-    const invocations = await service.listInvocationsWithMeta("thread-1");
-    assert.equal(invocations[0].invocationId, "invocation-1");
-    assert.equal(invocations[0].eventCount, 1);
-    assert.equal(invocations[0].state, null);
-
     const hits = await service.searchTranscript("thread-1", "sqlite memory");
     assert.ok(hits.some((hit) => hit.invocationId === "invocation-1" && hit.kind === "text.delta"));
     assert.ok(hits.every((hit) => typeof hit.layer === "string" && typeof hit.score === "number"));
@@ -102,7 +97,7 @@ test("recall service returns SQLite-only user messages and memory entries", asyn
   }
 });
 
-test("dual mode prefers healthy SQLite search and skips file scans", async () => {
+test("recall skips transcript scans when SQLite search is healthy", async () => {
   let fileSearches = 0;
   const { storage, service } = createFixture({
     searchTranscript: async () => {
@@ -131,87 +126,7 @@ test("dual mode prefers healthy SQLite search and skips file scans", async () =>
   }
 });
 
-test("files mode can still merge file hits when requested", async () => {
-  const fileOnly = {
-    invocationId: "legacy-invocation",
-    eventNo: 4,
-    kind: "stderr",
-    ts: "2026-07-11T00:00:00.000Z",
-    snippet: "legacy sqlite memory",
-  };
-  const { storage } = createFixture({
-    searchTranscript: async () => [fileOnly],
-  });
-  const filesService = createRecallService({
-    storage,
-    transcript: {
-      listInvocationsWithMeta: async () => [],
-      searchTranscript: async () => [fileOnly],
-      readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
-    },
-    mode: "files",
-  });
-  try {
-    const hits = await filesService.searchTranscript("thread-1", "sqlite memory");
-    assert.ok(hits.some((hit) => hit.invocationId === "invocation-1"));
-    assert.ok(hits.some((hit) => hit.invocationId === "legacy-invocation"));
-  } finally {
-    storage.close();
-  }
-});
-
-test("invocation listing keeps the more complete file record", async () => {
-  const fileRecord = {
-    invocationId: "invocation-1",
-    agent: "codex",
-    startedAt: "2026-07-12T00:00:00.000Z",
-    endedAt: "2026-07-12T00:01:00.000Z",
-    state: "completed",
-    eventCount: 5,
-  };
-  const { storage, service } = createFixture({
-    listInvocationsWithMeta: async () => [fileRecord],
-  });
-  try {
-    const result = await service.listInvocationsWithMeta("thread-1");
-    assert.equal(result[0], fileRecord);
-  } finally {
-    storage.close();
-  }
-});
-
-test("read invocation prefers the more complete source", async () => {
-  const fileEvent = { ts: "file", kind: "extra", payload: {} };
-  const { storage, service } = createFixture({
-    readInvocationPage: async () => ({
-      events: [{ ts: "file", kind: "text.delta", payload: {} }, fileEvent],
-      total: 2,
-      from: 0,
-      limit: 200,
-    }),
-  });
-  try {
-    const filePreferred = await service.readInvocationPage("thread-1", "invocation-1");
-    assert.equal(filePreferred.total, 2);
-    assert.equal(filePreferred.events[1], fileEvent);
-
-    const sqliteOnly = createRecallService({
-      storage,
-      transcript: {
-        listInvocationsWithMeta: async () => [],
-        searchTranscript: async () => [],
-        readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
-      },
-    });
-    const sqlitePreferred = await sqliteOnly.readInvocationPage("thread-1", "invocation-1");
-    assert.equal(sqlitePreferred.total, 1);
-    assert.equal(sqlitePreferred.events[0].kind, "text.delta");
-  } finally {
-    storage.close();
-  }
-});
-
-test("recall service uses SQLite when transcript reads fail", async () => {
+test("sqlite recall uses SQLite when transcript reads fail", async () => {
   const errors = [];
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "thread-1" });
@@ -241,6 +156,7 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     throw new Error("transcript unavailable");
   };
   const service = createRecallService({
+    mode: "sqlite",
     storage,
     transcript: {
       listInvocationsWithMeta: fail,
@@ -253,9 +169,7 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     assert.equal((await service.listInvocationsWithMeta("thread-1")).length, 1);
     assert.equal((await service.searchTranscript("thread-1", "file failure")).length, 1);
     assert.equal((await service.readInvocationPage("thread-1", "invocation-1")).total, 1);
-    // dual/sqlite search no longer probes the file index when SQLite is healthy.
-    assert.equal(errors.length, 2);
-    assert.ok(errors.every((message) => message.includes("file-recall")));
+    assert.equal(errors.length, 0);
   } finally {
     storage.close();
   }
@@ -309,6 +223,87 @@ test("sqlite mode is strict single-store and ignores transcript listings", async
   } finally {
     storage.close();
   }
+});
+
+test("sqlite recall does not require a transcript dependency", async () => {
+  const { storage } = createFixture();
+  const service = createRecallService({ mode: "sqlite", storage });
+  try {
+    const listed = await service.listInvocationsWithMeta("thread-1");
+    const page = await service.readInvocationPage("thread-1", "invocation-1");
+    const hits = await service.searchTranscript("thread-1", "sqlite memory");
+
+    assert.equal(listed.length, 1);
+    assert.equal(page.total, 1);
+    assert.ok(hits.length > 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("sqlite invocation reads surface database failures without transcript fallback", async () => {
+  let transcriptCalls = 0;
+  const failTranscript = async () => {
+    transcriptCalls += 1;
+    return [];
+  };
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      invocations: {
+        listForThreadWithMeta() {
+          throw new Error("sqlite unavailable");
+        },
+        get() {
+          throw new Error("sqlite unavailable");
+        },
+      },
+    },
+    transcript: {
+      listInvocationsWithMeta: failTranscript,
+      searchTranscript: failTranscript,
+      readInvocationPage: failTranscript,
+    },
+    logger: { error() {} },
+  });
+
+  await assert.rejects(() => service.listInvocationsWithMeta("thread-1"), /sqlite unavailable/);
+  await assert.rejects(
+    () => service.readInvocationPage("thread-1", "invocation-1"),
+    /sqlite unavailable/
+  );
+  assert.equal(transcriptCalls, 0);
+});
+
+test("sqlite search reports unavailable without scanning transcripts on database failure", async () => {
+  let transcriptCalls = 0;
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      recall: {
+        search() {
+          throw new Error("sqlite unavailable");
+        },
+      },
+    },
+    transcript: {
+      async searchTranscript() {
+        transcriptCalls += 1;
+        return [{ invocationId: "legacy" }];
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  const result = await service.searchSession("thread-1", "database failure", {
+    layers: "evidence",
+  });
+  assert.deepEqual(result.hits, []);
+  assert.deepEqual(result.availability, {
+    state: "unavailable",
+    reason: "search_failed",
+  });
+  assert.equal(transcriptCalls, 0);
 });
 
 test("sqlite mode skips transcript search after filling the requested limit", async () => {
@@ -446,7 +441,9 @@ test("searchSession empty query returns recency-only memory hits with layer stat
     assert.equal(result.layers.evidence, 0);
     assert.ok(result.hits.every((hit) => hit.layer === "memory"));
     assert.ok(result.hits.some((hit) => hit.sourceId === "memory-recency"));
-    assert.ok(logs.some((line) => line.includes("[recall-search]") && line.includes("source=recency")));
+    assert.ok(
+      logs.some((line) => line.includes("[recall-search]") && line.includes("source=recency"))
+    );
   } finally {
     storage.close();
   }

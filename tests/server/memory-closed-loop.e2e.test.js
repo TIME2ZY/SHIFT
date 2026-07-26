@@ -14,7 +14,6 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const { createServer } = require("../../src/server");
-const { readSessionMap, writeSessionMap } = require("../../src/server/session-map-store");
 const { createStorage } = require("../../src/storage");
 
 const UI_TOKEN = "memory-e2e-token";
@@ -78,8 +77,8 @@ function parseSseMetrics(streamText) {
 
 test("memory closed loop e2e: handoff → inject → seal → bootstrap", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-closed-loop-"));
-  const mapRoot = path.join(tmpDir, "session-maps");
   const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
   const prompts = [];
   const metricLogs = [];
   let run = 0;
@@ -87,7 +86,7 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: mapRoot,
+    storageMode: "sqlite",
     storage,
     logger: {
       info(line) {
@@ -175,7 +174,9 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
         "dual-loop-e2e-token"
       )}&layers=memory`
     ).then((response) => response.json());
-    assert.ok(search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry"));
+    assert.ok(
+      search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry")
+    );
 
     // --- Step 3: force seal and capture window-seal ---
     const firstWindow = storage.windows.listForThread(session.id)[0];
@@ -185,13 +186,7 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     storage.windows.addUsage(firstWindow.id, {
       inputChars: Math.max(0, targetChars - persistedChars),
     });
-    writeSessionMap(session.id, mapRoot, {
-      codex: {
-        sessionId: "provider-session-old",
-        workspaceKey: firstWindow.workspaceKey,
-        providerKey: firstWindow.providerKey,
-      },
-    });
+    storage.windows.bindProviderSession(firstWindow.id, "provider-session-old");
 
     const chat2 = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -203,7 +198,10 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     }).then((response) => response.text());
     assert.match(chat2, /event: sealed/);
     assert.equal(storage.windows.get(firstWindow.id).state, "sealed");
-    assert.equal(readSessionMap(session.id, mapRoot).codex, undefined);
+    const activeWindow = storage.windows
+      .listForThread(session.id)
+      .find((window) => window.state === "active");
+    assert.equal(activeWindow.providerSessionId, null);
 
     const sealMemories = storage.memories
       .listForThread(session.id)

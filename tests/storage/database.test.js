@@ -1,4 +1,7 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -8,6 +11,7 @@ const {
 } = require("../../src/storage/database");
 const { applyMigrations, validateMigrations } = require("../../src/storage/migrations");
 const { MIGRATIONS } = require("../../src/storage/schema");
+const { createStorage } = require("../../src/storage");
 
 test("memory database applies schema and safety pragmas", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
@@ -23,7 +27,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
-      10
+      MIGRATIONS.length
     );
     for (const name of [
       "threads",
@@ -40,14 +44,19 @@ test("memory database applies schema and safety pragmas", () => {
       "project_passages",
       "projects",
       "purged_threads",
+      "storage_metadata",
+      "storage_outbox",
       "recall_items",
       "recall_fts",
     ]) {
       assert.ok(tables.has(name), `expected ${name} table`);
     }
 
-    assert.equal(applyMigrations(db), 10);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count, 10);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count,
+      MIGRATIONS.length
+    );
     const memoryColumns = new Set(
       db
         .prepare("PRAGMA table_info(memory_entries)")
@@ -126,6 +135,113 @@ test("database quick check and WAL checkpoint report healthy state", () => {
   }
 });
 
+test("new database creates a stable clean epoch and activates cutover explicitly", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    const first = storage.metadata.getCurrent();
+    const second = storage.metadata.getCurrent();
+
+    assert.match(first.epochId, /^epoch-[0-9a-f]{32}$/);
+    assert.equal(first.schemaVersion, MIGRATIONS.length);
+    assert.equal(first.dataPolicy, "clean");
+    assert.equal(first.isClean, true);
+    assert.equal(first.isActive, false);
+    assert.equal(first.cutoverTime, null);
+    assert.deepEqual(second, first);
+
+    const activated = storage.metadata.activateCleanCutover({
+      cutoverTime: "2026-07-26T12:00:00+08:00",
+    });
+    assert.equal(activated.epochId, first.epochId);
+    assert.equal(activated.isActive, true);
+    assert.equal(activated.cutoverTime, "2026-07-26T04:00:00.000Z");
+    assert.deepEqual(storage.metadata.activateCleanCutover(), activated);
+  } finally {
+    storage.close();
+  }
+});
+
+test("storage epoch identity and cutover survive database reopen", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-storage-epoch-"));
+  const dbFile = path.join(tmpDir, "memory.sqlite");
+  let expected;
+  try {
+    const firstStorage = createStorage({ file: dbFile });
+    expected = firstStorage.metadata.activateCleanCutover({
+      cutoverTime: "2026-07-26T04:00:00.000Z",
+    });
+    firstStorage.close();
+
+    const reopenedStorage = createStorage({ file: dbFile });
+    try {
+      assert.deepEqual(reopenedStorage.metadata.getCurrent(), expected);
+    } finally {
+      reopenedStorage.close();
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("database with existing runtime rows is marked legacy validation, not cut over", () => {
+  const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 10) });
+  try {
+    db.prepare(
+      "INSERT INTO threads (id, created_at, updated_at) VALUES ('legacy-thread', 'now', 'now')"
+    ).run();
+
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    const metadata = db.prepare("SELECT * FROM storage_metadata WHERE singleton = 1").get();
+    assert.match(metadata.epoch_id, /^legacy-[0-9a-f]{32}$/);
+    assert.equal(metadata.schema_version, MIGRATIONS.length);
+    assert.equal(metadata.data_policy, "legacy-validation");
+    assert.equal(metadata.cutover_at, null);
+    const storage = createStorage({ db });
+    assert.throws(
+      () => storage.metadata.activateCleanCutover(),
+      /Legacy-validation storage cannot be activated/
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("clean epoch activation refuses business rows written before cutover", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.db
+      .prepare("INSERT INTO threads (id, created_at, updated_at) VALUES ('t', 'now', 'now')")
+      .run();
+    assert.throws(() => storage.metadata.activateCleanCutover(), /requires an empty database/);
+    assert.equal(storage.metadata.getCurrent().isActive, false);
+  } finally {
+    storage.close();
+  }
+});
+
+test("storage metadata schema version follows later migrations", () => {
+  const db = openMemoryDatabase({ file: ":memory:" });
+  try {
+    const futureMigrations = [
+      ...MIGRATIONS,
+      {
+        version: MIGRATIONS.length + 1,
+        name: "test_future_schema",
+        sql: "CREATE TABLE test_future_schema (id INTEGER PRIMARY KEY);",
+      },
+    ];
+
+    assert.equal(applyMigrations(db, futureMigrations), MIGRATIONS.length + 1);
+    assert.equal(
+      db.prepare("SELECT schema_version FROM storage_metadata WHERE singleton = 1").get()
+        .schema_version,
+      MIGRATIONS.length + 1
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("storage migrations require contiguous immutable versions", () => {
   assert.throws(
     () => validateMigrations([{ version: 2, name: "bad", sql: "SELECT 1" }]),
@@ -143,7 +259,10 @@ test("storage refuses a database created by newer code", () => {
     db.prepare(
       "INSERT INTO schema_migrations (version, name, applied_at) VALUES (99, 'future', 'now')"
     ).run();
-    assert.throws(() => applyMigrations(db), /newer than supported version 10/);
+    assert.throws(
+      () => applyMigrations(db),
+      new RegExp(`newer than supported version ${MIGRATIONS.length}`)
+    );
   } finally {
     db.close();
   }
@@ -163,7 +282,7 @@ test("later migrations upgrade a version 2 database without losing memory rows",
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 10);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     const memory = db.prepare("SELECT * FROM memory_entries WHERE id = 'memory-1'").get();
     assert.equal(memory.content, "keep me");
     // v6 backfills null capture keys and moves ownership columns.
@@ -193,7 +312,7 @@ test("context usage migration rebases only legacy active model capacities", () =
     insert.run("active-codex", "codex", "codex", "active", 200000);
     insert.run("sealed-gemini", "gemini", "antigravity", "sealed", 200000);
 
-    assert.equal(applyMigrations(db), 10);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
         .capacity_tokens,
@@ -252,7 +371,7 @@ test("sequence and causality migration backfills counters and message types", ()
     `
     ).run();
 
-    assert.equal(applyMigrations(db), 10);
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
     assert.equal(
       db.prepare("SELECT next_message_sequence value FROM threads WHERE id = 't'").get().value,
       4

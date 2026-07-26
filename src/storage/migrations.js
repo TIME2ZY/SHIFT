@@ -64,13 +64,24 @@ function applyMigrations(db, migrations = MIGRATIONS) {
     } else {
       db.transaction(() => {
         db.exec(migration.sql);
-        db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
-          migration.version,
-          migration.name,
-          new Date().toISOString()
-        );
+        db.prepare(
+          "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
+        ).run(migration.version, migration.name, new Date().toISOString());
       })();
     }
+  }
+
+  const hasStorageMetadata = db
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'storage_metadata' LIMIT 1"
+    )
+    .get();
+  if (hasStorageMetadata) {
+    const schemaVersion =
+      db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version || 0;
+    db.prepare("UPDATE storage_metadata SET schema_version = ? WHERE singleton = 1").run(
+      schemaVersion
+    );
   }
 
   return migrations.length;

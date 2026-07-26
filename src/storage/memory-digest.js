@@ -82,12 +82,12 @@ function buildHeuristicDigest(input = {}) {
   const recent = messages.slice(-12);
   const userLines = recent
     .filter((m) => m.role === "user")
-    .map((m) => oneLine(m.content))
+    .map((m) => compactText(m.content, 240))
     .filter(Boolean)
     .slice(-3);
   const assistantLines = recent
     .filter((m) => m.role === "assistant")
-    .map((m) => oneLine(m.content))
+    .map((m) => summarizeAssistantOutcome(m.content))
     .filter(Boolean)
     .slice(-3);
 
@@ -115,12 +115,22 @@ function buildHeuristicDigest(input = {}) {
 
   const lines = [
     `消息数: ${messages.length}`,
-    userLines.length ? `最近用户: ${userLines.join(" | ")}` : "最近用户: (无)",
-    assistantLines.length ? `最近助手: ${assistantLines.join(" | ")}` : "最近助手: (无)",
+    userLines.length ? `当前任务: ${userLines.join(" | ")}` : "当前任务: (无)",
+    assistantLines.length
+      ? `最近结论与进展:\n- ${assistantLines.join("\n- ")}`
+      : "最近结论与进展: (无)",
     `活跃记忆: ${active.length}`,
     `待确认候选: ${pending.length}`,
     topics.length ? `topics: ${topics.slice(0, 8).join(", ")}` : "topics: (无)",
   ];
+  const handoffs = active.filter((item) => item.kind === "handoff").slice(0, 3);
+  if (handoffs.length > 0) {
+    lines.push(
+      `当前交接（派生状态）:\n- ${handoffs
+        .map((item) => compactText(item.content, 420))
+        .join("\n- ")}`
+    );
+  }
 
   const durableCandidates = pending.slice(0, 5).map((item) => ({
     suggestionId: item.id,
@@ -131,7 +141,7 @@ function buildHeuristicDigest(input = {}) {
   }));
 
   return {
-    summary: lines.join("\n").slice(0, 2000),
+    summary: lines.join("\n").slice(0, 4000),
     topics: topics.slice(0, 12),
     durableCandidates,
     messageCount: messages.length,
@@ -186,11 +196,31 @@ function refreshDigestAndExtract(input = {}) {
   return result;
 }
 
-function oneLine(value) {
+function compactText(value, limit = 160) {
   return String(value || "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 80);
+    .slice(0, limit);
+}
+
+function summarizeAssistantOutcome(value) {
+  const raw = String(value || "");
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .filter(Boolean);
+  const signal = /(结论|下一步|状态|阻塞|P0|P1|P2|已完成|完成|失败|风险|建议|next_action)/i;
+  const selected = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!signal.test(lines[index])) continue;
+    selected.push(lines[index]);
+    if (index + 1 < lines.length && /^[-*]\s+/.test(lines[index + 1])) {
+      selected.push(lines[index + 1]);
+    }
+    if (selected.length >= 5) break;
+  }
+  if (selected.length > 0) return compactText(selected.join(" · "), 520);
+  return compactText(raw, 320);
 }
 
 function parseJson(value) {
@@ -211,4 +241,5 @@ module.exports = {
   createMemoryDigestRepository,
   buildHeuristicDigest,
   refreshDigestAndExtract,
+  summarizeAssistantOutcome,
 };

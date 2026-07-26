@@ -78,7 +78,7 @@ function createMemoryRoutes({
 
     if (!memoryService) {
       sendJson(res, 503, {
-        error: "Memory service unavailable. Enable SQLite storage (dual or sqlite mode).",
+        error: "Memory service unavailable. SQLite storage is required.",
       });
       return true;
     }
@@ -107,11 +107,28 @@ function createMemoryRoutes({
           includeRetired,
           limit: url.searchParams.get("limit"),
         });
+        const digest = storage?.digests?.get?.(sessionId) || null;
+        const pendingSuggestions =
+          suggestionService?.list?.(sessionId, {
+            status: "pending",
+            includeProject: true,
+            limit: 20,
+          }) || [];
+        const handoffs = memoryService.list(sessionId, {
+          kinds: "handoff",
+          includeRetired: false,
+          limit: 10,
+        });
         sendJson(res, 200, {
           sessionId,
           memories,
           kinds: PRODUCT_KINDS,
           counts: countBy(memories, (item) => item.status),
+          context: {
+            digest,
+            handoffs,
+            pendingSuggestions,
+          },
         });
       } catch (error) {
         logger.error?.(`[memory-api] list failed: ${error.message}`);
@@ -277,7 +294,7 @@ async function handleSuggestionRoutes(
 ) {
   if (!suggestionService) {
     sendJson(res, 503, {
-      error: "Suggestion service unavailable. Enable SQLite storage (dual or sqlite mode).",
+      error: "Suggestion service unavailable. SQLite storage is required.",
     });
     return true;
   }

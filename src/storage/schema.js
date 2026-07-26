@@ -474,6 +474,89 @@ const MIGRATIONS = Object.freeze([
       END;
     `,
   },
+  {
+    version: 11,
+    name: "storage_epoch_metadata",
+    sql: `
+      CREATE TABLE storage_metadata (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        epoch_id TEXT NOT NULL UNIQUE CHECK (length(epoch_id) > 0),
+        schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+        data_policy TEXT NOT NULL
+          CHECK (data_policy IN ('clean', 'legacy-validation')),
+        cutover_at TEXT,
+        created_at TEXT NOT NULL,
+        CHECK (data_policy = 'clean' OR cutover_at IS NULL)
+      );
+
+      INSERT INTO storage_metadata (
+        singleton,
+        epoch_id,
+        schema_version,
+        data_policy,
+        cutover_at,
+        created_at
+      )
+      SELECT
+        1,
+        CASE WHEN has_legacy_data
+          THEN 'legacy-' || lower(hex(randomblob(16)))
+          ELSE 'epoch-' || lower(hex(randomblob(16)))
+        END,
+        11,
+        CASE WHEN has_legacy_data THEN 'legacy-validation' ELSE 'clean' END,
+        NULL,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM (
+        SELECT (
+          EXISTS (SELECT 1 FROM threads LIMIT 1)
+          OR EXISTS (SELECT 1 FROM memory_entries LIMIT 1)
+          OR EXISTS (SELECT 1 FROM memory_events LIMIT 1)
+          OR EXISTS (SELECT 1 FROM memory_suggestions LIMIT 1)
+          OR EXISTS (SELECT 1 FROM purged_threads LIMIT 1)
+          OR EXISTS (SELECT 1 FROM projects LIMIT 1)
+          OR EXISTS (SELECT 1 FROM recall_items LIMIT 1)
+          OR EXISTS (SELECT 1 FROM thread_digests LIMIT 1)
+          OR EXISTS (SELECT 1 FROM project_documents LIMIT 1)
+        ) AS has_legacy_data
+      );
+    `,
+  },
+  {
+    version: 12,
+    name: "storage_outbox",
+    sql: `
+      CREATE TABLE storage_outbox (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        invocation_id TEXT NOT NULL,
+        sequence_no INTEGER NOT NULL CHECK (sequence_no >= 0),
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'delivered')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        next_attempt_at TEXT,
+        last_error TEXT,
+        delivered_at TEXT,
+        UNIQUE (invocation_id, sequence_no),
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (invocation_id) REFERENCES invocations(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX storage_outbox_pending
+        ON storage_outbox(status, next_attempt_at, created_at);
+    `,
+  },
+  {
+    version: 13,
+    name: "storage_outbox_retention",
+    sql: `
+      CREATE INDEX storage_outbox_delivered
+        ON storage_outbox(status, delivered_at);
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {
@@ -501,14 +584,14 @@ function migrateMemoryFoundationOwnership(db) {
     `);
 
     // Thread identity columns (safe ALTER).
-    const threadColumns = db.prepare("PRAGMA table_info(threads)").all().map((c) => c.name);
+    const threadColumns = db
+      .prepare("PRAGMA table_info(threads)")
+      .all()
+      .map((c) => c.name);
     const addThreadCol = (name, sql) => {
       if (!threadColumns.includes(name)) db.exec(sql);
     };
-    addThreadCol(
-      "project_key",
-      "ALTER TABLE threads ADD COLUMN project_key TEXT"
-    );
+    addThreadCol("project_key", "ALTER TABLE threads ADD COLUMN project_key TEXT");
     addThreadCol(
       "project_canonical_path",
       "ALTER TABLE threads ADD COLUMN project_canonical_path TEXT"
@@ -595,9 +678,7 @@ function migrateMemoryFoundationOwnership(db) {
       const autoKind = row.kind === "handoff" || row.kind === "window-seal";
       const authority = deriveLegacyAuthority(row.created_by, metadata);
       const confirmedBy =
-        row.status === "confirmed"
-          ? (metadata && metadata.confirmedBy) || null
-          : null;
+        row.status === "confirmed" ? (metadata && metadata.confirmedBy) || null : null;
       insert.run({
         id: row.id,
         scope: "thread",
@@ -781,4 +862,3 @@ function parseJsonSafe(value) {
 }
 
 module.exports = { PRAGMAS, MIGRATIONS, migrateMemoryFoundationOwnership };
-

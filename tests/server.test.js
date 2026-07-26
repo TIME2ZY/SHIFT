@@ -5,9 +5,11 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { createServer, ensureSession } = require("../src/server/index");
+const { createServer } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
+const { createStorage } = require("../src/storage");
+const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -72,14 +74,23 @@ async function withServer(options, fn) {
   const initialSessionIds = Array.isArray(options.initialSessionIds) ? options.initialSessionIds : [];
   const serverOptions = { ...options };
   delete serverOptions.initialSessionIds;
-  for (const sessionId of initialSessionIds) ensureSession(sessionsFile, sessionId);
+  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
+  prepareCleanEpoch({ file: memoryDbFile });
+  if (initialSessionIds.length > 0) {
+    const storage = createStorage({ file: memoryDbFile });
+    try {
+      for (const sessionId of initialSessionIds) storage.threads.create({ id: sessionId });
+    } finally {
+      storage.close();
+    }
+  }
   const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
     process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
     sessionsFile,
-    memoryDbFile: path.join(tmpDir, "memory.sqlite"),
+    memoryDbFile,
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
     invocationsFile: path.join(tmpDir, "invocations.json"),
     sessionMapRoot: path.join(tmpDir, "session-maps"),
@@ -118,28 +129,9 @@ test("serves fixed agent list", async () => {
   });
 });
 
-test("top-level request errors return 500 without stopping the server", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-error-test-"));
-  const blocker = path.join(dir, "not-a-directory");
-  fs.writeFileSync(blocker, "block\n", "utf8");
-  try {
-    await withServer(
-      {
-        sessionsFile: path.join(blocker, "sessions.json"),
-        logger: { error() {}, warn() {}, log() {} },
-      },
-      async (baseUrl) => {
-        const failed = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-        assert.equal(failed.status, 500);
-        assert.deepEqual(await failed.json(), { error: "Internal server error." });
-
-        const healthy = await fetch(`${baseUrl}/api/agents`);
-        assert.equal(healthy.status, 200);
-      }
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+test("server startup rejects retired online storage modes", () => {
+  assert.throws(() => createServer({ storageMode: "files" }), /only accepts sqlite/);
+  assert.throws(() => createServer({ storageMode: "dual" }), /only accepts sqlite/);
 });
 
 test("index injects the per-process UI token and loads the authenticated API client", async () => {
@@ -1151,9 +1143,10 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
   );
 });
 
-test("chat endpoint does not reuse a readonly provider session after switching the same chat into worktree mode", async () => {
+test("chat ignores legacy session maps when switching into worktree mode", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-"));
   const sessionsFile = path.join(tmpDir, "sessions.json");
+  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
   const invocationsFile = path.join(tmpDir, "invocations.json");
   const sessionMapRoot = path.join(tmpDir, "session-maps");
   const transcriptsDir = path.join(tmpDir, "transcripts");
@@ -1163,12 +1156,15 @@ test("chat endpoint does not reuse a readonly provider session after switching t
   const runs = [];
 
   if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
+  prepareCleanEpoch({ file: memoryDbFile });
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
     sessionsFile,
+    memoryDbFile,
     invocationsFile,
     sessionMapRoot,
+    storageMode: "sqlite",
     worktreeManager: {
       ensureWorktree({ sessionId }) {
         return {
@@ -1240,8 +1236,7 @@ test("chat endpoint does not reuse a readonly provider session after switching t
 test("chat endpoint resumes the matching provider session after base↔worktree round-trip", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-"));
   const sessionsFile = path.join(tmpDir, "sessions.json");
-  const invocationsFile = path.join(tmpDir, "invocations.json");
-  const sessionMapRoot = path.join(tmpDir, "session-maps");
+  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
   const transcriptsDir = path.join(tmpDir, "transcripts");
   const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-base-"));
@@ -1249,12 +1244,13 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   const runs = [];
 
   if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
+  prepareCleanEpoch({ file: memoryDbFile });
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
     sessionsFile,
-    invocationsFile,
-    sessionMapRoot,
+    memoryDbFile,
+    storageMode: "sqlite",
     worktreeManager: {
       ensureWorktree({ sessionId }) {
         return {
@@ -1270,7 +1266,16 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     spawnRunner(command, args, options) {
       runs.push({ cwd: options.cwd, env: options.env, args });
       const child = createMockChild();
+      const providerSessionId =
+        runs.length === 1
+          ? "provider-base-1"
+          : runs.length === 2
+            ? "provider-wt-1"
+            : `provider-later-${runs.length}`;
       process.nextTick(() => {
+        child.stdout.write(
+          `${JSON.stringify({ type: "run.started", sessionId: providerSessionId })}\n`
+        );
         child.stdout.end();
         child.emit("close", 0, null);
       });
@@ -1286,38 +1291,17 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
     const { session } = await created.json();
 
-    const sessionMapDir = path.join(sessionMapRoot, session.id);
-    fs.mkdirSync(sessionMapDir, { recursive: true });
-    fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
-      opencode: {
-        sessionId: "provider-base-1",
-        workspaceKey: `base:${baseDir}`,
-        updatedAt: "2026-07-02T00:00:00.000Z",
-        byWorkspace: {
-          [`base:${baseDir}`]: {
-            sessionId: "provider-base-1",
-            updatedAt: "2026-07-02T00:00:00.000Z",
-          },
-          [`worktree:${worktreeDir}`]: {
-            sessionId: "provider-wt-1",
-            updatedAt: "2026-07-02T01:00:00.000Z",
-          },
-        },
-      },
-    }, null, 2));
-
-    // Seed a session worktree link so useWorktree can reuse it.
-    const sessionsData = JSON.parse(fs.readFileSync(sessionsFile, "utf8"));
-    sessionsData.sessions[session.id].worktree = {
-      sessionId: session.id,
-      baseDir,
-      worktreeDir,
-      branch: `codex/session-${session.id}`,
-      status: "active",
-      createdAt: "2026-07-02T00:00:00.000Z",
-    };
-    sessionsData.sessions[session.id].projectDir = baseDir;
-    fs.writeFileSync(sessionsFile, `${JSON.stringify(sessionsData, null, 2)}\n`, "utf8");
+    const initialBaseChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: "opencode",
+        prompt: "initial base turn",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: false,
+      }),
+    });
+    await initialBaseChat.text();
 
     const worktreeChat = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -1333,6 +1317,18 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     assert.equal(worktreeChat.status, 200);
     await worktreeChat.text();
 
+    const resumedWorktreeChat = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: "opencode",
+        prompt: "worktree turn again",
+        sessionId: session.id,
+        projectDir: baseDir,
+        useWorktree: true,
+      }),
+    });
+    await resumedWorktreeChat.text();
+
     const baseChat = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1347,13 +1343,15 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     assert.equal(baseChat.status, 200);
     await baseChat.text();
 
-    assert.equal(runs.length, 2);
-    assert.equal(runs[0].cwd, worktreeDir);
-    assert.equal(runs[0].env.INVOKE_SESSION_ID, "provider-wt-1");
-    assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
-    assert.equal(runs[1].cwd, baseDir);
-    assert.equal(runs[1].env.INVOKE_SESSION_ID, "provider-base-1");
-    assert.equal(runs[1].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
+    assert.equal(runs.length, 4);
+    assert.equal(runs[0].env.INVOKE_SESSION_ID, "");
+    assert.equal(runs[1].env.INVOKE_SESSION_ID, "");
+    assert.equal(runs[2].cwd, worktreeDir);
+    assert.equal(runs[2].env.INVOKE_SESSION_ID, "provider-wt-1");
+    assert.equal(runs[2].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
+    assert.equal(runs[3].cwd, baseDir);
+    assert.equal(runs[3].env.INVOKE_SESSION_ID, "provider-base-1");
+    assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (!prevTranscriptDir) {
@@ -1993,86 +1991,6 @@ test("prompt template uses the cross-platform callback client", () => {
   assert.match(instructions, /TTL/);
 });
 
-// ── Transcript integration (lesson 08 Phase 1) ─────────────────
-
-test("chat endpoint writes transcript events (invocation-start, stdout, invocation-end)", async () => {
-  const transcript = require("../src/session/transcript");
-  const tmpTranscriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-transcript-"));
-  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
-  process.env.SHIFT_TRANSCRIPT_DIR = tmpTranscriptDir;
-  try {
-    let capturedSessionId = null;
-
-    await withServer(
-      {
-        spawnRunner(_command, _args) {
-          const child = createMockChild();
-          process.nextTick(() => {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-transcript", text: "partial " }) + "\n");
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-transcript", text: "answer" }) + "\n");
-            child.emit("close", 0, null);
-          });
-          return child;
-        },
-      },
-      async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "opencode", prompt: "hello transcript" }),
-        });
-        const text = await response.text();
-        const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
-        assert.ok(sessionMatch);
-        capturedSessionId = sessionMatch[1];
-      }
-    );
-
-    // Poll until the transcript files appear. On Windows, server.close() may
-    // resolve before all fs.promises.appendFile writes finish even though the
-    // handler awaits flush. Polling is more robust than a fixed sleep.
-    async function waitForInvocations(sessionId, minCount, timeoutMs) {
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        await transcript.flush();
-        const invs = await transcript.listInvocations(sessionId);
-        if (invs.length >= minCount) return invs;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      return await transcript.listInvocations(sessionId);
-    }
-
-    const invocations = await waitForInvocations(capturedSessionId, 1, 3000);
-    assert.ok(invocations.length >= 1, `expected at least one invocation, got: ${JSON.stringify(invocations)}`);
-
-    // Durable path coalesces consecutive text.delta fragments (SSE stays fine-grained).
-    const agentInv = invocations.find((id) => id !== "_user_prompt");
-    assert.ok(agentInv, "expected a non-user-prompt invocation");
-    const events = await transcript.readInvocation(capturedSessionId, agentInv);
-    const kinds = events.map((e) => e.kind);
-    assert.ok(kinds.includes("invocation-start"), `kinds: ${kinds.join(",")}`);
-    assert.ok(kinds.includes("text.delta"), `kinds: ${kinds.join(",")}`);
-    assert.ok(kinds.includes("invocation-end"), `kinds: ${kinds.join(",")}`);
-    const stdoutEvents = events.filter((e) => e.kind === "text.delta");
-    assert.equal(stdoutEvents.length, 1, "coalesced text.delta into one durable segment");
-    assert.equal(stdoutEvents[0].payload.text, "partial answer");
-
-    // The synthetic user-prompt invocation should be searchable
-    const userPromptEvents = await transcript.readInvocation(capturedSessionId, "_user_prompt");
-    assert.equal(userPromptEvents.length, 1);
-    assert.equal(userPromptEvents[0].kind, "user-prompt");
-      assert.equal(userPromptEvents[0].payload.agent, "opencode");
-
-    // Search should find the user prompt
-    const hits = await transcript.searchTranscript(capturedSessionId, "transcript");
-    assert.ok(hits.length >= 1, "search should find the user prompt");
-  } finally {
-    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
-    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
-    fs.rmSync(tmpTranscriptDir, { recursive: true, force: true });
-  }
-});
-
 // ── Context health + sealer integration (lesson 08 Phase 2) ─────
 
 test("chat endpoint emits context-warning when fillRatio crosses warn threshold", async () => {
@@ -2182,6 +2100,7 @@ async function withActiveChat(fn) {
             return true;
           };
           captured.kill = () => child.kill("SIGTERM");
+          captured.child = child;
           return child;
         },
       },
@@ -2365,13 +2284,21 @@ test("/api/callbacks/read-invocation requires targetInvocationId", async () => {
 
 test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
-    // Inject a bunch of stdout events so pagination has something to slice
-    const transcript = require("../src/session/transcript");
+    // Feed hard-boundary canonical provider events through the active
+    // SQLite-only chat path so pagination never relies on transcript fallback
+    // or waits for text-delta coalescing at invocation end.
     const invId = captured.env.SHIFT_INVOCATION_ID;
     for (let i = 0; i < 10; i++) {
-      transcript.appendEvent(sid, invId, "stdout", { text: `chunk-${i}` });
+      captured.child.stdout.write(
+        `${JSON.stringify({
+          type: "tool.started",
+          toolName: "read",
+          toolId: `pagination-tool-${i}`,
+          args: { path: `file-${i}.js` },
+        })}\n`
+      );
     }
-    await transcript.flush();
+    await new Promise((r) => setTimeout(r, 100));
 
     const resp = await fetch(
       `${baseUrl}/api/callbacks/read-invocation?` +
@@ -2670,6 +2597,7 @@ test("frontend recall expand shows events on open and shares process panel path"
   assert.match(recallJs, /function setMemories|setMemories\(/);
   assert.match(recallJs, /recall-item-conclusions/);
   assert.match(appJs, /loadContextMemories|setMemories/);
+  assert.match(appJs, /setContextSnapshot/);
   // Wave R2: search hits grouped by memory/message/evidence layers.
   assert.match(recallJs, /groupHitsByLayer/);
   assert.match(recallJs, /recall-hit-section/);
@@ -3065,73 +2993,39 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {
-  const transcript = require("../src/session/transcript");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-resume-"));
-  const prevDir = process.env.SHIFT_TRANSCRIPT_DIR;
-  process.env.SHIFT_TRANSCRIPT_DIR = tmpDir;
-
   const sessionId = "bootstrap-resume-test";
-  let firstPrompts = null;
-  let secondPrompt = null;
-
-  try {
-    await withServer(
-      {
-        initialSessionIds: [sessionId],
-        spawnRunner(command, args) {
-          if (!firstPrompts) firstPrompts = [args[args.length - 1]];
-          const child = createMockChild();
-          process.nextTick(() => {
-            child.stdout.write("first done");
-            child.emit("close", 0, null);
-          });
-          return child;
-        },
+  const prompts = [];
+  await withServer(
+    {
+      initialSessionIds: [sessionId],
+      spawnRunner(command, args) {
+        prompts.push(args[args.length - 1]);
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(
+            `${JSON.stringify({ type: "text.delta", text: `done-${prompts.length}` })}\n`
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
       },
-      async (baseUrl) => {
-        await (await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "opencode", prompt: "first", sessionId }),
-        })).text();
+    },
+    async (baseUrl) => {
+      for (const prompt of ["first", "second"]) {
+        await (
+          await fetch(`${baseUrl}/api/chat`, {
+            method: "POST",
+            body: JSON.stringify({ agent: "opencode", prompt, sessionId }),
+          })
+        ).text();
       }
-    );
+    }
+  );
 
-    await transcript.flush();
-    await new Promise((r) => setTimeout(r, 200));
-
-    await withServer(
-      {
-        initialSessionIds: [sessionId],
-        spawnRunner(command, args) {
-          secondPrompt = args[args.length - 1];
-          const child = createMockChild();
-          process.nextTick(() => {
-            child.stdout.write("second done");
-            child.emit("close", 0, null);
-          });
-          return child;
-        },
-      },
-      async (baseUrl) => {
-        await (await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "opencode", prompt: "second", sessionId }),
-        })).text();
-      }
-    );
-
-    assert.ok(firstPrompts && firstPrompts.length >= 1, "first chat should have run");
-    assert.ok(secondPrompt, "second chat should have run");
-    assert.match(firstPrompts[0], /第一个 invocation/);
-    assert.match(secondPrompt, /<!-- Digest/);
-    assert.doesNotMatch(secondPrompt, /第一个 invocation/);
-  } finally {
-    if (prevDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
-    else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /第一个 invocation/);
+  assert.match(prompts[1], /<!-- Digest/);
+  assert.doesNotMatch(prompts[1], /第一个 invocation/);
 });
 
 // ── Recall (memory/回忆) tests ────────────────────────────────
@@ -3248,7 +3142,7 @@ test("invocation event helpers are pure and session-scoped", () => {
     listInvocationsFromMap,
     searchInvocationsInMap,
     readInvocationFromMap,
-  } = require("../src/server/index");
+  } = require("../src/server/invocation-store");
   const map = new Map();
   map.set("inv-1", {
     invocationId: "inv-1",

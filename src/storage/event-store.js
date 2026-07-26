@@ -1,28 +1,21 @@
 const { eventPlainText } = require("./event-plain-text");
 
 /**
- * Unified L1 event sink.
+ * Authoritative invocation event sink.
  *
- * modes:
- * - files  → transcript JSONL only
- * - dual   → SQLite + transcript JSONL
- * - sqlite → SQLite only (JSONL is optional audit/export, not online write)
- *
- * SQLite write failures always propagate so outer transactions can roll back.
- * Callers that want fail-open (dual stream path) must catch at their boundary.
+ * SQLite is the only online write target. Canonical JSONL audit output is
+ * produced asynchronously from the transactional outbox.
  */
 function createEventStore({
-  storage = null,
-  transcript = null,
-  mode = "dual",
+  storage,
+  auditTranscript = true,
   logger = console,
 } = {}) {
-  if (!new Set(["files", "dual", "sqlite"]).has(mode)) {
-    throw new Error(`Unsupported event-store mode "${mode}". Use files, dual, or sqlite.`);
+  if (!storage?.invocations || typeof storage.transaction !== "function") {
+    throw new Error("SQLite event store requires durable storage.");
   }
 
-  const writeSqlite = (mode === "dual" || mode === "sqlite") && Boolean(storage);
-  const writeTranscript = (mode === "files" || mode === "dual") && Boolean(transcript);
+  const archiveCanonical = auditTranscript === true;
   const unavailableInvocations = new Set();
   const invocationThreads = new Map();
   const deletedThreads = new Set();
@@ -91,49 +84,27 @@ function createEventStore({
   /**
    * Append one invocation event to the configured sinks.
    *
-   * @returns {{ ok: boolean, event: object|null, sqlite: boolean, transcript: boolean }}
+   * @returns {{ ok: boolean, event: object|null, sqlite: boolean }}
    */
   function append(input = {}) {
     const invocationId = typeof input.invocationId === "string" ? input.invocationId : "";
     const kind = typeof input.kind === "string" ? input.kind : "";
     if (!invocationId || !kind) {
-      return { ok: false, event: null, sqlite: false, transcript: false };
+      return { ok: false, event: null, sqlite: false };
     }
 
     const payload = input.payload || {};
     const createdAt = input.createdAt || new Date().toISOString();
     const threadId = resolveThreadId(input.threadId, invocationId);
-    const synthetic = isSyntheticInvocation(invocationId);
-
-    const allowTranscript =
-      input.writeTranscript === undefined ? writeTranscript : Boolean(input.writeTranscript);
-    const allowSqlite =
-      input.writeSqlite === undefined ? writeSqlite : Boolean(input.writeSqlite) && writeSqlite;
-
-    let transcriptWritten = false;
-    if (allowTranscript && threadId) {
-      try {
-        transcript.appendEvent(threadId, invocationId, kind, payload);
-        transcriptWritten = true;
-      } catch (error) {
-        logger.error?.(`[event-store] transcript append failed: ${error.message}`);
-      }
-    }
-
-    if (!allowSqlite || synthetic) {
-      return {
-        ok: transcriptWritten || (!allowSqlite && !allowTranscript),
-        event: null,
-        sqlite: false,
-        transcript: transcriptWritten,
-      };
+    if (isSyntheticInvocation(invocationId)) {
+      return { ok: false, event: null, sqlite: false };
     }
 
     if (unavailableInvocations.has(invocationId)) {
-      return { ok: false, event: null, sqlite: false, transcript: transcriptWritten };
+      return { ok: false, event: null, sqlite: false };
     }
     if (threadId && deletedThreads.has(threadId)) {
-      return { ok: false, event: null, sqlite: false, transcript: transcriptWritten };
+      return { ok: false, event: null, sqlite: false };
     }
 
     // Do not swallow SQLite errors: callers (and outer transactions) must see
@@ -141,7 +112,7 @@ function createEventStore({
     const invocation = storage.invocations.get(invocationId);
     if (!invocation || deletedThreads.has(invocation.threadId)) {
       unavailableInvocations.add(invocationId);
-      return { ok: false, event: null, sqlite: false, transcript: transcriptWritten };
+      return { ok: false, event: null, sqlite: false };
     }
     invocationThreads.set(invocationId, invocation.threadId);
 
@@ -149,7 +120,7 @@ function createEventStore({
       const event = storage.invocations.appendEvent({
         invocationId,
         // Prefer DB atomic allocation unless an explicit sequence is provided
-        // (migration / dual-write replay compatibility).
+        // (offline migration/replay compatibility).
         ...(input.sequenceNo === undefined ? {} : { sequenceNo: input.sequenceNo }),
         kind,
         payload,
@@ -165,7 +136,18 @@ function createEventStore({
         agentId: invocation.agentId,
         createdAt: event.createdAt,
       });
-      return event;
+      const outboxId =
+        archiveCanonical && storage.outbox
+          ? storage.outbox.enqueue({
+              threadId: invocation.threadId,
+              invocationId,
+              sequenceNo: event.sequenceNo,
+              kind,
+              payload,
+              createdAt: event.createdAt,
+            })
+          : null;
+      return { event, outboxId };
     };
 
     // Nested transactions become savepoints under better-sqlite3, so this is
@@ -175,9 +157,10 @@ function createEventStore({
 
     return {
       ok: true,
-      event: stored,
+      event: stored.event,
       sqlite: true,
-      transcript: transcriptWritten,
+      outbox: Boolean(stored.outboxId),
+      outboxId: stored.outboxId,
     };
   }
 
@@ -188,10 +171,9 @@ function createEventStore({
   }
 
   return {
-    mode,
-    enabled: writeSqlite || writeTranscript,
-    writeSqlite,
-    writeTranscript,
+    mode: "sqlite",
+    enabled: true,
+    archiveCanonical,
     append,
     registerInvocation,
     markInvocationUnavailable,

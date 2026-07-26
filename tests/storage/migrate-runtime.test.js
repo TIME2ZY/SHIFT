@@ -7,6 +7,7 @@ const test = require("node:test");
 const { createStorage } = require("../../src/storage");
 const { migrateRuntimeToSqlite } = require("../../src/storage/migrate-runtime");
 const { auditSqliteStorage } = require("../../src/storage/audit-storage");
+const { copyLegacyRuntimeFixture } = require("../helpers/legacy-runtime-fixture");
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -23,82 +24,10 @@ function fixtureRoot() {
 }
 
 test("migrate imports sessions and transcript events into SQLite", async () => {
-  const root = fixtureRoot();
+  const root = copyLegacyRuntimeFixture("shift-migrate-fixture-");
   const sessionsFile = path.join(root, "sessions.json");
   const transcriptDir = path.join(root, "transcripts");
   const memoryDbFile = path.join(root, "memory.sqlite");
-
-  writeJson(sessionsFile, {
-    sessions: {
-      "thread-1": {
-        id: "thread-1",
-        title: "Hello world title",
-        createdAt: "2026-07-12T00:00:00.000Z",
-        projectDir: "C:/repo",
-        lastAgent: "codex",
-        messages: [
-          {
-            id: "msg-user",
-            role: "user",
-            agent: "codex",
-            content: "ship it",
-            createdAt: "2026-07-12T00:00:01.000Z",
-          },
-          {
-            id: "msg-assistant",
-            role: "assistant",
-            agent: "codex",
-            content: "done",
-            invocationId: "inv-1",
-            createdAt: "2026-07-12T00:00:05.000Z",
-          },
-        ],
-      },
-    },
-    lastSessionId: "thread-1",
-  });
-
-  writeJsonl(path.join(transcriptDir, "thread-1", "invocations", "inv-1.jsonl"), [
-    {
-      ts: "2026-07-12T00:00:02.000Z",
-      kind: "invocation-start",
-      payload: { agent: "codex" },
-    },
-    {
-      ts: "2026-07-12T00:00:03.000Z",
-      kind: "text.delta",
-      payload: { text: "done" },
-    },
-    {
-      ts: "2026-07-12T00:00:04.000Z",
-      kind: "handoff",
-      payload: { to: "gemini", goal: "review" },
-    },
-    {
-      ts: "2026-07-12T00:00:05.000Z",
-      kind: "memory-captured",
-      payload: {
-        id: "mem-1",
-        threadId: "thread-1",
-        kind: "handoff",
-        status: "captured",
-        content: "handoff codex → gemini",
-        createdBy: "codex",
-        createdAt: "2026-07-12T00:00:04.500Z",
-        captureKey: "handoff:inv-1:gemini:0",
-      },
-    },
-    {
-      ts: "2026-07-12T00:00:06.000Z",
-      kind: "invocation-end",
-      payload: { code: 0, signal: null },
-    },
-  ]);
-
-  // Synthetic / invalid threads should be skipped.
-  writeJsonl(path.join(transcriptDir, "_invalid", "invocations", "x.jsonl"), [
-    { ts: "2026-07-12T00:00:00.000Z", kind: "stdout", payload: { text: "nope" } },
-  ]);
 
   try {
     const first = await migrateRuntimeToSqlite({
@@ -123,7 +52,7 @@ test("migrate imports sessions and transcript events into SQLite", async () => {
         ["invocation-start", "text.delta", "handoff", "memory-captured", "invocation-end"]
       );
       assert.ok(storage.memories.getByCaptureKey("thread-1", "handoff:inv-1:gemini:0"));
-      assert.ok(storage.recall.search("thread-1", "ship it").length >= 1);
+      assert.ok(storage.recall.search("thread-1", "synthetic fixture").length >= 1);
       assert.ok(storage.recall.search("thread-1", "review").length >= 1);
 
       // Second run is idempotent.

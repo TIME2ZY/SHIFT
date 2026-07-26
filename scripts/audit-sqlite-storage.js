@@ -34,7 +34,7 @@ function printHelp() {
   console.log(`Usage: node scripts/audit-sqlite-storage.js [options]
 
 Options:
-  --db <path>   memory.sqlite (default: data/runtime/memory.sqlite)
+  --db <path>   authoritative SQLite (default: data/runtime/shift.sqlite)
   --repair      rebuild missing recall projections / FTS drift
   --full        run full integrity_check (slower)
   --json        print full JSON report

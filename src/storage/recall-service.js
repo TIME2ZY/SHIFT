@@ -22,8 +22,10 @@ const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 const DEFAULT_MAX_AUTO_MEMORY = 2;
 const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
-function createRecallService({ storage, transcript, mode = "dual", logger = console } = {}) {
-  if (!transcript) throw new Error("Transcript fallback is required.");
+function createRecallService({ storage, logger = console } = {}) {
+  if (!storage) {
+    throw new Error("SQLite recall requires durable storage.");
+  }
 
   function logSqliteFailure(operation, error) {
     logger.error?.(`[sqlite-recall] ${operation} failed: ${error.message}`);
@@ -43,49 +45,22 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     }
   }
 
-  async function tryFile(operation, work, fallback) {
+  function readSqlite(operation, work) {
     try {
-      return await work();
+      return work();
     } catch (error) {
-      logger.error?.(`[file-recall] ${operation} failed: ${error.message}`);
-      return fallback;
+      logSqliteFailure(operation, error);
+      throw error;
     }
   }
 
   async function listInvocationsWithMeta(threadId) {
-    // sqlite mode is strict single-store: never probe transcript for online reads.
-    if (mode === "sqlite" && storage) {
-      const sqliteRecords = trySqlite("list invocations", () =>
-        storage.invocations.listForThreadWithMeta(threadId)
-      );
-      if (sqliteRecords === undefined) return [];
-      return sqliteRecords
-        .map(invocationFromSqlite)
-        .sort((a, b) => String(b.startedAt || "").localeCompare(a.startedAt || ""));
-    }
-
-    const sqliteRecords = trySqlite("list invocations", () =>
+    const sqliteRecords = readSqlite("list invocations", () =>
       storage.invocations.listForThreadWithMeta(threadId)
     );
-    const fileRecords = await tryFile(
-      "list invocations",
-      () => transcript.listInvocationsWithMeta(threadId),
-      []
-    );
-    if (sqliteRecords === undefined) return fileRecords;
-
-    const mappedSqlite = sqliteRecords.map(invocationFromSqlite);
-    const merged = new Map();
-    for (const record of fileRecords) merged.set(record.invocationId, record);
-    for (const record of mappedSqlite) {
-      const fileRecord = merged.get(record.invocationId);
-      if (!fileRecord || record.eventCount >= fileRecord.eventCount) {
-        merged.set(record.invocationId, record);
-      }
-    }
-    return [...merged.values()].sort((a, b) =>
-      String(b.startedAt || "").localeCompare(a.startedAt || "")
-    );
+    return sqliteRecords
+      .map(invocationFromSqlite)
+      .sort((a, b) => String(b.startedAt || "").localeCompare(a.startedAt || ""));
   }
 
   async function searchTranscript(threadId, query, options = {}) {
@@ -164,55 +139,27 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         });
       });
 
-      // With a healthy SQLite index, do not fall back to full-file scans (R0 / R8).
-      if (sqliteHits !== undefined && mode !== "files") {
+      if (sqliteHits !== undefined) {
         result = finalizeSearchResult(sqliteHits.slice(0, limit), {
           query: searchQuery,
           limit,
           weakQuery: false,
         });
-      } else if (mode === "sqlite" && storage) {
-        // Strict single-store: SQLite miss/error does not resurrect transcript.
-        source = sqliteHits === undefined ? "sqlite-error" : "sqlite";
+      } else {
+        source = "sqlite-error";
         result = finalizeSearchResult([], {
           query: searchQuery,
           limit,
           weakQuery: false,
         });
-      } else {
-        const fileHits = await tryFile(
-          "search transcript",
-          () => transcript.searchTranscript(threadId, searchQuery, { limit }),
-          []
-        );
-        if (sqliteHits === undefined) {
-          source = "file";
-          result = finalizeSearchResult(
-            fileHits.map((hit) => enrichFileHit(hit, terms)).slice(0, limit),
-            { query: searchQuery, limit, weakQuery: false }
-          );
-        } else {
-          // mode === "files": merge lightly but still prefer layered sqlite order.
-          source = "mixed";
-          const merged = [];
-          const seen = new Set();
-          const fileHasUserPrompt = fileHits.some((hit) => hit.invocationId === "_user_prompt");
-          for (const hit of [
-            ...sqliteHits,
-            ...fileHits.map((item) => enrichFileHit(item, terms)),
-          ]) {
-            if (fileHasUserPrompt && hit.sourceKind === "message" && hit.kind === "message.user") {
-              continue;
-            }
-            const key = hitKey(hit);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            merged.push(hit);
-            if (merged.length >= limit) break;
-          }
-          result = finalizeSearchResult(merged, { query: searchQuery, limit, weakQuery: false });
-        }
       }
+    }
+
+    if (!result.availability) {
+      result.availability =
+        source === "sqlite-error"
+          ? { state: "unavailable", reason: "search_failed" }
+          : { state: "available", empty: result.hits.length === 0 };
     }
 
     storage?.memoryEvents?.recordSafe?.({
@@ -222,7 +169,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         query: result.query,
         weakQuery: result.weakQuery,
         source,
-        mode,
+        mode: "sqlite",
         limit,
         hits: result.hits.length,
         layers: result.layers,
@@ -236,7 +183,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       terms,
       weakQuery: result.weakQuery,
       source,
-      mode,
+      mode: "sqlite",
       limit,
       hits: result.hits.length,
       layers: result.layers,
@@ -380,20 +327,18 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
     }
 
     const scored = {
-      [LAYER_MEMORY]: byLayer[LAYER_MEMORY]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_MEMORY]: byLayer[LAYER_MEMORY].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_MESSAGE]: byLayer[LAYER_MESSAGE]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_MESSAGE]: byLayer[LAYER_MESSAGE].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_EVIDENCE]: byLayer[LAYER_EVIDENCE]
-        .map((item) => scoreAndMapHit(item, terms))
+      [LAYER_EVIDENCE]: byLayer[LAYER_EVIDENCE].map((item) => scoreAndMapHit(item, terms))
         .filter(Boolean)
         .sort(compareHits),
-      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC]
-        .map((item) => scoreAndMapProjectDoc(item, terms))
+      [LAYER_PROJECT_DOC]: byLayer[LAYER_PROJECT_DOC].map((item) =>
+        scoreAndMapProjectDoc(item, terms)
+      )
         .filter(Boolean)
         .sort(compareHits),
     };
@@ -713,7 +658,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       from: Math.max(0, Number(options.from) || 0),
       limit: options.limit || 200,
     };
-    const sqlitePage = trySqlite("read invocation page", () => {
+    const readPage = () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
       const page = storage.invocations.readEventsPage(invocationId, options);
@@ -727,21 +672,10 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
           eventNo: Number.isInteger(event.sequenceNo) ? event.sequenceNo : start + i,
         })),
       };
-    });
+    };
 
-    // Strict single-store: never fall back to transcript in sqlite mode.
-    if (mode === "sqlite" && storage) {
-      if (sqlitePage === undefined || sqlitePage === null) return emptyPage;
-      return sqlitePage;
-    }
-
-    const filePage = await tryFile(
-      "read invocation page",
-      () => transcript.readInvocationPage(threadId, invocationId, options),
-      emptyPage
-    );
-    if (sqlitePage === undefined || sqlitePage === null) return filePage;
-    if (sqlitePage.total < filePage.total) return filePage;
+    const sqlitePage = readSqlite("read invocation page", readPage);
+    if (sqlitePage === null) return emptyPage;
     return sqlitePage;
   }
 
@@ -812,7 +746,10 @@ function isProductMemoryKind(kind) {
   return PRODUCT_MEMORY_KINDS.has(kind);
 }
 
-function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }) {
+function selectRetrieveItems(
+  ranked,
+  { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }
+) {
   const selected = [];
   const seen = new Set();
   let autoCount = 0;
@@ -835,7 +772,10 @@ function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit, ma
   // Product recency first, then remaining recency (auto capped), then related, then score fill.
   take((item) => item.channels?.includes("recency") && isProductMemoryKind(item.kind), recentLimit);
   take((item) => item.channels?.includes("recency"), recentLimit);
-  take((item) => item.channels?.includes("related") && isProductMemoryKind(item.kind), relatedLimit);
+  take(
+    (item) => item.channels?.includes("related") && isProductMemoryKind(item.kind),
+    relatedLimit
+  );
   take((item) => item.channels?.includes("related"), relatedLimit);
   take(() => true, totalLimit);
   return selected.sort((a, b) => {
@@ -923,9 +863,7 @@ function scoreAndMapHit(item, terms) {
     memoryStatus: item.metadata?.status || null,
     memoryKind: item.metadata?.kind || null,
     content:
-      item.sourceKind === "memory-entry"
-        ? String(item.content || "").slice(0, 2048)
-        : undefined,
+      item.sourceKind === "memory-entry" ? String(item.content || "").slice(0, 2048) : undefined,
   };
 }
 
@@ -983,7 +921,8 @@ function matchScore(item, terms) {
   }
   if (channel === "contains") return 18;
 
-  const haystack = `${item.title || ""}\n${item.content || ""}\n${item.snippet || ""}`.toLowerCase();
+  const haystack =
+    `${item.title || ""}\n${item.content || ""}\n${item.snippet || ""}`.toLowerCase();
   let score = 0;
   for (const term of terms || []) {
     if (haystack.includes(String(term).toLowerCase())) score += 8;
@@ -1089,22 +1028,6 @@ function hitKey(hit) {
     return `${hit.sourceKind}:${hit.sourceId}`;
   }
   return `${hit.invocationId}:${hit.eventNo}:${hit.kind}`;
-}
-
-function enrichFileHit(hit, terms) {
-  return {
-    ...hit,
-    layer: layerForSourceKind(hit.sourceKind || "invocation-event"),
-    score: matchScore(
-      {
-        content: hit.snippet,
-        snippet: hit.snippet,
-        matchChannel: "contains",
-        metadata: {},
-      },
-      terms
-    ),
-  };
 }
 
 function invocationFromSqlite(record) {

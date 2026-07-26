@@ -1,9 +1,9 @@
 const { assertValidOpaqueId, isValidOpaqueId } = require("../server/id-policy");
-const { messageFromSqlite } = require("./session-read-service");
 
 /**
  * Session API backed solely by SQLite (L1 threads + messages + recall).
- * Signature mirrors the file session-store helpers so routes can swap by mode.
+ * Route-facing signatures retain the unused sessions-file slot so callers do
+ * not need storage-specific argument shims.
  *
  * worktree is process-local runtime state (authoritative copy lives in the
  * worktree manager state file); it is not part of the durable thread row.
@@ -248,4 +248,17 @@ function durableMessageMetadata(message) {
   return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
-module.exports = { createSqliteSessionService };
+function messageFromSqlite(message) {
+  return {
+    ...(message.metadata && typeof message.metadata === "object" ? message.metadata : {}),
+    id: message.id,
+    createdAt: message.createdAt,
+    role: message.role,
+    messageType: message.messageType,
+    agent: message.agentId || undefined,
+    content: message.content,
+    ...(message.invocationId ? { invocationId: message.invocationId } : {}),
+  };
+}
+
+module.exports = { createSqliteSessionService, messageFromSqlite };

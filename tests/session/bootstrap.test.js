@@ -72,6 +72,39 @@ test("buildDigest can read invocation metadata from SQLite-backed recall", async
   assert.doesNotMatch(digest, /第一个 invocation/);
 });
 
+test("buildDigest restores semantic thread state from SQLite", async () => {
+  const digest = await buildDigest({
+    sessionId: "thread-semantic",
+    digestSource: {
+      get(threadId) {
+        assert.equal(threadId, "thread-semantic");
+        return {
+          summary: "当前阻塞：README 缺少 clean epoch 初始化。",
+          durableCandidates: [
+            {
+              suggestionId: "suggestion-1",
+              kind: "decision",
+              topic: "sqlite-bootstrap",
+              content: "快速开始必须先创建 clean epoch。",
+            },
+          ],
+          updatedAt: "2026-07-26T08:00:00.000Z",
+          source: "heuristic",
+        };
+      },
+    },
+    invocationSource: {
+      listInvocationsWithMeta: async () => [],
+    },
+  });
+
+  assert.match(digest, /SQLite 恢复的 thread 状态/);
+  assert.match(digest, /README 缺少 clean epoch 初始化/);
+  assert.match(digest, /快速开始必须先创建 clean epoch/);
+  assert.match(digest, /SHIFT_DERIVED_DIGEST_DATA/);
+  assert.doesNotMatch(digest, /第一个 invocation/);
+});
+
 // ── buildDigest ────────────────────────────────────────────────
 
 test(
@@ -218,6 +251,16 @@ test(
       threadId: "t1",
       sessionId: "s1",
       agent: { id: "sage", label: "小智" },
+      digestSource: {
+        get() {
+          return {
+            summary: "恢复后的当前任务",
+            durableCandidates: [],
+            updatedAt: "2026-07-26T08:00:00.000Z",
+            source: "heuristic",
+          };
+        },
+      },
     });
     const packet = result.packet;
 
@@ -232,7 +275,7 @@ test(
 
     // Digest
     assert.match(packet, /<!-- Digest -->/);
-    assert.match(packet, /第一个 invocation/);
+    assert.match(packet, /恢复后的当前任务/);
 
     // Recall rule
     assert.match(packet, /<!-- 回忆铁律/);

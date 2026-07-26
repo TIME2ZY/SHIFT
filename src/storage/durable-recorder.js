@@ -1,25 +1,25 @@
 const crypto = require("node:crypto");
 const { createEventStore } = require("./event-store");
 
-function createDualWriteRecorder({ storage, eventStore = null, logger = console } = {}) {
+function createDurableRecorder({ storage, eventStore = null, logger = console } = {}) {
+  if (!storage) {
+    throw new Error("Durable recorder requires SQLite storage.");
+  }
   const events =
     eventStore ||
     createEventStore({
       storage,
-      transcript: null,
-      mode: storage ? "sqlite" : "files",
       logger,
     });
   /** Thread ids that were deleted during this process — block resurrection. */
   const deletedThreads = new Set();
 
   function attempt(operation, work) {
-    if (!storage) return null;
     try {
       return work();
     } catch (error) {
-      logger.error(`[sqlite-dual-write] ${operation} failed: ${error.message}`);
-      return null;
+      logger.error(`[sqlite-durable-write] ${operation} failed: ${error.message}`);
+      throw error;
     }
   }
 
@@ -168,8 +168,7 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
           triggerType: input.triggerType,
         });
         events.registerInvocation(input.invocationId, input.threadId);
-        // SQLite start event only here. Callers (or a later eventStore.append)
-        // own the transcript line so dual mode does not double-write JSONL.
+        // Invocation start and its first event commit atomically.
         events.append({
           threadId: input.threadId,
           invocationId: input.invocationId,
@@ -184,7 +183,6 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
           },
           createdAt: input.startedAt,
           sequenceNo: 0,
-          writeTranscript: false,
         });
         return record;
       });
@@ -200,21 +198,13 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
   }
 
   function appendInvocationEvent(invocationId, kind, payload, options = {}) {
-    // Fail-open at the dual-write boundary for stream events. EventStore itself
-    // propagates SQLite errors so transactional callers still roll back.
-    try {
-      const result = events.append({
-        invocationId,
-        kind,
-        payload,
-        ...options,
-      });
-      if (events.writeSqlite) return result.sqlite === true;
-      return result.ok;
-    } catch (error) {
-      logger.error(`[sqlite-dual-write] append invocation event failed: ${error.message}`);
-      return false;
-    }
+    const result = events.append({
+      invocationId,
+      kind,
+      payload,
+      ...options,
+    });
+    return result.sqlite === true;
   }
 
   function finishInvocation(invocationId, code, signal, endPayload = null) {
@@ -237,15 +227,12 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
           endPayload && typeof endPayload === "object"
             ? { code, signal, ...endPayload }
             : { code, signal };
-        // SQLite end event only; chat-routes still emits the richer transcript line
-        // via eventStore in dual mode (or skips transcript in sqlite mode).
         events.append({
           threadId: record.threadId,
           invocationId,
           kind: "invocation-end",
           payload,
           createdAt: record.endedAt,
-          writeTranscript: false,
         });
         return record;
       })
@@ -289,7 +276,6 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
           kind: "invocation-end",
           payload,
           createdAt: record.endedAt,
-          writeTranscript: input.writeTranscript === true,
         });
 
         let message = null;
@@ -334,9 +320,7 @@ function createDualWriteRecorder({ storage, eventStore = null, logger = console 
 
         return { invocation: record, message };
       });
-    return input.failClosed === true
-      ? finish()
-      : attempt("finish with assistant message", finish);
+    return attempt("finish with assistant message", finish);
   }
 
   function bindProviderSession(windowId, providerSessionId) {
@@ -421,4 +405,4 @@ function durableMessageMetadata(message) {
   return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
-module.exports = { createDualWriteRecorder, durableMessageMetadata };
+module.exports = { createDurableRecorder, durableMessageMetadata };
