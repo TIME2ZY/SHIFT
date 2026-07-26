@@ -307,9 +307,8 @@ outbox flusher
 - 超过容量/时长阈值时向用户显示 degraded 状态；
 - 禁止“先写两边，再用 try/catch 假装原子成功”。
 
-Outbox 的 SQLite 入队、幂等 JSONL flusher、重试和内部 health 已实现。产品 API/UI 告警
-及按保留策略清理 delivered rows 尚待后续实现；在此之前，现有 `dual` 写入仍仅被视为
-切换验证机制。
+Outbox 的 SQLite 入队、幂等 JSONL flusher、重试、产品 API/UI health 和 delivered row
+保留清理已实现。现有 `dual` 写入仍仅被视为切换验证机制。
 
 ## 11. 读取、恢复和重建
 
@@ -324,25 +323,19 @@ Outbox 的 SQLite 入队、幂等 JSONL flusher、重试和内部 health 已实�
 
 ### 11.2 显式恢复
 
-JSONL 只通过显式工具进入恢复流程：
+SQLite 备份是权威数据的恢复来源。恢复流程为：
 
 ```text
-scan → validate protocol/checksum → deduplicate by stable ID
-     → rebuild authoritative rows → apply tombstones
-     → rebuild projections → integrity audit → recovery report
+SQLite backup → restore into empty directory → integrity/foreign-key audit
+              → rebuild derived projections → storage audit → recovery report
 ```
 
-恢复必须：
+恢复必须保持 storage epoch、thread、message、invocation、memory 及其因果关系，并在完成后
+恢复为 SQLite-only 正常读取。recall、FTS、digest 和 memory search 从恢复后的 SQLite
+source tables 重建。
 
-- 幂等；
-- 保持 thread、invocation 和 event 因果关系；
-- 不覆盖更新版本的数据；
-- 遵守 delete/purge tombstone；
-- 输出 imported/skipped/conflicted/failed 统计；
-- 完成后恢复为 SQLite-only 正常读取。
-
-这里的恢复契约只适用于新 storage epoch 产生的 canonical JSONL。旧 session/transcript
-不会通过该流程导入新 epoch，也不纳入恢复承诺。
+Canonical JSONL 只承担审计归档、诊断和显式导出，不是会话真相源，也不承诺恢复完整
+thread/message/invocation。任何 JSONL 工具都不得反向覆盖 SQLite 或绕过 tombstone。
 
 ## 12. 删除、归档和隐私
 
@@ -366,7 +359,7 @@ version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢�
 1. 新写入和正常读取均以 SQLite 为唯一来源；
 2. 进程重启后 source tables 保持完整；
 3. recall、FTS、digest 和 memory search 可从新 epoch 的 source 重建；
-4. SQLite 备份、空目录恢复和完整性检查完成一次演练；
+4. SQLite 备份、空目录恢复、投影重建和完整性检查完成一次演练；
 5. canonical JSONL outbox 可重试，失败状态可观测；
 6. CI 和本机验证所需的 legacy 场景已转换为最小化、脱敏 fixture；
 7. 已生成清理清单，列出路径、数据范围、cutover time 和不可恢复性。
@@ -399,7 +392,7 @@ SHIFT_RAW_EVENT_LOG=off
 1. 新 storage epoch、schema version 和 cutover time 已落库；
 2. SQLite-only 路径覆盖正常 API；
 3. 新 epoch 的 session/message/invocation/memory 因果与完整性审计通过；
-4. 新 canonical transcript 可在空库恢复受支持的数据；
+4. SQLite backup 可在空目录恢复权威数据并通过完整性审计；
 5. tombstone 能阻止已清除或已 purge 的事件复活；
 6. recall/FTS/memory search 可从新 epoch source 重建；
 7. SQLite 失败和归档积压有可见健康状态；
@@ -413,19 +406,19 @@ SHIFT_RAW_EVENT_LOG=off
 本 ADR 接受时已知的主要差距：
 
 - `SHIFT_STORAGE_MODE` 默认仍为 `dual`；
-- `recall-service` 在 dual/files 模式读取并合并 transcript；
 - `event-store` 根据 storage mode 同步写 SQLite/transcript；
 - `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
-- chat route 仍拥有多处按 `sqlitePrimary` 分支；
+- chat route 仍拥有按 storage authority 分支；
 - session map/provider resume 仍有 legacy JSON 路径；
-- outbox backlog health 尚未暴露至产品 API/UI；
 - project-memory materialization workflow 尚未实现。
 
 已完成的边界：`sqlite` 模式的 session/message/invocation 在线读取不再读取或回退 legacy
 session/transcript；SQLite 读取失败会显式失败或返回 `unavailable`。在线 memory replay
 同样禁止在 `sqlite` 模式扫描旧 transcript。
 SQLite canonical events 已与权威事件在同一事务写入 outbox；后台 flusher 使用稳定 event
-ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。
+ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。outbox health 已暴露到
+产品 API/UI，delivered rows 具备有界保留清理策略。`dual` 的 session 和 invocation
+在线读取以 legacy 文件为权威且不再按完整度仲裁；SQLite 搜索投影有独立、明确的 owner。
 
 这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大
 平级双源范围。
@@ -438,7 +431,7 @@ ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。
 4. 增加 transactional outbox 和 archive health；
 5. 将 session/message/invocation 正常读取切到 SQLite；
 6. 将 recall/detail 正常读取切到 SQLite；
-7. 实现新 epoch canonical JSONL 的 recover/rebuild 工具；
+7. 实现 SQLite backup 的空目录恢复演练和 recovery report；
 8. 将 transcript 开关与 storage mode 解耦；
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；
 10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；

@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",
+    "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "vendor:md": "node scripts/vendor-md.js"
   },
   "devDependencies": {
