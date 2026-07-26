@@ -295,6 +295,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
     assert.equal(eventHits[0].metadata.invocationId, targetInvocationId);
 
     const service = createRecallService({
+      mode: "sqlite",
       storage,
       transcript: {
         listInvocationsWithMeta: async () => [],
@@ -483,7 +484,7 @@ test("database exceptions do not present memory as empty when file data exists",
   assert.equal(typeof searched[0].score, "number");
   const page = await service.readInvocationPage("thread-1", "file-inv");
   assert.equal(page.total, 1);
-  assert.ok(errors.length >= 2);
+  assert.equal(errors.length, 1, "only the SQLite-owned search projection probes the database");
   assert.match(errors[0], /sqlite-recall/);
 });
 

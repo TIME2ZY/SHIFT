@@ -110,6 +110,17 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
+    const invocationId = storage.invocations.listForThread(session.id)[0].id;
+    const replay = await apiFetch(
+      `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
+    ).then((response) => response.json());
+    assert.deepEqual(
+      replay.events.map((event) => event.kind),
+      ["invocation-start", "text.delta", "invocation-end"]
+    );
+
+    // Search has its own SQLite-owned projections; removing JSONL proves this
+    // does not change thread/message/invocation authority in dual mode.
     fs.rmSync(process.env.SHIFT_TRANSCRIPT_DIR, { recursive: true, force: true });
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
@@ -123,15 +134,6 @@ test("chat keeps file reads while mirroring durable records into SQLite", async 
     const userHit = userSearch.hits.find((hit) => hit.sourceKind === "message");
     assert.ok(userHit);
     assert.equal(userHit.kind, "message.user");
-
-    const invocationId = storage.invocations.listForThread(session.id)[0].id;
-    const replay = await apiFetch(
-      `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
-    ).then((response) => response.json());
-    assert.deepEqual(
-      replay.events.map((event) => event.kind),
-      ["invocation-start", "text.delta", "invocation-end"]
-    );
 
     const deleteResponse = await apiFetch(`${baseUrl}/api/sessions/${session.id}`, {
       method: "DELETE",
@@ -378,6 +380,11 @@ test("sqlite mode restores sessions after file loss and continues the message se
         prompt: "durable first prompt",
       }),
     }).then((response) => response.text());
+    assert.equal(
+      fs.existsSync(path.join(tmpDir, "invocations.json")),
+      false,
+      "sqlite mode must not create the legacy invocation registry"
+    );
     await new Promise((resolve) => firstServer.close(resolve));
     firstServer = null;
 

@@ -63,14 +63,9 @@ function createFixture(fileOverrides = {}) {
   return { storage, service: createRecallService({ storage, transcript }) };
 }
 
-test("recall service serves SQLite invocation metadata and event search", async () => {
+test("dual recall search uses the SQLite-owned search projection", async () => {
   const { storage, service } = createFixture();
   try {
-    const invocations = await service.listInvocationsWithMeta("thread-1");
-    assert.equal(invocations[0].invocationId, "invocation-1");
-    assert.equal(invocations[0].eventCount, 1);
-    assert.equal(invocations[0].state, null);
-
     const hits = await service.searchTranscript("thread-1", "sqlite memory");
     assert.ok(hits.some((hit) => hit.invocationId === "invocation-1" && hit.kind === "text.delta"));
     assert.ok(hits.every((hit) => typeof hit.layer === "string" && typeof hit.score === "number"));
@@ -160,7 +155,7 @@ test("files mode can still merge file hits when requested", async () => {
   }
 });
 
-test("invocation listing keeps the more complete file record", async () => {
+test("dual invocation listing uses the file authority without SQLite arbitration", async () => {
   const fileRecord = {
     invocationId: "invocation-1",
     agent: "codex",
@@ -180,7 +175,7 @@ test("invocation listing keeps the more complete file record", async () => {
   }
 });
 
-test("read invocation prefers the more complete source", async () => {
+test("dual invocation detail uses the file authority without SQLite arbitration", async () => {
   const fileEvent = { ts: "file", kind: "extra", payload: {} };
   const { storage, service } = createFixture({
     readInvocationPage: async () => ({
@@ -196,6 +191,7 @@ test("read invocation prefers the more complete source", async () => {
     assert.equal(filePreferred.events[1], fileEvent);
 
     const sqliteOnly = createRecallService({
+      mode: "sqlite",
       storage,
       transcript: {
         listInvocationsWithMeta: async () => [],
@@ -211,7 +207,7 @@ test("read invocation prefers the more complete source", async () => {
   }
 });
 
-test("recall service uses SQLite when transcript reads fail", async () => {
+test("sqlite recall uses SQLite when transcript reads fail", async () => {
   const errors = [];
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "thread-1" });
@@ -241,6 +237,7 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     throw new Error("transcript unavailable");
   };
   const service = createRecallService({
+    mode: "sqlite",
     storage,
     transcript: {
       listInvocationsWithMeta: fail,
@@ -253,9 +250,7 @@ test("recall service uses SQLite when transcript reads fail", async () => {
     assert.equal((await service.listInvocationsWithMeta("thread-1")).length, 1);
     assert.equal((await service.searchTranscript("thread-1", "file failure")).length, 1);
     assert.equal((await service.readInvocationPage("thread-1", "invocation-1")).total, 1);
-    // dual/sqlite search no longer probes the file index when SQLite is healthy.
-    assert.equal(errors.length, 2);
-    assert.ok(errors.every((message) => message.includes("file-recall")));
+    assert.equal(errors.length, 0);
   } finally {
     storage.close();
   }

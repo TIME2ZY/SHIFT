@@ -143,7 +143,8 @@ function createChatRoutes({
   const events = eventStore || durable.eventStore || NOOP_EVENT_STORE;
   const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
   const log = logger || options?.logger || console;
-  const sqlitePrimary = storageMode === "sqlite";
+  // dual is a validation mirror, not an alternate online authority.
+  const sqliteAuthoritative = storageMode === "sqlite";
   return async function handleChatRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/invoke") {
       let args;
@@ -485,31 +486,32 @@ function createChatRoutes({
         const queuedCause = threadCtx.a2aCauses[i] || null;
         const parentInvocationId =
           i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
-        const triggerType =
-          i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
+        const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
         const triggerMessageId =
           i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
-        invocationEvents.set(invocationId, {
-          invocationId,
-          sessionId,
-          agent,
-          startedAt,
-          endedAt: null,
-          state: "active",
-          events: [
-            {
-              ts: startedAt,
-              kind: "invocation-start",
-              payload: {
-                agent,
-                resumeSessionId: resumeSessionId || null,
-                parentInvocationId,
-                triggerMessageId,
-                triggerType,
+        if (!sqliteAuthoritative) {
+          invocationEvents.set(invocationId, {
+            invocationId,
+            sessionId,
+            agent,
+            startedAt,
+            endedAt: null,
+            state: "active",
+            events: [
+              {
+                ts: startedAt,
+                kind: "invocation-start",
+                payload: {
+                  agent,
+                  resumeSessionId: resumeSessionId || null,
+                  parentInvocationId,
+                  triggerMessageId,
+                  triggerType,
+                },
               },
-            },
-          ],
-        });
+            ],
+          });
+        }
         const durableRun = durable.startInvocation({
           session,
           invocationId,
@@ -525,7 +527,7 @@ function createChatRoutes({
           triggerMessageId,
           triggerType,
         });
-        if (sqlitePrimary && !durableRun) {
+        if (sqliteAuthoritative && !durableRun) {
           throw new Error(`Failed to persist invocation start for ${invocationId}.`);
         }
         const healthTracker = contextHealth.makeTracker(agent, {
@@ -761,9 +763,11 @@ function createChatRoutes({
           } catch (error) {
             log.error?.(`[event-store] durable event failed: ${error.message}`);
             // sqlite single-write: surface failure; dual keeps fail-open stream path.
-            if (sqlitePrimary) throw error;
+            if (sqliteAuthoritative) throw error;
           }
-          recordInvocationEvent(invocationEvents, invocationId, kind, payload);
+          if (!sqliteAuthoritative) {
+            recordInvocationEvent(invocationEvents, invocationId, kind, payload);
+          }
         };
         const durableCoalescer = createStreamDeltaCoalescer({
           ...resolveCoalesceOptionsFromEnv(),
@@ -881,8 +885,10 @@ function createChatRoutes({
           durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
         }
 
-        finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
-        persistInvocations();
+        if (!sqliteAuthoritative) {
+          finalizeInvocationEvent(invocationEvents, invocationId, code, signal);
+          persistInvocations();
+        }
 
         const invocationUsage = invocationUsageDelta(
           healthTracker.snapshot().billing,
@@ -935,7 +941,7 @@ function createChatRoutes({
                 session,
                 windowId: durableRun?.window?.id || null,
                 message: assistantMessage,
-                failClosed: sqlitePrimary,
+                failClosed: sqliteAuthoritative,
               })
             : null;
 
@@ -950,7 +956,7 @@ function createChatRoutes({
             payload: { code, signal, ...endPayload },
             writeSqlite: false,
           });
-          if (sqlitePrimary) {
+          if (sqliteAuthoritative) {
             session = {
               ...session,
               messages: [...(session.messages || []), assistantMessage],
@@ -965,7 +971,7 @@ function createChatRoutes({
             if (afterAssistant) session = afterAssistant;
           }
         } else {
-          if (sqlitePrimary) {
+          if (sqliteAuthoritative) {
             throw new Error(`Failed to atomically persist completion for ${invocationId}.`);
           }
           // files/dual compatibility path — split writes are not used by

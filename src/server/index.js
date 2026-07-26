@@ -61,7 +61,6 @@ const {
   readSessions,
   writeSessions,
   createSession,
-  restoreSession,
   ensureSession,
   listSessions,
   getSession,
@@ -143,7 +142,10 @@ function createServer(options = {}) {
   const durableRecorder = storageContext.recorder;
   const eventStore = storageContext.eventStore;
   const sqliteSessionService = storageContext.sessionService;
-  const sqlitePrimary = storageContext.mode === "sqlite" && Boolean(sqliteSessionService);
+  // Thread/message/invocation authority is explicit: dual keeps legacy files
+  // authoritative and uses SQLite as their validation mirror; sqlite never
+  // reads or writes those legacy stores.
+  const sqliteAuthoritative = storageContext.mode === "sqlite" && Boolean(sqliteSessionService);
   const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
@@ -165,53 +167,49 @@ function createServer(options = {}) {
     logger,
   });
   const activeInvocations = new Map();
-  const invocationRegistry = createInvocationRegistry({
-    file: invocationsFile,
-    readFile: readInvocationsFile,
-    writeFile: writeInvocationsFile,
-  });
+  const invocationRegistry = sqliteAuthoritative
+    ? {
+        events: new Map(),
+        persist() {},
+        deleteForSession() {},
+      }
+    : createInvocationRegistry({
+        file: invocationsFile,
+        readFile: readInvocationsFile,
+        writeFile: writeInvocationsFile,
+      });
   const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
   });
   _previewManagers.add(worktreeManager);
 
   function createSessionDual(file) {
-    if (sqlitePrimary) return sqliteSessionService.createSession(file);
+    if (sqliteAuthoritative) return sqliteSessionService.createSession(file);
     const session = createSession(file);
     durableRecorder.mirrorThread(session);
     return session;
   }
 
-  function ensureFileShadow(file, sessionId) {
-    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
-    const existing = getSession(file, sessionId);
-    if (existing || storageContext.mode !== "sqlite") return existing;
-    const recovered = sessionReader.getSession(file, sessionId);
-    return recovered ? restoreSession(file, recovered) : null;
-  }
-
   function updateProjectDirDual(file, sessionId, projectDir) {
-    if (sqlitePrimary)
+    if (sqliteAuthoritative)
       return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
-    ensureFileShadow(file, sessionId);
     const session = setSessionProjectDir(file, sessionId, projectDir);
     durableRecorder.mirrorThread(session);
     return session;
   }
 
   function updateWorktreeDual(file, sessionId, worktree) {
-    if (sqlitePrimary) return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
-    ensureFileShadow(file, sessionId);
+    if (sqliteAuthoritative)
+      return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
     const session = setSessionWorktree(file, sessionId, worktree);
     durableRecorder.mirrorThread(session);
     return session;
   }
 
   function appendToSessionDual(file, sessionId, message, appendOptions = {}) {
-    if (sqlitePrimary) {
+    if (sqliteAuthoritative) {
       return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
     }
-    if (appendOptions.allowCreate === false) ensureFileShadow(file, sessionId);
     const session = appendToSession(file, sessionId, message, appendOptions);
     durableRecorder.mirrorLastMessage(session, {
       windowId: appendOptions.windowId,
@@ -221,26 +219,25 @@ function createServer(options = {}) {
   }
 
   function deleteSessionDual(file, sessionId) {
-    if (sqlitePrimary) {
+    if (sqliteAuthoritative) {
       const deleted = sqliteSessionService.deleteSession(file, sessionId);
       // Keep recorder/event-store process guards in sync even when the row is
       // already gone (cascade deleted with the thread).
       durableRecorder.deleteThread(sessionId);
       return deleted;
     }
-    ensureFileShadow(file, sessionId);
     const deleted = deleteSession(file, sessionId);
     if (deleted) durableRecorder.deleteThread(sessionId);
     return deleted;
   }
 
   function getSessionForMode(file, sessionId) {
-    if (sqlitePrimary) return sqliteSessionService.getSession(file, sessionId);
+    if (sqliteAuthoritative) return sqliteSessionService.getSession(file, sessionId);
     return sessionReader.getSession(file, sessionId);
   }
 
   function listSessionsForMode(file) {
-    if (sqlitePrimary) return sqliteSessionService.listSessions(file);
+    if (sqliteAuthoritative) return sqliteSessionService.listSessions(file);
     return sessionReader.listSessions(file);
   }
 

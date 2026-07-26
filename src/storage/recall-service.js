@@ -67,7 +67,8 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
   }
 
   async function listInvocationsWithMeta(threadId) {
-    // sqlite mode is strict single-store: never probe transcript for online reads.
+    // Invocation authority follows the storage mode. dual reads the legacy
+    // transcript only; SQLite rows are a validation mirror audited offline.
     if (mode === "sqlite" && storage) {
       const sqliteRecords = readSqlite("list invocations", () =>
         storage.invocations.listForThreadWithMeta(threadId)
@@ -76,29 +77,7 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
         .map(invocationFromSqlite)
         .sort((a, b) => String(b.startedAt || "").localeCompare(a.startedAt || ""));
     }
-
-    const sqliteRecords = trySqlite("list invocations", () =>
-      storage.invocations.listForThreadWithMeta(threadId)
-    );
-    const fileRecords = await tryFile(
-      "list invocations",
-      () => transcript.listInvocationsWithMeta(threadId),
-      []
-    );
-    if (sqliteRecords === undefined) return fileRecords;
-
-    const mappedSqlite = sqliteRecords.map(invocationFromSqlite);
-    const merged = new Map();
-    for (const record of fileRecords) merged.set(record.invocationId, record);
-    for (const record of mappedSqlite) {
-      const fileRecord = merged.get(record.invocationId);
-      if (!fileRecord || record.eventCount >= fileRecord.eventCount) {
-        merged.set(record.invocationId, record);
-      }
-    }
-    return [...merged.values()].sort((a, b) =>
-      String(b.startedAt || "").localeCompare(a.startedAt || "")
-    );
+    return tryFile("list invocations", () => transcript.listInvocationsWithMeta(threadId), []);
   }
 
   async function searchTranscript(threadId, query, options = {}) {
@@ -747,22 +726,18 @@ function createRecallService({ storage, transcript, mode = "dual", logger = cons
       };
     };
 
-    // Strict single-store: never fall back to transcript in sqlite mode.
+    // No completeness arbitration: sqlite reads SQLite; dual/files read the
+    // transcript. Divergence belongs in the offline audit, not request paths.
     if (mode === "sqlite" && storage) {
       const sqlitePage = readSqlite("read invocation page", readPage);
       if (sqlitePage === null) return emptyPage;
       return sqlitePage;
     }
-
-    const sqlitePage = trySqlite("read invocation page", readPage);
-    const filePage = await tryFile(
+    return tryFile(
       "read invocation page",
       () => transcript.readInvocationPage(threadId, invocationId, options),
       emptyPage
     );
-    if (sqlitePage === undefined || sqlitePage === null) return filePage;
-    if (sqlitePage.total < filePage.total) return filePage;
-    return sqlitePage;
   }
 
   return {

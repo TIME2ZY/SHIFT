@@ -125,3 +125,20 @@ test("files mode reads the file store while sqlite failures remain visible", () 
     storage.close();
   }
 });
+
+test("dual session reads use files while SQLite remains a validation mirror", () => {
+  const { storage, fileSession, fileOnly, fileStore } = createFixture();
+  try {
+    const service = createSessionReadService({
+      mode: "dual",
+      storage,
+      fileStore,
+    });
+    assert.equal(service.getSession("sessions.json", "thread-1"), fileSession);
+    const sessions = service.listSessions("sessions.json");
+    assert.equal(sessions.length, 2);
+    assert.equal(sessions[1], fileOnly);
+  } finally {
+    storage.close();
+  }
+});
