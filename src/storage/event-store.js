@@ -15,6 +15,7 @@ function createEventStore({
   storage = null,
   transcript = null,
   mode = "dual",
+  auditTranscript = true,
   logger = console,
 } = {}) {
   if (!new Set(["files", "dual", "sqlite"]).has(mode)) {
@@ -23,6 +24,7 @@ function createEventStore({
 
   const writeSqlite = (mode === "dual" || mode === "sqlite") && Boolean(storage);
   const writeTranscript = (mode === "files" || mode === "dual") && Boolean(transcript);
+  const archiveCanonical = mode === "sqlite" && auditTranscript === true;
   const unavailableInvocations = new Set();
   const invocationThreads = new Map();
   const deletedThreads = new Set();
@@ -166,7 +168,7 @@ function createEventStore({
         createdAt: event.createdAt,
       });
       const outboxId =
-        mode === "sqlite" && storage.outbox
+        archiveCanonical && storage.outbox
           ? storage.outbox.enqueue({
               threadId: invocation.threadId,
               invocationId,
@@ -205,6 +207,7 @@ function createEventStore({
     enabled: writeSqlite || writeTranscript,
     writeSqlite,
     writeTranscript,
+    archiveCanonical,
     append,
     registerInvocation,
     markInvocationUnavailable,

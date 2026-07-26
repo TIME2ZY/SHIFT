@@ -22,6 +22,10 @@ test("storage health view maps available, degraded, and unavailable states", () 
   assert.equal(degraded.label, "审计积压 3");
   assert.match(degraded.title, /disk full/);
   assert.equal(viewModel({ storage: {} }).label, "不可用");
+  assert.equal(
+    viewModel({ storage: { mode: "sqlite", outbox: { state: "disabled" } } }).label,
+    "审计关闭"
+  );
 });
 
 test("storage health render updates the header chip", () => {

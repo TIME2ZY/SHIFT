@@ -14,6 +14,7 @@ test("storage health route exposes mode, epoch, and outbox health", async () => 
   const handle = createStorageRoutes({
     storageContext: {
       mode: "sqlite",
+      auditTranscript: true,
       storage: {
         metadata: {
           getCurrent: () => ({
@@ -41,6 +42,7 @@ test("storage health route exposes mode, epoch, and outbox health", async () => 
   );
   assert.equal(res.status, 200);
   assert.equal(res.body.storage.mode, "sqlite");
+  assert.equal(res.body.storage.auditTranscript, true);
   assert.equal(res.body.storage.epoch.epochId, "epoch-1");
   assert.equal(res.body.storage.outbox.pending, 2);
 });

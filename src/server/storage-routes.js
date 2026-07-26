@@ -18,6 +18,7 @@ function createStorageRoutes({
     return {
       storage: {
         mode: storageContext.mode,
+        auditTranscript: Boolean(storageContext.auditTranscript),
         epoch,
         outbox: storageContext.outboxHealth?.() || {
           state: "unavailable",

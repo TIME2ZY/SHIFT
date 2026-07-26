@@ -198,3 +198,30 @@ test("event store respects writeSqlite/writeTranscript overrides", () => {
     storage.close();
   }
 });
+
+test("sqlite audit transcript can be disabled without disabling authoritative events", () => {
+  const storage = createStorage({ file: ":memory:" });
+  seedInvocation(storage);
+  const eventStore = createEventStore({
+    storage,
+    mode: "sqlite",
+    auditTranscript: false,
+  });
+
+  try {
+    const result = eventStore.append({
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      kind: "text.delta",
+      payload: { text: "SQLite remains authoritative" },
+    });
+    assert.equal(result.sqlite, true);
+    assert.equal(result.outbox, false);
+    assert.equal(eventStore.archiveCanonical, false);
+    assert.equal(storage.invocations.listEvents("inv-1").length, 1);
+    assert.equal(storage.outbox.listPending().length, 0);
+  } finally {
+    eventStore.close();
+    storage.close();
+  }
+});

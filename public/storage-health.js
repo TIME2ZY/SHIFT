@@ -7,7 +7,13 @@
     const pending = Number(outbox.pending || 0);
     const state = outbox.state || "unavailable";
     const label =
-      state === "available" ? "正常" : state === "degraded" ? `审计积压 ${pending}` : "不可用";
+      state === "available"
+        ? "正常"
+        : state === "disabled"
+          ? "审计关闭"
+          : state === "degraded"
+            ? `审计积压 ${pending}`
+            : "不可用";
     const details = [
       `模式: ${storage.mode || "unknown"}`,
       outbox.oldestPendingAt ? `最早积压: ${outbox.oldestPendingAt}` : "",

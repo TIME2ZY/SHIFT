@@ -387,6 +387,10 @@ SHIFT_AUDIT_TRANSCRIPT=on
 SHIFT_RAW_EVENT_LOG=off
 ```
 
+`SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
+outbox row，health 显示 `disabled`，不会形成无法投递的假积压。`files/dual` 在退出产品
+模式前仍依赖 legacy transcript，其兼容写入不受该审计开关控制。
+
 `dual` 退出条件：
 
 1. 新 storage epoch、schema version 和 cutover time 已落库；

@@ -9,6 +9,11 @@ const { createSqliteSessionService } = require("./sqlite-session-service");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
   const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "dual";
+  const auditTranscript = resolveBoolean(
+    options.auditTranscript,
+    process.env[ENV.AUDIT_TRANSCRIPT],
+    true
+  );
   if (!new Set(["files", "dual", "sqlite"]).has(mode)) {
     throw new Error(`Unsupported storage mode "${mode}". Use files, dual, or sqlite.`);
   }
@@ -21,6 +26,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     });
     return {
       mode,
+      auditTranscript: false,
       storage: null,
       recorder: createDualWriteRecorder({ eventStore, logger }),
       eventStore,
@@ -60,12 +66,17 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     storage,
     transcript: options.transcript || null,
     mode,
+    auditTranscript,
     logger,
   });
   const recorder = createDualWriteRecorder({ storage, eventStore, logger });
   const sessionService = storage ? createSqliteSessionService({ storage, logger }) : null;
+  const pendingOutboxAtStart = Number(storage?.outbox?.health?.().pending || 0);
   const outboxFlusher =
-    mode === "sqlite" && storage?.outbox && options.transcript?.appendCanonicalEvent
+    mode === "sqlite" &&
+    (auditTranscript || pendingOutboxAtStart > 0) &&
+    storage?.outbox &&
+    options.transcript?.appendCanonicalEvent
       ? createOutboxFlusher({
           outbox: storage.outbox,
           transcript: options.transcript,
@@ -80,11 +91,23 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
 
   return {
     mode,
+    auditTranscript: mode === "sqlite" && auditTranscript,
     storage,
     recorder,
     eventStore,
     outboxFlusher,
-    outboxHealth: () => storage?.outbox?.health?.() || { state: "unavailable", pending: 0 },
+    outboxHealth: () => {
+      const health = storage?.outbox?.health?.() || { state: "unavailable", pending: 0 };
+      if (mode === "sqlite" && !auditTranscript && health.pending === 0) {
+        return {
+          state: "disabled",
+          pending: 0,
+          oldestPendingAt: null,
+          lastError: null,
+        };
+      }
+      return health;
+    },
     cleanupDeliveredOutbox(options) {
       if (!storage?.outbox?.cleanupDelivered) {
         return { available: false, deleted: 0 };
@@ -123,4 +146,14 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   };
 }
 
-module.exports = { createServerStorage };
+function resolveBoolean(explicit, envValue, fallback) {
+  if (typeof explicit === "boolean") return explicit;
+  const normalized = String(envValue || "")
+    .trim()
+    .toLowerCase();
+  if (["1", "true", "on", "yes"].includes(normalized)) return true;
+  if (["0", "false", "off", "no"].includes(normalized)) return false;
+  return fallback;
+}
+
+module.exports = { createServerStorage, resolveBoolean };
