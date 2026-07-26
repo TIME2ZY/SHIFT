@@ -2,6 +2,7 @@
 const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE } = require("../src/shared/runtime-paths");
 const { runSqliteRecoveryDrill } = require("../src/storage/recovery-drill");
+const { verifyRestoredSqliteApi } = require("../src/server/recovery-verification");
 
 function parseArgs(argv) {
   const options = {
@@ -55,7 +56,10 @@ async function main() {
     return;
   }
 
-  const report = await runSqliteRecoveryDrill(options);
+  const report = await runSqliteRecoveryDrill({
+    ...options,
+    verifyProductApi: verifyRestoredSqliteApi,
+  });
   if (options.json) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -68,6 +72,10 @@ async function main() {
     console.log(
       `integrity=${report.integrity.ok ? "ok" : "failed"} audit=${report.audit.ok ? "ok" : "failed"} mismatches=${report.mismatches.length}`
     );
+    console.log(
+      `causality=${report.causality.ok ? "ok" : "failed"} projections=${report.projections.afterRebuild.ok ? "ok" : "failed"} api=${report.productApi.ok ? "ok" : "failed"}`
+    );
+    console.log(`report=${report.reportFile}`);
   }
   if (!report.ok) process.exitCode = 1;
 }

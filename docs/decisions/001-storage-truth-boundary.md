@@ -336,6 +336,14 @@ SQLite backup → restore into empty directory → integrity/foreign-key audit
 恢复为 SQLite-only 正常读取。recall、FTS、digest 和 memory search 从恢复后的 SQLite
 source tables 重建。
 
+第五阶段 B 已于 2026-07-26 对 active clean epoch 完成一次真实空目录恢复验收。验收工具
+逐表比较权威 source rows 的行数与确定性内容指纹，检查 foreign key、跨 thread 因果关系
+和 sequence counter，重建 recall/FTS、memory search/FTS 与 digest，并用恢复库在随机
+端口启动 SQLite-only 产品服务验证 health、session、message 和 memory/context API。
+结果为 0 source mismatch、0 causality violation、0 audit error/warning，且未创建 legacy
+session/invocation/session-map。摘要见
+`docs/acceptance/005b-sqlite-recovery-20260726.md`。
+
 Canonical JSONL 只承担审计归档、诊断和显式导出，不是会话真相源，也不承诺恢复完整
 thread/message/invocation。任何 JSONL 工具都不得反向覆盖 SQLite 或绕过 tombstone。
 
@@ -457,10 +465,10 @@ transcript 物理分离。`dual` 的 session 和 invocation
 4. 增加 transactional outbox 和 archive health；
 5. 将 session/message/invocation 正常读取切到 SQLite；
 6. 将 recall/detail 正常读取切到 SQLite；
-7. 实现 SQLite backup 的空目录恢复演练和 recovery report；
+7. 实现 SQLite backup 的空目录恢复演练和 recovery report；（已完成）
 8. 将 transcript 开关与 storage mode 解耦；
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
-10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；
+10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（恢复演练已完成）
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
 
 每一步都必须可以独立回滚，并在进入下一步前有数据审计证据。

@@ -5,7 +5,12 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
-const { runSqliteRecoveryDrill } = require("../../src/storage/recovery-drill");
+const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const {
+  runSqliteRecoveryDrill,
+  inspectCausality,
+} = require("../../src/storage/recovery-drill");
+const { verifyRestoredSqliteApi } = require("../../src/server/recovery-verification");
 
 function seed(storage) {
   storage.threads.create({ id: "thread-1", title: "Recovery source" });
@@ -42,6 +47,7 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-recovery-drill-"));
   const sourceFile = path.join(root, "source", "memory.sqlite");
   const drillDir = path.join(root, "drill");
+  prepareCleanEpoch({ file: sourceFile });
   const storage = createStorage({ file: sourceFile });
   try {
     seed(storage);
@@ -50,11 +56,20 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
   }
 
   try {
-    const report = await runSqliteRecoveryDrill({ sourceFile, drillDir });
+    const report = await runSqliteRecoveryDrill({
+      sourceFile,
+      drillDir,
+      verifyProductApi: verifyRestoredSqliteApi,
+    });
     assert.equal(report.ok, true);
     assert.equal(report.mismatches.length, 0);
     assert.equal(report.integrity.ok, true);
     assert.equal(report.audit.ok, true);
+    assert.equal(report.causality.ok, true);
+    assert.equal(report.projections.afterRebuild.ok, true);
+    assert.equal(report.productApi.ok, true);
+    assert.equal(report.productApi.checks.sqliteOnly.ok, true);
+    assert.equal(fs.existsSync(report.reportFile), true);
     assert.equal(report.rebuilt.threads, 1);
     assert.equal(report.rebuilt.digests, 1);
     assert.equal(report.restored.counts.threads, 1);
@@ -71,6 +86,35 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
       restored.close();
     }
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("causality inspection detects cross-thread relationships beyond foreign keys", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-recovery-causality-"));
+  const storage = createStorage({ file: path.join(root, "memory.sqlite") });
+  try {
+    storage.threads.create({ id: "thread-1" });
+    storage.threads.create({ id: "thread-2" });
+    const window = storage.windows.create({
+      id: "window-1",
+      threadId: "thread-1",
+      agentId: "codex",
+      providerKey: "codex:gpt",
+      workspaceKey: "base",
+      generation: 1,
+      capacityTokens: 1000,
+    });
+    storage.db.prepare(`
+      INSERT INTO invocations
+        (id, thread_id, window_id, agent_id, state, started_at, next_event_sequence)
+      VALUES ('bad-invocation', 'thread-2', ?, 'codex', 'active', ?, 0)
+    `).run(window.id, new Date().toISOString());
+    const result = inspectCausality(storage.db);
+    assert.equal(result.ok, false);
+    assert.equal(result.violations["invocation-window-thread"], 1);
+  } finally {
+    storage.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
