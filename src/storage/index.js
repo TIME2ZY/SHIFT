@@ -9,6 +9,7 @@ const { createMemorySuggestionService } = require("./memory-suggestion-service")
 const { createMessageRepository } = require("./message-repository");
 const { createProjectEvidenceRepository, reindexThreadProject } = require("./project-evidence");
 const { createRecallRepository } = require("./recall-repository");
+const { createStorageMetadataRepository } = require("./storage-metadata-repository");
 const { createThreadRepository } = require("./thread-repository");
 const { createWindowRepository } = require("./window-repository");
 
@@ -28,6 +29,7 @@ function createStorage(options = {}) {
     projectEvidence: createProjectEvidenceRepository(db),
     memoryEvents,
     recall,
+    metadata: createStorageMetadataRepository(db),
     transaction(work) {
       return withTransaction(db, work);
     },
