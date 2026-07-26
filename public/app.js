@@ -445,6 +445,9 @@
     const sessionId = state.currentSessionId;
     if (!sessionId || typeof recallPanel.setMemories !== "function") {
       if (typeof recallPanel.setMemories === "function") recallPanel.setMemories([]);
+      if (typeof memoryPanel.setContextSnapshot === "function") {
+        memoryPanel.setContextSnapshot(null);
+      }
       return;
     }
     try {
@@ -454,8 +457,16 @@
       });
       if (state.currentSessionId !== sessionId) return;
       recallPanel.setMemories(data.memories || []);
+      if (typeof memoryPanel.setContextSnapshot === "function") {
+        memoryPanel.setContextSnapshot(data.context || null);
+      }
     } catch {
-      if (state.currentSessionId === sessionId) recallPanel.setMemories([]);
+      if (state.currentSessionId === sessionId) {
+        recallPanel.setMemories([]);
+        if (typeof memoryPanel.setContextSnapshot === "function") {
+          memoryPanel.setContextSnapshot(null);
+        }
+      }
     }
   }
 

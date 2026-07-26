@@ -352,6 +352,7 @@ function createChatRoutes({
         generation: initialWindow?.generation || 1,
         prompt: rawPrompt,
         invocationSource: recallService || transcript,
+        digestSource: storage?.digests || null,
         retrieveSource: recallService || null,
         memorySource: memoryService || null,
       });

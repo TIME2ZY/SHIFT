@@ -38,10 +38,13 @@
         bind() {},
         setInjectPreview() {},
         clearInjectPreview() {},
+        setContextSnapshot() {},
       };
     }
 
     let loadToken = 0;
+    let injectPreview = null;
+    let contextSnapshot = null;
 
     function toast(message, isError) {
       if (typeof onToast === "function") onToast(message, isError);
@@ -92,13 +95,8 @@
       }
     }
 
-    function renderInjectPreview(payload) {
-      if (!injectEl) return;
-      if (!payload) {
-        injectEl.hidden = true;
-        injectEl.innerHTML = "";
-        return;
-      }
+    function injectMarkup(payload) {
+      if (!payload) return "";
       const count = Number(payload.count) || (payload.items || []).length || 0;
       const items = Array.isArray(payload.items) ? payload.items : [];
       const availability =
@@ -135,16 +133,71 @@
               availability.state
             )}">${escHtml(availability.reason || availability.state)}</div>`
           : "";
-      injectEl.hidden = false;
-      injectEl.innerHTML = `<div class="memory-inject-title">${escHtml(title)}</div>${warn}${list}`;
+      return `<section class="memory-inject-block"><div class="memory-inject-title">${escHtml(
+        title
+      )}</div>${warn}${list}</section>`;
+    }
+
+    function contextMarkup(payload) {
+      const context = payload?.context || payload;
+      if (!context || typeof context !== "object") return "";
+      const digest = context.digest && typeof context.digest === "object" ? context.digest : null;
+      const handoffs = Array.isArray(context.handoffs) ? context.handoffs.slice(0, 5) : [];
+      const suggestions = Array.isArray(context.pendingSuggestions)
+        ? context.pendingSuggestions.slice(0, 5)
+        : [];
+      if (!digest && handoffs.length === 0 && suggestions.length === 0) return "";
+
+      const digestHtml = digest?.summary
+        ? `<div class="memory-context-digest">${escHtml(String(digest.summary).slice(0, 1600))}</div>`
+        : "";
+      const handoffHtml =
+        handoffs.length > 0
+          ? `<div class="memory-context-subtitle">当前交接</div><ul class="memory-inject-list">${handoffs
+              .map(
+                (item) =>
+                  `<li><span class="memory-kind">${escHtml(
+                    KIND_LABELS.handoff
+                  )}</span> ${escHtml(String(item.content || "").slice(0, 240))}</li>`
+              )
+              .join("")}</ul>`
+          : "";
+      const suggestionHtml =
+        suggestions.length > 0
+          ? `<div class="memory-context-subtitle">待确认候选</div><ul class="memory-inject-list">${suggestions
+              .map(
+                (item) =>
+                  `<li><span class="memory-kind">${escHtml(
+                    KIND_LABELS[item.proposedKind] || item.proposedKind || "候选"
+                  )}</span> ${escHtml(String(item.content || "").slice(0, 200))}</li>`
+              )
+              .join("")}</ul>`
+          : "";
+      return `<section class="memory-context-snapshot"><div class="memory-inject-title">SQLite 恢复的上下文</div>${digestHtml}${handoffHtml}${suggestionHtml}</section>`;
+    }
+
+    function renderStatus() {
+      if (!injectEl) return;
+      const markup = [injectMarkup(injectPreview), contextMarkup(contextSnapshot)]
+        .filter(Boolean)
+        .join("");
+      injectEl.hidden = !markup;
+      injectEl.innerHTML = markup;
     }
 
     function setInjectPreview(payload) {
-      renderInjectPreview(payload);
+      injectPreview = payload || null;
+      renderStatus();
     }
 
     function clearInjectPreview() {
-      renderInjectPreview(null);
+      injectPreview = null;
+      renderStatus();
+    }
+
+    function setContextSnapshot(payload) {
+      contextSnapshot = payload || null;
+      renderStatus();
     }
 
     function renderList(memories) {
@@ -268,7 +321,7 @@
       if (includeRetiredEl) includeRetiredEl.addEventListener("change", () => load());
     }
 
-    return { load, bind, setInjectPreview, clearInjectPreview };
+    return { load, bind, setInjectPreview, clearInjectPreview, setContextSnapshot };
   }
 
   const api = { createMemoryPanel, KIND_LABELS, STATUS_LABELS, PRODUCT_KINDS };

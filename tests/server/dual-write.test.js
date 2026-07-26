@@ -34,7 +34,7 @@ function successfulSpawn() {
   return child;
 }
 
-function providerSessionSpawn(calls) {
+function providerSessionSpawn(calls, responseTexts = []) {
   return (_command, _args, options) => {
     const child = new EventEmitter();
     child.stdout = new PassThrough();
@@ -45,10 +45,16 @@ function providerSessionSpawn(calls) {
       resumeSessionId: options.env.INVOKE_SESSION_ID || "",
       sessionFile: options.env.INVOKE_SESSION_FILE || "",
       sessionId,
+      prompt: _args[_args.length - 1],
     });
     process.nextTick(() => {
       child.stdout.write(`${JSON.stringify({ type: "run.started", sessionId })}\n`);
-      child.stdout.write(`${JSON.stringify({ type: "text.delta", text: "hello" })}\n`);
+      child.stdout.write(
+        `${JSON.stringify({
+          type: "text.delta",
+          text: responseTexts[calls.length - 1] || "hello",
+        })}\n`
+      );
       child.stdout.end();
       child.stderr.end();
       child.emit("close", 0, null);
@@ -374,6 +380,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
   const providerCalls = [];
+  const firstConclusion = "结论：SQLite restart context survives。";
   prepareCleanEpoch({ file: memoryDbFile });
 
   function startServer() {
@@ -382,7 +389,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
       invocationsFile: path.join(tmpDir, "invocations.json"),
       sessionMapRoot: path.join(tmpDir, "session-maps"),
       memoryDbFile,
-      spawnRunner: providerSessionSpawn(providerCalls),
+      spawnRunner: providerSessionSpawn(providerCalls, [firstConclusion, "hello"]),
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,
     });
@@ -436,7 +443,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
     );
     assert.deepEqual(
       recovered.messages.map((message) => message.content),
-      ["durable first prompt", "hello"]
+      ["durable first prompt", firstConclusion]
     );
 
     await apiFetch(`${secondUrl}/api/chat`, {
@@ -449,13 +456,15 @@ test("default sqlite mode restores sessions after restart without legacy writes"
     }).then((response) => response.text());
     assert.equal(providerCalls[1].resumeSessionId, "provider-session-1");
     assert.equal(providerCalls[1].sessionFile, "");
+    assert.match(providerCalls[1].prompt, /SQLite restart context survives/);
+    assert.match(providerCalls[1].prompt, /SHIFT_DERIVED_DIGEST_DATA/);
     assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     const continued = await apiFetch(`${secondUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
     assert.deepEqual(
       continued.messages.map((message) => message.content),
-      ["durable first prompt", "hello", "continued after restart", "hello"]
+      ["durable first prompt", firstConclusion, "continued after restart", "hello"]
     );
     // sqlite mode is true single-write: no sessions.json / transcript resurrection.
     assert.equal(fs.existsSync(sessionsFile), false);

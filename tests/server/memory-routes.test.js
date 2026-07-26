@@ -18,6 +18,8 @@ function makeSendJson(res) {
 function createHandle(storage, extras = {}) {
   return createMemoryRoutes({
     memoryService: storage.memory,
+    suggestionService: storage.suggestionService,
+    storage,
     getSession: () => ({ id: "thread-1" }),
     sessionsFile: "sessions.json",
     sendJson: extras.sendJson,
@@ -90,6 +92,56 @@ test("memory routes list create confirm and invalidate", async () => {
     );
     assert.equal(invalidateRes.statusCode, 200);
     assert.equal(invalidateRes.body.memory.status, "invalidated");
+  } finally {
+    storage.close();
+  }
+});
+
+test("memory routes return a restart-hydratable context snapshot", async () => {
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-1" });
+  try {
+    storage.memory.capture({
+      id: "handoff-1",
+      threadId: "thread-1",
+      kind: "handoff",
+      content: "结论：先修复 README，再继续 cutover。",
+      captureKey: "handoff:restart:opencode:0",
+      createdBy: "opencode",
+      metadata: { source: "handoff", toAgent: "grok" },
+    });
+    storage.suggestions.create({
+      id: "suggestion-1",
+      originThreadId: "thread-1",
+      proposedKind: "decision",
+      proposedScope: "thread",
+      topic: "sqlite-bootstrap",
+      content: "快速开始必须创建 clean epoch。",
+      confidence: 0.4,
+      anchors: [{ type: "invocation", ref: "invocation-1" }],
+    });
+    storage.digests.upsert({
+      threadId: "thread-1",
+      summary: "当前阻塞：README 缺少 SQLite 初始化。",
+      durableCandidates: [],
+      topics: ["sqlite-bootstrap"],
+      messageCount: 2,
+    });
+
+    const res = makeRes();
+    const handle = createHandle(storage, { sendJson: makeSendJson(res) });
+    await handle(
+      { method: "GET" },
+      res,
+      new URL("http://127.0.0.1/api/memories?sessionId=thread-1&includeRetired=false")
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.context.digest.summary, /README/);
+    assert.equal(res.body.context.handoffs.length, 1);
+    assert.match(res.body.context.handoffs[0].content, /先修复 README/);
+    assert.equal(res.body.context.pendingSuggestions.length, 1);
+    assert.match(res.body.context.pendingSuggestions[0].content, /clean epoch/);
   } finally {
     storage.close();
   }

@@ -2699,6 +2699,7 @@ test("frontend recall expand shows events on open and shares process panel path"
   assert.match(recallJs, /function setMemories|setMemories\(/);
   assert.match(recallJs, /recall-item-conclusions/);
   assert.match(appJs, /loadContextMemories|setMemories/);
+  assert.match(appJs, /setContextSnapshot/);
   // Wave R2: search hits grouped by memory/message/evidence layers.
   assert.match(recallJs, /groupHitsByLayer/);
   assert.match(recallJs, /recall-hit-section/);
