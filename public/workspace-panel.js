@@ -201,6 +201,8 @@
       discardBtn.textContent = "丢弃 worktree";
       discardBtn.addEventListener("click", () => discardWorkspace());
       actions.appendChild(discardBtn);
+
+      s.actionsHost.append(actions);
     }
 
     function updateMeta(files) {
@@ -375,7 +377,7 @@
       const wrap = document.createElement("div");
       wrap.className = "workspace-panel-body";
       const empty = document.createElement("div");
-      empty.className = "workspace-empty workspace-empty-cta";
+      empty.className = "workspace-empty workspace-empty-cta-box";
       const title = document.createElement("div");
       title.className = "workspace-empty-title";
       title.textContent = "当前会话尚未创建 worktree";
@@ -386,7 +388,7 @@
       empty.append(hint);
       const cta = document.createElement("button");
       cta.type = "button";
-      cta.className = "btn-cmd primary workspace-empty-cta";
+      cta.className = "btn-cmd primary workspace-empty-cta-btn";
       cta.textContent = "勾选「改代码」";
       cta.addEventListener("click", () => {
         if (typeof onRequestWorktree === "function") {

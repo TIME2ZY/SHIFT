@@ -646,13 +646,14 @@
   font-family: var(--font-ui);
 }
 
-.workspace-empty-cta {
+.workspace-empty-cta-box {
   padding: var(--space-5);
   border: 1px dashed var(--border-subtle);
   border-radius: var(--radius-xs);
   color: var(--text-tertiary);
   font-size: 12px;
   font-family: var(--font-ui);
+  text-align: center;
 }
 
 .workspace-empty-title {
@@ -664,4 +665,8 @@
 .workspace-empty-hint {
   margin-bottom: var(--space-3);
   line-height: 1.5;
+}
+
+.workspace-empty-cta-btn {
+  margin-top: var(--space-1);
 }

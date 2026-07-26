@@ -19,8 +19,9 @@
         dedupe.delete(key);
       }
       const el = document.createElement("div");
-      el.className = "toast";
-      el.setAttribute("role", "status");
+      const variant = options.variant === "error" ? "error" : options.variant === "ok" ? "ok" : "";
+      el.className = variant ? `toast toast-${variant}` : "toast";
+      el.setAttribute("role", variant === "error" ? "alert" : "status");
       const label = document.createElement("span");
       label.className = "toast-message";
       label.textContent = message;

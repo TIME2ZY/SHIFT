@@ -202,6 +202,9 @@
 
     async function newSession() {
       try {
+        // Preserve the leaving session's unsent draft (same as switchSession).
+        const previousSessionId = state.currentSessionId;
+        saveDraftFor(previousSessionId);
         const session = await sessionApi.createSession();
         state.currentSessionId = session.id;
         if (typeof onSessionChanged === "function") onSessionChanged(session.id);
@@ -226,8 +229,10 @@
         // New session starts with a clean draft.
         const newSlot = ensureSlot(session.id);
         if (newSlot) newSlot.draftPrompt = "";
-        if (promptEl) promptEl.value = "";
-        promptEl.focus();
+        if (promptEl) {
+          promptEl.value = "";
+          promptEl.focus();
+        }
         closeSidebarIfMobile();
       } catch (error) {
         addSystem("创建会话失败: " + error.message, "error");

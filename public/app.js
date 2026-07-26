@@ -356,7 +356,7 @@
     sessionApi,
     worktreeApi,
     onToast: (message, isError) => {
-      if (isError) showToast(message, { ttl: 7000 });
+      if (isError) showToast(message, { ttl: 7000, variant: "error" });
       else showToast(message);
     },
   });
@@ -389,7 +389,8 @@
       await loadWorktreeStatus();
       updateWorkspaceTabBadge();
     },
-    onToast: (message, isError) => showToast(message, isError ? { ttl: 7000 } : {}),
+    onToast: (message, isError) =>
+      showToast(message, isError ? { ttl: 7000, variant: "error" } : {}),
     onRequestWorktree: () => {
       if (!useWorktreeInput) return;
       useWorktreeInput.checked = true;
@@ -923,6 +924,7 @@
     agentLabel,
     syncComposerControls,
     onRuntimeStatusChange,
+    isContextBlocked: () => !!state.contextBlocked,
     restoreDraft(sessionId, value) {
       if (!promptEl || !sessionId) return;
       const slot = state.sessions && state.sessions[sessionId];
@@ -979,6 +981,10 @@
       abortActiveRun();
       return;
     }
+    if (state.contextBlocked) {
+      showToast("上下文已满 · 切换 Agent 或开新会话后再发送", { ttl: 7000, variant: "error" });
+      return;
+    }
     chatClient.sendPrompt();
     autoGrowPrompt();
   });
@@ -1026,6 +1032,14 @@
       const rt = runtimeStore.get(state.currentSessionId || "_pending");
       // While generating, Enter does not send (draft stays); use 停止 to abort.
       if (rt && rt.controller) return;
+      // Match btnSend.disabled: do not send when the active agent is full.
+      if (state.contextBlocked) {
+        showToast("上下文已满 · 切换 Agent 或开新会话后再发送", {
+          ttl: 7000,
+          variant: "error",
+        });
+        return;
+      }
       chatClient.sendPrompt();
       autoGrowPrompt();
     }

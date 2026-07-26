@@ -35,6 +35,8 @@
       onMemoryInject,
       onMemoryMetrics,
       restoreDraft,
+      /** Optional: when true, sendPrompt refuses to start a new run. */
+      isContextBlocked,
     } = deps;
 
     function store() {
@@ -225,6 +227,20 @@
       const activeRt = store().getOrCreate(state.currentSessionId || "_pending");
       if (activeRt.controller) return;
 
+      // Central guard: button/Enter both funnel here — block when the active
+      // agent's context budget is saturated (UI also disables send for a11y).
+      const blocked =
+        typeof isContextBlocked === "function"
+          ? !!isContextBlocked()
+          : !!(state && state.contextBlocked);
+      if (blocked) {
+        if (isActiveSession(state.currentSessionId)) {
+          showToastMaybe("上下文已满 · 切换 Agent 或开新会话后再发送", { ttl: 7000 });
+          setStatus("上下文已满", "error");
+        }
+        return;
+      }
+
       const resolved = resolvePromptAgent(prompt);
       const targetAgent = resolved && resolved.agent ? resolved.agent : resolved;
       if (!targetAgent || !targetAgent.id) {
@@ -414,9 +430,9 @@
     }
 
     // Surface a non-blocking recovery affordance after a network-failed run.
-    // Fills the composer with the last sent prompt and exposes a toast CTA so
-    // the user can re-send when ready — we intentionally do NOT auto-send,
-    // because the user may have started a different draft while waiting.
+    // Pre-fill the last prompt (unless the user is already composing), then
+    // offer an explicit CTA that re-sends. We never auto-send on failure so a
+    // mid-draft is not clobbered without a deliberate click.
     function offerRetry(sid, message) {
       const stored = lastSlotPrompt(sid);
       if (!stored) return;
@@ -430,10 +446,11 @@
         ttl: 12_000,
         actionLabel: "填回并重试",
         onClick: () => {
-          if (promptEl) {
-            if (!promptEl.value.trim()) fillComposer(sid, stored);
-            promptEl.focus();
-          }
+          if (!isActiveSession(sid)) return;
+          fillComposer(sid, stored);
+          if (promptEl && typeof promptEl.focus === "function") promptEl.focus();
+          // Fire-and-forget: sendPrompt is async; errors surface via its own path.
+          Promise.resolve(sendPrompt(stored)).catch(() => {});
         },
       });
     }

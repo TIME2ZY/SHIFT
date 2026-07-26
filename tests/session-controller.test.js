@@ -82,7 +82,7 @@ test("newSession focuses the prompt without clearing other session runtimes", as
   state.runtimeStore.beginRun("s-old", { abort() { throw new Error("should not abort other session"); } });
   let focused = 0;
   const deps = baseDeps(state, {
-    promptEl: { focus() { focused += 1; } },
+    promptEl: { value: "", focus() { focused += 1; } },
   });
 
   const controller = sessionControllerModule.createSessionController(deps);
@@ -92,6 +92,27 @@ test("newSession focuses the prompt without clearing other session runtimes", as
   assert.equal(state.runtimeStore.getStatus("s-old"), "running");
   assert.deepEqual(state.workspace, { empty: true });
   assert.equal(focused, 1);
+});
+
+test("newSession saves the previous session draft before clearing the composer", async () => {
+  const state = makeState({
+    currentSessionId: "s-old",
+    sessions: {
+      "s-old": { lastPrompt: "", lastAgent: "codex", draftPrompt: "" },
+    },
+  });
+  const promptEl = {
+    value: "unsent draft for old session",
+    focus() {},
+  };
+  const deps = baseDeps(state, { promptEl });
+  const controller = sessionControllerModule.createSessionController(deps);
+  await controller.newSession();
+
+  assert.equal(state.currentSessionId, "s2");
+  assert.equal(state.sessions["s-old"].draftPrompt, "unsent draft for old session");
+  assert.equal(state.sessions.s2.draftPrompt, "");
+  assert.equal(promptEl.value, "");
 });
 
 test("deleteSession aborts only the deleted session runtime", async () => {
