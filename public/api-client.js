@@ -16,26 +16,43 @@
   // endpoints (e.g. /api/chat) opt out by passing { retryable: false }.
   const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
 
+  /**
+   * Link a caller AbortSignal to an internal controller.
+   * No parent signal → no-op (do NOT abort the child).
+   * Parent already aborted → abort child immediately.
+   * Otherwise → forward parent abort to child.
+   */
   function linkAbort(parent, child) {
-    if (!parent || parent.signal.aborted) {
+    if (!parent) return;
+    if (parent.signal.aborted) {
       child.abort();
       return;
     }
     const onParentAbort = () => child.abort();
     parent.addEventListener("abort", onParentAbort, { once: true });
-    child.signal.addEventListener("abort", () =>
-      parent.removeEventListener("abort", onParentAbort)
+    child.signal.addEventListener(
+      "abort",
+      () => parent.removeEventListener("abort", onParentAbort),
+      { once: true }
     );
+  }
+
+  /** Finite positive timeout only; Infinity / NaN / ≤0 means "no timeout". */
+  function resolveTimeoutMs(value, fallback) {
+    if (value === undefined || value === null) return fallback;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return n;
   }
 
   /**
    * Wraps fetchImpl with: UI-token header, default timeout, and bounded retries
    * for safe read-only methods. Streaming endpoints pass { retryable: false,
-   * timeoutMs: Infinity } to keep long-lived requests unguarded.
+   * timeoutMs: Infinity } (or 0) to keep long-lived requests unguarded.
    */
   function createApiFetch(fetchImpl, uiToken, defaults = {}) {
     if (typeof fetchImpl !== "function") throw new Error("fetch implementation is required");
-    const baseTimeout = Number(defaults.timeoutMs) || DEFAULT_TIMEOUT_MS;
+    const baseTimeout = resolveTimeoutMs(defaults.timeoutMs, DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
     const baseRetries = Number.isFinite(defaults.retries) ? defaults.retries : 2;
 
     async function sleep(ms, signal) {
@@ -64,10 +81,26 @@
       const callerSignal = init.signal || null;
       const timeoutController = new AbortController();
       linkAbort(callerSignal, timeoutController);
+      // Only arm a timer for finite positive ms. Infinity/0 must not become
+      // setTimeout(fn, Infinity) which engines clamp to ~0–1ms and abort streams.
       const timer =
-        Number(timeoutMs) > 0 ? setTimeout(() => timeoutController.abort(), timeoutMs) : null;
+        timeoutMs > 0 ? setTimeout(() => timeoutController.abort(), timeoutMs) : null;
+      // Strip wrapper-only options so undici/browser RequestInit stays clean.
+      const {
+        retryable: _retryable,
+        timeoutMs: _timeoutMs,
+        timeoutForMethod: _timeoutForMethod,
+        retries: _retries,
+        signal: _signal,
+        headers: _headers,
+        ...fetchInit
+      } = init;
       try {
-        return await fetchImpl(input, { ...init, headers, signal: timeoutController.signal });
+        return await fetchImpl(input, {
+          ...fetchInit,
+          headers,
+          signal: timeoutController.signal,
+        });
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -79,8 +112,8 @@
         init.retryable !== undefined ? !!init.retryable : RETRYABLE_METHODS.has(method);
       const timeoutMs =
         init.timeoutMs !== undefined
-          ? Number(init.timeoutMs)
-          : Number(init.timeoutForMethod) || baseTimeout;
+          ? resolveTimeoutMs(init.timeoutMs, 0)
+          : resolveTimeoutMs(init.timeoutForMethod, baseTimeout);
       const userRetries = Number.isFinite(init.retries) ? Number(init.retries) : baseRetries;
       const maxAttempts = retryable ? Math.max(1, userRetries + 1) : 1;
 
