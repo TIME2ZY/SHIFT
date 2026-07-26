@@ -6,6 +6,7 @@ const {
   agentLabelFromList,
   agentMention,
   agentMeta,
+  agentModelParts,
   agentRoleSummary,
   agentColorIndex,
   fmtTime,
@@ -30,7 +31,20 @@ test("roleBadgeLabel covers roles", () => {
 test("agent helpers format mention and meta", () => {
   assert.equal(agentLabelFromList([{ id: "grok", label: "grok" }], "grok"), "grok");
   assert.equal(agentMention({ id: "x", label: "X" }), "X");
-  assert.match(agentMeta({ providerId: "codex", model: "gpt", reasoningEffort: "high" }), /codex/);
+  // Model + effort only — CLI/provider is already shown by avatar + name.
+  assert.equal(
+    agentMeta({ providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "high" }),
+    "gpt-5.6-sol · high"
+  );
+  assert.equal(agentMeta({ providerId: "grok", model: "grok-4.5" }), "grok-4.5");
+  assert.doesNotMatch(
+    agentMeta({ providerId: "opencode", model: "qwen3.7-plus" }),
+    /opencode|xAI|Antigravity|codex/i
+  );
+  assert.deepEqual(
+    agentModelParts({ model: "gpt-5.6-sol", reasoningEffort: "high" }),
+    { model: "gpt-5.6-sol", effort: "high", tags: [] }
+  );
   assert.equal(agentRoleSummary({ description: "a".repeat(40) }).length, 33);
 });
 
@@ -40,9 +54,11 @@ test("agentMeta appends capability tags when capabilities are present", () => {
     model: "gpt-5.6-sol",
     capabilities: { thinking: false, tools: true, resume: true },
   });
+  assert.match(meta, /^gpt-5\.6-sol · /);
   assert.match(meta, /工具/);
   assert.doesNotMatch(meta, /子代理/);
   assert.doesNotMatch(meta, /思考/);
+  assert.doesNotMatch(meta, /codex|xAI|CLI/i);
 });
 
 test("agentColorIndex is stable for known agents and in 1..6", () => {

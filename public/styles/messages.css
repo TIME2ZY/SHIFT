@@ -383,11 +383,9 @@
   overflow-wrap: anywhere;
 }
 
-/* User + assistant share the same bubble body metrics; only wrap rules differ */
-.user .msg-bubble {
-  white-space: pre-wrap;
-}
-
+/* User content is markdown-rendered (newlines → <br>). Do not use pre-wrap on
+   the bubble: renderMd ends with "\n" after </p>, which pre-wrap shows as a
+   trailing blank line. Plain fallback still uses .is-md-plain { pre-wrap }. */
 .assistant .msg-bubble {
   word-break: break-word;
 }

@@ -97,7 +97,9 @@
     agentLabel,
     agentMention,
     agentMeta,
+    agentModelParts,
     agentRoleSummary,
+    agentRoleLabel,
     agentColorIndex,
     roleDisplayName,
     roleBadgeLabel,
@@ -816,6 +818,20 @@
     promptEl.focus();
   }
 
+  function getRunningAgentIds() {
+    const rt = runtimeStore.get(state.currentSessionId || "_pending");
+    if (!rt || !rt.controller) return [];
+    const ids = [];
+    if (rt.liveMessages && typeof rt.liveMessages.keys === "function") {
+      for (const id of rt.liveMessages.keys()) {
+        if (id) ids.push(String(id));
+      }
+    }
+    // Before the first assistant event lands, still show the selected agent as live.
+    if (ids.length === 0 && state.selectedAgent) ids.push(String(state.selectedAgent));
+    return ids;
+  }
+
   const agentPanelView = window.AgentPanelView.createAgentPanelView({
     agentTabsEl,
     contextStatusEl,
@@ -823,11 +839,19 @@
     agentLabel,
     agentMention,
     agentMeta,
+    agentModelParts,
     agentRoleSummary,
+    agentRoleLabel,
     agentColorIndex,
     setDefaultAgent,
     insertAgentMention,
     promptEl,
+    getRunningAgentIds,
+    onNewSession: () => {
+      if (sessionController && typeof sessionController.newSession === "function") {
+        sessionController.newSession();
+      }
+    },
     onContextBlockedChange: (blocked) => {
       state.contextBlocked = !!blocked;
       syncComposerControls();
@@ -1021,6 +1045,8 @@
   bus.on("runtime:status", () => {
     syncComposerControls();
     updateJumpBottomVisibility();
+    // Refresh live dots / is-live state on the Agents roster.
+    if (typeof renderAgentTabs === "function") renderAgentTabs();
   });
 
   setRightPanelTab("agents");

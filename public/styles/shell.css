@@ -1007,17 +1007,20 @@
   .agent-tabs {
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 118px;
+    grid-auto-columns: 128px;
     gap: 6px;
     padding: 8px 10px 10px;
     overflow-x: auto;
   }
 
   .agent-tab {
-    min-height: 58px;
+    min-height: 52px;
     grid-template-columns: 28px minmax(0, 1fr);
-    padding: 9px 9px 8px;
-    gap: 2px 7px;
+    grid-template-areas: "avatar identity";
+    padding: 8px 9px;
+    column-gap: 7px;
+    row-gap: 0;
+    align-items: center;
   }
 
   .agent-avatar-panel {
@@ -1030,15 +1033,25 @@
     height: 17px;
   }
 
+  /* Horizontal chips: identity only — usage/role/budget need the full rail */
+  .agent-tab .agent-tab-actions,
+  .agent-tab .agent-session-usage,
   .agent-tab .agent-tab-role,
-  .agent-tab .agent-tab-budget {
-    display: none;
+  .agent-tab .agent-tab-budget,
+  .agent-tab .agent-tab-blocked-hint {
+    display: none !important;
   }
 
   .agent-tab-model {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .agent-tab-effort {
+    font-size: 9px;
+    min-height: 14px;
+    padding: 0 4px;
   }
 
   .composer {
