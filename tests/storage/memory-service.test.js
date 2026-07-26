@@ -236,7 +236,7 @@ test("createProduct writes decision/constraint/fact with supersession", () => {
     const fact = storage.memory.createProduct({
       threadId: "thread-1",
       kind: "fact",
-      content: "Runtime database path is data/runtime/memory.sqlite",
+      content: "Fixture database path is sandbox/runtime/example.sqlite",
     });
     assert.equal(fact.memory.kind, "fact");
     assert.match(fact.supersessionKey, /^fact:/);

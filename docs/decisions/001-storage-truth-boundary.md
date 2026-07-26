@@ -374,6 +374,13 @@ version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢�
 6. CI 和本机验证所需的 legacy 场景已转换为最小化、脱敏 fixture；
 7. 已生成清理清单，列出路径、数据范围、cutover time 和不可恢复性。
 
+第五阶段 C 已于 2026-07-26 将必要 legacy 格式收敛为
+`tests/fixtures/legacy-runtime/` 下的最小脱敏 fixture，覆盖 session/message、
+invocation registry、transcript JSONL 和 provider session map。迁移测试只操作复制到系统
+临时目录的 fixture；`npm test` 在执行前拒绝直接 runtime 路径、默认 runtime 存储常量和
+未隔离的 `createServer()`。因此 CI 与本机测试不再依赖真实 legacy 历史。验收摘要见
+`docs/acceptance/005c-legacy-fixture-isolation-20260726.md`。
+
 清理工具必须从权威 `shift.sqlite` 读取 clean epoch/cutover，同时将 legacy
 `memory.sqlite` 作为独立候选。若 legacy transcript 目录中检测到 post-cutover canonical
 event，或任何候选路径与权威数据库/canonical audit 目录重叠，必须拒绝生成清理清单。
@@ -468,7 +475,7 @@ transcript 物理分离。`dual` 的 session 和 invocation
 7. 实现 SQLite backup 的空目录恢复演练和 recovery report；（已完成）
 8. 将 transcript 开关与 storage mode 解耦；
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
-10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（恢复演练已完成）
+10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（已完成）
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
 
 每一步都必须可以独立回滚，并在进入下一步前有数据审计证据。

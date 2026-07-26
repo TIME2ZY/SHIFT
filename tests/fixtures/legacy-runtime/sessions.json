@@ -1,0 +1,29 @@
+{
+  "sessions": {
+    "thread-1": {
+      "id": "thread-1",
+      "title": "Hello world title",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "projectDir": "C:/sanitized/project",
+      "lastAgent": "codex",
+      "messages": [
+        {
+          "id": "msg-user",
+          "role": "user",
+          "agent": "codex",
+          "content": "ship the synthetic fixture",
+          "createdAt": "2026-01-01T00:00:01.000Z"
+        },
+        {
+          "id": "msg-assistant",
+          "role": "assistant",
+          "agent": "codex",
+          "content": "synthetic fixture completed",
+          "invocationId": "inv-1",
+          "createdAt": "2026-01-01T00:00:05.000Z"
+        }
+      ]
+    }
+  },
+  "lastSessionId": "thread-1"
+}
