@@ -14,11 +14,15 @@ related:
 
 ## 1. 状态
 
-**Accepted — SQLite cutover active; legacy runtime cleanup completed**
+**Accepted — storage truth cutover completed; compatibility-mode retirement pending**
 
-本 ADR 冻结 SHIFT 的目标存储边界。当前代码仍保留 `files / dual / sqlite` 兼容模式，默认
-已切换为 `sqlite`；`dual` 仅用于显式验证，不再是产品默认。实现 PR 必须显式说明它推进了哪一条
-切换验收条件，不能在代码中重新发明另一套真相语义。
+本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离和
+真实 legacy 数据清理均已完成，当前在线服务只使用 `shift.sqlite`。从业务数据和运行
+安全角度，本次存储重构的核心目标已经完成。
+
+工程收尾尚有一个明确任务：代码仍接受 `files / dual / sqlite` 三种 mode，并保留
+file/dual 的在线分支。`files`/`dual` 已没有真实运行数据，只服务于兼容测试和旧格式工具；
+在这些分支从产品 composition root 移除前，本 ADR 的实现工作不标记为完全关闭。
 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
@@ -28,7 +32,7 @@ projection 细节的规范。本 ADR 负责更高一层的全系统边界；两�
 
 SHIFT 最初以 JSON session 文件和 JSONL transcript 保存本地状态，随后引入 SQLite，
 承载 thread、message、invocation、context window、memory 和 recall projection。在架构
-演进和新旧实现验证期间，当前系统同时存在：
+演进和新旧实现验证期间，代码与运行数据曾同时存在：
 
 - `sessions.json` 文件会话存储；
 - 按 thread/invocation 组织的 JSONL transcript；
@@ -58,7 +62,7 @@ SHIFT 采用四类明确分工的持久化边界：
 
 1. **SQLite 是唯一在线业务真相源。**
 2. **Git 管理的项目文件是正式项目知识和项目内容的真相源。**
-3. **JSONL 是追加式审计、诊断和灾难恢复材料，不参与正常在线仲裁。**
+3. **JSONL 是追加式审计、诊断和导出材料，不参与正常在线仲裁或业务恢复。**
 4. **普通 JSON 仅用于配置、迁移 checkpoint 或可重建的本机绑定；不得承载核心业务真相。**
 5. **现有 legacy 运行数据不迁移到新存储 epoch；它只作为临时验证语料，切换验收后清除。**
 
@@ -77,7 +81,7 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | 可回放的规范化 durable events           | SQLite invocation event tables   | canonical JSONL                       |
 | Provider 原始事件                       | raw JSONL diagnostic log         | 不得成为 message/memory 真相          |
 | Context window、generation、usage       | SQLite context/window tables     | usage summary                         |
-| Provider resume session 绑定            | SQLite window/session binding    | legacy session-map JSON               |
+| Provider resume session 绑定            | SQLite window/session binding    | 脱敏 legacy session-map 测试 fixture  |
 | 未确认 suggestion 和运行期 memory       | SQLite memory tables             | Active Memory Card                    |
 | 已确认但尚未 materialize 的产品记忆     | SQLite `memory_entries`          | recall projection                     |
 | 已 materialize 的项目长期知识           | Git 管理的 Markdown/项目文件     | SQLite passage/index + source pointer |
@@ -216,8 +220,8 @@ Canonical JSONL 保存带协议版本、稳定 event ID 和因果坐标的追加
 - 人工审计；
 - invocation 过程下钻；
 - 导出；
-- SQLite 灾难恢复；
-- replay 和 migration；
+- SQLite backup 恢复后的审计核对和诊断；
+- 离线协议回放和兼容性测试；
 - 跨版本诊断。
 
 它不得用于正常 session/message/recall API 的在线回退或合并读取。
@@ -256,10 +260,9 @@ JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什�
 - 结构化长期 memory；
 - 需要并发更新和事务一致性的状态。
 
-现有 `sessions.json`、legacy provider session map 和旧 transcript 不作为生产迁移输入。
-它们在切换前保持只读，仅用于验证字段映射和新旧行为差异；切换完成后，正常服务不得
-依赖它们，真实历史数据按 §12.1 清除。确需覆盖 legacy 格式时，只保留最小化、脱敏的
-测试 fixture。
+`sessions.json`、legacy provider session map 和旧 transcript 不作为生产迁移输入。
+切换期间它们保持只读，仅用于验证字段映射和新旧行为差异；正常服务不依赖它们，真实
+历史数据已按 §12.1 清除。确需覆盖 legacy 格式时，只保留最小化、脱敏的测试 fixture。
 
 ## 9. 派生投影
 
@@ -310,7 +313,7 @@ outbox flusher
 Outbox 的 SQLite 入队、幂等 JSONL flusher、重试、产品 API/UI health 和 delivered row
 保留清理已实现。SQLite canonical archive 使用独立的
 `audit-transcripts/<epoch-id>/`，不得与 legacy `transcripts/` 共用清理边界。现有
-`dual` 写入仍仅被视为切换验证机制。
+`dual` 写入只存在于待移除的兼容分支，不属于受支持的产品写入路径。
 
 ## 11. 读取、恢复和重建
 
@@ -406,11 +409,11 @@ legacy validation SQLite 共 378 个文件已永久删除；权威 SQLite、cano
 
 现有模式重新定义为：
 
-| 模式     | 定位                            | 终态               |
-| -------- | ------------------------------- | ------------------ |
-| `files`  | legacy compatibility 和隔离验证 | 不作为正常产品模式 |
-| `dual`   | 切换观察期、差异审计            | 临时               |
-| `sqlite` | 正常在线业务模式                | 唯一正式模式       |
+| 模式     | 定位                    | 终态                         |
+| -------- | ----------------------- | ---------------------------- |
+| `files`  | legacy fixture 兼容测试 | 从产品 composition root 移除 |
+| `dual`   | legacy 差异测试         | 从产品 composition root 移除 |
+| `sqlite` | 正常在线业务模式        | 唯一正式模式                 |
 
 Transcript 是否开启是独立维度，不应继续由 storage mode 隐式决定。目标配置语义类似：
 
@@ -422,8 +425,8 @@ SHIFT_RAW_EVENT_LOG=off
 ```
 
 `SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
-outbox row，health 显示 `disabled`，不会形成无法投递的假积压。`files/dual` 在退出产品
-模式前仍依赖 legacy transcript，其兼容写入不受该审计开关控制。
+outbox row，health 显示 `disabled`，不会形成无法投递的假积压。兼容测试中的
+`files/dual` 仍依赖 fixture transcript，其写入不受该审计开关控制。
 `SHIFT_AUDIT_TRANSCRIPT_DIR` 只承载 post-cutover canonical archive；不得指向 legacy
 `SHIFT_TRANSCRIPT_DIR`。
 
@@ -441,6 +444,9 @@ outbox row，health 显示 `disabled`，不会形成无法投递的假积压。`
 10. legacy 行为场景已转换为最小化、脱敏 fixture；
 11. 备份恢复演练通过，并已生成旧数据清理清单。
 
+以上退出条件已全部满足，真实 legacy 数据也已删除。因此移除 `files/dual` 不再是数据
+切换或正确性风险，而是删除不可达产品分支、收敛配置面和降低维护成本的工程收尾。
+
 Clean cutover 必须指向一个不存在的新数据库文件，并通过显式命令创建、激活：
 
 ```text
@@ -452,37 +458,32 @@ clean epoch。
 
 ## 14. 当前实现差距
 
-本 ADR 接受时已知的主要差距：
+SQLite 正式路径的 truth boundary 已完成：session/message/invocation、provider resume、
+memory 和 recall/detail 正常读取均不访问 legacy 文件；SQLite 错误 fail closed；canonical
+event 通过 transactional outbox 幂等归档；health、retention、恢复演练和 legacy 清理均
+已有验收证据。
 
-- `SHIFT_STORAGE_MODE` 默认已切换为 `sqlite`；
-- `event-store` 根据 storage mode 同步写 SQLite/transcript；
-- `dual-write-recorder` 包含吞掉部分 SQLite 错误后继续运行的过渡语义；
-- chat route 仍拥有按 storage authority 分支；
-- session map/provider resume 仍有 legacy JSON 路径；
-- project-memory materialization workflow 尚未实现。
+剩余差距只属于兼容代码收尾：
 
-已完成的边界：`sqlite` 模式的 session/message/invocation 在线读取不再读取或回退 legacy
-session/transcript；SQLite 读取失败会显式失败或返回 `unavailable`。在线 memory replay
-同样禁止在 `sqlite` 模式扫描旧 transcript。
-SQLite canonical events 已与权威事件在同一事务写入 outbox；后台 flusher 使用稳定 event
-ID 幂等追加 JSONL，并保留可重试的 pending/error 健康状态。outbox health 已暴露到
-产品 API/UI，delivered rows 具备有界保留清理策略，canonical archive 已与 legacy
-transcript 物理分离。`dual` 的 session 和 invocation
-在线读取以 legacy 文件为权威且不再按完整度仲裁；SQLite 搜索投影有独立、明确的 owner。
+- `createServerStorage` 和 `event-store` 仍接受 `files/dual`；
+- composition root、chat route、session read 和 recall service 仍有 mode branch；
+- `dual-write-recorder` 仍保留过渡期容错语义；
+- legacy session-map 仍可由非 SQLite 兼容分支调用；
+- dual audit、legacy migrate 和脱敏 fixture 仍需保留为离线工具/测试，不能再由产品服务调用。
 
-这些差距不是违反 ADR 的存量 bug；它们是后续切换工作的明确清单。新增功能不得扩大
-平级双源范围。
+project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决定，不是本次 SQLite
+真相源切换的关闭条件。新增功能不得扩大或重新激活平级双源范围。
 
 ## 15. 实现顺序
 
-1. 建立 storage audit 和 dual divergence 指标，不改变行为；
-2. 定义并持久化 storage epoch、schema version 和 cutover time；
-3. 为每个在线 API 标记 authoritative read path；
-4. 增加 transactional outbox 和 archive health；
-5. 将 session/message/invocation 正常读取切到 SQLite；
-6. 将 recall/detail 正常读取切到 SQLite；
+1. 建立 storage audit 和 dual divergence 指标，不改变行为；（已完成）
+2. 定义并持久化 storage epoch、schema version 和 cutover time；（已完成）
+3. 为每个在线 API 标记 authoritative read path；（已完成）
+4. 增加 transactional outbox 和 archive health；（已完成）
+5. 将 session/message/invocation 正常读取切到 SQLite；（已完成）
+6. 将 recall/detail 正常读取切到 SQLite；（已完成）
 7. 实现 SQLite backup 的空目录恢复演练和 recovery report；（已完成）
-8. 将 transcript 开关与 storage mode 解耦；
+8. 将 transcript 开关与 storage mode 解耦；（已完成）
 9. 将默认模式改为 `sqlite`，移除正常服务中的 file merge/fallback；（已完成）
 10. 将必要 legacy 场景固化为脱敏 fixture，执行备份恢复演练；（已完成）
 11. 满足退出条件后删除 `dual` 产品模式，并通过独立清理操作删除真实 legacy 数据。
@@ -514,7 +515,7 @@ transcript 物理分离。`dual` 的 session 和 invocation
 - 正常读取和故障语义更容易解释；
 - 删除、恢复和断代切换不会互相复活数据；
 - SQLite 事务真正保护 message/invocation/memory 一致性；
-- JSONL 仍保留可审计、可导出和灾难恢复价值；
+- JSONL 仍保留可审计、可导出和恢复后核对价值；
 - 正式项目知识可以跟随 Git 分支、review 和跨机器传播；
 - recall、摘要和未来 embedding 可以安全重建；
 - 存储代码可以逐步删除 mode branch 和重复合并逻辑。
