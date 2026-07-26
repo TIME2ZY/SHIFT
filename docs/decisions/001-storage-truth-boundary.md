@@ -405,6 +405,15 @@ outbox row，health 显示 `disabled`，不会形成无法投递的假积压。`
 10. legacy 行为场景已转换为最小化、脱敏 fixture；
 11. 备份恢复演练通过，并已生成旧数据清理清单。
 
+Clean cutover 必须指向一个不存在的新数据库文件，并通过显式命令创建、激活：
+
+```text
+npm run prepare:storage:epoch -- --db <new-storage.sqlite>
+```
+
+命令拒绝覆盖已有数据库及其 WAL/SHM sidecar。旧 validation DB 不得原地激活或复用为
+clean epoch。
+
 ## 14. 当前实现差距
 
 本 ADR 接受时已知的主要差距：

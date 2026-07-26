@@ -18,6 +18,7 @@
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",
+    "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "vendor:md": "node scripts/vendor-md.js"
   },
   "devDependencies": {
