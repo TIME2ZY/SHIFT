@@ -2,9 +2,15 @@
    RESET & BASE
    ═══════════════════════════════════════════════════════════ */
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
 
-html, body {
+html,
+body {
   height: 100%;
   overflow: hidden;
 }
@@ -25,7 +31,12 @@ body {
   line-height: 1.55;
 }
 
-button, input, textarea { font: inherit; color: inherit; }
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
 
 button {
   cursor: pointer;
@@ -53,21 +64,31 @@ button {
   transform: translateY(0);
 }
 
-:focus { outline: none; }
+:focus {
+  outline: none;
+}
 :focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: var(--radius-sm);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+  background-clip: padding-box;
+}
 
 /* Shared message identity shell (user + agent). Brand/user glyphs sit inside. */
 .msg-avatar,
@@ -168,6 +189,20 @@ button {
 
 .btn-cmd:focus-visible {
   box-shadow: var(--focus-ring);
+}
+
+.btn-cmd:disabled,
+.btn-cmd.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.btn-cmd:disabled:hover,
+.btn-cmd.is-disabled:hover {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 /* Sole solid primary CTA in the product chrome */

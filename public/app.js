@@ -10,6 +10,7 @@
   const messagesEl = $("#messages");
   const promptEl = $("#prompt");
   const btnSend = $("#btn-send");
+  const btnMention = $("#btn-mention");
   const useWorktreeInput = $("#use-worktree");
   const skillsBarEl = $("#skills-bar");
   const statusEl = $("#status");
@@ -98,6 +99,7 @@
       rightPanelTab: "agents", // agents | context | workspace
       workspace: window.WorkspacePanel.emptyWorkspaceState(),
       usageSummary: { available: false, session: {}, agents: [] },
+      contextBlocked: false, // active agent's context budget saturated
       // NOT live run data — see runtimeStore
       runtimeStore,
     },
@@ -140,6 +142,10 @@
 
   const localePack = window.Locale || window.LocaleZhCN;
   const L = (localePack && localePack.locale) || {};
+  const t = (path, fallback) => {
+    const locale = window.Locale || window.LocaleZhCN || localePack;
+    return locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
+  };
 
   function formatElapsed(ms) {
     const sec = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -249,27 +255,29 @@
   function syncComposerControls() {
     const rt = runtimeStore.get(state.currentSessionId || "_pending");
     const running = !!(rt && rt.controller);
-    // Keep the textarea editable while generating so users can draft the next prompt.
+    const blocked = !!state.contextBlocked && !running;
     promptEl.disabled = false;
-    const sendLabel = running
+    btnSend.textContent = running
       ? (L.composer && L.composer.stop) || "停止"
       : (L.composer && L.composer.send) || "发送";
-    btnSend.textContent = sendLabel;
     btnSend.setAttribute("aria-busy", running ? "true" : "false");
     btnSend.setAttribute(
       "aria-label",
       running ? (L.composer && L.composer.stopGenerate) || "停止生成" : "发送"
     );
-    if (running) btnSend.classList.add("danger");
-    else btnSend.classList.remove("danger");
-    if (running) {
-      promptEl.setAttribute(
-        "title",
-        (L.composer && L.composer.draftWhileRunning) || "生成中仍可编辑草稿"
-      );
-    } else {
-      promptEl.removeAttribute("title");
-    }
+    btnSend.classList.toggle("danger", running);
+    btnSend.disabled = blocked;
+    btnSend.classList.toggle("is-disabled", blocked);
+    btnSend.title = blocked ? "上下文已满 · 切换 Agent 或开新会话" : "";
+    promptEl.setAttribute(
+      "title",
+      running
+        ? (L.composer && L.composer.draftWhileRunning) || "生成中仍可编辑草稿"
+        : blocked
+          ? "当前 Agent 上下文已满 · 输入 @点名其它 Agent 或开新会话"
+          : ""
+    );
+    if (!running && !blocked) promptEl.removeAttribute("title");
     updateRunBar();
   }
 
@@ -829,12 +837,31 @@
     setDefaultAgent,
     insertAgentMention,
     promptEl,
+    onContextBlockedChange: (blocked) => {
+      state.contextBlocked = !!blocked;
+      syncComposerControls();
+    },
   });
   renderAgentTabs = agentPanelView.renderAgentTabs;
   renderCurrentAgent = agentPanelView.renderCurrentAgent;
 
   if (contextStatusEl) {
     contextStatusEl.addEventListener("click", () => activateRightTab("agents"));
+  }
+
+  if (btnMention) {
+    btnMention.addEventListener("click", () => {
+      if (!promptEl) return;
+      const start = promptEl.selectionStart || promptEl.value.length;
+      const end = promptEl.selectionEnd || start;
+      const insert = start > 0 && !/\s$/.test(promptEl.value.slice(0, start)) ? " @" : "@";
+      promptEl.value = promptEl.value.slice(0, start) + insert + promptEl.value.slice(end);
+      promptEl.setSelectionRange(start + insert.length, start + insert.length);
+      autoGrowPrompt();
+      updateActiveSkills(promptEl.value);
+      mentionComposer.update();
+      promptEl.focus();
+    });
   }
 
   async function loadAgents() {
@@ -896,44 +923,32 @@
     syncComposerControls,
     onRuntimeStatusChange,
     restoreDraft(sessionId, value) {
-      if (!promptEl) return;
-      if (!sessionId) return;
+      if (!promptEl || !sessionId) return;
       const slot = state.sessions && state.sessions[sessionId];
-      const text = value != null ? String(value) : slot ? slot.lastPrompt || "" : "";
+      const text = value != null ? String(value) : (slot && slot.lastPrompt) || "";
       promptEl.value = text;
-      // Replicate the textarea input handler so autoGrow, skills, mentions react.
       autoGrowPrompt();
       updateActiveSkills(promptEl.value);
-      // Persist as draft so a subsequent session switch also restores this text.
       if (slot) slot.draftPrompt = text;
     },
     onUsageEvent: (_event, sessionId) => scheduleUsageSummary(sessionId),
     onMemoryEvent: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
-      // Refresh recall so conclusions re-attach to the producing turn.
       if (state.rightPanelTab === "context") loadContextPanel();
-      const action = payload && payload.action;
-      const locale = window.Locale || window.LocaleZhCN;
-      const t = (path, fallback) =>
-        locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
-      if (action === "invalidate") {
-        setStatus(t("memory.agentInvalidated", "Agent 已否定一条记忆"), "ok");
-      } else {
-        setStatus(t("memory.agentWrote", "Agent 已写入记忆"), "ok");
-      }
+      setStatus(
+        (payload && payload.action) === "invalidate"
+          ? t("memory.agentInvalidated", "Agent 已否定一条记忆")
+          : t("memory.agentWrote", "Agent 已写入记忆"),
+        "ok"
+      );
     },
     onMemoryInject: (payload, sessionId) => {
       const sid = (payload && payload.sessionId) || sessionId;
       if (sid && state.currentSessionId && sid !== state.currentSessionId) return;
-      if (typeof memoryPanel.setInjectPreview === "function") {
-        memoryPanel.setInjectPreview(payload);
-      }
+      if (typeof memoryPanel.setInjectPreview === "function") memoryPanel.setInjectPreview(payload);
       const count = Number(payload && payload.count) || 0;
       if (count > 0 && state.rightPanelTab !== "context") {
-        const locale = window.Locale || window.LocaleZhCN;
-        const t = (path, fallback) =>
-          locale && typeof locale.t === "function" ? locale.t(path, fallback) : fallback || path;
         setStatus(
           t("memory.injectedSummary", "本回合注入 {{n}} 条").replace("{{n}}", String(count)),
           "ok"
@@ -990,13 +1005,11 @@
     autoGrowPrompt();
     updateActiveSkills(promptEl.value);
     mentionComposer.update();
-    // Persist the in-progress draft so switching sessions keeps the work.
     const sid = state.currentSessionId;
-    if (sid) {
-      if (!state.sessions) state.sessions = {};
-      if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
-      state.sessions[sid].draftPrompt = promptEl.value;
-    }
+    if (!sid) return;
+    if (!state.sessions) state.sessions = {};
+    if (!state.sessions[sid]) state.sessions[sid] = { lastPrompt: "", lastAgent: "codex" };
+    state.sessions[sid].draftPrompt = promptEl.value;
   });
   promptEl.addEventListener("click", () => mentionComposer.update());
   promptEl.addEventListener("keyup", (e) => {

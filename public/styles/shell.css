@@ -1043,6 +1043,7 @@
   }
 
   .worktree-mode-chip,
+  .composer-mention-btn,
   .btn-cmd.primary {
     min-height: 44px;
   }
