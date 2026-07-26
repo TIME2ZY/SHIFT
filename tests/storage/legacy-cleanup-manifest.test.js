@@ -191,6 +191,43 @@ test("cleanup manifest blocks a legacy transcript directory containing canonical
   }
 });
 
+test("cleanup manifest accepts a mixed transcript only after protected archive coverage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-covered-mixed-"));
+  const transcriptDir = path.join(root, "transcripts");
+  fs.mkdirSync(transcriptDir);
+  fs.writeFileSync(
+    path.join(transcriptDir, "mixed.jsonl"),
+    `${JSON.stringify({ eventId: "evt-1", kind: "text.delta" })}\n`
+  );
+  try {
+    const manifest = buildLegacyCleanupManifest({
+      epoch: {
+        epochId: "epoch-1",
+        schemaVersion: 13,
+        dataPolicy: "clean",
+        cutoverTime: "2026-07-26T00:00:00.000Z",
+        isActive: true,
+      },
+      paths: {
+        authoritativeDbFile: path.join(root, "shift.sqlite"),
+        transcriptDir,
+        auditTranscriptDir: path.join(root, "audit-transcripts"),
+      },
+      canonicalCoverage: {
+        required: true,
+        verified: true,
+        sourceCanonicalEvents: 1,
+        archivedCanonicalEvents: 1,
+        missingFromAudit: [],
+      },
+    });
+    assert.equal(manifest.canonicalCoverage.verified, true);
+    assert.equal(manifest.targets.find((item) => item.id === "transcripts").exists, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("epoch inspection opens SQLite read-only without changing the database", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-epoch-"));
   const databaseFile = path.join(root, "memory.sqlite");

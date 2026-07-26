@@ -5,6 +5,8 @@ const {
   buildLegacyCleanupManifest,
   readEpochMetadata,
 } = require("../src/storage/legacy-cleanup-manifest");
+const { inspectCanonicalCoverage } = require("../src/storage/mixed-transcript-retirement");
+const { resolveEpochAuditDirectory } = require("../src/storage/server-storage");
 const { ENV } = require("../src/shared/brand");
 const { loadProjectEnv } = require("../src/shared/load-env");
 const runtimePaths = require("../src/shared/runtime-paths");
@@ -89,7 +91,19 @@ function main() {
 
   try {
     const epoch = readEpochMetadata(options.authoritativeDbFile);
-    const manifest = buildLegacyCleanupManifest({ paths: options, epoch });
+    const epochAuditDir =
+      epoch?.epochId && options.auditTranscriptDir
+        ? resolveEpochAuditDirectory(options.auditTranscriptDir, epoch.epochId)
+        : options.auditTranscriptDir;
+    const canonicalCoverage = inspectCanonicalCoverage(
+      options.transcriptDir,
+      epochAuditDir
+    );
+    const manifest = buildLegacyCleanupManifest({
+      paths: options,
+      epoch,
+      canonicalCoverage,
+    });
     const json = JSON.stringify(manifest, null, 2);
     if (options.output) {
       fs.mkdirSync(path.dirname(options.output), { recursive: true });

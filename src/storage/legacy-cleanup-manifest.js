@@ -1,9 +1,15 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
 const { pathsOverlap } = require("../shared/runtime-paths");
 
-function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = {}) {
+function buildLegacyCleanupManifest({
+  paths = {},
+  epoch = null,
+  generatedAt,
+  canonicalCoverage = null,
+} = {}) {
   assertCleanActiveEpoch(epoch);
   const at = validTimestamp(generatedAt) || new Date().toISOString();
   const authoritativeDbFile = requiredPath(
@@ -39,7 +45,7 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
   ];
 
   assertTargetIsSeparated(paths.transcriptDir, auditTranscriptDir, "legacy transcripts");
-  assertLegacyTranscriptOnly(paths.transcriptDir);
+  assertLegacyTranscriptOnly(paths.transcriptDir, canonicalCoverage);
 
   const targets = [
     target("sessions", paths.sessionsFile, "legacy session/message JSON"),
@@ -75,7 +81,7 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
   }
 
   return {
-    manifestVersion: 1,
+    manifestVersion: 2,
     generatedAt: at,
     action: "plan-only",
     destructive: false,
@@ -93,8 +99,10 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
       ? { before: epoch.cutoverTime, inclusive: false }
       : { policy: "all pre-cutover legacy data" },
     protectedPaths,
+    canonicalCoverage,
     recoverability:
       "Permanent deletion is not recoverable unless a separately retained SQLite backup exists.",
+    confirmation: `DELETE_LEGACY:${epoch.epochId}`,
     prerequisites: [
       "default online mode is sqlite",
       "clean storage epoch is active",
@@ -154,11 +162,18 @@ function assertPathsDoNotOverlap(left, right, leftLabel, rightLabel) {
   );
 }
 
-function assertLegacyTranscriptOnly(transcriptDir) {
+function assertLegacyTranscriptOnly(transcriptDir, canonicalCoverage = null) {
   const resolved = optionalPath(transcriptDir);
   if (!resolved || !fs.existsSync(resolved)) return;
   const canonicalFile = findCanonicalAuditFile(resolved);
   if (!canonicalFile) return;
+  if (
+    canonicalCoverage?.required &&
+    canonicalCoverage?.verified &&
+    canonicalCoverage?.missingFromAudit?.length === 0
+  ) {
+    return;
+  }
   throw new Error(
     `Legacy transcript cleanup is blocked: canonical audit events were found in ${canonicalFile}. ` +
       "Move or explicitly retire the mixed archive before deletion."
@@ -236,11 +251,13 @@ function inspectPath(value) {
       type: root.isSymbolicLink() ? "symlink" : "file",
       files: root.isFile() ? 1 : 0,
       bytes: root.isFile() ? root.size : 0,
+      fingerprint: root.isFile() ? fingerprintFiles(value, [value]) : null,
     };
   }
 
   let files = 0;
   let bytes = 0;
+  const filePaths = [];
   const pending = [value];
   while (pending.length > 0) {
     const directory = pending.pop();
@@ -251,10 +268,31 @@ function inspectPath(value) {
       else if (entry.isFile()) {
         files += 1;
         bytes += fs.statSync(child).size;
+        filePaths.push(child);
       }
     }
   }
-  return { exists: true, type: "directory", files, bytes };
+  filePaths.sort((left, right) => left.localeCompare(right));
+  return {
+    exists: true,
+    type: "directory",
+    files,
+    bytes,
+    fingerprint: fingerprintFiles(value, filePaths),
+  };
+}
+
+function fingerprintFiles(root, files) {
+  const hash = crypto.createHash("sha256");
+  const base = fs.statSync(root).isDirectory() ? root : path.dirname(root);
+  for (const file of files) {
+    const relative = path.relative(base, file).split(path.sep).join("/");
+    const stats = fs.statSync(file);
+    hash.update(`${relative}\0${stats.size}\0`);
+    hash.update(fs.readFileSync(file));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
 }
 
 function validTimestamp(value) {

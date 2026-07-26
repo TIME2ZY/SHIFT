@@ -18,7 +18,9 @@
     "audit:storage": "node scripts/audit-sqlite-storage.js",
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
+    "archive:storage:mixed-transcripts": "node scripts/archive-mixed-transcripts.js",
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",
+    "execute:storage:cleanup": "node scripts/execute-legacy-cleanup.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "vendor:md": "node scripts/vendor-md.js"
   },
