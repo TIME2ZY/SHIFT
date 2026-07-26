@@ -109,6 +109,34 @@ test("cleanup manifest rejects the authoritative database as a legacy target", (
   );
 });
 
+test("cleanup manifest protects authoritative SQLite WAL and SHM sidecars", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-sidecars-"));
+  const databaseFile = path.join(root, "shift.sqlite");
+  try {
+    for (const suffix of ["-wal", "-shm"]) {
+      assert.throws(
+        () =>
+          buildLegacyCleanupManifest({
+            epoch: {
+              epochId: "epoch-1",
+              schemaVersion: 13,
+              dataPolicy: "clean",
+              cutoverTime: "2026-07-26T00:00:00.000Z",
+              isActive: true,
+            },
+            paths: {
+              authoritativeDbFile: databaseFile,
+              legacyDbFile: `${databaseFile}${suffix}`,
+            },
+          }),
+        /overlaps protected authoritative-db-(wal|shm)/
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("cleanup manifest rejects overlapping audit and legacy transcript directories", () => {
   const transcriptDir = path.resolve("transcripts");
   assert.throws(

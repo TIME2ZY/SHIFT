@@ -5,19 +5,31 @@ const {
   buildLegacyCleanupManifest,
   readEpochMetadata,
 } = require("../src/storage/legacy-cleanup-manifest");
+const { ENV } = require("../src/shared/brand");
+const { loadProjectEnv } = require("../src/shared/load-env");
 const runtimePaths = require("../src/shared/runtime-paths");
 
-function parseArgs(argv) {
-  const options = {
-    authoritativeDbFile: runtimePaths.DEFAULT_MEMORY_DB_FILE,
+function defaultOptions(env = process.env) {
+  return {
+    authoritativeDbFile: path.resolve(
+      env[ENV.MEMORY_DB] || runtimePaths.DEFAULT_MEMORY_DB_FILE
+    ),
     legacyDbFile: runtimePaths.LEGACY_MEMORY_DB_FILE,
     sessionsFile: runtimePaths.DEFAULT_SESSIONS_FILE,
     invocationsFile: runtimePaths.DEFAULT_INVOCATIONS_FILE,
-    transcriptDir: runtimePaths.DEFAULT_TRANSCRIPT_DIR,
-    auditTranscriptDir: runtimePaths.DEFAULT_AUDIT_TRANSCRIPT_DIR,
+    transcriptDir: path.resolve(
+      env[ENV.TRANSCRIPT_DIR] || runtimePaths.DEFAULT_TRANSCRIPT_DIR
+    ),
+    auditTranscriptDir: path.resolve(
+      env[ENV.AUDIT_TRANSCRIPT_DIR] || runtimePaths.DEFAULT_AUDIT_TRANSCRIPT_DIR
+    ),
     sessionMapRoot: runtimePaths.DEFAULT_SESSION_MAP_ROOT,
     output: "",
   };
+}
+
+function parseArgs(argv, env = process.env) {
+  const options = defaultOptions(env);
   const names = new Map([
     ["--db", "authoritativeDbFile"],
     ["--authoritative-db", "authoritativeDbFile"],
@@ -60,6 +72,7 @@ Options:
 }
 
 function main() {
+  loadProjectEnv(runtimePaths.ROOT);
   let options;
   try {
     options = parseArgs(process.argv.slice(2));
@@ -89,4 +102,6 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { defaultOptions, main, parseArgs };

@@ -369,6 +369,9 @@ version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢�
 清理工具必须从权威 `shift.sqlite` 读取 clean epoch/cutover，同时将 legacy
 `memory.sqlite` 作为独立候选。若 legacy transcript 目录中检测到 post-cutover canonical
 event，或任何候选路径与权威数据库/canonical audit 目录重叠，必须拒绝生成清理清单。
+权威数据库的 `-wal` / `-shm` sidecar 与主文件具有相同保护级别。清理 CLI 必须和正常
+服务共同加载 `.env` / `.env.local` 的 `SHIFT_*` 路径，显式 CLI 参数优先。epoch archive
+目录只接受安全单段 ID，并显式拒绝 `.` / `..` 后再校验 containment。
 
 满足门槛后，可以直接永久删除旧 `sessions.json`、旧 transcript、旧 provider session map
 及其旧投影，无需先导入 SQLite。清理操作必须是独立、显式的变更，不得夹带在 schema

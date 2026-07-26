@@ -7,13 +7,29 @@ const test = require("node:test");
 const { createStorage, openMemoryDatabase } = require("../../src/storage");
 const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
 const { MIGRATIONS } = require("../../src/storage/schema");
-const { createServerStorage, resolveBoolean } = require("../../src/storage/server-storage");
+const {
+  createServerStorage,
+  resolveBoolean,
+  resolveEpochAuditDirectory,
+  safeEpochDirectory,
+} = require("../../src/storage/server-storage");
 
 test("audit transcript boolean accepts explicit and environment-style values", () => {
   assert.equal(resolveBoolean(undefined, "off", true), false);
   assert.equal(resolveBoolean(undefined, "ON", false), true);
   assert.equal(resolveBoolean(false, "on", true), false);
   assert.equal(resolveBoolean(undefined, "unknown", true), true);
+});
+
+test("epoch audit directory rejects dot segments and remains inside its root", () => {
+  const root = path.resolve("audit-transcripts");
+  assert.throws(() => safeEpochDirectory("."), /Unsafe storage epoch id/);
+  assert.throws(() => safeEpochDirectory(".."), /Unsafe storage epoch id/);
+  assert.throws(() => safeEpochDirectory("../escape"), /Unsafe storage epoch id/);
+  assert.equal(
+    resolveEpochAuditDirectory(root, "epoch-safe_1"),
+    path.join(root, "epoch-safe_1")
+  );
 });
 
 test("files storage mode does not open SQLite", () => {

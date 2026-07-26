@@ -17,6 +17,16 @@ function buildLegacyCleanupManifest({ paths = {}, epoch = null, generatedAt } = 
       path: authoritativeDbFile,
       description: "active SQLite business truth source",
     },
+    {
+      id: "authoritative-db-wal",
+      path: `${authoritativeDbFile}-wal`,
+      description: "active SQLite write-ahead log",
+    },
+    {
+      id: "authoritative-db-shm",
+      path: `${authoritativeDbFile}-shm`,
+      description: "active SQLite shared-memory sidecar",
+    },
     ...(auditTranscriptDir
       ? [
           {

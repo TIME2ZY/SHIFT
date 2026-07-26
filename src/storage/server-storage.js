@@ -101,10 +101,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     options.auditTranscriptSink ||
     (mode === "sqlite" && options.auditTranscriptDir
       ? createCanonicalTranscriptSink(
-          path.join(
-            path.resolve(options.auditTranscriptDir),
-            safeEpochDirectory(activeEpoch?.epochId)
-          )
+          resolveEpochAuditDirectory(options.auditTranscriptDir, activeEpoch?.epochId)
         )
       : options.transcript || null);
   const outboxFlusher =
@@ -184,10 +181,29 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
 
 function safeEpochDirectory(epochId) {
   const value = String(epochId || "").trim();
-  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+  if (
+    value === "." ||
+    value === ".." ||
+    !/^[A-Za-z0-9._-]+$/.test(value)
+  ) {
     throw new Error(`Unsafe storage epoch id for audit archive: ${value || "(missing)"}`);
   }
   return value;
+}
+
+function resolveEpochAuditDirectory(auditRoot, epochId) {
+  const root = path.resolve(auditRoot);
+  const resolved = path.resolve(root, safeEpochDirectory(epochId));
+  const relative = path.relative(root, resolved);
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`Storage epoch archive escapes audit root: ${resolved}`);
+  }
+  return resolved;
 }
 
 function resolveBoolean(explicit, envValue, fallback) {
@@ -200,4 +216,9 @@ function resolveBoolean(explicit, envValue, fallback) {
   return fallback;
 }
 
-module.exports = { createServerStorage, resolveBoolean, safeEpochDirectory };
+module.exports = {
+  createServerStorage,
+  resolveBoolean,
+  resolveEpochAuditDirectory,
+  safeEpochDirectory,
+};

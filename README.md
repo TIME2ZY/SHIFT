@@ -136,6 +136,9 @@ Copy-Item .env.example .env
 | `npm run plan:storage:cleanup`     | 只读生成 legacy 清理清单          |
 | `npm run audit:storage:divergence` | 只读比较 legacy 验证语料与 SQLite |
 
+Storage 脚本与服务共同加载项目 `.env` / `.env.local`；`SHIFT_MEMORY_DB`、
+`SHIFT_TRANSCRIPT_DIR`、`SHIFT_AUDIT_TRANSCRIPT_DIR` 是默认路径，命令行显式参数优先。
+
 <details>
 <summary><strong>技术轮廓</strong></summary>
 
