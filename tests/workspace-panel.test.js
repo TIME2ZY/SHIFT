@@ -56,8 +56,9 @@ function withJsdom(html, run) {
 
 test("renderWorkspacePanel mounts refresh/discard actions for dirty worktrees", () => {
   // Regression: updateActions used to build buttons but never append them.
-  withJsdom('<!doctype html><div id="panel"></div>', () => {
-    const panelEl = document.getElementById("panel");
+  withJsdom('<!doctype html><div id="panel"></div>', (dom) => {
+    const doc = dom.window.document;
+    const panelEl = doc.getElementById("panel");
     const state = {
       currentSessionId: "s1",
       workspace: {
@@ -106,8 +107,9 @@ test("renderWorkspacePanel mounts refresh/discard actions for dirty worktrees", 
 });
 
 test("renderEmptyStateWithWorktreeCta uses distinct CTA box/button classes", () => {
-  withJsdom('<!doctype html><div id="panel"></div>', () => {
-    const panelEl = document.getElementById("panel");
+  withJsdom('<!doctype html><div id="panel"></div>', (dom) => {
+    const doc = dom.window.document;
+    const panelEl = doc.getElementById("panel");
     const state = {
       currentSessionId: "s1",
       workspace: emptyWorkspaceState(),
