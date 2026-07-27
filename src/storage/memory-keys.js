@@ -71,12 +71,17 @@ function deriveTopicFromContent(content) {
   return slugifyTopic(firstLine.slice(0, 48));
 }
 
+const { canonicalizeTopic, listCanonicalTopics, TOPIC_ALIASES } = require("./memory-topic-canon");
+
 module.exports = {
   PRODUCT_KINDS,
   AUTO_KINDS,
   ALL_KINDS,
   ACTIVE_STATUSES,
   ALL_STATUSES,
+  TOPIC_ALIASES,
+  canonicalizeTopic,
+  listCanonicalTopics,
   isProductKind,
   normalizeProductKind,
   slugifyTopic,

@@ -249,14 +249,74 @@ function createMemoryRepository(db) {
     },
 
     /**
+     * Active product rows (any kind) whose supersession topic segment matches.
+     * Used so decision:X and fact:X cannot both stay active.
+     */
+    listActiveProductByTopic({ scope, ownerThreadId, projectKey, topic }) {
+      if (!topic) return [];
+      const productKinds = ["decision", "constraint", "fact", "lesson"];
+      const kindClause = `AND kind IN (${productKinds.map(() => "?").join(", ")})`;
+      if (scope === "project") {
+        if (!projectKey) return [];
+        const rows = db
+          .prepare(
+            `
+            SELECT * FROM memory_entries
+            WHERE scope = 'project' AND project_key = ?
+              AND status IN ('captured', 'confirmed')
+              ${kindClause}
+              AND (
+                supersession_key LIKE ?
+                OR json_extract(metadata_json, '$.topic') = ?
+              )
+            ORDER BY created_at DESC, id DESC
+          `
+          )
+          .all(projectKey, ...productKinds, `%:${topic}`, topic);
+        return rows.map(mapMemory).filter((m) => topicSegment(m) === topic);
+      }
+      if (!ownerThreadId) return [];
+      const rows = db
+        .prepare(
+          `
+          SELECT * FROM memory_entries
+          WHERE scope = 'thread' AND owner_thread_id = ?
+            AND status IN ('captured', 'confirmed')
+            ${kindClause}
+            AND (
+              supersession_key LIKE ?
+              OR json_extract(metadata_json, '$.topic') = ?
+            )
+          ORDER BY created_at DESC, id DESC
+        `
+        )
+        .all(ownerThreadId, ...productKinds, `%:${topic}`, topic);
+      return rows.map(mapMemory).filter((m) => topicSegment(m) === topic);
+    },
+
+    /**
      * Retire active peers before insert (UNIQUE-safe). supersededBy filled later.
      */
-    retireActivePeers({ scope, ownerThreadId, projectKey, supersessionKey, metadataPatch }) {
-      if (!supersessionKey) return [];
-      const peers =
-        scope === "project"
-          ? this.listActiveByProjectSupersessionKey(projectKey, supersessionKey)
-          : this.listActiveBySupersessionKey(ownerThreadId, supersessionKey);
+    retireActivePeers({ scope, ownerThreadId, projectKey, supersessionKey, topic, metadataPatch }) {
+      const byKey = new Map();
+      if (supersessionKey) {
+        const peers =
+          scope === "project"
+            ? this.listActiveByProjectSupersessionKey(projectKey, supersessionKey)
+            : this.listActiveBySupersessionKey(ownerThreadId, supersessionKey);
+        for (const peer of peers) byKey.set(peer.id, peer);
+      }
+      // Cross-kind same topic (decision vs fact) — one active product topic only.
+      if (topic) {
+        const topicPeers = this.listActiveProductByTopic({
+          scope,
+          ownerThreadId,
+          projectKey,
+          topic,
+        });
+        for (const peer of topicPeers) byKey.set(peer.id, peer);
+      }
+      const peers = [...byKey.values()];
       for (const peer of peers) {
         this.transition(peer.id, "superseded", {
           supersededBy: null,
@@ -507,6 +567,19 @@ function buildFtsQuery(query, options = {}) {
 
 function escapeLike(value) {
   return value.replace(/[!%_]/g, (character) => `!${character}`);
+}
+
+/** Topic segment of supersession_key kind:topic or metadata.topic */
+function topicSegment(memory) {
+  if (!memory) return "";
+  if (typeof memory.topic === "string" && memory.topic) return memory.topic;
+  if (memory.metadata && typeof memory.metadata.topic === "string" && memory.metadata.topic) {
+    return memory.metadata.topic;
+  }
+  const key = memory.supersessionKey || "";
+  const sep = key.indexOf(":");
+  if (sep > 0) return key.slice(sep + 1);
+  return "";
 }
 
 function mapMemory(row) {

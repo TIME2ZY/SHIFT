@@ -398,6 +398,7 @@ node scripts/callback-client.js memory-upsert --kind decision --topic storage-pr
 参数：
 - \`--kind\`：\`decision\`（拍板）| \`constraint\`（禁止/必须）| \`fact\`（可核对事实）
 - \`--topic\`：**必填**，短稳定主题（中英文均可）；**同主题更新必须复用同一 topic**，系统会 supersede 旧条
+- 鉴权/存储优先 canonical：\`auth-token-ttl\` / \`auth-no-refresh\` / \`auth-password-hash\` / \`auth-session-model\` / \`auth-login-contract\` / \`auth-token-isolation\` / \`auth-scope\` / \`storage-primary\` / \`local-dev-port\`（常见别名写入时会归一）
 - \`--content\`：一句话结论；必要细节可两行，勿贴大段日志
 
 写入规则：
