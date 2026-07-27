@@ -15,6 +15,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     dumpDir: "",
     projectDir: "",
     sessionId: "",
+    startFrom: "",
+    chatRetries: 3,
     apiUrl: process.env.SHIFT_API_URL || "http://127.0.0.1:8787",
     uiToken: process.env.SHIFT_UI_TOKEN || "",
     basePort: Number(process.env.PORT || 8787),
@@ -101,6 +103,22 @@ function parseArgs(argv = process.argv.slice(2)) {
       opts.sessionId = arg.slice("--session-id=".length);
       continue;
     }
+    if (arg === "--start-from") {
+      opts.startFrom = String(next() || "");
+      continue;
+    }
+    if (arg.startsWith("--start-from=")) {
+      opts.startFrom = arg.slice("--start-from=".length);
+      continue;
+    }
+    if (arg === "--chat-retries") {
+      opts.chatRetries = positiveInt(next(), opts.chatRetries);
+      continue;
+    }
+    if (arg.startsWith("--chat-retries=")) {
+      opts.chatRetries = positiveInt(arg.slice("--chat-retries=".length), opts.chatRetries);
+      continue;
+    }
     if (arg === "--api-url") {
       opts.apiUrl = String(next() || opts.apiUrl);
       continue;
@@ -162,6 +180,8 @@ Options:
   --ui-token <token>      UI token (default SHIFT_UI_TOKEN)
   --project-dir <path>    session project dir (default repo root)
   --session-id <id>       continue an existing session
+  --start-from <turnId>   skip stack turns before this id (e.g. u9_security)
+  --chat-retries <n>      retry chat on SQLITE busy / 5xx (default 3)
   --max-fill-turns <n>    max stack turns before recall (default 12)
   --turn-timeout-ms <n>   per-turn timeout (default 15min)
   --require-seal          fail if no sealed event

@@ -134,7 +134,17 @@ async function main() {
       startedAt: new Date(startedAt).toISOString(),
     });
 
-    const fillTurns = scenario.STACK_TURNS.slice(0, opts.maxFillTurns);
+    let fillTurns = scenario.STACK_TURNS.slice(0, opts.maxFillTurns);
+    if (opts.startFrom) {
+      const idx = fillTurns.findIndex((t) => t.id === opts.startFrom);
+      if (idx < 0) {
+        throw new Error(
+          `--start-from ${opts.startFrom} not found in stack turns: ${fillTurns.map((t) => t.id).join(", ")}`
+        );
+      }
+      fillTurns = fillTurns.slice(idx);
+      console.log(`[live] resuming stack from ${opts.startFrom} (${fillTurns.length} fill turns left)`);
+    }
     let turnIndex = 0;
 
     for (const turn of fillTurns) {
@@ -143,11 +153,13 @@ async function main() {
       console.log(`\n── turn ${turnIndex}/${fillTurns.length} · ${turn.id} ──`);
       console.log(`user: ${turn.prompt.slice(0, 120)}${turn.prompt.length > 120 ? "…" : ""}`);
 
-      const result = await api.chat({
+      const result = await chatWithRetry(api, {
         sessionId,
         agent: scenario.AGENT,
         prompt: turn.prompt,
         timeoutMs: opts.turnTimeoutMs,
+        retries: opts.chatRetries,
+        label: turn.id,
       });
 
       const memoryInjects = collectMemoryInjectPayloads(result.events);
@@ -188,11 +200,13 @@ async function main() {
     turnIndex += 1;
     const recall = scenario.RECALL_TURN;
     console.log(`\n── turn ${turnIndex} · ${recall.id} (recall) ──`);
-    const recallResult = await api.chat({
+    const recallResult = await chatWithRetry(api, {
       sessionId,
       agent: scenario.AGENT,
       prompt: recall.prompt,
       timeoutMs: opts.turnTimeoutMs,
+      retries: opts.chatRetries,
+      label: recall.id,
     });
     const recallInjects = collectMemoryInjectPayloads(recallResult.events);
     turnRecords.push({
@@ -306,6 +320,34 @@ async function main() {
       }
     }
   }
+}
+
+function isRetryableChatFailure(result) {
+  if (!result) return true;
+  if (result.ok) return false;
+  if (result.status >= 500) return true;
+  const blob = `${result.text || ""}${JSON.stringify(result.summary?.errors || [])}`;
+  return /database is locked|SQLITE_BUSY|SQLITE_BUSY_SNAPSHOT/i.test(blob);
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function chatWithRetry(api, { sessionId, agent, prompt, timeoutMs, retries = 3, label }) {
+  let last = null;
+  const attempts = Math.max(1, Number(retries) || 1);
+  for (let i = 1; i <= attempts; i += 1) {
+    last = await api.chat({ sessionId, agent, prompt, timeoutMs });
+    if (last.ok) return last;
+    if (!isRetryableChatFailure(last) || i === attempts) return last;
+    const waitMs = 1500 * i;
+    console.warn(
+      `  [retry ${i}/${attempts}] ${label} http=${last.status} — waiting ${waitMs}ms (sqlite busy / 5xx)`
+    );
+    await sleep(waitMs);
+  }
+  return last;
 }
 
 function printSummary(report, dumpDir) {
