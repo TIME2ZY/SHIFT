@@ -109,13 +109,16 @@ function createMemoryCapture({
     const windowIdentity = input.windowId || `invocation:${invocationId}`;
     const id = input.id || idFactory();
     const createdAt = input.createdAt || new Date().toISOString();
+    const reason = input.reason || "context overflow";
+    const partial =
+      typeof input.partial === "boolean" ? input.partial : isPartialSealReason(reason, input);
     const metadata = {
       source: "window-seal",
       agentId,
       generation: positiveIntegerOrNull(input.generation),
       ratio: finiteNumberOrNull(input.ratio),
-      reason: input.reason || "context overflow",
-      partial: true,
+      reason,
+      partial,
       invocationState: input.invocationState || "sealed",
     };
     const memoryInput = {
@@ -231,19 +234,45 @@ function renderHandoffMemory({ fromAgent, toAgent, handoff, quality }) {
   return truncateEnd(lines.join("\n"), MAX_MEMORY_CONTENT_CHARS);
 }
 
+function isPartialSealReason(reason, input = {}) {
+  const r = String(reason || "");
+  if (r.startsWith("post-turn")) return false;
+  if (r === "pre-call-projected" || r === "physical-ceiling-empty") return true;
+  if (r === "physical-ceiling") {
+    // Complete answer then physical soft-seal still has full text.
+    return !(typeof input.assistantContent === "string" && input.assistantContent.trim());
+  }
+  // Legacy "context overflow" mid-stream style — treat as partial unless told otherwise.
+  return true;
+}
+
 function renderWindowSealMemory(input) {
+  const partial = input.partial !== false;
   const snapshot = truncateMiddle(
     typeof input.assistantContent === "string" && input.assistantContent
       ? input.assistantContent
-      : "(seal 时尚无 assistant 文本)",
+      : partial
+        ? "(seal 时尚无 assistant 文本)"
+        : "(本轮无 assistant 文本)",
     1500
   );
+  if (partial) {
+    return truncateEnd(
+      [
+        `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=true`,
+        "中断快照:",
+        snapshot,
+        "说明: provider session 已放弃；后续请以结构化记忆与 session-search 为准。",
+      ].join("\n"),
+      MAX_MEMORY_CONTENT_CHARS
+    );
+  }
   return truncateEnd(
     [
-      `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=true`,
-      "中断快照:",
+      `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=false`,
+      "完整轮次快照:",
       snapshot,
-      "说明: provider session 已放弃；后续请以结构化记忆与 session-search 为准。",
+      "说明: 窗口已正常轮换；后续请以结构化记忆与 session-search 为准。",
     ].join("\n"),
     MAX_MEMORY_CONTENT_CHARS
   );

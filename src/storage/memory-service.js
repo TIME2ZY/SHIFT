@@ -8,7 +8,6 @@ const {
   buildSupersessionKey,
   buildProductCaptureKey,
   deriveTopicFromContent,
-  slugifyTopic,
   parseSupersessionKey,
 } = require("./memory-keys");
 
@@ -83,17 +82,70 @@ function createMemoryService({
       const writeFields = deriveWriteFields(input);
 
       // Contract: retire peers BEFORE insert so UNIQUE active indexes stay valid.
-      const previous = supersessionKey
-        ? storage.memories.retireActivePeers({
-            scope,
-            ownerThreadId,
+      // Also retire same-topic product rows across kinds (decision vs fact).
+      const topicForPeers =
+        typeof input.topic === "string" && input.topic
+          ? input.topic
+          : supersessionKey && supersessionKey.includes(":")
+            ? supersessionKey.slice(supersessionKey.indexOf(":") + 1)
+            : null;
+      const metadataPatch = { supersededAt: nowIso(clock) };
+      const previous = [];
+      const seen = new Set();
+      const retire = (args) => {
+        const peers = storage.memories.retireActivePeers({
+          ...args,
+          metadataPatch,
+        });
+        for (const peer of peers) {
+          if (!seen.has(peer.id)) {
+            seen.add(peer.id);
+            previous.push(peer);
+          }
+        }
+      };
+      if (supersessionKey || topicForPeers) {
+        retire({
+          scope,
+          ownerThreadId,
+          projectKey,
+          supersessionKey,
+          topic: topicForPeers,
+        });
+      }
+      // Same canon topic must not stay active as both project decision and thread fact.
+      if (topicForPeers) {
+        if (scope === "project" && originThreadId) {
+          retire({
+            scope: "thread",
+            ownerThreadId: originThreadId,
+            projectKey: null,
+            supersessionKey: null,
+            topic: topicForPeers,
+          });
+        }
+        if (scope === "thread" && projectKey) {
+          retire({
+            scope: "project",
+            ownerThreadId: null,
             projectKey,
-            supersessionKey,
-            metadataPatch: {
-              supersededAt: nowIso(clock),
-            },
-          })
-        : [];
+            supersessionKey: null,
+            topic: topicForPeers,
+          });
+        } else if (scope === "thread" && originThreadId) {
+          // Resolve projectKey from origin thread when writing thread-scoped product.
+          const origin = storage.threads?.get?.(originThreadId);
+          if (origin?.projectKey) {
+            retire({
+              scope: "project",
+              ownerThreadId: null,
+              projectKey: origin.projectKey,
+              supersessionKey: null,
+              topic: topicForPeers,
+            });
+          }
+        }
+      }
 
       const memory = storage.memories.create({
         ...input,
@@ -184,12 +236,15 @@ function createMemoryService({
         `Memory supersessionKey kind "${parsedSupersessionKey.kind}" does not match "${kind}".`
       );
     }
-    const topic =
+    const { canonicalizeTopic } = require("./memory-topic-canon");
+    const topicRaw =
       typeof input.topic === "string" && input.topic.trim()
-        ? slugifyTopic(input.topic)
+        ? input.topic
         : parsedSupersessionKey
-          ? slugifyTopic(parsedSupersessionKey.topic)
+          ? parsedSupersessionKey.topic
           : deriveTopicFromContent(content);
+    // Canonicalize so aliases (auth-session-ttl → auth-token-ttl) share one chain.
+    const topic = canonicalizeTopic(topicRaw);
     const supersessionKey = buildSupersessionKey(kind, topic);
     const captureKey =
       typeof input.captureKey === "string" && input.captureKey.trim()
@@ -424,6 +479,26 @@ function createMemoryService({
     return invalidated;
   }
 
+  /**
+   * Whether a live thread may mutate (invalidate/confirm-adjacent) this memory.
+   * - thread-scoped: owner/origin must match session
+   * - project-scoped: same projectKey as the calling thread
+   */
+  function canAccessFromThread(memory, threadId) {
+    if (!memory || !threadId) return false;
+    const thread = storage.threads?.get?.(threadId) || null;
+    if (!thread) return false;
+
+    const scope = memory.scope || "thread";
+    if (scope === "project") {
+      if (!memory.projectKey || !thread.projectKey) return false;
+      return memory.projectKey === thread.projectKey;
+    }
+
+    const owner = memory.ownerThreadId || memory.threadId || memory.originThreadId;
+    return owner === threadId;
+  }
+
   function enrichMemory(memory) {
     if (!memory) return null;
     const relatedKey = memory.supersessionKey;
@@ -487,6 +562,7 @@ function createMemoryService({
     get,
     confirm,
     invalidate,
+    canAccessFromThread,
     PRODUCT_KINDS,
   };
 }

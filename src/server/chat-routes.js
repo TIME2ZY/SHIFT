@@ -745,6 +745,8 @@ function createChatRoutes({
             ratio,
             reason: "context overflow",
             assistantContent,
+            // Mid-stream kill is always a partial snapshot.
+            partial: true,
             invocationState: "sealed",
           });
           if (capture?.captured) {

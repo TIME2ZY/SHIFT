@@ -32,6 +32,16 @@ always: true
 
 - **必填**、短、稳定（如 `storage-primary`）
 - **同主题变更必须复用同一 topic**（系统会 supersede 旧条）
+- 鉴权/存储相关优先用 canonical（系统会把常见别名归一到这些键）：
+  - `auth-token-ttl`（勿再用 auth-session-ttl 等变体）
+  - `auth-no-refresh`
+  - `auth-password-hash`
+  - `auth-session-model`
+  - `auth-login-contract`
+  - `auth-token-isolation`
+  - `auth-scope`
+  - `storage-primary`
+  - `local-dev-port`
 
 ## 怎么写（二选一）
 

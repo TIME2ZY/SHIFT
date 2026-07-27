@@ -480,7 +480,15 @@ function createCallbackRoutes({
       }
 
       const existing = memoryService.get(memoryId);
-      if (!existing || existing.threadId !== sessionId) {
+      // Project memories are readable project-wide; invalidate must use the same
+      // projectKey rule (not origin-thread equality), or agents cannot correct
+      // institutional memory from a new session.
+      const accessible =
+        existing &&
+        (typeof memoryService.canAccessFromThread === "function"
+          ? memoryService.canAccessFromThread(existing, sessionId)
+          : existing.threadId === sessionId);
+      if (!accessible) {
         sendJson(res, 404, { error: "Memory not found." });
         return true;
       }
