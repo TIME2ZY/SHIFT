@@ -24,7 +24,7 @@ async function startHarness(opts, ctx) {
   return startSpawn(opts, ctx);
 }
 
-async function startAttach(opts, ctx) {
+async function startAttach(opts, _ctx) {
   if (!opts.uiToken) {
     throw new Error("attach mode requires --ui-token or SHIFT_UI_TOKEN");
   }

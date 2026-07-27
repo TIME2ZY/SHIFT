@@ -352,7 +352,6 @@ function evaluateLiveRun(input) {
   for (const a of factsResult.soft) soft.push(a);
 
   // ── Inject relevance soft: related channel ──
-  const injectStats = injectEvents[0]?.stats || injectEvents[0]?.items?.[0] && null;
   const relatedCount =
     injectEvents[0]?.stats?.channels?.related ??
     injectEvents[0]?.stats?.related ??

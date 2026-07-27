@@ -15,7 +15,7 @@
 const path = require("node:path");
 
 const { parseArgs, printHelp } = require("./lib/parse-args");
-const { preflight, printPreflight, ROOT } = require("./lib/preflight");
+const { preflight, printPreflight } = require("./lib/preflight");
 const { createApiClient } = require("./lib/api-client");
 const { startHarness, resolveProjectDir } = require("./lib/harness");
 const { collectMemoryInjectPayloads } = require("./lib/sse");
@@ -110,7 +110,7 @@ async function main() {
 
   try {
     harness = await startHarness(opts, { dumpDir });
-    const { api, prompts } = harness;
+    const { api } = harness;
     const projectDir = resolveProjectDir(opts);
 
     // Re-check health after spawn

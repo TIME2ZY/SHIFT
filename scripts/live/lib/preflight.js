@@ -4,7 +4,6 @@
 
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
-const path = require("node:path");
 
 const { ROOT, DEFAULT_MEMORY_DB_FILE } = require("../../../src/shared/runtime-paths");
 
