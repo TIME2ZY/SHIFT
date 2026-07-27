@@ -55,31 +55,34 @@
     return [];
   }
 
+  /**
+   * Structured model line for the agent panel (model mono + effort chip).
+   * Brand/CLI is already conveyed by avatar + name.
+   */
+  function agentModelParts(agent) {
+    if (!agent) return { model: "", effort: "", tags: [] };
+    const tags =
+      agent.capabilities && typeof agent.capabilities === "object"
+        ? resolveCapabilityTags(agent)
+        : [];
+    return {
+      model: agent.model ? String(agent.model) : "",
+      effort: agent.reasoningEffort ? String(agent.reasoningEffort) : "",
+      tags: Array.isArray(tags) ? tags : [],
+    };
+  }
+
+  /**
+   * Compact agent subtitle for mention menu / tooltips.
+   */
   function agentMeta(agent) {
     if (!agent) return "";
-    const providerLabel = agent.providerId === "opencode" ? "opencode go" : agent.providerId || "";
-    let base;
-    if (agent.providerId === "opencode") {
-      base = `${providerLabel || "opencode go"} · ${agent.model}`;
-    } else if (agent.providerId === "grok") {
-      base = agent.reasoningEffort
-        ? `xAI · ${agent.model} · ${agent.reasoningEffort}`
-        : `xAI · ${agent.model}`;
-    } else if (agent.providerId === "antigravity") {
-      base = agent.reasoningEffort
-        ? `Antigravity · ${agent.model} · ${agent.reasoningEffort}`
-        : `Antigravity · ${agent.model}`;
-    } else {
-      base = agent.reasoningEffort
-        ? `${providerLabel} · ${agent.model} · ${agent.reasoningEffort}`
-        : `${providerLabel} · ${agent.model}`;
-    }
-    // Capability tags only when the API provided an explicit capabilities object.
-    if (agent.capabilities && typeof agent.capabilities === "object") {
-      const tags = resolveCapabilityTags(agent);
-      if (tags.length) base = `${base} · ${tags.join("+")}`;
-    }
-    return base;
+    const { model, effort, tags } = agentModelParts(agent);
+    const parts = [];
+    if (model) parts.push(model);
+    if (effort) parts.push(effort);
+    if (tags.length) parts.push(tags.join("+"));
+    return parts.join(" · ");
   }
 
   function roleBadgeLabel(role) {
@@ -142,6 +145,7 @@
       agentLabel,
       agentMention,
       agentMeta,
+      agentModelParts,
       agentColorIndex,
       roleBadgeLabel,
       roleDisplayName(role, agentId) {
@@ -158,6 +162,7 @@
     agentLabelFromList,
     agentMention,
     agentMeta,
+    agentModelParts,
     agentColorIndex,
     AGENT_COLOR_COUNT,
     roleBadgeLabel,
