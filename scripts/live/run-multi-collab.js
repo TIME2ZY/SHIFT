@@ -89,9 +89,10 @@ function setLiveCapacity(tokens) {
 function checkCli(name) {
   const which = process.platform === "win32" ? "where" : "which";
   // gemini uses antigravity CLI in catalog; still check common binaries
+  // Gemini provider uses Antigravity CLI; binary is often `agy` on PATH.
   const candidates =
     name === "gemini"
-      ? ["antigravity", "gemini"]
+      ? ["agy", "antigravity", "gemini"]
       : name === "codex"
         ? ["codex"]
         : name === "grok"
