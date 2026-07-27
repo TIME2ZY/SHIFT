@@ -16,11 +16,43 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
   const worktrees = new Map();
 
   function attempt(operation, work) {
-    try {
-      return work();
-    } catch (error) {
-      logger.error?.(`[sqlite-session] ${operation} failed: ${error.message}`);
-      throw error;
+    const maxAttempts = 5;
+    let lastError = null;
+    for (let i = 1; i <= maxAttempts; i += 1) {
+      try {
+        return work();
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableSqliteBusy(error) || i === maxAttempts) {
+          logger.error?.(`[sqlite-session] ${operation} failed: ${error.message}`);
+          throw error;
+        }
+        const waitMs = 50 * i * i;
+        logger.warn?.(
+          `[sqlite-session] ${operation} busy (${error.code || error.message}); retry ${i}/${maxAttempts} after ${waitMs}ms`
+        );
+        sleepSync(waitMs);
+      }
+    }
+    throw lastError;
+  }
+
+  function isRetryableSqliteBusy(error) {
+    const code = String(error?.code || "");
+    const message = String(error?.message || "");
+    return (
+      code === "SQLITE_BUSY" ||
+      code === "SQLITE_BUSY_SNAPSHOT" ||
+      code === "SQLITE_LOCKED" ||
+      /database is locked|SQLITE_BUSY/i.test(message)
+    );
+  }
+
+  /** better-sqlite3 is sync; busy retries must block the event loop briefly. */
+  function sleepSync(ms) {
+    const end = Date.now() + Math.max(0, ms);
+    while (Date.now() < end) {
+      // spin — intentional; keeps transaction retry simple without async rewrite
     }
   }
 
