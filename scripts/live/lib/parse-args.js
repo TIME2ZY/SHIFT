@@ -11,6 +11,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     totalTimeoutMs: 120 * 60 * 1000,
     strictMemory: false,
     requireSeal: false,
+    /** When true, resume runs may exit 0 as resumeRunPassed (never cleanRunPassed). */
+    allowResume: false,
     dryRun: false,
     dumpDir: "",
     projectDir: "",
@@ -44,6 +46,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
     if (arg === "--require-seal") {
       opts.requireSeal = true;
+      continue;
+    }
+    if (arg === "--allow-resume") {
+      opts.allowResume = true;
       continue;
     }
     if (arg === "--mode") {
@@ -179,9 +185,12 @@ Options:
   --api-url <url>         attach base URL (default SHIFT_API_URL or http://127.0.0.1:8787)
   --ui-token <token>      UI token (default SHIFT_UI_TOKEN)
   --project-dir <path>    session project dir (default repo root)
-  --session-id <id>       continue an existing session
-  --start-from <turnId>   skip stack turns before this id (e.g. u9_security)
+  --session-id <id>       continue an existing session (marks run as resume)
+  --start-from <turnId>   skip stack turns before this id (marks run as resume)
+  --allow-resume          allow exit 0 for resume/recovery runs only (never clean-run)
   --chat-retries <n>      retry chat on SQLITE busy / 5xx (default 3)
+  --strict-memory         fail on soft fact/memory misses (exit 4)
+  --require-seal          fail if no sealed event
   --max-fill-turns <n>    max stack turns before recall (default 12)
   --turn-timeout-ms <n>   per-turn timeout (default 15min)
   --require-seal          fail if no sealed event

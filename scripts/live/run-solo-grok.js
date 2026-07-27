@@ -19,14 +19,20 @@ const { preflight, printPreflight, ROOT } = require("./lib/preflight");
 const { createApiClient } = require("./lib/api-client");
 const { startHarness, resolveProjectDir } = require("./lib/harness");
 const { collectMemoryInjectPayloads } = require("./lib/sse");
-const { evaluateLiveRun } = require("./lib/live-assert");
+const {
+  evaluateLiveRun,
+  annotateTurnOutcomes,
+  classifyTurnOutcome,
+} = require("./lib/live-assert");
 const {
   createDumpDir,
   dumpTurn,
   writeReport,
   writeJson,
+  writeText,
 } = require("./lib/live-dump");
 const scenario = require("./scenarios/solo-grok-auth");
+const { DEFAULT_MEMORY_DB_FILE } = require("../../src/shared/runtime-paths");
 
 const EXIT = {
   OK: 0,
@@ -87,6 +93,13 @@ async function main() {
   let sealed = false;
   let sealTurnId = null;
   let fatalError = null;
+  const isResume = Boolean(opts.sessionId || opts.startFrom);
+  const runKind = isResume ? "resume" : "clean";
+  if (isResume && !opts.allowResume) {
+    console.warn(
+      "[live] WARNING: --session-id/--start-from marks a RESUME run; clean-run acceptance will FAIL unless --allow-resume"
+    );
+  }
 
   const totalTimer =
     opts.totalTimeoutMs > 0
@@ -131,6 +144,8 @@ async function main() {
       sessionId,
       projectDir,
       baseUrl: api.baseUrl,
+      runKind,
+      allowResume: Boolean(opts.allowResume),
       startedAt: new Date(startedAt).toISOString(),
     });
 
@@ -163,33 +178,42 @@ async function main() {
       });
 
       const memoryInjects = collectMemoryInjectPayloads(result.events);
-      const record = {
-        turnId: turn.id,
-        ok: result.ok,
-        status: result.status,
-        durationMs: result.durationMs,
-        assistantText: result.assistantText,
-        summary: result.summary,
-        memoryInjects,
-      };
+      const record = buildTurnRecord(turn, result, memoryInjects);
       turnRecords.push(record);
-      dumpTurn(dumpDir, turnIndex, turn, result, { memoryInjects });
+      dumpTurn(dumpDir, turnIndex, turn, result, {
+        memoryInjects,
+        outcome: record.outcome,
+        failure: record.failure,
+      });
 
       console.log(
         `  http=${result.status} duration=${result.durationMs}ms ` +
           `assistantChars=${(result.assistantText || "").length} ` +
+          `outcome=${record.outcome} ` +
           `sealed=${result.summary.sealed.length} memory-inject=${result.summary.memoryInject}`
       );
       if (result.summary.errors?.length) {
         console.warn("  errors:", JSON.stringify(result.summary.errors).slice(0, 300));
       }
       if (!result.ok) {
-        throw new Error(`chat failed on ${turn.id} status=${result.status}`);
+        dumpFailure(dumpDir, turn.id, result, {
+          phase: "chat",
+          sessionId,
+          sealed,
+        });
+        throw new Error(
+          `chat failed on ${turn.id} status=${result.status}: ${summarizeFailure(result)}`
+        );
       }
 
       if (result.summary.sealed?.length) {
         sealed = true;
         sealTurnId = turn.id;
+        if (record.outcome === "seal-empty") {
+          console.warn(
+            "  ⚠ seal-empty: user prompt not answered (will hard-fail L9/L10 unless product replays)"
+          );
+        }
         console.log(`  ★ sealed (agent=${result.summary.sealed[0]?.agent}) — stopping fill turns`);
         break;
       }
@@ -209,20 +233,27 @@ async function main() {
       label: recall.id,
     });
     const recallInjects = collectMemoryInjectPayloads(recallResult.events);
-    turnRecords.push({
-      turnId: recall.id,
-      ok: recallResult.ok,
-      status: recallResult.status,
-      durationMs: recallResult.durationMs,
-      assistantText: recallResult.assistantText,
-      summary: recallResult.summary,
+    const recallRecord = buildTurnRecord(recall, recallResult, recallInjects);
+    turnRecords.push(recallRecord);
+    dumpTurn(dumpDir, turnIndex, recall, recallResult, {
       memoryInjects: recallInjects,
+      outcome: recallRecord.outcome,
     });
-    dumpTurn(dumpDir, turnIndex, recall, recallResult, { memoryInjects: recallInjects });
     console.log(
       `  http=${recallResult.status} duration=${recallResult.durationMs}ms ` +
-        `assistantChars=${(recallResult.assistantText || "").length}`
+        `assistantChars=${(recallResult.assistantText || "").length} outcome=${recallRecord.outcome}`
     );
+
+    if (!recallResult.ok) {
+      dumpFailure(dumpDir, recall.id, recallResult, {
+        phase: "recall",
+        sessionId,
+        sealed,
+      });
+      throw new Error(
+        `chat failed on ${recall.id} status=${recallResult.status}: ${summarizeFailure(recallResult)}`
+      );
+    }
 
     if (recallResult.summary.sealed?.length) {
       sealed = true;
@@ -239,22 +270,33 @@ async function main() {
       // optional
     }
 
+    let messages = [];
     try {
-      const messages = await api.getMessages(sessionId);
+      messages = await api.getMessages(sessionId);
       writeJson(path.join(dumpDir, "snapshot-messages.json"), { messages });
+      attachUserMessageIds(turnRecords, messages);
     } catch {
       // optional
     }
 
+    const windows = snapshotWindows(sessionId);
+    writeJson(path.join(dumpDir, "snapshot-windows.json"), { windows });
+
+    const annotated = annotateTurnOutcomes(turnRecords);
+    writeJson(path.join(dumpDir, "turns-annotated.json"), annotated);
+
     const evaluated = evaluateLiveRun({
       opts,
       sessionId,
-      turns: turnRecords,
+      turns: annotated,
       sealed,
       sealTurnId,
       memoriesPayload,
       prompts: harness.prompts || [],
       preflightNotes: pf.notes,
+      runKind,
+      windows,
+      stackTurnIds: scenario.STACK_TURNS.slice(0, opts.maxFillTurns).map((t) => t.id),
     });
 
     const report = {
@@ -264,9 +306,12 @@ async function main() {
       sessionId,
       sealed,
       sealTurnId,
-      turnCount: turnRecords.length,
+      turnCount: annotated.length,
       durationMs: Date.now() - startedAt,
       exitCode: evaluated.exitCode,
+      runKind: evaluated.runKind,
+      cleanRunPassed: evaluated.cleanRunPassed,
+      resumeRunPassed: evaluated.resumeRunPassed,
       productMemoryCount: evaluated.productMemoryCount,
       productMemories: evaluated.productMemories,
       hard: evaluated.hard,
@@ -275,9 +320,13 @@ async function main() {
         ...evaluated.notes,
         `dump: ${dumpDir}`,
         `session kept in runtime DB — open UI to continue chatting`,
+        `cleanRunPassed=${evaluated.cleanRunPassed} resumeRunPassed=${evaluated.resumeRunPassed}`,
       ],
       hardFailed: evaluated.hardFailed,
       softFailed: evaluated.softFailed,
+      injectItemCount: evaluated.injectItemCount,
+      relatedCount: evaluated.relatedCount,
+      recencyCount: evaluated.recencyCount,
     };
 
     writeReport(dumpDir, report);
@@ -286,6 +335,7 @@ async function main() {
   } catch (error) {
     fatalError = error;
     const isTimeout = /timeout/i.test(error.message || "");
+    const windows = sessionId ? snapshotWindows(sessionId) : [];
     const report = {
       scenarioId: scenario.SCENARIO_ID,
       mode: opts.mode,
@@ -296,13 +346,27 @@ async function main() {
       turnCount: turnRecords.length,
       durationMs: Date.now() - startedAt,
       exitCode: isTimeout ? EXIT.TIMEOUT : EXIT.HARD_FAIL,
+      runKind,
+      cleanRunPassed: false,
+      resumeRunPassed: false,
       productMemoryCount: 0,
       hard: [],
       soft: [],
       notes: pf?.notes || [],
       error: error.stack || String(error),
+      windows,
     };
     try {
+      writeJson(path.join(dumpDir, "failure-context.json"), {
+        phase: "runner",
+        sessionId,
+        sealed,
+        sealTurnId,
+        turnCount: turnRecords.length,
+        lastTurns: turnRecords.slice(-3),
+        windows,
+        error: { message: error.message, stack: error.stack, name: error.name },
+      });
       writeReport(dumpDir, report);
     } catch {
       // ignore
@@ -350,9 +414,112 @@ async function chatWithRetry(api, { sessionId, agent, prompt, timeoutMs, retries
   return last;
 }
 
+function buildTurnRecord(turn, result, memoryInjects) {
+  const base = {
+    turnId: turn.id,
+    userPrompt: turn.prompt,
+    ok: result.ok,
+    status: result.status,
+    durationMs: result.durationMs,
+    assistantText: result.assistantText,
+    summary: result.summary,
+    memoryInjects,
+    failure: result.ok
+      ? null
+      : {
+          status: result.status,
+          bodyPreview: String(result.text || "").slice(0, 2000),
+          errors: result.summary?.errors || [],
+        },
+  };
+  base.outcome = classifyTurnOutcome(base);
+  return base;
+}
+
+function attachUserMessageIds(turnRecords, messages) {
+  const users = (messages || []).filter((m) => m.role === "user");
+  // Best-effort: match by order of user prompts in this run
+  let ui = 0;
+  for (const t of turnRecords) {
+    while (ui < users.length) {
+      const msg = users[ui];
+      ui += 1;
+      if (String(msg.content || "").includes(String(t.userPrompt || "").slice(0, 40))) {
+        t.userMessageId = msg.id;
+        break;
+      }
+    }
+  }
+}
+
+function snapshotWindows(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const { createStorage } = require("../../src/storage");
+    const file = process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE;
+    const storage = createStorage({ file });
+    try {
+      return storage.windows.listForThread(sessionId).map((w) => ({
+        id: w.id,
+        generation: w.generation,
+        state: w.state,
+        capacityTokens: w.capacityTokens,
+        inputChars: w.inputChars,
+        outputChars: w.outputChars,
+        contextUsedTokens: w.contextUsedTokens,
+        sealReason: w.sealReason || null,
+        providerSessionId: w.providerSessionId || null,
+      }));
+    } finally {
+      storage.close();
+    }
+  } catch (error) {
+    console.warn(`[live] window snapshot failed: ${error.message}`);
+    return [];
+  }
+}
+
+function dumpFailure(dumpDir, turnId, result, ctx) {
+  try {
+    writeJson(path.join(dumpDir, `failure-${turnId}.json`), {
+      turnId,
+      ...ctx,
+      status: result.status,
+      // SSE/error body may contain the only server message we get
+      bodyPreview: String(result.text || "").slice(0, 8000),
+      summary: result.summary,
+      sanitizedHint:
+        "Server may only return {error:'Internal server error.'}; check server logs for SqliteError/stack.",
+    });
+    writeText(
+      path.join(dumpDir, `failure-${turnId}.sse.txt`),
+      String(result.text || "")
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function summarizeFailure(result) {
+  const text = String(result.text || "");
+  try {
+    const j = JSON.parse(text);
+    if (j?.error) return j.error;
+  } catch {
+    // not json
+  }
+  const err = result.summary?.errors?.[0];
+  if (err) return typeof err === "string" ? err : JSON.stringify(err);
+  return text.slice(0, 200) || `HTTP ${result.status}`;
+}
+
 function printSummary(report, dumpDir) {
   console.log("\n════════ live summary ════════");
-  console.log(`exitCode=${report.exitCode} sealed=${report.sealed} session=${report.sessionId}`);
+  console.log(
+    `exitCode=${report.exitCode} runKind=${report.runKind} ` +
+      `cleanRunPassed=${report.cleanRunPassed} resumeRunPassed=${report.resumeRunPassed}`
+  );
+  console.log(`sealed=${report.sealed} session=${report.sessionId}`);
   console.log(`productMemories=${report.productMemoryCount} turns=${report.turnCount}`);
   for (const a of report.hard || []) {
     console.log(`  hard ${a.ok ? "OK" : "FAIL"} ${a.id}: ${a.message}`);

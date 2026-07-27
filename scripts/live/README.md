@@ -80,12 +80,32 @@ npm run test:live:solo-grok -- --require-seal --strict-memory
 - `prompts/`（仅 spawn 模式）
 - `snapshot-memories.json` 等
 
+## 验收（严格）
+
+主验收只认 **clean run**（单次进程、无 `--session-id` / `--start-from`）：
+
+| 标志 | 含义 |
+|------|------|
+| `cleanRunPassed` | 连续跑通且硬断言全过 — **唯一主验收** |
+| `resumeRunPassed` | 仅当 `--allow-resume` 时，续跑可 exit 0（恢复能力测试） |
+
+硬断言要点：
+
+- **L0** 禁止用续跑冒充 clean pass  
+- **L9** seal 触发轮必须有非空回答或 `seal-and-replayed`（禁止空 assistant）  
+- **L10 / L10b** 禁止空 assistant-final  
+- **L11** 重放不得重复持久化 user message  
+- **F-*** 期望事实（24h TTL、无 refresh、SQLite…），非「回答看起来很长」  
+
+确定性单测（进 `npm test`）：`tests/scenarios/live-assert.test.js`  
+（fake 投影 / seal 边界表在 `context-budget.js`，不依赖真 Grok。）
+
 ## Exit code
 
 | Code | 含义 |
 |------|------|
-| 0 | 硬断言通过 |
-| 1 | 硬断言失败或运行错误 |
+| 0 | 硬断言通过（resume 须带 `--allow-resume`） |
+| 1 | 硬断言失败、空 assistant、续跑未授权、或运行错误 |
 | 2 | Preflight 失败 |
 | 3 | 超时 |
 | 4 | `--strict-memory` 下软断言失败 |
