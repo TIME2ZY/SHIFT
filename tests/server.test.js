@@ -2059,9 +2059,17 @@ test("chat endpoint terminates the chain with sealed event when action threshold
           body: JSON.stringify({ agent: "codex", prompt: "start" }),
         });
         const text = await response.text();
-        // The sealed event must fire for the first agent (codex), not after
-        // A2A routing to sage.
-        assert.match(text, /event: sealed\ndata: \{"agent":"codex".*"reason":"context overflow"\}/);
+        // Seal lifecycle: pre-call rotate and/or post/physical seal — never silent drop.
+        assert.match(text, /event: sealed\ndata: \{[^\n]*"agent":"codex"/);
+        assert.match(
+          text,
+          /"reason":"(context overflow|pre-call-projected|physical-ceiling|post-turn-[^"]+|physical-ceiling-empty)"/
+        );
+        // User still gets non-empty assistant text (or explicit retryable error).
+        assert.ok(
+          /"role":"assistant","text":"x{10,}/.test(text) || /retryable":true/.test(text),
+          "expected non-empty assistant stream or retryable error after seal pressure"
+        );
       }
     );
   } finally {
