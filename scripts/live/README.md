@@ -113,3 +113,30 @@ npm run test:live:solo-grok -- --require-seal --strict-memory
 ## 费用与时间
 
 真模型、多轮、可能 high reasoning：可能 **数十分钟** 并产生 API 费用。先用 `--dry-run` 确认话术。
+
+---
+
+## 多 Agent 串行协作（`test:live:multi-collab`）
+
+讨论环 **22K**（Gemini↔Codex，不改代码）→ 实现环 **48K**（Grok↔OpenCode，**useWorktree=true**）→ 回顾。
+
+```powershell
+# 推荐 spawn：同进程内切换 SHIFT_TEST_CAPACITY
+npm run test:live:multi-collab -- --mode spawn
+
+# 只打印话术
+npm run test:live:multi-collab -- --mode spawn --dry-run
+
+# 覆盖 capacity
+npm run test:live:multi-collab -- --mode spawn --discuss-capacity 22000 --implement-capacity 48000
+```
+
+| 幕 | capacity | worktree | Agent |
+|----|----------|----------|--------|
+| discuss | 22000 | off | gemini, codex |
+| implement | 48000 | **on** | grok, opencode |
+| recall | 48000 | off | codex |
+
+整场 **不因首次 seal 结束**；每幕跑完脚本内全部用户轮。断言见 `lib/multi-assert.js`（四角出现、A2A、seal 轮非空答等）。
+
+**要求：** 本机 PATH 上有对应 CLI（gemini/antigravity、codex、grok、opencode）。

@@ -105,7 +105,7 @@ function createApiClient({ baseUrl, uiToken }) {
    * Full chat turn: read SSE until connection ends.
    * @returns {Promise<{ status, text, events, assistantText, summary, durationMs }>}
    */
-  async function chat({ sessionId, agent, prompt, projectDir, signal, timeoutMs }) {
+  async function chat({ sessionId, agent, prompt, projectDir, useWorktree, signal, timeoutMs }) {
     const controller = new AbortController();
     const timer =
       timeoutMs > 0
@@ -120,6 +120,7 @@ function createApiClient({ baseUrl, uiToken }) {
     try {
       const body = { sessionId, agent, prompt };
       if (projectDir) body.projectDir = projectDir;
+      if (useWorktree === true) body.useWorktree = true;
 
       const response = await apiFetch("/api/chat", {
         method: "POST",
