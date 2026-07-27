@@ -18,6 +18,13 @@ const {
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { extractSuggestionsFromTurn } = require("../storage/memory-extractor");
 const { refreshDigestAndExtract } = require("../storage/memory-digest");
+const {
+  projectTurnBudget,
+  shouldPreSealRotate,
+  shouldSoftSealAfterTurn,
+  shouldEmergencyStop,
+  charsToTokens,
+} = require("../session/context-budget");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -456,84 +463,41 @@ function createChatRoutes({
         const providerId = agentConfig.providerId || "";
         const providerKey =
           providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
-        const durableWindow = storage?.windows?.getOpen?.({
-          threadId: sessionId,
-          agentId: agent,
-          providerKey,
-          workspaceKey,
-        });
-        const resumeSessionId = durableWindow?.providerSessionId || "";
+        let openWindow =
+          storage?.windows?.getOpen?.({
+            threadId: sessionId,
+            agentId: agent,
+            providerKey,
+            workspaceKey,
+          }) ||
+          durable.ensureWindow({
+            session,
+            threadId: sessionId,
+            agentId: agent,
+            providerKey,
+            workspaceKey,
+            capacityTokens: contextHealth.getAgentCapacity(agent),
+            reserveRatio: contextHealth.getAgentReserveRatio(agent),
+          });
+        let resumeSessionId = openWindow?.providerSessionId || "";
         let assistantContent = "";
         let observedProviderSessionId = "";
         let contextWarned = false;
         let contextSealedSseSent = false;
         let contextSealHandled = false;
+        let emergencyStop = false;
+        let sealPending = false;
+        let preCallRotated = false;
+        let preCallSealedWindowId = null;
+        let preCallSealedGeneration = null;
+        let preCallSealedRatio = 0;
 
-        const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
-        const startedAt = new Date().toISOString();
         const queuedCause = threadCtx.a2aCauses[i] || null;
         const parentInvocationId =
           i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
         const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
         const triggerMessageId =
           i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
-        const durableRun = durable.startInvocation({
-          session,
-          invocationId,
-          threadId: sessionId,
-          agentId: agent,
-          providerKey,
-          workspaceKey,
-          capacityTokens: contextHealth.getAgentCapacity(agent),
-          reserveRatio: contextHealth.getAgentReserveRatio(agent),
-          resumeSessionId,
-          startedAt,
-          parentInvocationId,
-          triggerMessageId,
-          triggerType,
-        });
-        if (!durableRun) {
-          throw new Error(`Failed to persist invocation start for ${invocationId}.`);
-        }
-        const healthTracker = contextHealth.makeTracker(agent, {
-          capacityTokens: durableRun?.window?.capacityTokens,
-          inputChars: durableRun?.window?.inputChars,
-          outputChars: durableRun?.window?.outputChars,
-          reserveRatio: durableRun?.window?.reserveRatio,
-          contextUsedTokens: durableRun?.window?.contextUsedTokens,
-          contextUsageSource: durableRun?.window?.contextUsageSource,
-          billingInputTokens: durableRun?.window?.billingInputTokens,
-          billingCachedInputTokens: durableRun?.window?.billingCachedInputTokens,
-          billingOutputTokens: durableRun?.window?.billingOutputTokens,
-          billingReasoningTokens: durableRun?.window?.billingReasoningTokens,
-          billingTotalTokens: durableRun?.window?.billingTotalTokens,
-          billingCostUsd: durableRun?.window?.billingCostUsd,
-        });
-        const billingAtStart = { ...healthTracker.snapshot().billing };
-        const sealer = sessionSealer.makeSealer();
-        threadCtx.sealer = sealer;
-        sendSse(res, "agent-start", { agent, invocationId });
-        if (i === 0) {
-          const injectPayload = buildMemoryInjectPayload({
-            sessionId,
-            agent,
-            source: "bootstrap",
-            items: bootstrapInject.items,
-            stats: bootstrapInject.stats,
-          });
-          sendSse(res, "memory-inject", injectPayload);
-          storage?.memoryEvents?.recordSafe?.({
-            eventType: "memory_injected",
-            threadId: sessionId,
-            agentId: agent,
-            payload: {
-              source: "bootstrap",
-              count: injectPayload.count,
-              memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
-              availability: injectPayload.availability,
-            },
-          });
-        }
 
         let agentPrompt;
         /** @type {string[]} */
@@ -633,7 +597,7 @@ function createChatRoutes({
               threadId: sessionId,
               sessionId,
               agent: agentConfig,
-              generation: durableRun?.window?.generation || 1,
+              generation: openWindow?.generation || 1,
             }),
             agentPrompt
           );
@@ -642,8 +606,184 @@ function createChatRoutes({
           }
         }
         promptParts.push(callbackInstructions);
-        const promptForAgent = promptParts.filter(Boolean).join("\n\n");
+        let promptForAgent = promptParts.filter(Boolean).join("\n\n");
+
+        // Tracker from open window *before* this prompt (for PRE projection).
+        let healthTracker = contextHealth.makeTracker(agent, {
+          capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
+          inputChars: openWindow?.inputChars,
+          outputChars: openWindow?.outputChars,
+          reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
+          contextUsedTokens: openWindow?.contextUsedTokens,
+          contextUsageSource: openWindow?.contextUsageSource,
+          billingInputTokens: openWindow?.billingInputTokens,
+          billingCachedInputTokens: openWindow?.billingCachedInputTokens,
+          billingOutputTokens: openWindow?.billingOutputTokens,
+          billingReasoningTokens: openWindow?.billingReasoningTokens,
+          billingTotalTokens: openWindow?.billingTotalTokens,
+          billingCostUsd: openWindow?.billingCostUsd,
+        });
+        const usedBeforePrompt = healthTracker.getUsedTokens();
+        const promptTokens = charsToTokens(promptForAgent.length);
+        const preBudget = projectTurnBudget({
+          currentContextTokens: usedBeforePrompt,
+          estimatedFullPromptTokens: promptTokens,
+        });
+        if (
+          shouldPreSealRotate({
+            usableContextTokens: healthTracker.usableContextTokens,
+            projected: preBudget.projected,
+          })
+        ) {
+          const ratio0 = healthTracker.getFillRatio();
+          const rotated = durable.sealAndRotateWindow({
+            session,
+            threadId: sessionId,
+            agentId: agent,
+            providerKey,
+            workspaceKey,
+            capacityTokens: healthTracker.capacityTokens,
+            reserveRatio: healthTracker.reserveRatio,
+            windowId: openWindow?.id || null,
+            reason: "pre-call-projected",
+          });
+          if (rotated?.next || rotated?.sealed) {
+            preCallRotated = true;
+            preCallSealedWindowId = openWindow?.id || rotated?.sealed?.id || null;
+            preCallSealedGeneration = openWindow?.generation || rotated?.sealed?.generation || null;
+            preCallSealedRatio = ratio0;
+            sendSse(res, "sealed", {
+              agent,
+              ratio: ratio0,
+              reason: "pre-call-projected",
+              projected: preBudget.projected,
+              usable: healthTracker.usableContextTokens,
+            });
+            contextSealedSseSent = true;
+            // Capture after startInvocation (needs a real invocation id for SQLite FK).
+            openWindow =
+              rotated?.next ||
+              storage?.windows?.getOpen?.({
+                threadId: sessionId,
+                agentId: agent,
+                providerKey,
+                workspaceKey,
+              });
+            resumeSessionId = "";
+            healthTracker = contextHealth.makeTracker(agent, {
+              capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
+              inputChars: openWindow?.inputChars,
+              outputChars: openWindow?.outputChars,
+              reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
+              contextUsedTokens: openWindow?.contextUsedTokens,
+              contextUsageSource: openWindow?.contextUsageSource,
+            });
+            // Refresh generation identity in prompt when possible (A2A path).
+            // promptParts: [identity, collab, sessionIdentity, agentPrompt, callbacks]
+            if (i > 0 && promptParts.length >= 4) {
+              promptParts[2] = sessionBootstrap.buildIdentity({
+                threadId: sessionId,
+                sessionId,
+                agent: agentConfig,
+                generation: openWindow?.generation || 2,
+              });
+              promptForAgent = promptParts.filter(Boolean).join("\n\n");
+            }
+          }
+        }
         healthTracker.addInput(promptForAgent.length);
+
+        // Start invocation only on the window that will actually run the provider.
+        const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
+        const startedAt = new Date().toISOString();
+        let durableRun = durable.startInvocation({
+          session,
+          invocationId,
+          threadId: sessionId,
+          agentId: agent,
+          providerKey,
+          workspaceKey,
+          capacityTokens: healthTracker.capacityTokens,
+          reserveRatio: healthTracker.reserveRatio,
+          resumeSessionId,
+          startedAt,
+          parentInvocationId,
+          triggerMessageId,
+          triggerType,
+        });
+        if (!durableRun) {
+          throw new Error(`Failed to persist invocation start for ${invocationId}.`);
+        }
+        let activeInvocationId = invocationId;
+        // Prefer tracker bound to the durable window snapshot when present.
+        if (durableRun.window) {
+          healthTracker = contextHealth.makeTracker(agent, {
+            capacityTokens: durableRun.window.capacityTokens,
+            inputChars: durableRun.window.inputChars,
+            outputChars: durableRun.window.outputChars,
+            reserveRatio: durableRun.window.reserveRatio,
+            contextUsedTokens: durableRun.window.contextUsedTokens,
+            contextUsageSource: durableRun.window.contextUsageSource,
+            billingInputTokens: durableRun.window.billingInputTokens,
+            billingCachedInputTokens: durableRun.window.billingCachedInputTokens,
+            billingOutputTokens: durableRun.window.billingOutputTokens,
+            billingReasoningTokens: durableRun.window.billingReasoningTokens,
+            billingTotalTokens: durableRun.window.billingTotalTokens,
+            billingCostUsd: durableRun.window.billingCostUsd,
+          });
+          healthTracker.addInput(promptForAgent.length);
+        }
+        const billingAtStart = { ...healthTracker.snapshot().billing };
+        const sealer = sessionSealer.makeSealer();
+        sealer.update(healthTracker.getFillRatio());
+        threadCtx.sealer = sealer;
+        // Keep agent-start payload stable for clients/tests; extras go on window-meta.
+        sendSse(res, "agent-start", { agent, invocationId });
+        sendSse(res, "window-meta", {
+          agent,
+          invocationId,
+          generation: durableRun?.window?.generation || openWindow?.generation || 1,
+          preCallRotated,
+        });
+        if (preCallRotated && preCallSealedWindowId) {
+          const capture = memories.captureWindowSeal({
+            threadId: sessionId,
+            invocationId,
+            windowId: preCallSealedWindowId,
+            agentId: agent,
+            generation: preCallSealedGeneration,
+            ratio: preCallSealedRatio,
+            reason: "pre-call-projected",
+            assistantContent: "",
+            invocationState: "pre-call-rotate",
+          });
+          if (capture?.captured) {
+            sendSse(res, "memory-captured", capture.event);
+          }
+          // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
+        }
+        if (i === 0) {
+          const injectPayload = buildMemoryInjectPayload({
+            sessionId,
+            agent,
+            source: "bootstrap",
+            items: bootstrapInject.items,
+            stats: bootstrapInject.stats,
+          });
+          sendSse(res, "memory-inject", injectPayload);
+          storage?.memoryEvents?.recordSafe?.({
+            eventType: "memory_injected",
+            threadId: sessionId,
+            agentId: agent,
+            payload: {
+              source: "bootstrap",
+              count: injectPayload.count,
+              memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
+              availability: injectPayload.availability,
+            },
+          });
+        }
+
         if (threadCtx._pendingA2AInject) {
           const pending = threadCtx._pendingA2AInject;
           threadCtx._pendingA2AInject = null;
@@ -704,7 +844,12 @@ function createChatRoutes({
         // usage.update is passthrough and does not end an open streak.
         const persistDurableEvent = (kind, payload) => {
           try {
-            events.append({ threadId: sessionId, invocationId, kind, payload });
+            events.append({
+              threadId: sessionId,
+              invocationId: activeInvocationId,
+              kind,
+              payload,
+            });
           } catch (error) {
             log.error?.(`[event-store] durable event failed: ${error.message}`);
             throw error;
@@ -714,118 +859,215 @@ function createChatRoutes({
           ...resolveCoalesceOptionsFromEnv(),
           write: persistDurableEvent,
         });
-        const sealContextWindow = (ratio) => {
-          if (contextSealHandled) return;
+        const sealContextWindow = (ratio, reason = "post-turn-soft") => {
+          if (contextSealHandled) return null;
           contextSealHandled = true;
           durableCoalescer.flushAll();
+          let rotated = null;
           if (durableRun?.window?.id) {
-            const contextRotated = Boolean(
-              durable.sealAndRotateWindow({
-                session,
-                threadId: sessionId,
-                agentId: agent,
-                providerKey,
-                workspaceKey,
-                capacityTokens: durableRun.window.capacityTokens,
-                reserveRatio: durableRun.window.reserveRatio,
-                windowId: durableRun.window.id,
-                reason: "context overflow",
-              })
-            );
-            if (!contextRotated) {
-              durable.sealWindow(durableRun.window.id, "context overflow");
+            rotated = durable.sealAndRotateWindow({
+              session,
+              threadId: sessionId,
+              agentId: agent,
+              providerKey,
+              workspaceKey,
+              capacityTokens: durableRun.window.capacityTokens,
+              reserveRatio: durableRun.window.reserveRatio,
+              windowId: durableRun.window.id,
+              reason,
+            });
+            if (!rotated) {
+              durable.sealWindow(durableRun.window.id, reason);
             }
           }
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
-            invocationId,
+            invocationId: activeInvocationId,
             windowId: durableRun?.window?.id || null,
             agentId: agent,
             generation: durableRun?.window?.generation || null,
             ratio,
-            reason: "context overflow",
+            reason,
             assistantContent,
             invocationState: "sealed",
           });
           if (capture?.captured) {
             sendSse(res, "memory-captured", capture.event);
           }
+          return rotated;
+        };
+        const noteContextPressure = () => {
+          const usableRatio = healthTracker.getFillRatio();
+          sealer.update(usableRatio);
+          if (usableRatio >= sealer.thresholds.warn && !contextWarned) {
+            sendSse(res, "context-warning", {
+              agent,
+              ratio: usableRatio,
+              threshold: sealer.thresholds.warn,
+            });
+            contextWarned = true;
+            sealPending = true;
+          }
+          const emergency = shouldEmergencyStop({
+            physicalContextTokens: healthTracker.capacityTokens,
+            usedTokens: healthTracker.getUsedTokens(),
+            physicalKillRatio: 0.98,
+          });
+          if (emergency.stop) {
+            emergencyStop = true;
+            if (!contextSealedSseSent) {
+              sendSse(res, "sealed", {
+                agent,
+                ratio: usableRatio,
+                physicalRatio: healthTracker.getPhysicalFillRatio(),
+                reason: emergency.reason || "physical-ceiling",
+              });
+              contextSealedSseSent = true;
+            }
+          }
         };
         const addObservedContext = (charCount) => {
           healthTracker.addOutput(charCount);
-          const ratio = healthTracker.getFillRatio();
-          const state = sealer.update(ratio);
-          if (state === sessionSealer.STATE.SEALING && !contextWarned) {
-            sendSse(res, "context-warning", { agent, ratio, threshold: sealer.thresholds.warn });
-            contextWarned = true;
-          } else if (state === sessionSealer.STATE.SEALED && !contextSealedSseSent) {
-            sendSse(res, "sealed", { agent, ratio, reason: "context overflow" });
-            contextSealedSseSent = true;
-            sealContextWindow(ratio);
-          }
+          noteContextPressure();
         };
 
-        const { code, signal } = await runChildStream({
-          spawnRunner,
-          args: buildChatArgs(agent, agentPrompt, promptForAgent),
-          res,
-          cwd: runWorkspace.worktreeDir,
-          killGraceMs: options.killGraceMs,
-          timeoutMs: options.timeoutMs,
-          signal: invocationController.signal,
-          env: invocationEnv,
-          onEvent(event) {
-            // Realtime path first — UI should not wait on durable batching.
-            sendSse(res, "agent-event", event);
-            if (
-              typeof event.sessionId === "string" &&
-              event.sessionId &&
-              durableRun?.window?.id
-            ) {
-              observedProviderSessionId = event.sessionId;
-              durable.bindProviderSession(durableRun.window.id, event.sessionId);
-            }
-            if (event.type === "text.delta") {
-              const text = typeof event.text === "string" ? event.text : "";
-              assistantContent += text;
-              sendSse(res, "message", { agent, role: "assistant", text });
-            }
-            if (event.type === "usage.update") {
-              healthTracker.applyUsage(event);
-              if (durableRun?.window?.id) {
-                durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+        // Replay loop: at most one automatic re-run after empty emergency stop.
+        let code = 0;
+        let signal = null;
+        let replayedAfterEmpty = false;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (attempt > 0) {
+            // New window after empty emergency — start a fresh invocation.
+            assistantContent = "";
+            observedProviderSessionId = "";
+            emergencyStop = false;
+            sealPending = false;
+            const retry = callbacks.createInvocation(sessionId, agent);
+            const retryRun = durable.startInvocation({
+              session,
+              invocationId: retry.invocationId,
+              threadId: sessionId,
+              agentId: agent,
+              providerKey,
+              workspaceKey,
+              capacityTokens: healthTracker.capacityTokens,
+              reserveRatio: healthTracker.reserveRatio,
+              resumeSessionId: "",
+              startedAt: new Date().toISOString(),
+              parentInvocationId,
+              triggerMessageId,
+              triggerType,
+            });
+            if (!retryRun) break;
+            durableRun = retryRun;
+            activeInvocationId = retry.invocationId;
+            invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
+            invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
+            invocationEnv.INVOKE_SESSION_ID = "";
+            threadCtx.currentInvocationId = retry.invocationId;
+            threadCtx.windowId = retryRun.window?.id || null;
+            healthTracker = contextHealth.makeTracker(agent, {
+              capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
+              reserveRatio: retryRun.window?.reserveRatio ?? healthTracker.reserveRatio,
+            });
+            healthTracker.addInput(promptForAgent.length);
+            sendSse(res, "agent-start", { agent, invocationId: retry.invocationId });
+            sendSse(res, "window-meta", {
+              agent,
+              invocationId: retry.invocationId,
+              generation: retryRun.window?.generation || 2,
+              replay: true,
+            });
+            replayedAfterEmpty = true;
+          }
+
+          const streamResult = await runChildStream({
+            spawnRunner,
+            args: buildChatArgs(agent, agentPrompt, promptForAgent),
+            res,
+            cwd: runWorkspace.worktreeDir,
+            killGraceMs: options.killGraceMs,
+            timeoutMs: options.timeoutMs,
+            signal: invocationController.signal,
+            env: invocationEnv,
+            onEvent(event) {
+              sendSse(res, "agent-event", event);
+              if (
+                typeof event.sessionId === "string" &&
+                event.sessionId &&
+                durableRun?.window?.id
+              ) {
+                observedProviderSessionId = event.sessionId;
+                durable.bindProviderSession(durableRun.window.id, event.sessionId);
               }
-            }
-            const contextChars = contextCharsFromEvent(event);
-            if (contextChars > 0) addObservedContext(contextChars);
-            durableCoalescer.accept(event);
-          },
-          onStderr(text) {
-            durableCoalescer.flushAll();
-            persistDurableEvent("stderr", { agent, text });
-            const visible = filterBenignStderr(text);
-            if (visible) sendSse(res, "stderr", { agent, text: visible });
-          },
-          onHealth: addObservedContext,
-          shouldStop: () => sealer.isSealed(),
-        });
-
-        // Always drain residual deltas before end markers / finishInvocation.
-        durableCoalescer.flushAll();
-
-        if (durableRun) {
-          durable.addWindowUsage(durableRun.window.id, {
-            inputChars: promptForAgent.length,
-            outputChars: assistantContent.length,
+              if (event.type === "text.delta") {
+                const text = typeof event.text === "string" ? event.text : "";
+                assistantContent += text;
+                sendSse(res, "message", { agent, role: "assistant", text });
+              }
+              if (event.type === "usage.update") {
+                healthTracker.applyUsage(event);
+                if (durableRun?.window?.id) {
+                  durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+                }
+                noteContextPressure();
+              }
+              const contextChars = contextCharsFromEvent(event);
+              if (contextChars > 0) addObservedContext(contextChars);
+              durableCoalescer.accept(event);
+            },
+            onStderr(text) {
+              durableCoalescer.flushAll();
+              persistDurableEvent("stderr", { agent, text });
+              const visible = filterBenignStderr(text);
+              if (visible) sendSse(res, "stderr", { agent, text: visible });
+            },
+            onHealth: addObservedContext,
+            // Only physical/emergency stop mid-stream — never soft usable seal.
+            shouldStop: () => emergencyStop,
           });
-          durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
-        }
-        if (sealer.isSealed()) {
-          sealContextWindow(healthTracker.getFillRatio());
-        } else if (durableRun) {
-          const persistedProviderSessionId =
-            observedProviderSessionId || durableRun.window.providerSessionId || "";
-          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+          code = streamResult.code;
+          signal = streamResult.signal;
+          durableCoalescer.flushAll();
+
+          if (durableRun) {
+            durable.addWindowUsage(durableRun.window.id, {
+              inputChars: promptForAgent.length,
+              outputChars: assistantContent.length,
+            });
+            durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+          }
+
+          const hasText = Boolean(String(assistantContent || "").trim());
+          if (!hasText && emergencyStop && attempt === 0) {
+            // Empty emergency: rotate (if needed) and replay once on generation N+1.
+            const ratio = healthTracker.getFillRatio();
+            if (!contextSealHandled) {
+              sealContextWindow(ratio, "physical-ceiling-empty");
+            }
+            durable.finishInvocation(activeInvocationId, code, signal, {
+              agent,
+              contentBytes: 0,
+              usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
+              fillRatioAtEnd: ratio,
+              sealerState: "sealed",
+              emptyEmergency: true,
+            });
+            const nextWin = storage?.windows?.getOpen?.({
+              threadId: sessionId,
+              agentId: agent,
+              providerKey,
+              workspaceKey,
+            });
+            if (nextWin) {
+              healthTracker = contextHealth.makeTracker(agent, {
+                capacityTokens: nextWin.capacityTokens,
+                reserveRatio: nextWin.reserveRatio,
+              });
+              continue;
+            }
+          }
+          break;
         }
 
         const invocationUsage = invocationUsageDelta(
@@ -838,13 +1080,50 @@ function createChatRoutes({
           usage: invocationUsage,
           fillRatioAtEnd: healthTracker.getFillRatio(),
           sealerState: sealer.getState(),
+          emergencyStop,
+          sealPending,
+          preCallRotated,
+          replayedAfterEmpty,
         };
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
-          // Still close the invocation durably; skip assistant-final on abort.
-          durable.finishInvocation(invocationId, code, signal, endPayload);
+          durable.finishInvocation(
+            threadCtx.currentInvocationId || invocationId,
+            code,
+            signal,
+            endPayload
+          );
           aborted = true;
-          previousInvocationId = invocationId;
+          previousInvocationId = threadCtx.currentInvocationId || invocationId;
+          break;
+        }
+
+        const finalInvocationId = threadCtx.currentInvocationId || invocationId;
+        const hasAssistantText = Boolean(String(assistantContent || "").trim());
+
+        // Under seal pressure, never treat empty content as a completed reply.
+        // Clean zero-output exits (legacy mocks / silent success) may still persist "".
+        const sealPressure = emergencyStop || sealPending || preCallRotated || contextSealedSseSent;
+        if (!hasAssistantText && sealPressure) {
+          durable.finishInvocation(finalInvocationId, code, signal, {
+            ...endPayload,
+            emptyAssistant: true,
+          });
+          sendSse(res, "error", {
+            message: "Assistant produced no content after context pressure; request not completed.",
+            retryable: true,
+            agent,
+            reason: emergencyStop ? "physical-ceiling" : "empty-assistant",
+          });
+          sendSse(res, "agent-exit", {
+            agent,
+            code,
+            signal,
+            invocationId: finalInvocationId,
+            usage: invocationUsage,
+          });
+          previousInvocationId = finalInvocationId;
+          aborted = true;
           break;
         }
 
@@ -855,17 +1134,16 @@ function createChatRoutes({
           content: assistantContent,
           exitCode: code,
           signal,
-          invocationId,
+          invocationId: finalInvocationId,
           usage: invocationUsage,
           messageType: "assistant-final",
           createdAt: new Date().toISOString(),
         };
 
-        // Prefer atomic SQLite path: finish + invocation-end + assistant-final.
         const completed =
           durable.enabled && typeof durable.finishWithAssistantMessage === "function"
             ? durable.finishWithAssistantMessage({
-                invocationId,
+                invocationId: finalInvocationId,
                 code,
                 signal,
                 endPayload,
@@ -883,10 +1161,39 @@ function createChatRoutes({
             messages: [...(session.messages || []), assistantMessage],
           };
         } else {
-          throw new Error(`Failed to atomically persist completion for ${invocationId}.`);
+          throw new Error(`Failed to atomically persist completion for ${finalInvocationId}.`);
         }
-        previousInvocationId = invocationId;
-        sendSse(res, "agent-exit", { agent, code, signal, invocationId, usage: invocationUsage });
+        previousInvocationId = finalInvocationId;
+        sendSse(res, "agent-exit", {
+          agent,
+          code,
+          signal,
+          invocationId: finalInvocationId,
+          usage: invocationUsage,
+        });
+
+        // POST soft seal after a complete answer (never mid-stream kill path).
+        const postSoft = shouldSoftSealAfterTurn({
+          usableContextTokens: healthTracker.usableContextTokens,
+          usedTokens: healthTracker.getUsedTokens(),
+        });
+        if ((sealPending || postSoft.seal || emergencyStop) && !contextSealHandled) {
+          const ratio = healthTracker.getFillRatio();
+          const reason = emergencyStop
+            ? "physical-ceiling"
+            : postSoft.reason
+              ? `post-turn-${postSoft.reason}`
+              : "post-turn-soft";
+          if (!contextSealedSseSent) {
+            sendSse(res, "sealed", { agent, ratio, reason });
+            contextSealedSseSent = true;
+          }
+          sealContextWindow(ratio, reason);
+        } else if (durableRun && !contextSealHandled) {
+          const persistedProviderSessionId =
+            observedProviderSessionId || durableRun.window.providerSessionId || "";
+          durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+        }
 
         // Parse structured handoff once per turn (soft — never blocks routing).
         const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
@@ -905,10 +1212,8 @@ function createChatRoutes({
           handoffQualityByTarget,
         });
 
-        if (sealer.isSealed()) {
-          aborted = true;
-          break;
-        }
+        // Soft/post seal must not abort the user-visible answer or strip A2A.
+        // Only client abort ends the chain early here.
 
         // Wave H2/H3: unified finalize (policy + capture + enqueue/repair).
         const agentLabels = Object.fromEntries(
@@ -919,7 +1224,7 @@ function createChatRoutes({
           fromAgent: agent,
           threadId: sessionId,
           sessionId,
-          invocationId,
+          invocationId: finalInvocationId,
           windowId: durableRun?.window?.id || null,
           useWorktree: Boolean(useWorktree),
           worklist,
@@ -946,7 +1251,7 @@ function createChatRoutes({
         const blockStats = applyMemoryBlocks({
           text: assistantContent,
           threadId: sessionId,
-          invocationId,
+          invocationId: finalInvocationId,
           agentId: agent,
           memoryService,
           eventStore: events,
@@ -962,7 +1267,7 @@ function createChatRoutes({
         const writeMetrics = buildMemoryWriteMetrics({
           source: "chat",
           threadId: sessionId,
-          invocationId,
+          invocationId: finalInvocationId,
           agent,
           stats: mergedWriteStats,
         });
@@ -978,7 +1283,7 @@ function createChatRoutes({
             assistantText: assistantContent,
             userMessageId,
             assistantMessageId: assistantMessage.id,
-            invocationId,
+            invocationId: finalInvocationId,
             projectKey: storage?.threads?.get?.(sessionId)?.projectKey || null,
             extractSuggestionsFromTurn,
             logger: log,
@@ -986,7 +1291,7 @@ function createChatRoutes({
           if (extractResult?.extract?.created > 0 || extractResult?.digest) {
             sendSse(res, "memory-digest", {
               sessionId,
-              invocationId,
+              invocationId: finalInvocationId,
               digest: extractResult.digest
                 ? {
                     summary: extractResult.digest.summary,
