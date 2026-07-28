@@ -353,10 +353,22 @@ function createServer(options = {}) {
   const server = http.createServer(
     createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
   );
-  server.once("close", () => {
+  let storageClosed = false;
+  async function closeStorageContext() {
+    if (storageClosed) return;
+    storageClosed = true;
     _previewManagers.delete(worktreeManager);
-    storageContext.close();
+    try {
+      await storageContext.close();
+    } catch (error) {
+      logger.error?.(`[server] storage shutdown failed: ${error.message}`);
+    }
+  }
+  server.once("close", () => {
+    void closeStorageContext();
   });
+  // Expose for tests / orchestrated shutdown that can await flush-before-close.
+  server.closeStorageContext = closeStorageContext;
   return server;
 }
 

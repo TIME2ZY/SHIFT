@@ -136,18 +136,48 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
       };
     },
     sessionService,
-    close() {
-      outboxFlusher?.stop();
-      recorder.close();
-      eventStore.close();
-      sessionService?.close?.();
+    /**
+     * Ordered shutdown: final outbox flush (while DB open) → recorder/event
+     * stores → checkpoint → close DB. Prefer awaiting the returned Promise.
+     */
+    async close() {
+      if (outboxFlusher) {
+        try {
+          await outboxFlusher.close();
+        } catch (error) {
+          logger.error?.(`[sqlite-storage] outbox close failed: ${error.message}`);
+        }
+      }
+      try {
+        recorder.close();
+      } catch (error) {
+        logger.error?.(`[sqlite-storage] recorder close failed: ${error.message}`);
+      }
+      try {
+        eventStore.close();
+      } catch (error) {
+        logger.error?.(`[sqlite-storage] eventStore close failed: ${error.message}`);
+      }
+      try {
+        sessionService?.close?.();
+      } catch (error) {
+        logger.error?.(`[sqlite-storage] sessionService close failed: ${error.message}`);
+      }
       if (ownsStorage && storage) {
         try {
-          storage.checkpoint("TRUNCATE");
+          if (storage.db?.open) {
+            storage.checkpoint("TRUNCATE");
+          }
         } catch (error) {
           logger.error(`[sqlite-storage] WAL checkpoint failed: ${error.message}`);
         }
-        storage.close();
+        try {
+          if (storage.db?.open) {
+            storage.close();
+          }
+        } catch (error) {
+          logger.error?.(`[sqlite-storage] db close failed: ${error.message}`);
+        }
       }
     },
   };

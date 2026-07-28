@@ -14,6 +14,8 @@ function createOutboxFlusher({
   let timer = null;
   let running = null;
   let lastCleanupAt = 0;
+  /** After close() begins, interval ticks must not start new flushes. */
+  let stopped = false;
 
   function cleanupDelivered(options = {}) {
     if (!outbox.cleanupDelivered) return { deleted: 0, before: null };
@@ -29,12 +31,24 @@ function createOutboxFlusher({
     return { deleted, before, retentionDays: days };
   }
 
-  async function flushOnce() {
+  async function flushOnce({ final = false } = {}) {
+    // Interval ticks stop after stop(); only close()'s final flush sets final=true.
+    if (stopped && !final) {
+      return { delivered: 0, failed: 0, cleanup: null, health: outbox.health?.() || null, skipped: true };
+    }
     if (running) return running;
     running = (async () => {
       let delivered = 0;
       let failed = 0;
-      const rows = outbox.listPending({ limit: batchSize });
+      let rows;
+      try {
+        rows = outbox.listPending({ limit: batchSize });
+      } catch (error) {
+        if (/not open|closed/i.test(String(error.message || ""))) {
+          return { delivered: 0, failed: 0, cleanup: null, health: null, dbClosed: true };
+        }
+        throw error;
+      }
       for (const row of rows) {
         try {
           await transcript.appendCanonicalEvent(row);
@@ -43,15 +57,25 @@ function createOutboxFlusher({
         } catch (error) {
           failed += 1;
           const delayMs = Math.min(60_000, 1000 * 2 ** Math.min(row.attempts, 6));
-          outbox.markFailed(row.id, error, { delayMs });
+          try {
+            outbox.markFailed(row.id, error, { delayMs });
+          } catch (markError) {
+            if (!/not open|closed/i.test(String(markError.message || ""))) {
+              logger.error?.(`[storage-outbox] markFailed failed: ${markError.message}`);
+            }
+          }
           logger.error?.(`[storage-outbox] delivery failed for ${row.id}: ${error.message}`);
         }
       }
       let cleanup = null;
       if (Date.now() - lastCleanupAt >= cleanupIntervalMs) {
-        cleanup = cleanupDelivered();
+        try {
+          cleanup = cleanupDelivered();
+        } catch (error) {
+          if (!/not open|closed/i.test(String(error.message || ""))) throw error;
+        }
       }
-      return { delivered, failed, cleanup, health: outbox.health() };
+      return { delivered, failed, cleanup, health: outbox.health?.() || null };
     })();
     try {
       return await running;
@@ -61,14 +85,13 @@ function createOutboxFlusher({
   }
 
   function start() {
-    if (timer) return;
-    timer = setInterval(
-      () =>
-        void flushOnce().catch((error) => {
-          logger.error?.(`[storage-outbox] flush failed: ${error.message}`);
-        }),
-      Math.max(100, intervalMs)
-    );
+    if (timer || stopped) return;
+    timer = setInterval(() => {
+      if (stopped) return;
+      void flushOnce().catch((error) => {
+        logger.error?.(`[storage-outbox] flush failed: ${error.message}`);
+      });
+    }, Math.max(100, intervalMs));
     timer.unref?.();
   }
 
@@ -77,9 +100,27 @@ function createOutboxFlusher({
     timer = null;
   }
 
+  /**
+   * Stop the interval, wait for any in-flight flush, then run one final flush.
+   * Callers must await this before closing the SQLite connection.
+   */
   async function close() {
     stop();
-    await flushOnce();
+    stopped = true;
+    if (running) {
+      try {
+        await running;
+      } catch {
+        // already logged inside flushOnce
+      }
+    }
+    try {
+      // final=true bypasses stopped guard for one last drain while DB is open
+      await flushOnce({ final: true });
+    } catch (error) {
+      logger.error?.(`[storage-outbox] final flush failed: ${error.message}`);
+    }
+    stopped = true;
   }
 
   return {

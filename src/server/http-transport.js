@@ -36,17 +36,41 @@ function readJsonBody(req, maxBodyChars = DEFAULT_MAX_BODY_CHARS) {
   });
 }
 
+function publicErrorPayload(error) {
+  if (error && typeof error.toPublicJson === "function") {
+    return error.toPublicJson();
+  }
+  if (error && error.publicError === true) {
+    return {
+      error: error.message || "Request failed.",
+      code: error.code || "internal_error",
+      ...(error.retryable !== undefined ? { retryable: Boolean(error.retryable) } : {}),
+      ...(error.invocationId ? { invocationId: error.invocationId } : {}),
+    };
+  }
+  if (error && typeof error.code === "string" && error.code.startsWith("durable_")) {
+    return {
+      error: error.message || "Durable write failed.",
+      code: error.code,
+      retryable: error.retryable !== false,
+      ...(error.invocationId ? { invocationId: error.invocationId } : {}),
+    };
+  }
+  return { error: "Internal server error.", code: "internal_error" };
+}
+
 function createSafeRequestListener(handleRequest, { sendJson, sendSse, logger = console }) {
   return (req, res) => {
     handleRequest(req, res).catch((error) => {
       logger.error?.("[http] unhandled request error", error);
       if (res.destroyed || res.writableEnded) return;
+      const payload = publicErrorPayload(error);
       if (!res.headersSent) {
-        sendJson(res, 500, { error: "Internal server error." });
+        sendJson(res, 500, payload);
         return;
       }
       try {
-        sendSse(res, "error", { error: "Internal server error." });
+        sendSse(res, "error", payload);
         res.end();
       } catch {
         res.destroy();
@@ -58,6 +82,7 @@ function createSafeRequestListener(handleRequest, { sendJson, sendSse, logger = 
 module.exports = {
   DEFAULT_MAX_BODY_CHARS,
   createSafeRequestListener,
+  publicErrorPayload,
   sendJson,
   sendSse,
   readJsonBody,

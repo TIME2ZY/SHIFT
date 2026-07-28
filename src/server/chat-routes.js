@@ -25,6 +25,7 @@ const {
   shouldEmergencyStop,
   charsToTokens,
 } = require("../session/context-budget");
+const { DurableWriteError } = require("../storage/sqlite-retry");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -1163,7 +1164,14 @@ function createChatRoutes({
             messages: [...(session.messages || []), assistantMessage],
           };
         } else {
-          throw new Error(`Failed to atomically persist completion for ${finalInvocationId}.`);
+          throw new DurableWriteError(
+            `Failed to atomically persist completion for ${finalInvocationId}.`,
+            {
+              code: "durable_write_failed",
+              invocationId: finalInvocationId,
+              retryable: true,
+            }
+          );
         }
         previousInvocationId = finalInvocationId;
         sendSse(res, "agent-exit", {
