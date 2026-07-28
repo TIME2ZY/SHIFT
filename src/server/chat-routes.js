@@ -778,7 +778,8 @@ function createChatRoutes({
         const sealer = sessionSealer.makeSealer();
         sealer.update(healthTracker.getFillRatio());
         threadCtx.sealer = sealer;
-        // Keep agent-start payload stable for clients/tests; extras go on window-meta.
+        // Keep this payload stable for existing clients. A2A causality lives on
+        // window-meta and is joined by invocationId in live-test auditing.
         sendSse(res, "agent-start", { agent, invocationId });
         sendSse(res, "window-meta", {
           agent,
@@ -791,6 +792,9 @@ function createChatRoutes({
           worktree: Boolean(activeWorktree),
           cwd: runWorkspace.worktreeDir,
           baseDir: runWorkspace.baseDir,
+          parentInvocationId,
+          triggerMessageId,
+          triggerType,
         });
         // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
         sendSse(res, "workspace-meta", {
@@ -1077,6 +1081,9 @@ function createChatRoutes({
               worktree: Boolean(activeWorktree),
               cwd: runWorkspace.worktreeDir,
               baseDir: runWorkspace.baseDir,
+              parentInvocationId,
+              triggerMessageId,
+              triggerType,
             });
             sendSse(res, "workspace-meta", {
               agent,

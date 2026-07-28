@@ -6,14 +6,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { ROOT } = require("../../../src/shared/runtime-paths");
 
-function createDumpDir(explicit) {
+function createDumpDir(explicit, prefix = "solo-grok") {
   if (explicit) {
     const dir = path.resolve(explicit);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const dir = path.join(ROOT, "output", "live", `solo-grok-${stamp}`);
+  const dir = path.join(ROOT, "output", "live", `${prefix}-${stamp}`);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -65,8 +65,13 @@ function writeReport(dumpDir, report) {
 }
 
 function renderReportMd(report) {
+  const reportTitle =
+    report.title ||
+    (report.scenarioId === "multi-auth-collab"
+      ? "Live multi-agent collaboration"
+      : "Live solo Grok");
   const lines = [
-    `# Live solo Grok · ${report.scenarioId || "scenario"}`,
+    `# ${reportTitle} · ${report.scenarioId || "scenario"}`,
     "",
     `- **exitCode**: ${report.exitCode}`,
     `- **runKind**: ${report.runKind || "clean"}`,
@@ -74,16 +79,14 @@ function renderReportMd(report) {
     `- **resumeRunPassed**: ${report.resumeRunPassed === true ? "yes" : "no"}`,
     `- **mode**: ${report.mode}`,
     `- **sessionId**: \`${report.sessionId || ""}\``,
-    `- **capacity**: ${report.capacity}`,
-    `- **sealed**: ${report.sealed ? "yes" : "no"}`,
-    `- **sealTurn**: ${report.sealTurnId || "—"}`,
     `- **turns**: ${report.turnCount}`,
     `- **durationMs**: ${report.durationMs}`,
-    `- **productMemories**: ${report.productMemoryCount}`,
-    "",
-    "## Hard assertions",
-    "",
   ];
+  appendOptionalLine(lines, "capacity", report.capacity);
+  appendOptionalLine(lines, "sealed", report.sealed == null ? null : report.sealed ? "yes" : "no");
+  appendOptionalLine(lines, "sealTurn", report.sealTurnId);
+  appendOptionalLine(lines, "productMemories", report.productMemoryCount);
+  lines.push("", "## Hard assertions", "");
   for (const a of report.hard || []) {
     lines.push(`- ${a.ok ? "✅" : "❌"} **${a.id}**: ${a.message}`);
   }
@@ -100,6 +103,11 @@ function renderReportMd(report) {
   }
   lines.push("");
   return lines.join("\n");
+}
+
+function appendOptionalLine(lines, label, value) {
+  if (value === undefined || value === null || value === "") return;
+  lines.push(`- **${label}**: ${value}`);
 }
 
 module.exports = {

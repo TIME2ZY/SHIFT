@@ -51,9 +51,13 @@ test("finalize enqueues complete handoff under balanced", () => {
   assert.equal(result.enqueued.length, 1);
   assert.equal(result.enqueued[0].to, "opencode");
   assert.equal(result.enqueued[0].policy, DECISIONS.ALLOW);
+  assert.match(result.enqueued[0].handoffId, /^h-/);
+  assert.equal(result.enqueued[0].parentInvocationId, "inv1");
   assert.deepEqual(worklist, ["codex", "opencode"]);
   assert.ok(events.some((e) => e.kind === "handoff-parsed" || e.kind === "handoff"));
-  assert.ok(events.some((e) => e.kind === "a2a-route"));
+  const route = events.find((e) => e.kind === "a2a-route" && e.payload?.handoffId);
+  assert.equal(route.payload.handoffId, result.enqueued[0].handoffId);
+  assert.equal(route.payload.parentInvocationId, "inv1");
 });
 
 test("finalize request_repair on worktree empty packet under balanced", () => {

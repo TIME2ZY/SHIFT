@@ -595,6 +595,7 @@ function emitRoute({
         messageType: "a2a-route",
         from: entry.from,
         to: entry.to,
+        parentInvocationId: entry.parentInvocationId,
         handoffOk: entry.handoffOk,
         handoffDegraded: entry.handoffDegraded,
         handoffPolicy: entry.policy,
@@ -612,6 +613,8 @@ function emitRoute({
     sendSse("a2a-route", {
       from: entry.from,
       to: entry.to,
+      parentInvocationId: entry.parentInvocationId,
+      routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
       handoffDegraded: entry.handoffDegraded,
       handoffPolicy: entry.policy,
@@ -634,6 +637,8 @@ function emitRoute({
     payload: {
       from: entry.from,
       to: entry.to,
+      parentInvocationId: entry.parentInvocationId,
+      routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
       handoffDegraded: entry.handoffDegraded,
       handoffPolicy: entry.policy,

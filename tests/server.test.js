@@ -1509,7 +1509,21 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.equal(second.status, 200);
 
       const text = await second.text();
-      assert.match(text, /event: agent-start\ndata: \{"agent":"opencode","invocationId":"[^"]+"\}/);
+      const startMatch = text.match(
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+      );
+      assert.ok(startMatch, "agent-start must retain its stable two-field payload");
+      const windowMeta = text
+        .split("\n\n")
+        .find(
+          (frame) =>
+            frame.startsWith("event: window-meta\n") &&
+            frame.includes(`"invocationId":"${startMatch[1]}"`)
+        );
+      assert.ok(windowMeta, "window-meta must correlate by invocationId");
+      assert.match(windowMeta, /"parentInvocationId":null/);
+      assert.match(windowMeta, /"triggerMessageId":"[^"]+"/);
+      assert.match(windowMeta, /"triggerType":"user-message"/);
       assert.equal(callCount, 2);
     }
   );

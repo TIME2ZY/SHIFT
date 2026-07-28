@@ -4,6 +4,12 @@
 
 const { findEvents, extractAssistantText, collectMemoryInjectPayloads, summarizeEvents } =
   require("./sse");
+const {
+  auditInvocationLifecycle,
+  aggregateInvocationAudits,
+} = require("./invocation-audit");
+const { auditHandoffs, aggregateHandoffAudits } = require("./handoff-audit");
+const { auditMemoryRetrieval } = require("./memory-retrieval-audit");
 
 function buildTurnTrace(events, meta = {}) {
   const agentStarts = findEvents(events, "agent-start").map((e) => ({
@@ -16,15 +22,19 @@ function buildTurnTrace(events, meta = {}) {
   const sealedAgents = unique(sealed.map((s) => s.agent).filter(Boolean));
   const assistantText = extractAssistantText(events);
   const summary = summarizeEvents(events);
+  const invocationAudit = auditInvocationLifecycle(agentStarts, agentExits);
+  const handoffAudit = auditHandoffs(events);
 
   return {
     ...meta,
     agents,
     agentStarts,
     agentExits,
+    invocationAudit,
+    handoffAudit,
     sealed,
     sealedAgents,
-    a2aHops: Math.max(0, agentStarts.length - 1),
+    a2aHops: handoffAudit.validA2AHops,
     assistantText,
     hasNonEmptyAssistant: Boolean(String(assistantText || "").trim()),
     memoryInjects: collectMemoryInjectPayloads(events),
@@ -40,6 +50,9 @@ function aggregateTrace(turns) {
   let sealEvents = 0;
   let emptyAssistants = 0;
   const phaseStats = Object.create(null);
+  const invocationAudit = aggregateInvocationAudits(turns);
+  const handoffAudit = aggregateHandoffAudits(turns);
+  const memoryRetrievalAudit = auditMemoryRetrieval(turns);
 
   for (const t of turns || []) {
     for (const a of t.agents || []) agentsSeen.add(a);
@@ -77,6 +90,9 @@ function aggregateTrace(turns) {
     emptyAssistants,
     userTurns: (turns || []).length,
     phases,
+    invocationAudit,
+    handoffAudit,
+    memoryRetrievalAudit,
   };
 }
 
