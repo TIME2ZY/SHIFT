@@ -26,6 +26,11 @@ const {
   shouldEmergencyStop,
   charsToTokens,
 } = require("../session/context-budget");
+const {
+  resolveRotateCapacity,
+  buildSealMeta,
+  formatSealReason,
+} = require("../session/seal-lifecycle");
 const { DurableWriteError } = require("../storage/sqlite-retry");
 
 const BILLING_FIELDS = Object.freeze([
@@ -638,28 +643,46 @@ function createChatRoutes({
           })
         ) {
           const ratio0 = healthTracker.getFillRatio();
+          const rotateCapacity = resolveRotateCapacity({
+            agentId: agent,
+            getAgentCapacity: contextHealth.getAgentCapacity,
+            previousCapacity: healthTracker.capacityTokens,
+          });
+          const preSealReason = formatSealReason("pre-call-projected", true);
           const rotated = durable.sealAndRotateWindow({
             session,
             threadId: sessionId,
             agentId: agent,
             providerKey,
             workspaceKey,
-            capacityTokens: healthTracker.capacityTokens,
+            capacityTokens: rotateCapacity,
             reserveRatio: healthTracker.reserveRatio,
             windowId: openWindow?.id || null,
-            reason: "pre-call-projected",
+            reason: preSealReason,
           });
           if (rotated?.next || rotated?.sealed) {
             preCallRotated = true;
             preCallSealedWindowId = openWindow?.id || rotated?.sealed?.id || null;
             preCallSealedGeneration = openWindow?.generation || rotated?.sealed?.generation || null;
             preCallSealedRatio = ratio0;
+            const sealMeta = buildSealMeta({
+              partial: true,
+              reason: "pre-call-projected",
+              ratio: ratio0,
+              workspaceKey,
+              generation: preCallSealedGeneration,
+              nextCapacityTokens: rotateCapacity,
+              missingFields: ["assistantContent"],
+            });
             sendSse(res, "sealed", {
               agent,
               ratio: ratio0,
               reason: "pre-call-projected",
               projected: preBudget.projected,
               usable: healthTracker.usableContextTokens,
+              ...sealMeta,
+              nextCapacityTokens: rotateCapacity,
+              workspaceKey,
             });
             contextSealedSseSent = true;
             // Capture after startInvocation (needs a real invocation id for SQLite FK).
@@ -673,7 +696,7 @@ function createChatRoutes({
               });
             resumeSessionId = "";
             healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
+              capacityTokens: openWindow?.capacityTokens || rotateCapacity,
               inputChars: openWindow?.inputChars,
               outputChars: openWindow?.outputChars,
               reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
@@ -874,10 +897,23 @@ function createChatRoutes({
           ...resolveCoalesceOptionsFromEnv(),
           write: persistDurableEvent,
         });
-        const sealContextWindow = (ratio, reason = "post-turn-soft") => {
+        const sealContextWindow = (ratio, reason = "post-turn-soft", opts = {}) => {
           if (contextSealHandled) return null;
           contextSealHandled = true;
           durableCoalescer.flushAll();
+          // Mid-stream / emergency → partial; completed post-turn soft seal → complete.
+          const partial =
+            opts.partial !== undefined
+              ? Boolean(opts.partial)
+              : /physical-ceiling|emergency|mid-stream|pre-call/i.test(String(reason));
+          const rotateCapacity = resolveRotateCapacity({
+            agentId: agent,
+            getAgentCapacity: contextHealth.getAgentCapacity,
+            previousCapacity:
+              durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
+            explicitCapacity: opts.capacityTokens,
+          });
+          const sealReason = formatSealReason(reason, partial);
           let rotated = null;
           if (durableRun?.window?.id) {
             rotated = durable.sealAndRotateWindow({
@@ -886,15 +922,37 @@ function createChatRoutes({
               agentId: agent,
               providerKey,
               workspaceKey,
-              capacityTokens: durableRun.window.capacityTokens,
-              reserveRatio: durableRun.window.reserveRatio,
+              capacityTokens: rotateCapacity,
+              reserveRatio:
+                durableRun.window.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
               windowId: durableRun.window.id,
-              reason,
+              reason: sealReason,
             });
             if (!rotated) {
-              durable.sealWindow(durableRun.window.id, reason);
+              durable.sealWindow(durableRun.window.id, sealReason);
+            } else if (rotated.next) {
+              // Keep runtime tracker aligned with new generation capacity.
+              durableRun = {
+                ...durableRun,
+                window: rotated.next,
+              };
+              healthTracker = contextHealth.makeTracker(agent, {
+                capacityTokens: rotated.next.capacityTokens || rotateCapacity,
+                reserveRatio: rotated.next.reserveRatio,
+              });
             }
           }
+          const sealMeta = buildSealMeta({
+            partial,
+            reason,
+            ratio,
+            workspaceKey,
+            generation: durableRun?.window?.generation || null,
+            nextCapacityTokens: rotateCapacity,
+            missingFields: partial && !String(assistantContent || "").trim()
+              ? ["assistantContent"]
+              : [],
+          });
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
             invocationId: activeInvocationId,
@@ -902,16 +960,16 @@ function createChatRoutes({
             agentId: agent,
             generation: durableRun?.window?.generation || null,
             ratio,
-            reason,
+            reason: sealReason,
             assistantContent,
-            // Mid-stream kill is always a partial snapshot.
-            partial: true,
-            invocationState: "sealed",
+            partial,
+            invocationState: partial ? "sealed-partial" : "sealed-complete",
+            sealMeta,
           });
           if (capture?.captured) {
             sendSse(res, "memory-captured", capture.event);
           }
-          return rotated;
+          return { rotated, sealMeta, rotateCapacity };
         };
         const noteContextPressure = () => {
           const usableRatio = healthTracker.getFillRatio();
@@ -1228,11 +1286,20 @@ function createChatRoutes({
             : postSoft.reason
               ? `post-turn-${postSoft.reason}`
               : "post-turn-soft";
+          // Emergency mid-stream remains partial; normal post-turn soft seal is complete.
+          const partial = Boolean(emergencyStop);
           if (!contextSealedSseSent) {
-            sendSse(res, "sealed", { agent, ratio, reason });
+            sendSse(res, "sealed", {
+              agent,
+              ratio,
+              reason,
+              partial,
+              complete: !partial,
+              workspaceKey,
+            });
             contextSealedSseSent = true;
           }
-          sealContextWindow(ratio, reason);
+          sealContextWindow(ratio, reason, { partial });
         } else if (durableRun && !contextSealHandled) {
           const persistedProviderSessionId =
             observedProviderSessionId || durableRun.window.providerSessionId || "";

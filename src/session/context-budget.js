@@ -136,3 +136,6 @@ module.exports = {
   charsToTokens,
   percentile,
 };
+
+// Re-export seal lifecycle helpers for live harness / single import path.
+Object.assign(module.exports, require("./seal-lifecycle"));

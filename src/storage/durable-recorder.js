@@ -258,13 +258,41 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
   }
 
   /**
+   * Force-terminal any still-active invocations bound to a sealed window.
+   */
+  function terminateInvocationsForWindow(windowId, reason = "window-sealed") {
+    if (!storage || !windowId) return [];
+    const forced = [];
+    try {
+      const window = storage.windows.get(windowId);
+      const threadId = window?.threadId;
+      if (!threadId || typeof storage.invocations.listForThread !== "function") return forced;
+      for (const inv of storage.invocations.listForThread(threadId)) {
+        if (inv.state !== "active") continue;
+        if (inv.windowId !== windowId) continue;
+        const row = forceTerminalInvocation(inv.id, {
+          state: "failed",
+          reason,
+          causeMessage: reason,
+        });
+        if (row) forced.push(row.id);
+      }
+    } catch (error) {
+      logger.warn?.(`[sqlite-durable-write] terminate window invs failed: ${error.message}`);
+    }
+    return forced;
+  }
+
+  /**
    * Seal the open window for a coordinate and open generation N+1 in one
    * transaction. The new window never inherits the sealed provider session.
+   * capacityTokens should be the **current** live capacity (not sticky old gen).
    */
   function sealAndRotateWindow(input) {
     if (!storage || !isThreadWritable(input.threadId)) return null;
     mirrorThread(input.session);
-    return attempt("seal and rotate context window", () =>
+    const reason = input.reason || "context overflow";
+    const result = attempt("seal and rotate context window", () =>
       storage.windows.sealAndRotate({
         threadId: input.threadId,
         agentId: input.agentId,
@@ -272,12 +300,26 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         workspaceKey: input.workspaceKey,
         capacityTokens: input.capacityTokens,
         reserveRatio: input.reserveRatio,
-        reason: input.reason || "context overflow",
+        reason,
         windowId: input.windowId || null,
         nextId: input.nextId || crypto.randomUUID(),
         sealedAt: input.sealedAt || new Date().toISOString(),
       })
     );
+    // Seal completeness: open invocations on the sealed generation must not stay active.
+    if (result?.sealed?.id) {
+      const terminated = terminateInvocationsForWindow(
+        result.sealed.id,
+        `window-sealed:${reason}`
+      );
+      if (terminated.length) {
+        logger.warn?.(
+          `[sqlite-durable-write] sealed window ${result.sealed.id} terminated ${terminated.length} open invocation(s)`
+        );
+      }
+      result.terminatedInvocationIds = terminated;
+    }
+    return result;
   }
 
   function mirrorLastMessage(session, context = {}) {
