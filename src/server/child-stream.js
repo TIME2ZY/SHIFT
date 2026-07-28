@@ -1,6 +1,8 @@
 const { ROOT } = require("../shared/runtime-paths");
 const { sendSse } = require("./http-transport");
 const { StringDecoder } = require("node:string_decoder");
+const { windowsUtf8Environment } = require("../agents/windows-runtime");
+const { createEncodingTracker } = require("../shared/encoding-guard");
 
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000;
@@ -14,6 +16,7 @@ function runChildStream({
   onEvent,
   onStderr,
   onHealth,
+  onEncodingWarning,
   shouldStop,
   killGraceMs,
   signal,
@@ -23,11 +26,25 @@ function runChildStream({
   const graceMs = killGraceMs || DEFAULT_KILL_GRACE_MS;
   const workDir = cwd || ROOT;
   const serverTimeoutMs = timeoutMs || DEFAULT_SERVER_TIMEOUT_MS;
+  const encodingTracker = createEncodingTracker();
 
   return new Promise((resolve) => {
+    const childEnv = {
+      ...process.env,
+      ...windowsUtf8Environment(process.env),
+      ...(env || {}),
+    };
+    // Prefer UTF-8 for Node child even when parent shell is legacy codepage.
+    if (!childEnv.NODE_OPTIONS) childEnv.NODE_OPTIONS = "";
+    if (!/\b--input-type\b/.test(childEnv.NODE_OPTIONS)) {
+      // leave NODE_OPTIONS as-is; do not invent flags that break providers
+    }
+    childEnv.PYTHONIOENCODING = childEnv.PYTHONIOENCODING || "utf-8";
+    childEnv.PYTHONUTF8 = childEnv.PYTHONUTF8 || "1";
+
     const child = spawnRunner(process.execPath, args, {
       cwd: workDir,
-      env: { ...process.env, ...(env || {}) },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -41,8 +58,23 @@ function runChildStream({
     const decodeChunk = (decoder, chunk) =>
       typeof chunk === "string" ? chunk : decoder.write(chunk);
 
+    const noteEncoding = (text, channel) => {
+      if (!text || typeof onEncodingWarning !== "function") return;
+      const hit = encodingTracker.observe(text);
+      if (!hit) return;
+      onEncodingWarning({
+        channel,
+        count: hit.count,
+        total: hit.total,
+        first: hit.first,
+        samples: hit.samples,
+        cwd: workDir,
+      });
+    };
+
     const processStdoutText = (text) => {
       if (!text) return;
+      noteEncoding(text, "stdout");
       if (typeof onEvent !== "function") {
         onStdout(text);
         if (onHealth) onHealth(text.length);
@@ -61,6 +93,11 @@ function runChildStream({
         } catch (error) {
           sendSse(res, "error", { message: `Invalid agent event: ${error.message}` });
           continue;
+        }
+        // Also scan decoded text fields inside events (replacement may appear after JSON parse).
+        if (event && typeof event === "object") {
+          if (typeof event.text === "string") noteEncoding(event.text, "event.text");
+          if (typeof event.data === "string") noteEncoding(event.data, "event.data");
         }
         onEvent(event);
         if (onHealth && event.type === "text.delta") {
@@ -111,7 +148,10 @@ function runChildStream({
         return;
       }
       const text = decodeChunk(stderrDecoder, chunk);
-      if (text) onStderr(text);
+      if (text) {
+        noteEncoding(text, "stderr");
+        onStderr(text);
+      }
     });
 
     child.on("error", (error) => sendSse(res, "error", { message: error.message }));
@@ -121,13 +161,21 @@ function runChildStream({
         processStdoutText("\n");
       }
       const stderrRemainder = stderrDecoder.end();
-      if (stderrRemainder) onStderr(stderrRemainder);
+      if (stderrRemainder) {
+        noteEncoding(stderrRemainder, "stderr");
+        onStderr(stderrRemainder);
+      }
       closed = true;
       clearTimeout(killTimer);
       clearInterval(activityTimer);
       if (signal) signal.removeEventListener("abort", abortHandler);
       res.removeListener("close", onResClose);
-      resolve({ code, signal: closeSignal });
+      resolve({
+        code,
+        signal: closeSignal,
+        encoding: encodingTracker.snapshot(),
+        cwd: workDir,
+      });
     });
   });
 }

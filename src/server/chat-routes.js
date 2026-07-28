@@ -7,7 +7,9 @@ const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const handoffRouteRegistry = require("../agents/handoff-route-registry");
+const { createRunObservability } = require("../agents/run-observability");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
+const { scanReplacementChars } = require("../shared/encoding-guard");
 const { applyMemoryBlocks } = require("../agents/memory-block");
 const {
   emptyWriteStats,
@@ -434,6 +436,7 @@ function createChatRoutes({
     const a2aHistory = [];
     let aborted = false;
     let previousInvocationId = null;
+    const runObs = createRunObservability({ startedAt: Date.now() });
     const threadCtx = {
       sessionId,
       res,
@@ -782,7 +785,24 @@ function createChatRoutes({
           invocationId,
           generation: durableRun?.window?.generation || openWindow?.generation || 1,
           preCallRotated,
+          capacityTokens:
+            durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
+          workspaceKey,
+          worktree: Boolean(activeWorktree),
+          cwd: runWorkspace.worktreeDir,
+          baseDir: runWorkspace.baseDir,
         });
+        // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
+        sendSse(res, "workspace-meta", {
+          agent,
+          invocationId,
+          workspaceKey,
+          cwd: runWorkspace.worktreeDir,
+          baseDir: runWorkspace.baseDir,
+          useWorktree: Boolean(activeWorktree),
+          branch: runWorkspace.branch || "",
+        });
+        runObs.noteInvocationStart({ agent, invocationId });
         if (preCallRotated && preCallSealedWindowId) {
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
@@ -1052,7 +1072,23 @@ function createChatRoutes({
               invocationId: retry.invocationId,
               generation: retryRun.window?.generation || 2,
               replay: true,
+              capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
+              workspaceKey,
+              worktree: Boolean(activeWorktree),
+              cwd: runWorkspace.worktreeDir,
+              baseDir: runWorkspace.baseDir,
             });
+            sendSse(res, "workspace-meta", {
+              agent,
+              invocationId: retry.invocationId,
+              workspaceKey,
+              cwd: runWorkspace.worktreeDir,
+              baseDir: runWorkspace.baseDir,
+              useWorktree: Boolean(activeWorktree),
+              branch: runWorkspace.branch || "",
+              replay: true,
+            });
+            runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
             replayedAfterEmpty = true;
           }
 
@@ -1080,6 +1116,9 @@ function createChatRoutes({
                 assistantContent += text;
                 sendSse(res, "message", { agent, role: "assistant", text });
               }
+              if (event.type === "tool.started" || event.type === "tool.finished") {
+                runObs.noteToolEvent();
+              }
               if (event.type === "usage.update") {
                 healthTracker.applyUsage(event);
                 if (durableRun?.window?.id) {
@@ -1097,6 +1136,22 @@ function createChatRoutes({
               const visible = filterBenignStderr(text);
               if (visible) sendSse(res, "stderr", { agent, text: visible });
             },
+            onEncodingWarning(payload) {
+              runObs.noteEncoding(payload.count || 1);
+              if (payload.first) {
+                sendSse(res, "encoding-warning", {
+                  agent,
+                  invocationId: activeInvocationId,
+                  channel: payload.channel,
+                  count: payload.count,
+                  total: payload.total,
+                  samples: payload.samples,
+                  cwd: payload.cwd,
+                  message:
+                    "Replacement character U+FFFD detected in agent stream (encoding mismatch).",
+                });
+              }
+            },
             onHealth: addObservedContext,
             // Only physical/emergency stop mid-stream — never soft usable seal.
             shouldStop: () => emergencyStop,
@@ -1104,6 +1159,9 @@ function createChatRoutes({
           code = streamResult.code;
           signal = streamResult.signal;
           durableCoalescer.flushAll();
+          if (streamResult.encoding?.total > 0) {
+            runObs.noteDegraded("encoding_in_stream");
+          }
 
           if (durableRun) {
             durable.addWindowUsage(durableRun.window.id, {
@@ -1247,6 +1305,24 @@ function createChatRoutes({
           );
         }
         previousInvocationId = finalInvocationId;
+        // Final text scan (in case deltas were clean but concat/store introduced issues).
+        const finalEnc = scanReplacementChars(assistantContent);
+        if (!finalEnc.ok) {
+          runObs.noteEncoding(finalEnc.count);
+          sendSse(res, "encoding-warning", {
+            agent,
+            invocationId: finalInvocationId,
+            channel: "assistant-final",
+            count: finalEnc.count,
+            samples: finalEnc.samples,
+            message: "Replacement character U+FFFD in final assistant text.",
+          });
+        }
+        runObs.noteInvocationEnd(finalInvocationId, {
+          exitCode: code,
+          usage: invocationUsage,
+          encodingWarnings: finalEnc.count || 0,
+        });
         sendSse(res, "agent-exit", {
           agent,
           code,
@@ -1426,6 +1502,23 @@ function createChatRoutes({
       if (callbacks.getThread(sessionId) === threadCtx) {
         callbacks.unregisterThread(sessionId);
       }
+    }
+
+    // Observability summary (emit-only; does not fail the request).
+    try {
+      const costSummary = runObs.summarize();
+      if (!res.writableEnded && !res.destroyed) {
+        sendSse(res, "run-cost", costSummary);
+        if (costSummary.degraded) {
+          sendSse(res, "run-degraded", {
+            reasons: costSummary.degradedReasons,
+            durationMs: costSummary.durationMs,
+            encodingWarnings: costSummary.encodingWarnings,
+          });
+        }
+      }
+    } catch (error) {
+      log.warn?.(`[run-obs] summarize failed: ${error.message}`);
     }
 
     // Phase 2: no open invocations may survive past stream end (orphan reconcile).

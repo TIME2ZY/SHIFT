@@ -23,7 +23,11 @@ test("child stream removes abort and response listeners after exit", async () =>
   assert.equal(res.listenerCount("close"), 1);
   child.emit("close", 0, null);
 
-  assert.deepEqual(await completed, { code: 0, signal: null });
+  const result = await completed;
+  assert.equal(result.code, 0);
+  assert.equal(result.signal, null);
+  assert.ok(result.encoding);
+  assert.equal(result.encoding.total, 0);
   assert.equal(res.listenerCount("close"), 0);
 });
 
