@@ -353,7 +353,9 @@ async function main() {
     writeJson(path.join(dumpDir, "snapshot-windows.json"), { windows });
     writeJson(path.join(dumpDir, "turns-trace.json"), turnRecords);
 
-    const aggregate = aggregateTrace(turnRecords);
+    const aggregate = aggregateTrace(turnRecords, {
+      memoryExpectations: scenario.MEMORY_EXPECTATIONS,
+    });
     writeJson(path.join(dumpDir, "aggregate.json"), aggregate);
 
     const evaluated = evaluateMultiCollab({
@@ -361,6 +363,7 @@ async function main() {
       sessionId,
       turns: turnRecords,
       aggregate,
+      memoryExpectations: scenario.MEMORY_EXPECTATIONS,
       runKind,
       windows,
       memoriesPayload,
@@ -446,6 +449,15 @@ function printSummary(report, dumpDir) {
           `related=${formatPercent(memory.relatedHitRate)} ` +
           `recall=${formatPercent(memory.recallSuccessRate)}`
       );
+      const semantics = report.aggregate.memorySemanticAudit;
+      if (semantics?.configured) {
+        console.log(
+          `memory semantics retrieved=${formatPercent(semantics.retrievalCoverage)} ` +
+            `answer=${formatPercent(semantics.answerCoverage)} ` +
+            `grounded=${formatPercent(semantics.groundedCoverage)} ` +
+            `itemPrecision=${formatPercent(semantics.itemPrecision)}`
+        );
+      }
     }
   }
   for (const a of report.hard || []) {

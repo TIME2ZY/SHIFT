@@ -15,6 +15,12 @@ const { renderReportMd } = require("../../scripts/live/lib/live-dump");
 const {
   auditMemoryRetrieval,
 } = require("../../scripts/live/lib/memory-retrieval-audit");
+const {
+  auditMemorySemantics,
+} = require("../../scripts/live/lib/memory-semantic-audit");
+const {
+  MEMORY_EXPECTATIONS,
+} = require("../../scripts/live/scenarios/multi-auth-collab");
 
 function event(eventName, data) {
   return { event: eventName, data };
@@ -371,4 +377,175 @@ test("multi-collab hard-fails unavailable or empty recall retrieval", () => {
   });
   assert.ok(result.hardFailed.includes("M12-MEMORY-AVAILABLE"));
   assert.ok(result.hardFailed.includes("M13-MEMORY-RECALL"));
+});
+
+test("memory semantic audit separates retrieved, answered, and grounded facts", () => {
+  const result = auditMemorySemantics(
+    [
+      {
+        turnId: "r1",
+        phaseId: "recall",
+        assistantText:
+          "登录态约一周，不启用 refresh token；SQLite 为存储，端口 8787，密码使用 Argon2id。",
+        memoryInjects: [
+          {
+            items: [
+              {
+                id: "ttl",
+                status: "captured",
+                topic: "auth-token-ttl",
+                content: "登录态约一周",
+              },
+              {
+                id: "refresh",
+                status: "captured",
+                topic: "auth-no-refresh",
+                content: "本期不启用 refresh token",
+              },
+              {
+                id: "storage",
+                status: "captured",
+                topic: "storage-primary",
+                content: "SQLite 是主存储",
+              },
+              {
+                id: "port",
+                status: "captured",
+                topic: "local-dev-port",
+                content: "监听 8787",
+              },
+              {
+                id: "hash",
+                status: "captured",
+                topic: "auth-password-hash",
+                content: "使用 Argon2id",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    MEMORY_EXPECTATIONS
+  );
+  assert.equal(result.retrievalCoverage, 1);
+  assert.equal(result.answerCoverage, 1);
+  assert.equal(result.groundedCoverage, 1);
+  assert.equal(result.itemPrecision, 1);
+  assert.deepEqual(result.unsupportedRecallFacts, []);
+  assert.deepEqual(result.contradictions, []);
+});
+
+test("correct-looking recall without injected evidence is not grounded", () => {
+  const result = auditMemorySemantics(
+    [
+      {
+        turnId: "r1",
+        phaseId: "recall",
+        assistantText:
+          "登录态约一周，不做 refresh token；SQLite 为存储，端口 8787，密码使用 scrypt。",
+        memoryInjects: [{ items: [] }],
+      },
+    ],
+    MEMORY_EXPECTATIONS
+  );
+  assert.equal(result.answerCoverage, 1);
+  assert.equal(result.retrievalCoverage, 0);
+  assert.equal(result.groundedCoverage, 0);
+  assert.equal(result.unsupportedRecallFacts.length, 5);
+});
+
+test("multi-collab passes semantic gates with retrieved and grounded scenario facts", () => {
+  const turns = [
+    routedTurn({
+      turnId: "d1",
+      phaseId: "discuss",
+      from: "gemini",
+      to: "codex",
+    }),
+    routedTurn({
+      turnId: "i1",
+      phaseId: "implement",
+      from: "grok",
+      to: "opencode",
+    }),
+    closedTurn({
+      turnId: "r1",
+      phaseId: "recall",
+      agents: ["codex"],
+    }),
+  ];
+  const availableEmpty = {
+    count: 0,
+    availability: { state: "available", empty: true },
+    stats: { channels: { recency: 0, related: 0 } },
+    items: [],
+  };
+  turns[0].memoryInjects = [availableEmpty];
+  turns[1].memoryInjects = [availableEmpty];
+  turns[2].assistantText =
+    "登录态约一周，不做 refresh token；SQLite 为存储，端口 8787，密码使用 Argon2id。";
+  turns[2].memoryInjects = [
+    {
+      count: 5,
+      availability: { state: "available", empty: false },
+      stats: { channels: { recency: 2, related: 3 } },
+      items: [
+        { id: "ttl", status: "captured", content: "登录态约一周" },
+        { id: "refresh", status: "captured", content: "不做 refresh token" },
+        { id: "storage", status: "captured", content: "SQLite 主存储" },
+        { id: "port", status: "captured", content: "本地端口 8787" },
+        { id: "hash", status: "captured", content: "密码使用 Argon2id" },
+      ],
+    },
+  ];
+  const aggregate = aggregateTrace(turns, {
+    memoryExpectations: MEMORY_EXPECTATIONS,
+  });
+  const result = evaluateMultiCollab({
+    sessionId: "session-1",
+    turns,
+    aggregate,
+    memoryExpectations: MEMORY_EXPECTATIONS,
+    memoriesPayload: {
+      memories: [{ kind: "decision", status: "captured" }],
+    },
+  });
+  assert.equal(result.exitCode, 0, JSON.stringify(result.hardFailed));
+  assert.ok(
+    result.hard
+      .filter((item) => item.id.startsWith("M1"))
+      .every((item) => item.ok)
+  );
+});
+
+test("retired or contradictory recall evidence fails semantic safety", () => {
+  const semantic = auditMemorySemantics(
+    [
+      {
+        turnId: "r1",
+        phaseId: "recall",
+        assistantText: "当前 token 改为 24 小时并启用 refresh token。",
+        memoryInjects: [
+          {
+            items: [
+              {
+                id: "stale-ttl",
+                status: "superseded",
+                topic: "auth-token-ttl",
+                content: "当前改为 24 小时",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    MEMORY_EXPECTATIONS
+  );
+  assert.deepEqual(semantic.staleItems.map((item) => item.id), ["stale-ttl"]);
+  assert.ok(
+    semantic.contradictions.some((item) => item.factId === "auth-token-ttl")
+  );
+  assert.ok(
+    semantic.contradictions.some((item) => item.factId === "auth-no-refresh")
+  );
 });

@@ -43,6 +43,12 @@ function evaluateMultiCollab(input) {
       successfulRecallTurns: 0,
       recallSuccessRate: 0,
     },
+    memorySemanticAudit: {
+      configured: false,
+      expectedFacts: 0,
+      staleItems: [],
+      contradictions: [],
+    },
   };
 
   hard.push({
@@ -228,6 +234,63 @@ function evaluateMultiCollab(input) {
         : "no recall phase turn observed",
   });
 
+  const semantics = agg.memorySemanticAudit || {
+    configured: false,
+    expectedFacts: 0,
+    staleItems: [],
+    contradictions: [],
+  };
+  const semanticThresholds = input.memoryExpectations || {};
+  const minRetrievedFacts = threshold(
+    semanticThresholds.minRetrievedFacts,
+    semantics.expectedFacts
+  );
+  const minRecalledFacts = threshold(
+    semanticThresholds.minRecalledFacts,
+    semantics.expectedFacts
+  );
+  const minGroundedFacts = threshold(
+    semanticThresholds.minGroundedFacts,
+    semantics.expectedFacts
+  );
+
+  hard.push({
+    id: "M14-MEMORY-FACT-RETRIEVAL",
+    ok:
+      semantics.configured === true &&
+      semantics.retrievedFacts >= minRetrievedFacts,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : `retrieved expected facts=${semantics.retrievedFacts}/${semantics.expectedFacts} (${formatRate(semantics.retrievalCoverage)}); missing=${(semantics.missingRetrievedFacts || []).join(",") || "none"}`,
+  });
+
+  hard.push({
+    id: "M15-MEMORY-GROUNDED-RECALL",
+    ok:
+      semantics.configured === true &&
+      semantics.recalledFacts >= minRecalledFacts &&
+      semantics.groundedFacts >= minGroundedFacts,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : `answer=${semantics.recalledFacts}/${semantics.expectedFacts}, grounded=${semantics.groundedFacts}/${semantics.expectedFacts} (${formatRate(semantics.groundedCoverage)}); unsupported=${(semantics.unsupportedRecallFacts || []).join(",") || "none"}`,
+  });
+
+  hard.push({
+    id: "M16-MEMORY-NO-STALE-CONFLICT",
+    ok:
+      semantics.configured === true &&
+      semantics.staleItems.length === 0 &&
+      semantics.contradictions.length === 0,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : semantics.staleItems.length === 0 && semantics.contradictions.length === 0
+          ? "no retired injected memories or scenario contradictions"
+          : `stale=${semantics.staleItems.map((item) => item.id || item.topic || "?").join(",") || "none"} contradictions=${semantics.contradictions.map((item) => `${item.factId}:${item.source}`).join(",") || "none"}`,
+  });
+
   // Soft: discuss should ideally seal under 22K
   const discussSeals = agg.phases?.discuss?.seals || 0;
   soft.push({
@@ -288,6 +351,15 @@ function evaluateMultiCollab(input) {
       `related=${formatRate(retrieval.relatedHitRate)}`,
   });
 
+  soft.push({
+    id: "S-MEMORY-SEMANTIC-PRECISION",
+    ok: semantics.configured === true && semantics.itemPrecision >= 0.5,
+    message:
+      semantics.configured === true
+        ? `expected-fact item precision=${formatRate(semantics.itemPrecision)} (${semantics.relevantItemCount}/${semantics.injectItemCount})`
+        : "memory semantic expectations not configured",
+  });
+
   const hardFailed = hard.filter((a) => !a.ok);
   const softFailed = soft.filter((a) => !a.ok);
   let exitCode = 0;
@@ -310,6 +382,13 @@ function evaluateMultiCollab(input) {
 
 function formatRate(value) {
   return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function threshold(value, expectedFacts) {
+  if (Number.isFinite(Number(value))) {
+    return Math.max(0, Math.min(expectedFacts, Math.floor(Number(value))));
+  }
+  return expectedFacts;
 }
 
 module.exports = { evaluateMultiCollab };
