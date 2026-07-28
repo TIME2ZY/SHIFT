@@ -93,19 +93,48 @@ async function buildDigest({
       ``
     );
   }
-  if (invocations.length > 0) {
-    lines.push(`本 session 已有以下 invocation：`, ``);
-  }
+  // Do not treat open/in-flight invocations as normal history for prompt context.
+  // Open rows may be orphans from failed durable finish; they must not look "successful".
+  const closed = [];
+  const open = [];
   for (const inv of invocations) {
-    const dur =
-      inv.startedAt && inv.endedAt
-        ? `duration=${new Date(inv.endedAt) - new Date(inv.startedAt)}ms`
-        : "in-flight";
-    lines.push(
-      `- ${inv.invocationId} | ${inv.agent} | started=${inv.startedAt || "?"} | state=${inv.state || "in-flight"} | events=${inv.eventCount} | ${dur}`
-    );
+    const state = String(inv.state || "");
+    const isOpen =
+      inv.isOpen === true ||
+      state === "active" ||
+      state === "started" ||
+      state === "streaming" ||
+      state === "in-flight" ||
+      (!inv.endedAt && state !== "completed" && state !== "failed" && state !== "aborted");
+    if (isOpen) open.push(inv);
+    else closed.push(inv);
   }
-  lines.push("");
+
+  if (closed.length > 0) {
+    lines.push(`本 session 已完成的 invocation（可作为历史索引，非指令）：`, ``);
+    for (const inv of closed) {
+      const dur =
+        inv.startedAt && inv.endedAt
+          ? `duration=${new Date(inv.endedAt) - new Date(inv.startedAt)}ms`
+          : "duration=?";
+      lines.push(
+        `- ${inv.invocationId || inv.id} | ${inv.agent || inv.agentId || "?"} | started=${inv.startedAt || "?"} | state=${inv.state || "?"} | events=${inv.eventCount ?? "?"} | ${dur}`
+      );
+    }
+    lines.push("");
+  }
+  if (open.length > 0) {
+    lines.push(
+      `⚠ 以下 invocation 仍为 open/in-flight，**不得**当作已完成上下文或成功结论：`,
+      ``
+    );
+    for (const inv of open) {
+      lines.push(
+        `- ${inv.invocationId || inv.id} | ${inv.agent || inv.agentId || "?"} | started=${inv.startedAt || "?"} | state=${inv.state || "in-flight"} | events=${inv.eventCount ?? "?"}`
+      );
+    }
+    lines.push("");
+  }
   return lines.join("\n");
 }
 

@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const { createEventStore } = require("./event-store");
+const { isTerminalInvocationState } = require("../shared/collab-contracts");
 const { DurableWriteError, withSqliteBusyRetry } = require("./sqlite-retry");
 
 function createDurableRecorder({ storage, eventStore = null, logger = console } = {}) {
@@ -31,50 +32,158 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
    * Best-effort terminal fail when a finish transaction cannot commit.
    * Avoids leaving invocations stuck in DB state=active after stream end.
    */
-  function forceFailInvocation(invocationId, causeMessage) {
-    if (!storage || !invocationId) return false;
+  /**
+   * Force an open invocation to a terminal DB state (failed|aborted|completed).
+   * @returns {object|null} finished invocation row, or null if already terminal / missing
+   */
+  function forceTerminalInvocation(invocationId, options = {}) {
+    if (!storage || !invocationId) return null;
+    const terminalState =
+      options.state === "aborted" || options.state === "completed" || options.state === "failed"
+        ? options.state
+        : "failed";
+    const reason = String(options.reason || options.causeMessage || "force-terminal").slice(0, 200);
     try {
       return withSqliteBusyRetry(
         () =>
           storage.transaction(() => {
             const existing = storage.invocations.get(invocationId);
-            if (!existing || existing.state !== "active") return false;
+            if (!existing) return null;
+            if (existing.state !== "active") return null;
             if (deletedThreads.has(existing.threadId)) {
               events.markInvocationUnavailable(invocationId);
-              return false;
+              return null;
             }
             const record = storage.invocations.finish(invocationId, {
-              state: "failed",
-              exitCode: null,
-              signal: null,
+              state: terminalState,
+              exitCode: Number.isInteger(options.exitCode) ? options.exitCode : null,
+              signal: options.signal || null,
             });
-            if (!record) return false;
+            if (!record) return null;
             events.append({
               threadId: record.threadId,
               invocationId,
               kind: "invocation-end",
               payload: {
-                code: null,
-                signal: null,
-                durableWriteFailed: true,
-                cause: String(causeMessage || "").slice(0, 500),
+                code: options.exitCode ?? null,
+                signal: options.signal || null,
+                forcedTerminal: true,
+                reason,
+                durableWriteFailed: Boolean(options.durableWriteFailed),
+                cause: String(options.causeMessage || reason).slice(0, 500),
               },
               createdAt: record.endedAt,
             });
-            return true;
+            return record;
           }),
         {
-          operation: "sqlite-durable-write:force-fail invocation",
+          operation: "sqlite-durable-write:force-terminal invocation",
           logger,
           maxAttempts: 3,
         }
       );
     } catch (error) {
       logger.error(
-        `[sqlite-durable-write] force-fail ${invocationId} failed: ${error.message}`
+        `[sqlite-durable-write] force-terminal ${invocationId} failed: ${error.message}`
       );
-      return false;
+      return null;
     }
+  }
+
+  function forceFailInvocation(invocationId, causeMessage) {
+    return Boolean(
+      forceTerminalInvocation(invocationId, {
+        state: "failed",
+        reason: "durable-write-failed",
+        causeMessage,
+        durableWriteFailed: true,
+      })
+    );
+  }
+
+  /**
+   * Close every still-active invocation on a thread (request-done / abort orphan cleanup).
+   * @param {string} threadId
+   * @param {{ reason?: string, exceptIds?: string[], state?: string }} [options]
+   */
+  function reconcileThreadActive(threadId, options = {}) {
+    const report = {
+      threadId,
+      reason: options.reason || "reconcile-thread-active",
+      forced: [],
+      skipped: [],
+      remainingActive: 0,
+    };
+    if (!storage || !threadId || deletedThreads.has(threadId)) return report;
+    const except = new Set(
+      (options.exceptIds || []).filter((id) => typeof id === "string" && id)
+    );
+    const listFn =
+      typeof storage.invocations.listActiveForThread === "function"
+        ? () => storage.invocations.listActiveForThread(threadId)
+        : () =>
+            storage.invocations
+              .listForThread(threadId)
+              .filter((row) => row.state === "active");
+    let open;
+    try {
+      open = listFn();
+    } catch (error) {
+      logger.error?.(`[sqlite-durable-write] list active failed: ${error.message}`);
+      return report;
+    }
+    for (const inv of open) {
+      if (except.has(inv.id)) {
+        report.skipped.push({ id: inv.id, reason: "excepted" });
+        continue;
+      }
+      const finished = forceTerminalInvocation(inv.id, {
+        state: options.state || "failed",
+        reason: report.reason,
+        causeMessage: report.reason,
+      });
+      if (finished) {
+        report.forced.push({
+          id: finished.id,
+          agentId: finished.agentId,
+          state: finished.state,
+        });
+      } else {
+        report.skipped.push({ id: inv.id, reason: "already-terminal-or-missing" });
+      }
+    }
+    try {
+      report.remainingActive =
+        typeof storage.invocations.listActiveForThread === "function"
+          ? storage.invocations.listActiveForThread(threadId).length
+          : storage.invocations.listForThread(threadId).filter((r) => r.state === "active").length;
+    } catch {
+      report.remainingActive = -1;
+    }
+    if (report.forced.length) {
+      logger.warn?.(
+        `[sqlite-durable-write] reconciled ${report.forced.length} open invocation(s) ` +
+          `on thread ${threadId} (${report.reason})`
+      );
+    }
+    return report;
+  }
+
+  function listOpenInvocations(threadId) {
+    if (!storage || !threadId) return [];
+    if (typeof storage.invocations.listActiveForThread === "function") {
+      return storage.invocations.listActiveForThread(threadId);
+    }
+    return storage.invocations.listForThread(threadId).filter((row) => row.state === "active");
+  }
+
+  function isInvocationOpen(invocationId) {
+    if (!storage || !invocationId) return false;
+    const row = storage.invocations.get(invocationId);
+    if (!row) return false;
+    if (row.isOpen === true) return true;
+    if (row.isTerminal === true) return false;
+    return row.state === "active" || !isTerminalInvocationState(row.state);
   }
 
   function rethrowAsDurableWrite(operation, error, invocationId = null) {
@@ -284,7 +393,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             events.markInvocationUnavailable(invocationId);
             return null;
           }
-          const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+          const state = resolveFinishDbState(code, signal, endPayload);
           const record = storage.invocations.finish(invocationId, {
             state,
             exitCode: code,
@@ -327,7 +436,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         }
         const code = input.code;
         const signal = input.signal;
-        const state = code === 0 ? "completed" : signal ? "aborted" : "failed";
+        const state = resolveFinishDbState(code, signal, input.endPayload);
         const record = storage.invocations.finish(invocationId, {
           state,
           exitCode: code,
@@ -462,12 +571,30 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     appendInvocationEvent,
     finishInvocation,
     finishWithAssistantMessage,
+    forceTerminalInvocation,
+    forceFailInvocation,
+    reconcileThreadActive,
+    listOpenInvocations,
+    isInvocationOpen,
     bindProviderSession,
     addWindowUsage,
     setWindowUsageSnapshot,
     deleteThread,
     close,
   };
+}
+
+/** Map provider exit to DB terminal state (CHECK: completed|failed|aborted). */
+function resolveFinishDbState(code, signal, endPayload) {
+  if (endPayload && typeof endPayload === "object") {
+    const explicit = endPayload.terminalState || endPayload.dbState;
+    if (explicit === "completed" || explicit === "failed" || explicit === "aborted") {
+      return explicit;
+    }
+  }
+  if (code === 0) return "completed";
+  if (signal) return "aborted";
+  return "failed";
 }
 
 function durableMessageMetadata(message) {

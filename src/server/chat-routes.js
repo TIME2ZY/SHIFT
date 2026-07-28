@@ -1327,9 +1327,43 @@ function createChatRoutes({
       }
     }
 
+    // Phase 2: no open invocations may survive past stream end (orphan reconcile).
+    // One chat owns the session at a time (activeInvocations), so thread-wide cleanup is safe.
+    if (durable.enabled && typeof durable.reconcileThreadActive === "function") {
+      try {
+        const reconcile = durable.reconcileThreadActive(sessionId, {
+          reason: aborted ? "request-aborted-orphan" : "request-done-orphan",
+          state: aborted ? "aborted" : "failed",
+        });
+        if (reconcile?.forced?.length && !res.writableEnded && !res.destroyed) {
+          sendSse(res, "invocation-reconcile", {
+            threadId: sessionId,
+            reason: reconcile.reason,
+            forced: reconcile.forced,
+            remainingActive: reconcile.remainingActive,
+          });
+        }
+      } catch (error) {
+        log.error?.(`[invocation-lifecycle] reconcile failed: ${error.message}`);
+      }
+    }
+
     threadCtx.currentInvocationId = null;
     threadCtx.windowId = null;
     if (!aborted) {
+      // Hard invariant: done implies no open durable invocations for this thread.
+      const stillOpen =
+        durable.enabled && typeof durable.listOpenInvocations === "function"
+          ? durable.listOpenInvocations(sessionId)
+          : [];
+      if (stillOpen.length > 0 && !res.writableEnded && !res.destroyed) {
+        sendSse(res, "error", {
+          error: "Open invocations remained after reconcile.",
+          code: "invocation_orphan_remaining",
+          retryable: false,
+          openInvocationIds: stillOpen.map((row) => row.id),
+        });
+      }
       sendSse(res, "done", {});
     }
     res.end();
