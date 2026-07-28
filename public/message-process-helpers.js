@@ -413,7 +413,55 @@
     isProcessBucketsEmpty,
     textDeltaSummary,
     stampEventNos,
+    isCollabSystemKind,
+    parseA2aRouteContent,
+    resolveMessageKind,
   };
+
+  /** System kinds that represent multi-agent collaboration edges. */
+  function isCollabSystemKind(kind) {
+    const k = String(kind || "");
+    return (
+      k === "a2a-route" ||
+      k === "a2a-skipped" ||
+      k === "handoff-repair-needed" ||
+      k === "a2a-phase-rejected"
+    );
+  }
+
+  /**
+   * Parse "🔄 From → To" style content when structured fields are missing.
+   * @returns {{ fromLabel: string, toLabel: string, degraded: boolean, skipped: boolean }|null}
+   */
+  function parseA2aRouteContent(content) {
+    const text = String(content || "").trim();
+    if (!text) return null;
+    const skipped = text.startsWith("⏭") || /未入队/.test(text);
+    const route = text.startsWith("🔄") || text.includes("→");
+    if (!skipped && !route) return null;
+    const m = text.match(/(?:🔄|⏭)\s*(.+?)\s*→\s*(.+?)(?:（|$)/u);
+    if (!m) return null;
+    return {
+      fromLabel: m[1].trim(),
+      toLabel: m[2].replace(/（.*$/, "").trim(),
+      degraded: /不完整|degraded|allow_degraded/i.test(text),
+      skipped,
+    };
+  }
+
+  /**
+   * Prefer explicit messageType/kind, then content heuristics.
+   */
+  function resolveMessageKind(msg = {}) {
+    const explicit = msg.messageType || msg.kind || msg.metadata?.kind || "";
+    if (explicit) return explicit;
+    if (msg.role === "system") {
+      const parsed = parseA2aRouteContent(msg.content);
+      if (parsed?.skipped) return "a2a-skipped";
+      if (parsed) return "a2a-route";
+    }
+    return "";
+  }
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   globalScope.MessageProcessHelpers = api;

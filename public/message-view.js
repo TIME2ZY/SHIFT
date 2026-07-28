@@ -702,12 +702,36 @@
       usage = null,
       showUsage = true,
       scroll = true,
+      kind = "",
+      messageType = "",
+      from = null,
+      to = null,
+      handoffId = null,
+      routeStatus = null,
     }) {
       hideEmpty();
       ensureSpacer();
 
+      const helpers = resolveProcessHelpers();
+      const resolvedKind =
+        messageType ||
+        kind ||
+        (helpers && typeof helpers.resolveMessageKind === "function"
+          ? helpers.resolveMessageKind({
+              role,
+              content,
+              kind,
+              messageType,
+            })
+          : "") ||
+        "";
+
       const wrapper = document.createElement("article");
       wrapper.className = ["message", role, variant].filter(Boolean).join(" ");
+      if (resolvedKind) {
+        wrapper.dataset.msgKind = resolvedKind;
+        wrapper.classList.add(`kind-${resolvedKind}`);
+      }
       if (role === "assistant" && agent && typeof agentColorIndex === "function") {
         wrapper.dataset.agentColor = String(agentColorIndex(agent));
         wrapper.dataset.agentId = String(agent);
@@ -715,6 +739,7 @@
       if (role === "assistant") {
         wrapper.dataset.usageEligible = showUsage === false ? "false" : "true";
       }
+      if (invocationId) wrapper.dataset.invocationId = String(invocationId);
 
       const meta = document.createElement("div");
       meta.className = "msg-meta";
@@ -731,6 +756,13 @@
         metaAgent.className = "msg-agent-id";
         metaAgent.textContent = agent;
         meta.appendChild(metaAgent);
+      }
+      if (role === "assistant" && invocationId) {
+        const metaInv = document.createElement("span");
+        metaInv.className = "msg-invocation-id";
+        metaInv.title = String(invocationId);
+        metaInv.textContent = `inv …${String(invocationId).slice(-8)}`;
+        meta.appendChild(metaInv);
       }
 
       const badge = document.createElement("span");
@@ -798,8 +830,29 @@
 
       const contentEl = document.createElement("div");
       contentEl.className = "msg-final-content";
-      // Length-aware paint: short sync; long structure+idle Prism; super-long plain first.
-      paintFinalMarkdown(contentEl, content, { copyBtn });
+      // Collab system notices: structured handoff / route cards instead of plain prose.
+      if (
+        role === "system" &&
+        helpers &&
+        typeof helpers.isCollabSystemKind === "function" &&
+        helpers.isCollabSystemKind(resolvedKind)
+      ) {
+        bubble.classList.add("msg-bubble-handoff");
+        contentEl.appendChild(
+          buildHandoffCardEl({
+            content,
+            kind: resolvedKind,
+            from,
+            to,
+            handoffId,
+            routeStatus,
+            helpers,
+          })
+        );
+      } else {
+        // Length-aware paint: short sync; long structure+idle Prism; super-long plain first.
+        paintFinalMarkdown(contentEl, content, { copyBtn });
+      }
       bubble.appendChild(contentEl);
 
       wrapper.append(...(avatar ? [avatar, meta, card] : [meta, card]));
@@ -814,6 +867,144 @@
 
       const setBadge = makeSetBadge(badge, wrapper);
       return { wrapper, bubble, meta, setBadge, contentEl };
+    }
+
+    function buildHandoffCardEl({ content, kind, from, to, handoffId, routeStatus, helpers }) {
+      const cardEl = document.createElement("div");
+      cardEl.className = "handoff-card";
+      if (kind) cardEl.dataset.kind = kind;
+
+      const parsed =
+        helpers && typeof helpers.parseA2aRouteContent === "function"
+          ? helpers.parseA2aRouteContent(content)
+          : null;
+      const fromLabel = from || parsed?.fromLabel || "?";
+      const toLabel = to || parsed?.toLabel || "?";
+      const skipped =
+        kind === "a2a-skipped" || kind === "handoff-repair-needed" || parsed?.skipped;
+      const degraded = parsed?.degraded || routeStatus === "allow_degraded";
+
+      const title = document.createElement("div");
+      title.className = "handoff-card-title";
+      title.textContent = skipped ? "协作未入队" : degraded ? "交接（降级）" : "协作交接";
+      cardEl.appendChild(title);
+
+      const route = document.createElement("div");
+      route.className = "handoff-card-route";
+      const fromPill = document.createElement("span");
+      fromPill.className = "handoff-pill from";
+      fromPill.textContent = fromLabel;
+      const arrow = document.createElement("span");
+      arrow.className = "handoff-arrow";
+      arrow.textContent = "→";
+      const toPill = document.createElement("span");
+      toPill.className = "handoff-pill to";
+      toPill.textContent = toLabel;
+      route.append(fromPill, arrow, toPill);
+      cardEl.appendChild(route);
+
+      const metaRow = document.createElement("div");
+      metaRow.className = "handoff-card-meta";
+      if (kind) {
+        const k = document.createElement("span");
+        k.className = "handoff-meta-chip";
+        k.textContent = kind;
+        metaRow.appendChild(k);
+      }
+      if (routeStatus) {
+        const s = document.createElement("span");
+        s.className = "handoff-meta-chip";
+        s.textContent = routeStatus;
+        metaRow.appendChild(s);
+      }
+      if (handoffId) {
+        const h = document.createElement("span");
+        h.className = "handoff-meta-chip mono";
+        h.title = handoffId;
+        h.textContent = `id …${String(handoffId).slice(-8)}`;
+        metaRow.appendChild(h);
+      }
+      if (metaRow.childNodes.length) cardEl.appendChild(metaRow);
+
+      const body = document.createElement("div");
+      body.className = "handoff-card-body";
+      body.textContent = String(content || "").trim();
+      cardEl.appendChild(body);
+      return cardEl;
+    }
+
+    /**
+     * Collapse prior multi-agent turns in each user segment; keep final assistant expanded.
+     * Call after bulk history insert or live route bursts.
+     */
+    function organizeCollabMessages(options = {}) {
+      if (!messagesEl) return;
+      const openLast = options.openLast !== false;
+      const children = Array.from(messagesEl.children).filter(
+        (el) => el.classList && el.classList.contains("message")
+      );
+      // Unwrap previous groups so re-run is idempotent
+      for (const group of Array.from(messagesEl.querySelectorAll(":scope > .collab-group"))) {
+        const parent = group.parentNode;
+        while (group.firstChild) parent.insertBefore(group.firstChild, group);
+        group.remove();
+      }
+
+      let segment = [];
+      const flush = () => {
+        if (segment.length === 0) return;
+        organizeCollabSegment(segment, { openLast });
+        segment = [];
+      };
+      for (const el of children) {
+        if (el.classList.contains("user")) {
+          flush();
+          segment = [el];
+        } else {
+          segment.push(el);
+        }
+      }
+      flush();
+    }
+
+    function organizeCollabSegment(segment, { openLast }) {
+      if (!segment || segment.length < 3) return;
+      // Need user + at least two assistant (or assistant + routes + assistant)
+      const assistants = segment.filter((el) => el.classList.contains("assistant"));
+      if (assistants.length < 2) return;
+      const lastAssistant = assistants[assistants.length - 1];
+      const lastIdx = segment.indexOf(lastAssistant);
+      if (lastIdx <= 1) return;
+      const prior = segment.slice(1, lastIdx);
+      if (prior.length === 0) return;
+
+      const details = document.createElement("details");
+      details.className = "collab-group";
+      details.open = false;
+      const summary = document.createElement("summary");
+      summary.className = "collab-group-summary";
+      const agentIds = prior
+        .filter((el) => el.classList.contains("assistant") && el.dataset.agentId)
+        .map((el) => el.dataset.agentId);
+      const uniqueAgents = [...new Set(agentIds)];
+      const routeCount = prior.filter(
+        (el) => el.dataset.msgKind === "a2a-route" || el.classList.contains("kind-a2a-route")
+      ).length;
+      summary.textContent =
+        `协作过程 · ${prior.length} 条` +
+        (uniqueAgents.length ? ` · ${uniqueAgents.join(" → ")}` : "") +
+        (routeCount ? ` · ${routeCount} 次交接` : "") +
+        (openLast ? "（最终回答已展开）" : "");
+      details.appendChild(summary);
+      const body = document.createElement("div");
+      body.className = "collab-group-body";
+      details.appendChild(body);
+
+      const insertBeforeEl = prior[0];
+      insertBeforeEl.parentNode.insertBefore(details, insertBeforeEl);
+      for (const el of prior) {
+        body.appendChild(el);
+      }
     }
 
     function thinkingSummaryLabel(text) {
@@ -1982,10 +2173,21 @@
       if (typeof syncComposerControls === "function") syncComposerControls();
     }
 
-    function addSystem(text, variant = "") {
+    function addSystem(text, variant = "", extra = {}) {
       hideEmpty();
       ensureSpacer();
-      createMessage({ role: "system", agent: "system", content: text, variant });
+      createMessage({
+        role: "system",
+        agent: "system",
+        content: text,
+        variant,
+        kind: extra.kind || "",
+        messageType: extra.messageType || extra.kind || "",
+        from: extra.from || null,
+        to: extra.to || null,
+        handoffId: extra.handoffId || null,
+        routeStatus: extra.routeStatus || null,
+      });
 
       const slot = typeof getSessionSlot === "function" ? getSessionSlot() : null;
       if (variant === "error" && slot && slot.lastPrompt) {
@@ -2142,6 +2344,7 @@
       finalizeLiveMessages,
       finishStream,
       remountLiveMessages,
+      organizeCollabMessages,
       addSystem,
       addDebug,
       ensureSpacer,
