@@ -1,12 +1,17 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { finalizeA2ARoutes, handoffRouteRegistry } = require("../../src/agents/a2a-finalize");
+const {
+  finalizeA2ARoutes,
+  handoffRouteRegistry,
+  collabTaskRegistry,
+} = require("../../src/agents/a2a-finalize");
 const { DECISIONS } = require("../../src/agents/handoff-policy");
 const { summarizeHandoffOutcome } = require("../../src/agents/callbacks");
 
 test.beforeEach(() => {
   handoffRouteRegistry.resetForTests();
+  collabTaskRegistry.resetForTests();
 });
 
 function completeHandoffText(to = "opencode") {

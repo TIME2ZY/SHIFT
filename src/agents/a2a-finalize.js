@@ -4,7 +4,9 @@ const {
   decidePolicy,
   canEnqueue,
   buildRepairPayload,
+  buildPhaseRejectPayload,
   resolveHandoffPolicyMode,
+  resolveCollabPhase,
   DECISIONS,
 } = require("./handoff-policy");
 const {
@@ -12,6 +14,7 @@ const {
   logFinalizeMetrics,
 } = require("./handoff-metrics");
 const handoffRouteRegistry = require("./handoff-route-registry");
+const collabTaskRegistry = require("./collab-task-registry");
 const {
   HANDOFF_PARSE_STATUS,
   HANDOFF_ROUTE_STATUS,
@@ -105,8 +108,36 @@ function finalizeA2ARoutes(input = {}) {
         ...(handoffMatch.blockCount > 1 ? ["multi_handoff_block"] : []),
       ],
     });
-    const decision = decidePolicy({ quality, useWorktree, mode });
+    const phaseId =
+      input.phaseId ||
+      resolveCollabPhase({
+        useWorktree,
+        intent: quality.intent,
+        fromAgent,
+        toAgent: target,
+      });
+    const taskSkip = collabTaskRegistry.shouldSkipRedundantReview({
+      threadId: sessionId,
+      toAgent: target,
+      intent: quality.intent,
+      contentHash,
+      handoff,
+    });
+    const policyInput = {
+      quality,
+      useWorktree,
+      mode,
+      fromAgent,
+      toAgent: target,
+      intent: quality.intent,
+      phaseId,
+      taskSkip,
+    };
+    const decision = decidePolicy(policyInput);
+    const phaseCheck = policyInput._phaseCheck || null;
     quality.policy = decision;
+    quality.phase = phaseCheck?.phase || phaseId;
+    quality.taskSkip = taskSkip.skip ? taskSkip : null;
     handoffByTarget[target] = handoff;
     handoffQualityByTarget[target] = quality;
 
@@ -122,6 +153,8 @@ function finalizeA2ARoutes(input = {}) {
       blockIndex: handoffMatch.blockIndex,
       blockCount: handoffMatch.blockCount,
       canonical: handoffMatch.canonical,
+      phase: quality.phase,
+      taskState: collabTaskRegistry.getTask(sessionId)?.state || null,
     };
 
     emitHandoffParsed({
@@ -182,6 +215,55 @@ function finalizeA2ARoutes(input = {}) {
     }
 
     if (!canEnqueue(decision)) {
+      // Phase/task reject vs handoff repair (incomplete fence).
+      const isPhaseOrTaskReject =
+        taskSkip.skip || (phaseCheck && phaseCheck.ok === false && decision === DECISIONS.REJECT);
+      if (isPhaseOrTaskReject) {
+        const reject = buildPhaseRejectPayload({
+          fromAgent,
+          toAgent: target,
+          phaseCheck,
+          taskSkip,
+          mode,
+        });
+        skipped.push({
+          from: fromAgent,
+          to: target,
+          reason: reject.reason,
+          policy: DECISIONS.REJECT,
+          phase: reject.phase,
+          taskState: reject.taskState,
+        });
+        if (sendSse) sendSse("a2a-skipped", reject);
+        if (appendToSession && sessionsFile && sessionId) {
+          appendToSession(
+            sessionsFile,
+            sessionId,
+            {
+              role: "system",
+              agent: "system",
+              content: reject.message,
+              kind: "a2a-skipped",
+              messageType: "a2a-phase-rejected",
+              from: fromAgent,
+              to: target,
+              reason: reject.reason,
+              source,
+            },
+            { allowCreate: false }
+          );
+        }
+        appendRouteEvent({
+          eventStore,
+          transcript,
+          durableRecorder,
+          sessionId,
+          invocationId,
+          kind: "a2a-skipped",
+          payload: reject,
+        });
+        continue;
+      }
       const repair = buildRepairPayload({
         fromAgent,
         toAgent: target,
@@ -216,6 +298,7 @@ function finalizeA2ARoutes(input = {}) {
       policy: decision,
       source,
       reason: quality.intent || "a2a-route",
+      phaseId: quality.phase || phaseId,
     });
     hopRecords.push(accept.record);
     summary.handoffId = accept.record.handoffId;
@@ -294,6 +377,21 @@ function finalizeA2ARoutes(input = {}) {
       appendToSession,
       source,
     });
+    // Advance collab task state after successful enqueue.
+    try {
+      collabTaskRegistry.noteAcceptedRoute({
+        threadId: sessionId,
+        fromAgent,
+        toAgent: target,
+        intent: quality.intent,
+        contentHash,
+        useWorktree,
+        handoff,
+        text,
+      });
+    } catch (error) {
+      logger.warn?.(`[collab-task] note route failed: ${error.message}`);
+    }
     if (Array.isArray(input.a2aState?.a2aCauses)) {
       input.a2aState.a2aCauses.push({
         agentId: target,
@@ -581,4 +679,5 @@ function appendRouteEvent({
 module.exports = {
   finalizeA2ARoutes,
   handoffRouteRegistry,
+  collabTaskRegistry,
 };
