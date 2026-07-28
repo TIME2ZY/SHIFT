@@ -111,6 +111,9 @@ childProcess.spawn = function spawn(command, args, options = {}) {
       PATH: `${tmpDir}${path.delimiter}${process.env.PATH}`,
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
+      // Keep invocation assertions independent from the developer machine's
+      // Windows npm Codex installation; launcher resolution has focused tests.
+      INVOKE_CODEX_PATH: "codex",
       ...extraEnv,
     },
     extraEnv
@@ -173,6 +176,7 @@ childProcess.spawn = function spawn(command, args, options = {}) {
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
       INVOKE_SESSION_ID: resumeSessionId,
+      INVOKE_CODEX_PATH: "codex",
     }),
     encoding: "utf8",
   });
@@ -194,6 +198,7 @@ function runScriptWithHook(args, hookSource) {
       ...process.env,
       NODE_OPTIONS: `--require ${hookPath}`,
       INVOKE_SESSION_FILE: sessionPath,
+      INVOKE_CODEX_PATH: "codex",
     }),
     encoding: "utf8",
   });

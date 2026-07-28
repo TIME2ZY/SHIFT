@@ -1,3 +1,5 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const { makeEvent } = require("../event-protocol");
 const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
@@ -8,6 +10,71 @@ const {
   isFailedItem,
   toolItemId,
 } = require("../tool-classification");
+
+const CODEX_PACKAGE_ENTRY = path.join("node_modules", "@openai", "codex", "bin", "codex.js");
+
+/**
+ * Resolve Codex without relying on a shell. On Windows, npm exposes codex.cmd,
+ * which child_process.spawn cannot execute directly with shell:false. Prefer a
+ * native executable when present; otherwise launch the npm package entry with
+ * the same Node executable that is running SHIFT.
+ */
+function resolveCodexLauncher(
+  env = process.env,
+  {
+    platform = process.platform,
+    existsSync = fs.existsSync,
+    nodePath = process.execPath,
+  } = {}
+) {
+  const override = String(env.INVOKE_CODEX_PATH || env.CODEX_PATH || "").trim();
+  if (override) {
+    return launcherForCodexPath(override, { platform, existsSync, nodePath });
+  }
+  if (platform !== "win32") return { command: "codex", argsPrefix: [] };
+
+  const pathValue = String(env.Path || env.PATH || "");
+  const pathDirs = pathValue
+    .split(";")
+    .map((item) => item.trim().replace(/^"(.*)"$/, "$1"))
+    .filter(Boolean);
+  const appDataNpm = env.APPDATA ? path.win32.join(env.APPDATA, "npm") : "";
+  if (appDataNpm && !pathDirs.some((item) => sameWindowsPath(item, appDataNpm))) {
+    pathDirs.push(appDataNpm);
+  }
+
+  for (const directory of pathDirs) {
+    const nativeCommand = path.win32.join(directory, "codex.exe");
+    if (existsSync(nativeCommand)) return { command: nativeCommand, argsPrefix: [] };
+
+    const cmdShim = path.win32.join(directory, "codex.cmd");
+    if (!existsSync(cmdShim)) continue;
+    const packageEntry = path.win32.join(directory, CODEX_PACKAGE_ENTRY);
+    if (existsSync(packageEntry)) {
+      return { command: nodePath, argsPrefix: [packageEntry] };
+    }
+  }
+
+  // Preserve the normal lookup on platforms/installations that provide a real
+  // executable elsewhere. A start failure will retain the provider's standard
+  // diagnostic instead of silently invoking a command shell.
+  return { command: "codex", argsPrefix: [] };
+}
+
+function launcherForCodexPath(candidate, { platform, existsSync, nodePath }) {
+  if (/\.js$/i.test(candidate)) return { command: nodePath, argsPrefix: [candidate] };
+  if (platform === "win32" && /\.cmd$/i.test(candidate)) {
+    const packageEntry = path.win32.join(path.win32.dirname(candidate), CODEX_PACKAGE_ENTRY);
+    if (existsSync(packageEntry)) {
+      return { command: nodePath, argsPrefix: [packageEntry] };
+    }
+  }
+  return { command: candidate, argsPrefix: [] };
+}
+
+function sameWindowsPath(left, right) {
+  return path.win32.resolve(left).toLowerCase() === path.win32.resolve(right).toLowerCase();
+}
 
 function buildCodexEnvironment(_options = {}, env = process.env) {
   const codexHome = String(env.INVOKE_CODEX_HOME || "").trim();
@@ -405,7 +472,9 @@ const codexProvider = {
   buildEnvironment: buildCodexEnvironment,
   buildInvocation(config, prompt) {
     const providerOptions = config.providerOptions || {};
+    const launcher = resolveCodexLauncher();
     const args = [
+      ...launcher.argsPrefix,
       "-s",
       providerOptions.sandbox || "danger-full-access",
       "-a",
@@ -420,7 +489,7 @@ const codexProvider = {
     } else {
       args.push("exec", "--json", prompt);
     }
-    return { command: "codex", args };
+    return { command: launcher.command, args };
   },
 };
 
@@ -428,5 +497,6 @@ module.exports = {
   buildCodexEnvironment,
   classifyCodexStderr,
   createCodexRuntime,
+  resolveCodexLauncher,
   codexProvider,
 };
