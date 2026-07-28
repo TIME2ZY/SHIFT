@@ -130,7 +130,9 @@ function extractDecisionCandidates(text, options = {}) {
 }
 
 /**
- * Run extractor against a turn and create suggestions (never product memories).
+ * Extract suggestions from **one** assistant turn only.
+ * Callers must pass assistantText for a single invocation — never a multi-agent
+ * concatenated transcript (phase 4 capture boundary).
  */
 function extractSuggestionsFromTurn(input = {}) {
   const storage = input.storage;
@@ -142,7 +144,12 @@ function extractSuggestionsFromTurn(input = {}) {
   }
 
   const userText = typeof input.userText === "string" ? input.userText : "";
-  const assistantText = typeof input.assistantText === "string" ? input.assistantText : "";
+  let assistantText = typeof input.assistantText === "string" ? input.assistantText : "";
+  // Soft guard: multi-agent concat often contains multiple ```handoff fences.
+  const handoffMarks = [...assistantText.matchAll(/```handoff/gi)];
+  if (handoffMarks.length > 1) {
+    assistantText = assistantText.slice(0, handoffMarks[1].index);
+  }
   const sources = [
     {
       text: userText,

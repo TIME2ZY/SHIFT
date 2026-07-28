@@ -114,6 +114,12 @@ function buildMemoryInjectPayload(input = {}) {
   const items = slimInjectItems(input.items);
   const stats = input.stats && typeof input.stats === "object" ? input.stats : {};
   const availability = normalizeAvailability(stats);
+  const funnel =
+    stats.funnel && typeof stats.funnel === "object"
+      ? stats.funnel
+      : input.funnel && typeof input.funnel === "object"
+        ? input.funnel
+        : null;
   return {
     sessionId: input.sessionId || input.threadId || null,
     agent: input.agent || null,
@@ -128,8 +134,10 @@ function buildMemoryInjectPayload(input = {}) {
       channels: stats.channels || {},
       availability,
       budgetBuckets: stats.budgetBuckets || null,
+      funnel,
     },
     availability,
+    funnel,
   };
 }
 

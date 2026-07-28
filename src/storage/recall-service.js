@@ -1,5 +1,6 @@
 const {
   renderActiveMemoryCard,
+  renderActiveMemoryCardDetailed,
   resolveA2AMemoryBudget,
   resolveBudgetBuckets,
   resolveMemoryBudget,
@@ -9,6 +10,13 @@ const {
   resolveSearchMemoryQuota,
   resolveSearchMessageQuota,
 } = require("./memory-inject");
+const {
+  applyGuaranteedSlots,
+  buildFunnelStats,
+  dedupeRankedByTopic,
+  extractQueryTopicHints,
+  MEMORY_DROP_REASONS,
+} = require("./memory-funnel");
 const { clampSearchQuery, extractSearchTerms, isWeakQuery } = require("./query-terms");
 
 const LAYER_MEMORY = "memory";
@@ -566,40 +574,77 @@ function createRecallService({ storage, logger = console } = {}) {
       availability = { state: "available", empty: byId.size === 0 };
     }
 
-    const ranked = [...byId.values()].sort((a, b) => {
+    const rankedRaw = [...byId.values()].sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       const statusDelta = statusRank(a.status) - statusRank(b.status);
       if (statusDelta !== 0) return statusDelta;
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     });
 
+    const { ranked, dropped: dedupeDropped } = dedupeRankedByTopic(rankedRaw);
+
     // Prefer product memories; cap auto kinds so handoffs cannot fill the pack.
-    const selected = selectRetrieveItems(ranked, {
+    const totalLimit = recentLimit + relatedLimit;
+    let selected = selectRetrieveItems(ranked, {
       recentLimit,
       relatedLimit,
-      totalLimit: recentLimit + relatedLimit,
+      totalLimit,
       maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
+    const queryTopics = extractQueryTopicHints(prompt);
+    const slotResult = applyGuaranteedSlots(selected, ranked, queryTopics, totalLimit);
+    selected = slotResult.selected;
+
     const budgetBuckets = resolveBudgetBuckets(budgetChars);
-    const rendered =
-      availability.state === "unavailable"
-        ? renderUnavailableMemoryCard(availability)
-        : availability.state === "degraded"
-          ? prependAvailabilityWarning(
-              renderActiveMemoryCard(selected, { budgetChars, budgetBuckets }),
-              availability
-            )
-          : renderActiveMemoryCard(selected, { budgetChars, budgetBuckets });
+    const cardMeta = renderActiveMemoryCardDetailed(selected, {
+      budgetChars,
+      budgetBuckets,
+      droppedTopics: dedupeDropped.map((d) => d.topic).filter(Boolean),
+      guaranteedTopics: slotResult.guaranteed,
+    });
+    let rendered = cardMeta.text;
+    if (availability.state === "unavailable") {
+      rendered = renderUnavailableMemoryCard(availability);
+    } else if (availability.state === "degraded") {
+      rendered = prependAvailabilityWarning(rendered, availability);
+    }
     const usedChars = rendered.length;
     const byKind = {};
     for (const item of selected) {
       byKind[item.kind || "memory"] = (byKind[item.kind || "memory"] || 0) + 1;
     }
 
+    const renderedCount = cardMeta.renderedIds?.length || selected.length;
+    const budgetDropped = Math.max(0, selected.length - renderedCount);
+    const funnel = buildFunnelStats({
+      retrieved: byId.size,
+      ranked: ranked.length,
+      selected: selected.length,
+      rendered: renderedCount,
+      delivered: renderedCount,
+      used: null,
+      correct: null,
+      dropped: dedupeDropped.length + budgetDropped,
+      dropReason:
+        budgetDropped > 0
+          ? MEMORY_DROP_REASONS.BUCKET_BUDGET
+          : dedupeDropped.length
+            ? MEMORY_DROP_REASONS.TOPIC_DEDUP
+            : null,
+      truncated: cardMeta.truncated || /truncated:\s*true/i.test(rendered),
+      guaranteedTopics: slotResult.guaranteed,
+      droppedTopics: [
+        ...dedupeDropped.map((d) => d.topic).filter(Boolean),
+        ...(cardMeta.droppedTopics || []),
+      ],
+      conflictCount: dedupeDropped.filter((d) => d.dropReason === MEMORY_DROP_REASONS.TOPIC_DEDUP)
+        .length,
+    });
+
     const stats = {
       usedChars,
-      truncated: /truncated:\s*true/i.test(rendered),
+      truncated: funnel.truncated,
       byKind,
       channels: {
         recency: selected.filter((item) => item.channels?.includes("recency")).length,
@@ -609,6 +654,7 @@ function createRecallService({ storage, logger = console } = {}) {
       termCount: terms.length,
       availability,
       budgetBuckets,
+      funnel,
     };
 
     storage?.memoryEvents?.recordSafe?.({
@@ -618,9 +664,11 @@ function createRecallService({ storage, logger = console } = {}) {
         source: "retrieveForTurn",
         count: selected.length,
         memoryIds: selected.map((item) => item.id).filter(Boolean),
+        renderedIds: cardMeta.renderedIds || [],
         availability,
         usedChars,
         truncated: stats.truncated,
+        funnel,
       },
     });
 
@@ -628,6 +676,7 @@ function createRecallService({ storage, logger = console } = {}) {
       items: selected,
       rendered,
       stats,
+      funnel,
     };
   }
 

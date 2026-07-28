@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { validateCaptureEncoding } = require("./memory-funnel");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 
@@ -31,6 +32,19 @@ function createMemoryCapture({
   }
 
   function persistCapture(input, eventInvocationId) {
+    // Capture is scoped to a single source invocation (never cross-agent concat).
+    if (input?.sourceInvocationId && eventInvocationId && input.sourceInvocationId !== eventInvocationId) {
+      logger.warn?.(
+        `[memory-capture] refusing cross-invocation capture source=${input.sourceInvocationId} event=${eventInvocationId}`
+      );
+      return { captured: false, reason: "invocation_boundary" };
+    }
+    const encoding = validateCaptureEncoding(input?.content);
+    if (!encoding.ok) {
+      logger.warn?.(`[memory-capture] rejected content with replacement characters`);
+      return { captured: false, reason: encoding.reason || "encoding" };
+    }
+
     let outcome = null;
     let error = null;
     if (memoryService && typeof memoryService.capture === "function") {
