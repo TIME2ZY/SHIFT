@@ -53,17 +53,53 @@ test("createApiFetch does not abort when caller omits signal", async () => {
 test("createApiFetch aborts immediately when caller signal is already aborted", async () => {
   const controller = new AbortController();
   controller.abort();
-  let called = false;
-  const request = apiClient.createApiFetch(async () => {
-    called = true;
-    return { ok: true };
+  let capturedSignal;
+  const request = apiClient.createApiFetch(async (_input, init) => {
+    capturedSignal = init.signal;
+    if (init.signal.aborted) {
+      const error = new Error("fetch was aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    return { ok: true, status: 200 };
   }, "token-4");
 
   await assert.rejects(
     () => request("/api/agents", { signal: controller.signal }),
-    (err) => err && (err.name === "AbortError" || /abort/i.test(String(err.message || err)))
+    (err) => err?.name === "AbortError"
   );
-  assert.equal(called, false);
+  assert.equal(capturedSignal.aborted, true);
+});
+
+test("createApiFetch forwards caller cancellation to an in-flight request", async () => {
+  const controller = new AbortController();
+  let capturedSignal;
+  const request = apiClient.createApiFetch(
+    (_input, init) =>
+      new Promise((_resolve, reject) => {
+        capturedSignal = init.signal;
+        init.signal.addEventListener(
+          "abort",
+          () => {
+            const error = new Error("fetch was aborted");
+            error.name = "AbortError";
+            reject(error);
+          },
+          { once: true }
+        );
+      }),
+    "token-5"
+  );
+
+  const pending = request("/api/chat", {
+    method: "POST",
+    retryable: false,
+    signal: controller.signal,
+  });
+  controller.abort();
+
+  await assert.rejects(pending, (err) => err?.name === "AbortError");
+  assert.equal(capturedSignal.aborted, true);
 });
 
 test("createApiFetch treats Infinity timeout as no timeout", async () => {
@@ -71,7 +107,7 @@ test("createApiFetch treats Infinity timeout as no timeout", async () => {
   const request = apiClient.createApiFetch(async (_input, init) => {
     signal = init.signal;
     return { ok: true, status: 200 };
-  }, "token-5");
+  }, "token-6");
 
   await request("/api/chat", {
     method: "POST",

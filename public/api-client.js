@@ -24,11 +24,11 @@
    */
   function linkAbort(parent, child) {
     if (!parent) return;
-    if (parent.signal.aborted) {
-      child.abort();
+    if (parent.aborted) {
+      child.abort(parent.reason);
       return;
     }
-    const onParentAbort = () => child.abort();
+    const onParentAbort = () => child.abort(parent.reason);
     parent.addEventListener("abort", onParentAbort, { once: true });
     child.signal.addEventListener(
       "abort",
