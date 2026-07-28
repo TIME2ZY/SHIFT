@@ -6,6 +6,7 @@ const {
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
+const handoffRouteRegistry = require("../agents/handoff-route-registry");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 const { applyMemoryBlocks } = require("../agents/memory-block");
 const {
@@ -715,6 +716,19 @@ function createChatRoutes({
         if (!durableRun) {
           throw new Error(`Failed to persist invocation start for ${invocationId}.`);
         }
+        // Bind A2A hop → target invocation when this agent was started by a handoff.
+        if (parentInvocationId && triggerType === "a2a-handoff") {
+          try {
+            handoffRouteRegistry.bindTargetInvocation({
+              sourceInvocationId: parentInvocationId,
+              targetAgent: agent,
+              targetInvocationId: invocationId,
+              handoffId: queuedCause?.handoffId || null,
+            });
+          } catch (error) {
+            log.warn?.(`[handoff-route] bind target failed: ${error.message}`);
+          }
+        }
         let activeInvocationId = invocationId;
         // Prefer tracker bound to the durable window snapshot when present.
         if (durableRun.window) {
@@ -1090,14 +1104,15 @@ function createChatRoutes({
         };
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
-          durable.finishInvocation(
-            threadCtx.currentInvocationId || invocationId,
-            code,
-            signal,
-            endPayload
-          );
+          const abortInvId = threadCtx.currentInvocationId || invocationId;
+          durable.finishInvocation(abortInvId, code, signal, endPayload);
+          try {
+            handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
+          } catch {
+            /* ignore */
+          }
           aborted = true;
-          previousInvocationId = threadCtx.currentInvocationId || invocationId;
+          previousInvocationId = abortInvId;
           break;
         }
 
@@ -1181,6 +1196,25 @@ function createChatRoutes({
           invocationId: finalInvocationId,
           usage: invocationUsage,
         });
+
+        // Close A2A hop when this agent was the handoff target.
+        try {
+          const hop = handoffRouteRegistry.completeByTargetInvocation(finalInvocationId, {
+            ok: code === 0,
+          });
+          if (hop && !res.writableEnded && !res.destroyed) {
+            sendSse(res, "a2a-hop-complete", {
+              handoffId: hop.handoffId,
+              sourceInvocationId: hop.sourceInvocationId,
+              targetInvocationId: hop.targetInvocationId,
+              completeStatus: hop.completeStatus,
+              routeStatus: hop.routeStatus,
+              effective: handoffRouteRegistry.isEffectiveA2aHop(hop),
+            });
+          }
+        } catch (error) {
+          log.warn?.(`[handoff-route] complete hop failed: ${error.message}`);
+        }
 
         // POST soft seal after a complete answer (never mid-stream kill path).
         const postSoft = shouldSoftSealAfterTurn({
