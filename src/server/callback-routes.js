@@ -364,6 +364,9 @@ function createCallbackRoutes({
             topic,
             content,
             ...(scope ? { scope } : {}),
+            ...(Number.isInteger(body.evidenceEventNo)
+              ? { evidenceEventNo: body.evidenceEventNo }
+              : {}),
           },
           {
             threadId: sessionId,

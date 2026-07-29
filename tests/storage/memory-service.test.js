@@ -301,6 +301,8 @@ test("writeMemoryCandidate derives trusted fields and returns stable outcomes", 
     assert.equal(created.memory.activation, "query");
     assert.equal(created.memory.sourceInvocationId, "invocation-1");
     assert.equal(created.memory.sourceMessageId, "message-user-1");
+    assert.equal(created.memory.anchors[0].type, "message");
+    assert.equal(created.memory.anchors[0].ref, "message-user-1");
     assert.match(created.memory.contentHash, /^[a-f0-9]{64}$/);
 
     const unchanged = storage.memory.writeMemoryCandidate(
@@ -337,6 +339,127 @@ test("writeMemoryCandidate derives trusted fields and returns stable outcomes", 
     assert.equal(superseded.replacedMemoryId, created.memoryId);
     assert.equal(storage.memories.get(created.memoryId).status, "superseded");
     assert.equal(storage.memory.listActive("thread-1").length, 1);
+  } finally {
+    storage.close();
+  }
+});
+
+test("writeMemoryCandidate validates and freezes invocation event evidence", () => {
+  const storage = createFixture();
+  try {
+    storage.invocations.start({
+      id: "invocation-evidence",
+      threadId: "thread-1",
+      windowId: "window-1",
+      agentId: "codex",
+    });
+    const toolEvent = storage.invocations.appendEvent({
+      invocationId: "invocation-evidence",
+      kind: "tool.finished",
+      payload: {
+        toolName: "database-check",
+        status: "ok",
+        result: "SQLite version 3.50 is available.",
+      },
+    });
+    const textEvent = storage.invocations.appendEvent({
+      invocationId: "invocation-evidence",
+      kind: "text.delta",
+      payload: { text: "Unverified assistant prose." },
+    });
+    const failedEvent = storage.invocations.appendEvent({
+      invocationId: "invocation-evidence",
+      kind: "command.finished",
+      payload: { command: "check-db", exitCode: 1, output: "failed" },
+    });
+
+    const written = storage.memory.writeMemoryCandidate(
+      {
+        kind: "fact",
+        topic: "runtime.sqlite-version",
+        content: "SQLite version 3.50 is available at runtime.",
+        scope: "thread",
+        evidenceEventNo: toolEvent.sequenceNo,
+      },
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-evidence",
+        agentId: "codex",
+      }
+    );
+    assert.equal(written.outcome, "created");
+    assert.equal(written.memory.metadata.evidenceEventNo, toolEvent.sequenceNo);
+    assert.equal(written.memory.metadata.evidenceKind, "tool.finished");
+    assert.deepEqual(
+      {
+        type: written.memory.anchors[0].type,
+        ref: written.memory.anchors[0].ref,
+        eventNo: written.memory.anchors[0].eventNo,
+        eventKind: written.memory.anchors[0].eventKind,
+      },
+      {
+        type: "invocation",
+        ref: "invocation-evidence",
+        eventNo: toolEvent.sequenceNo,
+        eventKind: "tool.finished",
+      }
+    );
+    assert.match(written.memory.anchors[0].contentHash, /^[a-f0-9]{64}$/);
+
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime.unverified",
+            content: "This prose is not valid tool evidence.",
+            scope: "thread",
+            evidenceEventNo: textEvent.sequenceNo,
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-evidence",
+            agentId: "codex",
+          }
+        ),
+      /cannot ground/
+    );
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime.failed-check",
+            content: "A failed command cannot establish this fact.",
+            scope: "thread",
+            evidenceEventNo: failedEvent.sequenceNo,
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-evidence",
+            agentId: "codex",
+          }
+        ),
+      /Failed tool events/
+    );
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime.missing-check",
+            content: "A missing event cannot establish this fact.",
+            scope: "thread",
+            evidenceEventNo: 999,
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-evidence",
+            agentId: "codex",
+          }
+        ),
+      /does not exist/
+    );
   } finally {
     storage.close();
   }

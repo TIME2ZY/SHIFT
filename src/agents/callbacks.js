@@ -395,6 +395,7 @@ node scripts/callback-client.js session-search --query "redis 端口" --limit 10
 - \`topic\`：小写 ASCII 稳定主题，可用点号或连字符分段
 - \`content\`：10–500 字符，只表达一个结论
 - \`scope\`：\`thread\` | \`project\`
+- \`evidenceEventNo\`：可选；工具验证出的 fact 应引用当前 invocation 的成功事件
 
 示例：
 

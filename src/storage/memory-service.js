@@ -10,11 +10,18 @@ const {
   deriveTopicFromContent,
   parseSupersessionKey,
 } = require("./memory-keys");
+const { eventPlainText } = require("./event-plain-text");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
 const MEMORY_WRITE_SCOPES = Object.freeze(["thread", "project"]);
-const MEMORY_WRITE_INPUT_FIELDS = new Set(["kind", "topic", "content", "scope"]);
+const MEMORY_WRITE_INPUT_FIELDS = new Set([
+  "kind",
+  "topic",
+  "content",
+  "scope",
+  "evidenceEventNo",
+]);
 const MEMORY_WRITE_TOPIC_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const MEMORY_WRITE_MIN_CONTENT_CHARS = 10;
 const MEMORY_WRITE_MAX_CONTENT_CHARS = 500;
@@ -373,6 +380,15 @@ function createMemoryService({
       topic,
     })[0];
     const contentHash = hashMemoryWriteContent(content);
+    const evidence = resolveMemoryWriteEvidence({
+      storage,
+      candidate,
+      threadId,
+      invocationId,
+      storedInvocation,
+      sourceMessageId,
+      projectKey: thread.projectKey || null,
+    });
 
     if (
       existing &&
@@ -406,15 +422,14 @@ function createMemoryService({
       captureKey,
       sourceInvocationId: storedInvocation ? invocationId : null,
       sourceMessageId,
+      anchors: evidence.anchors,
       createdBy: agentId,
       writeChannel: "agent",
       metadata: {
         writeSource: invocationContext.source || "memory_write",
         callbackInvocationId: invocationId,
-        evidenceEventNo:
-          Number.isInteger(invocationContext.evidenceEventNo)
-            ? invocationContext.evidenceEventNo
-            : null,
+        evidenceEventNo: evidence.eventNo,
+        evidenceKind: evidence.eventKind,
       },
     });
 
@@ -726,6 +741,113 @@ function assertMemoryWriteCandidateShape(candidate) {
   ) {
     throw new Error(`Memory scope must be one of: ${MEMORY_WRITE_SCOPES.join(", ")}.`);
   }
+  if (
+    candidate.evidenceEventNo !== undefined &&
+    (!Number.isInteger(candidate.evidenceEventNo) || candidate.evidenceEventNo < 0)
+  ) {
+    throw new Error("Memory evidenceEventNo must be a non-negative integer.");
+  }
+  if (candidate.evidenceEventNo !== undefined && candidate.kind !== "fact") {
+    throw new Error("Memory evidenceEventNo is only valid for fact memories.");
+  }
+}
+
+function resolveMemoryWriteEvidence({
+  storage,
+  candidate,
+  threadId,
+  invocationId,
+  storedInvocation,
+  sourceMessageId,
+  projectKey,
+}) {
+  if (candidate.evidenceEventNo !== undefined) {
+    if (!storedInvocation || !invocationId) {
+      throw new Error("Memory event evidence requires a persisted invocation.");
+    }
+    const event = storage.invocations?.getEvent?.(
+      invocationId,
+      candidate.evidenceEventNo
+    );
+    if (!event) {
+      throw new Error(
+        `Evidence event ${candidate.evidenceEventNo} does not exist in the current invocation.`
+      );
+    }
+    const allowedKinds = new Set([
+      "tool.finished",
+      "command.finished",
+      "tool.completed",
+      "tool_result",
+    ]);
+    if (!allowedKinds.has(event.kind)) {
+      throw new Error(`Evidence event kind "${event.kind}" cannot ground a memory.`);
+    }
+    if (
+      event.payload?.status === "error" ||
+      event.payload?.failed === true ||
+      (Number.isInteger(event.payload?.exitCode) && event.payload.exitCode !== 0)
+    ) {
+      throw new Error("Failed tool events cannot ground a memory.");
+    }
+    const snapshot = eventPlainText(event.kind, event.payload || {}).slice(0, 240);
+    return {
+      eventNo: event.sequenceNo,
+      eventKind: event.kind,
+      anchors: [
+        {
+          type: "invocation",
+          ref: invocationId,
+          eventNo: event.sequenceNo,
+          eventKind: event.kind,
+          originThreadId: threadId,
+          capturedProjectKey: projectKey,
+          capturedAt: event.createdAt,
+          label: snapshot,
+          contentHash: hashMemoryWriteContent(snapshot),
+        },
+      ],
+    };
+  }
+
+  if (sourceMessageId) {
+    const message = storage.messages?.get?.(sourceMessageId);
+    const snapshot = String(message?.content || "").trim().slice(0, 240);
+    return {
+      eventNo: null,
+      eventKind: null,
+      anchors: [
+        {
+          type: "message",
+          ref: sourceMessageId,
+          originThreadId: threadId,
+          capturedProjectKey: projectKey,
+          capturedAt: message?.createdAt || null,
+          label: snapshot,
+          contentHash: hashMemoryWriteContent(snapshot),
+        },
+      ],
+    };
+  }
+
+  if (invocationId) {
+    return {
+      eventNo: null,
+      eventKind: null,
+      anchors: [
+        {
+          type: "invocation",
+          ref: invocationId,
+          originThreadId: threadId,
+          capturedProjectKey: projectKey,
+          capturedAt: storedInvocation?.startedAt || null,
+          label: "Current invocation",
+        },
+      ],
+    };
+  }
+
+  throw new Error("Memory write requires a source message or invocation.");
 }
 
 function normalizeMemoryWriteContent(value) {

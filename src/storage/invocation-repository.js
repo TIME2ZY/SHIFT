@@ -135,6 +135,12 @@ function createInvocationRepository(db) {
       return appendEventTransaction(input);
     },
 
+    getEvent(invocationId, sequenceNo) {
+      if (!invocationId || !Number.isInteger(sequenceNo) || sequenceNo < 0) return null;
+      const row = findEvent.get(invocationId, sequenceNo);
+      return row ? mapEvent(row) : null;
+    },
+
     listEvents(invocationId) {
       return listEvents.all(invocationId).map(mapEvent);
     },

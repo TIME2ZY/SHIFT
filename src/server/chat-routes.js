@@ -19,7 +19,10 @@ const {
   buildMemoryInjectPayload,
 } = require("../storage/memory-metrics");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
-const { extractSuggestionsFromTurn } = require("../storage/memory-extractor");
+const {
+  extractSuggestionsFromTurn,
+  isSuggestionExtractorEnabled,
+} = require("../storage/memory-extractor");
 const { refreshDigestAndExtract } = require("../storage/memory-digest");
 const {
   projectTurnBudget,
@@ -1480,7 +1483,9 @@ function createChatRoutes({
             assistantMessageId: assistantMessage.id,
             invocationId: finalInvocationId,
             projectKey: storage?.threads?.get?.(sessionId)?.projectKey || null,
-            extractSuggestionsFromTurn,
+            extractSuggestionsFromTurn: isSuggestionExtractorEnabled()
+              ? extractSuggestionsFromTurn
+              : null,
             logger: log,
           });
           if (extractResult?.extract?.created > 0 || extractResult?.digest) {

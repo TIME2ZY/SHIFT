@@ -67,6 +67,8 @@ always: true
 }
 ```
 
+工具验证出的 `fact` 应尽量附带 `evidenceEventNo`。它只能引用当前 invocation 中已经完成且成功的工具或命令结果；不要引用 assistant 文本、失败事件或其他 invocation。
+
 Provider 没有暴露 `memory_write` 时，才使用 prompt 中提供的兼容 callback 命令。
 
 不要传入 ID、thread、project、invocation、authority、status、时间戳或版本关系。服务端会从可信 invocation 上下文推导这些字段，并完成去重与 supersession。

@@ -58,16 +58,18 @@ test("shift context MCP returns structured memory_write results", async () => {
     params: {
       name: "memory_write",
       arguments: {
-        kind: "decision",
-        topic: "storage.authoritative",
-        content: "SQLite is authoritative.",
-        scope: "project",
+        kind: "fact",
+        topic: "runtime.sqlite-version",
+        content: "SQLite version 3.50 is available.",
+        scope: "thread",
+        evidenceEventNo: 7,
       },
     },
   });
   assert.equal(response.result.isError, false);
   assert.equal(response.result.structuredContent.outcome, "created");
   assert.equal(calls.length, 1);
+  assert.equal(calls[0].evidenceEventNo, 7);
 });
 
 test("memory_write bridge binds callback credentials from environment", async () => {
@@ -78,6 +80,7 @@ test("memory_write bridge binds callback credentials from environment", async ()
       topic: "runtime.database",
       content: "SQLite is available at runtime.",
       scope: "thread",
+      evidenceEventNo: 4,
     },
     {
       env: ENV,
@@ -106,6 +109,7 @@ test("memory_write bridge binds callback credentials from environment", async ()
     topic: "runtime.database",
     content: "SQLite is available at runtime.",
     scope: "thread",
+    evidenceEventNo: 4,
   });
 });
 

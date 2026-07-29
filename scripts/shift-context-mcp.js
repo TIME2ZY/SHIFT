@@ -32,6 +32,10 @@ const MEMORY_WRITE_TOOL = Object.freeze({
         type: "string",
         enum: ["thread", "project"],
       },
+      evidenceEventNo: {
+        type: "integer",
+        minimum: 0,
+      },
     },
     required: ["kind", "topic", "content", "scope"],
     additionalProperties: false,
@@ -87,6 +91,9 @@ async function callMemoryWrite(
         topic: args?.topic,
         content: args?.content,
         scope: args?.scope,
+        ...(args?.evidenceEventNo === undefined
+          ? {}
+          : { evidenceEventNo: args.evidenceEventNo }),
       }),
     }
   );
@@ -120,7 +127,13 @@ function validateMemoryWriteArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("memory_write arguments must be an object.");
   }
-  const allowed = new Set(["kind", "topic", "content", "scope"]);
+  const allowed = new Set([
+    "kind",
+    "topic",
+    "content",
+    "scope",
+    "evidenceEventNo",
+  ]);
   const unknown = Object.keys(args).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw new Error(`memory_write received unknown fields: ${unknown.join(", ")}.`);
@@ -145,6 +158,15 @@ function validateMemoryWriteArguments(args) {
   }
   if (!["thread", "project"].includes(args.scope)) {
     throw new Error("memory_write scope must be thread or project.");
+  }
+  if (
+    args.evidenceEventNo !== undefined &&
+    (!Number.isInteger(args.evidenceEventNo) || args.evidenceEventNo < 0)
+  ) {
+    throw new Error("memory_write evidenceEventNo must be a non-negative integer.");
+  }
+  if (args.evidenceEventNo !== undefined && args.kind !== "fact") {
+    throw new Error("memory_write evidenceEventNo is only valid for fact memories.");
   }
 }
 

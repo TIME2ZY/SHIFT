@@ -25,6 +25,15 @@ function resolveAnchor(anchor, context = {}) {
 
   if (type === "invocation" && storage?.invocations?.get) {
     const invocation = storage.invocations.get(ref);
+    if (invocation && Number.isInteger(anchor.eventNo)) {
+      const event =
+        storage.invocations.getEvent?.(ref, anchor.eventNo) ||
+        storage.invocations
+          .listEvents?.(ref)
+          ?.find((item) => item.sequenceNo === anchor.eventNo);
+      if (event) return { state: "ok", entity: event };
+      return missingOrDeleted(storage, originThreadId, "invocation-event");
+    }
     if (invocation) return { state: "ok", entity: invocation };
     return missingOrDeleted(storage, originThreadId, "invocation");
   }
