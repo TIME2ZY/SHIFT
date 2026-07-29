@@ -6,6 +6,25 @@ const { createEncodingTracker } = require("../shared/encoding-guard");
 
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000;
+const SERVER_ONLY_AGENT_ENV_KEYS = Object.freeze([
+  "SHIFT_MEMORY_DB",
+  "SHIFT_TRANSCRIPT_DIR",
+  "SHIFT_AUDIT_TRANSCRIPT_DIR",
+  "SHIFT_TEST_CAPACITY",
+]);
+
+function buildAgentChildEnvironment(baseEnv = process.env, overrides = {}) {
+  const childEnv = {
+    ...baseEnv,
+    ...windowsUtf8Environment(baseEnv),
+    ...(overrides || {}),
+  };
+  // These settings belong to the live server. Leaking them into an Agent means
+  // commands run by that Agent can migrate the authoritative live database,
+  // write into the server transcript, or inherit harness-only capacity values.
+  for (const key of SERVER_ONLY_AGENT_ENV_KEYS) delete childEnv[key];
+  return childEnv;
+}
 
 function runChildStream({
   spawnRunner,
@@ -29,11 +48,7 @@ function runChildStream({
   const encodingTracker = createEncodingTracker();
 
   return new Promise((resolve) => {
-    const childEnv = {
-      ...process.env,
-      ...windowsUtf8Environment(process.env),
-      ...(env || {}),
-    };
+    const childEnv = buildAgentChildEnvironment(process.env, env);
     // Prefer UTF-8 for Node child even when parent shell is legacy codepage.
     if (!childEnv.NODE_OPTIONS) childEnv.NODE_OPTIONS = "";
     if (!/\b--input-type\b/.test(childEnv.NODE_OPTIONS)) {
@@ -205,6 +220,8 @@ function filterBenignStderr(text) {
 module.exports = {
   DEFAULT_KILL_GRACE_MS,
   DEFAULT_SERVER_TIMEOUT_MS,
+  SERVER_ONLY_AGENT_ENV_KEYS,
+  buildAgentChildEnvironment,
   runChildStream,
   filterBenignStderr,
 };

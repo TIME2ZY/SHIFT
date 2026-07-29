@@ -76,6 +76,33 @@ function resolveAgyCommand(env = process.env) {
   return "agy";
 }
 
+/**
+ * Antigravity's Windows stream-json writer can split model text at invalid
+ * UTF-8 boundaries, replacing isolated Chinese bytes with U+FFFD before Node
+ * receives them. The buffered json format preserves the final response and
+ * conversation id without passing through that incremental writer.
+ */
+function resolveAgyOutputFormat(
+  providerOptions = {},
+  env = process.env,
+  platform = process.platform
+) {
+  const explicit = providerOptions.outputFormat
+    ? String(providerOptions.outputFormat)
+    : String(env.AGY_OUTPUT_FORMAT || "").trim();
+  if (explicit) {
+    if (!SUPPORTED_OUTPUT_FORMATS.has(explicit)) {
+      throw new Error(
+        `Unsupported Antigravity outputFormat "${explicit}". Supported: ${[
+          ...SUPPORTED_OUTPUT_FORMATS,
+        ].join(", ")}.`
+      );
+    }
+    return explicit;
+  }
+  return platform === "win32" ? "json" : "stream-json";
+}
+
 function sessionIdFromEvent(event) {
   if (!event || typeof event !== "object") return "";
   if (typeof event.conversation_id === "string" && event.conversation_id) {
@@ -484,8 +511,9 @@ const antigravityProvider = {
         : providerOptions.mode;
     if (mode) args.push("--mode", mode);
 
-    // Default stream-json so tools/session are available (hidden CLI flag; verified 1.1.3).
-    const outputFormat = providerOptions.outputFormat || "stream-json";
+    // Windows defaults to buffered JSON to avoid Antigravity's incremental
+    // UTF-8 corruption. Other platforms keep stream-json and tool events.
+    const outputFormat = resolveAgyOutputFormat(providerOptions);
     if (outputFormat) args.push("--output-format", String(outputFormat));
 
     if (providerOptions.sandbox === true) args.push("--sandbox");
@@ -512,6 +540,7 @@ module.exports = {
   MODEL_FAMILY,
   resolveAgyModelLabel,
   resolveAgyCommand,
+  resolveAgyOutputFormat,
   sessionIdFromEvent,
   normalizeToolArgs,
   createAntigravityRuntime,
