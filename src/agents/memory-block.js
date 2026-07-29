@@ -4,10 +4,18 @@
  */
 
 const { PRODUCT_KINDS } = require("../storage/memory-keys");
+const { ENV } = require("../shared/brand");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 const MIN_CONTENT_CHARS = 4;
 const KNOWN_FIELDS = new Set(["kind", "topic", "content"]);
+
+function isFencedMemoryBlocksEnabled(env = process.env) {
+  const value = String(env?.[ENV.MEMORY_FENCED_BLOCKS_ENABLED] || "")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "yes", "on"].includes(value);
+}
 
 /**
  * @param {string} text
@@ -112,6 +120,7 @@ function applyMemoryBlocks(input = {}) {
   const eventStore = input.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
   const logger = input.logger || console;
+  const env = input.env || process.env;
 
   const parsed = parseMemoryBlocks(text);
   const stats = {
@@ -123,6 +132,10 @@ function applyMemoryBlocks(input = {}) {
   };
 
   if (!parsed.length) return stats;
+  if (!isFencedMemoryBlocksEnabled(env)) {
+    stats.blockSkipped = parsed.length;
+    return stats;
+  }
   if (!memoryService || typeof memoryService.writeMemoryCandidate !== "function") {
     stats.blockSkipped = parsed.length;
     return stats;
@@ -220,6 +233,7 @@ module.exports = {
   PRODUCT_KINDS,
   MAX_MEMORY_CONTENT_CHARS,
   MIN_CONTENT_CHARS,
+  isFencedMemoryBlocksEnabled,
   parseMemoryBlocks,
   parseMemoryBody,
   applyMemoryBlocks,

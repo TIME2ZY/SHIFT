@@ -67,7 +67,7 @@ always: true
 }
 ```
 
-工具验证出的 `fact` 应尽量附带 `evidenceEventNo`。它只能引用当前 invocation 中已经完成且成功的工具或命令结果；不要引用 assistant 文本、失败事件或其他 invocation。
+工具验证出的 `fact` 应尽量附带 `evidenceEventNo`。不知道事件编号时，先调用 `memory_evidence_list`；它只返回当前 invocation 中可用的成功工具结果。不要引用 assistant 文本、失败事件或其他 invocation。
 
 Provider 没有暴露 `memory_write` 时，才使用 prompt 中提供的兼容 callback 命令。
 

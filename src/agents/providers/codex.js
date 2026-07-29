@@ -28,7 +28,7 @@ function shiftContextMcpConfigArgs() {
     "-c",
     'mcp_servers.shift_context.env_vars=["SHIFT_API_URL","SHIFT_THREAD_ID","SHIFT_INVOCATION_ID","SHIFT_CALLBACK_TOKEN"]',
     "-c",
-    'mcp_servers.shift_context.enabled_tools=["memory_write"]',
+    'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list"]',
     "-c",
     'mcp_servers.shift_context.default_tools_approval_mode="auto"',
     "-c",

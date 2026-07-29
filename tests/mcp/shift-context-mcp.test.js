@@ -3,7 +3,9 @@ const test = require("node:test");
 
 const {
   MEMORY_WRITE_TOOL,
+  MEMORY_EVIDENCE_LIST_TOOL,
   callMemoryWrite,
+  callMemoryEvidenceList,
   createRequestHandler,
 } = require("../../scripts/shift-context-mcp");
 const {
@@ -17,7 +19,7 @@ const ENV = {
   SHIFT_CALLBACK_TOKEN: "secret",
 };
 
-test("shift context MCP exposes only memory_write", async () => {
+test("shift context MCP exposes memory write and current evidence discovery", async () => {
   const handle = createRequestHandler();
   const initialized = await handle({
     jsonrpc: "2.0",
@@ -33,7 +35,10 @@ test("shift context MCP exposes only memory_write", async () => {
     id: 2,
     method: "tools/list",
   });
-  assert.deepEqual(listed.result.tools, [MEMORY_WRITE_TOOL]);
+  assert.deepEqual(listed.result.tools, [
+    MEMORY_WRITE_TOOL,
+    MEMORY_EVIDENCE_LIST_TOOL,
+  ]);
   assert.deepEqual(MEMORY_WRITE_TOOL.inputSchema.required, [
     "kind",
     "topic",
@@ -41,6 +46,63 @@ test("shift context MCP exposes only memory_write", async () => {
     "scope",
   ]);
   assert.equal(MEMORY_WRITE_TOOL.inputSchema.additionalProperties, false);
+});
+
+test("shift context MCP returns current invocation evidence", async () => {
+  const calls = [];
+  const handle = createRequestHandler({
+    memoryEvidenceList: async (args) => {
+      calls.push(args);
+      return {
+        invocationId: "invocation-1",
+        events: [{ eventNo: 7, kind: "tool.finished", summary: "tests passed" }],
+        hasMore: false,
+      };
+    },
+  });
+  const response = await handle({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: {
+      name: "memory_evidence_list",
+      arguments: { limit: 5 },
+    },
+  });
+  assert.equal(response.result.isError, false);
+  assert.equal(response.result.structuredContent.events[0].eventNo, 7);
+  assert.deepEqual(calls, [{ limit: 5 }]);
+});
+
+test("memory_evidence_list bridge binds current invocation credentials", async () => {
+  let captured;
+  const result = await callMemoryEvidenceList(
+    { limit: 5 },
+    {
+      env: ENV,
+      fetchImpl: async (url, init) => {
+        captured = { url, init };
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              invocationId: "invocation-1",
+              events: [{ eventNo: 4, kind: "tool.finished", summary: "ok" }],
+              hasMore: false,
+            }),
+        };
+      },
+    }
+  );
+  assert.equal(result.events[0].eventNo, 4);
+  assert.equal(
+    captured.url.href,
+    "http://127.0.0.1:8787/api/callbacks/memory-evidence" +
+      "?sessionId=thread-1&invocationId=invocation-1&limit=5"
+  );
+  assert.equal(captured.init.method, "GET");
+  assert.equal(captured.init.headers["X-Callback-Token"], "secret");
 });
 
 test("shift context MCP returns structured memory_write results", async () => {
@@ -158,7 +220,7 @@ test("Codex invocation config registers the per-invocation MCP bridge", () => {
   );
   assert.ok(
     args.includes(
-      'mcp_servers.shift_context.enabled_tools=["memory_write"]'
+      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list"]'
     )
   );
   assert.ok(

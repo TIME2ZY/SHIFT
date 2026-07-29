@@ -49,6 +49,31 @@ const MEMORY_WRITE_TOOL = Object.freeze({
   },
 });
 
+const MEMORY_EVIDENCE_LIST_TOOL = Object.freeze({
+  name: "memory_evidence_list",
+  description:
+    "List successful tool-result events from the current invocation that may ground a fact memory.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 50,
+        default: 20,
+      },
+    },
+    additionalProperties: false,
+  },
+  annotations: {
+    title: "List current memory evidence",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+});
+
 function requireShiftContext(env = process.env) {
   const apiUrl = String(env.SHIFT_API_URL || "").replace(/\/+$/, "");
   const sessionId = String(env.SHIFT_THREAD_ID || "");
@@ -123,6 +148,45 @@ async function callMemoryWrite(
   };
 }
 
+async function callMemoryEvidenceList(
+  args = {},
+  { env = process.env, fetchImpl = globalThis.fetch } = {}
+) {
+  validateMemoryEvidenceListArguments(args);
+  if (typeof fetchImpl !== "function") {
+    throw new Error("Global fetch is unavailable; Node 20+ is required.");
+  }
+  const context = requireShiftContext(env);
+  const url = new URL("/api/callbacks/memory-evidence", `${context.apiUrl}/`);
+  url.searchParams.set("sessionId", context.sessionId);
+  url.searchParams.set("invocationId", context.invocationId);
+  if (args.limit !== undefined) url.searchParams.set("limit", String(args.limit));
+  const response = await fetchImpl(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "X-Callback-Token": context.callbackToken,
+    },
+  });
+  const text = await response.text();
+  let value;
+  try {
+    value = text ? JSON.parse(text) : {};
+  } catch {
+    value = { error: text || "Invalid response from Shift." };
+  }
+  if (!response.ok) {
+    throw new Error(
+      value?.error || `Shift memory_evidence_list failed with HTTP ${response.status}.`
+    );
+  }
+  return {
+    invocationId: value.invocationId || context.invocationId,
+    events: Array.isArray(value.events) ? value.events : [],
+    hasMore: Boolean(value.hasMore),
+  };
+}
+
 function validateMemoryWriteArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("memory_write arguments must be an object.");
@@ -170,7 +234,28 @@ function validateMemoryWriteArguments(args) {
   }
 }
 
-function createRequestHandler({ memoryWrite = callMemoryWrite } = {}) {
+function validateMemoryEvidenceListArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("memory_evidence_list arguments must be an object.");
+  }
+  const unknown = Object.keys(args).filter((key) => key !== "limit");
+  if (unknown.length > 0) {
+    throw new Error(
+      `memory_evidence_list received unknown fields: ${unknown.join(", ")}.`
+    );
+  }
+  if (
+    args.limit !== undefined &&
+    (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)
+  ) {
+    throw new Error("memory_evidence_list limit must be an integer from 1 to 50.");
+  }
+}
+
+function createRequestHandler({
+  memoryWrite = callMemoryWrite,
+  memoryEvidenceList = callMemoryEvidenceList,
+} = {}) {
   return async function handleRequest(request) {
     if (!request || request.jsonrpc !== "2.0" || typeof request.method !== "string") {
       return jsonRpcError(request?.id ?? null, -32600, "Invalid Request");
@@ -188,15 +273,24 @@ function createRequestHandler({ memoryWrite = callMemoryWrite } = {}) {
     }
 
     if (request.method === "tools/list") {
-      return jsonRpcResult(request.id, { tools: [MEMORY_WRITE_TOOL] });
+      return jsonRpcResult(request.id, {
+        tools: [MEMORY_WRITE_TOOL, MEMORY_EVIDENCE_LIST_TOOL],
+      });
     }
 
     if (request.method === "tools/call") {
-      if (request.params?.name !== MEMORY_WRITE_TOOL.name) {
+      const toolName = request.params?.name;
+      if (
+        toolName !== MEMORY_WRITE_TOOL.name &&
+        toolName !== MEMORY_EVIDENCE_LIST_TOOL.name
+      ) {
         return jsonRpcError(request.id, -32602, "Unknown tool.");
       }
       try {
-        const result = await memoryWrite(request.params?.arguments || {});
+        const result =
+          toolName === MEMORY_WRITE_TOOL.name
+            ? await memoryWrite(request.params?.arguments || {})
+            : await memoryEvidenceList(request.params?.arguments || {});
         return jsonRpcResult(request.id, {
           content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: result,
@@ -253,9 +347,12 @@ if (require.main === module) {
 
 module.exports = {
   MEMORY_WRITE_TOOL,
+  MEMORY_EVIDENCE_LIST_TOOL,
   requireShiftContext,
   callMemoryWrite,
+  callMemoryEvidenceList,
   validateMemoryWriteArguments,
+  validateMemoryEvidenceListArguments,
   createRequestHandler,
   jsonRpcResult,
   jsonRpcError,

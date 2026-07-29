@@ -10,7 +10,11 @@ const {
   deriveTopicFromContent,
   parseSupersessionKey,
 } = require("./memory-keys");
-const { eventPlainText } = require("./event-plain-text");
+const {
+  MEMORY_EVIDENCE_EVENT_KINDS,
+  isSuccessfulMemoryEvidenceEvent,
+  summarizeMemoryEvidenceEvent,
+} = require("./memory-evidence");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
@@ -774,23 +778,13 @@ function resolveMemoryWriteEvidence({
         `Evidence event ${candidate.evidenceEventNo} does not exist in the current invocation.`
       );
     }
-    const allowedKinds = new Set([
-      "tool.finished",
-      "command.finished",
-      "tool.completed",
-      "tool_result",
-    ]);
-    if (!allowedKinds.has(event.kind)) {
+    if (!isSuccessfulMemoryEvidenceEvent(event)) {
+      if (MEMORY_EVIDENCE_EVENT_KINDS.includes(event.kind)) {
+        throw new Error("Failed tool events cannot ground a memory.");
+      }
       throw new Error(`Evidence event kind "${event.kind}" cannot ground a memory.`);
     }
-    if (
-      event.payload?.status === "error" ||
-      event.payload?.failed === true ||
-      (Number.isInteger(event.payload?.exitCode) && event.payload.exitCode !== 0)
-    ) {
-      throw new Error("Failed tool events cannot ground a memory.");
-    }
-    const snapshot = eventPlainText(event.kind, event.payload || {}).slice(0, 240);
+    const snapshot = summarizeMemoryEvidenceEvent(event);
     return {
       eventNo: event.sequenceNo,
       eventKind: event.kind,

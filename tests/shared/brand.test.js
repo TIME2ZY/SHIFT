@@ -28,5 +28,9 @@ describe("brand identifiers", () => {
       brand.ENV.MEMORY_SUGGESTIONS_ENABLED,
       "SHIFT_MEMORY_SUGGESTIONS_ENABLED"
     );
+    assert.equal(
+      brand.ENV.MEMORY_FENCED_BLOCKS_ENABLED,
+      "SHIFT_MEMORY_FENCED_BLOCKS_ENABLED"
+    );
   });
 });

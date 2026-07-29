@@ -4,6 +4,7 @@ const {
   buildMemoryWriteMetrics,
   logMemoryWriteMetrics,
 } = require("../storage/memory-metrics");
+const { describeMemoryEvidenceEvent } = require("../storage/memory-evidence");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 
@@ -289,6 +290,54 @@ function createCallbackRoutes({
       }
 
       sendJson(res, 200, { invocationId: targetInvocationId, ...result });
+      return true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/callbacks/memory-evidence") {
+      const sessionId = url.searchParams.get("sessionId") || "";
+      const invocationId = url.searchParams.get("invocationId") || "";
+      const callbackToken = req.headers["x-callback-token"] || "";
+      const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "20", 10);
+      const limit = Math.max(1, Math.min(50, Number.isFinite(requestedLimit) ? requestedLimit : 20));
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, {
+          error: "sessionId, invocationId, and X-Callback-Token are required.",
+        });
+        return true;
+      }
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return true;
+      }
+      if (!recall || typeof recall.readInvocationPage !== "function") {
+        sendJson(res, 503, { error: "Invocation evidence is unavailable." });
+        return true;
+      }
+
+      const first = await recall.readInvocationPage(sessionId, invocationId, {
+        from: 0,
+        limit: 1,
+      });
+      const total = Math.max(0, Number(first?.total) || 0);
+      const scanLimit = Math.min(2000, Math.max(1, total));
+      const page =
+        total <= 1
+          ? first
+          : await recall.readInvocationPage(sessionId, invocationId, {
+              from: Math.max(0, total - scanLimit),
+              limit: scanLimit,
+            });
+      const eligible = (page?.events || [])
+        .map(describeMemoryEvidenceEvent)
+        .filter(Boolean);
+      const selected = eligible.slice(-limit);
+
+      sendJson(res, 200, {
+        invocationId,
+        events: selected,
+        hasMore: eligible.length > selected.length || total > scanLimit,
+      });
       return true;
     }
 
