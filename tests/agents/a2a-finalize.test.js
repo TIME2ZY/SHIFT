@@ -14,6 +14,32 @@ test.beforeEach(() => {
   collabTaskRegistry.resetForTests();
 });
 
+test("handoff route dedupe is scoped to one thread", () => {
+  const input = {
+    sourceAgent: "codex",
+    targetAgent: "gemini",
+    sourceInvocationId: "shared-invocation",
+    handoff: { to: "gemini", what: "same task" },
+  };
+  const first = handoffRouteRegistry.tryAcceptRoute({
+    ...input,
+    threadId: "thread-a",
+  });
+  const duplicate = handoffRouteRegistry.tryAcceptRoute({
+    ...input,
+    threadId: "thread-a",
+  });
+  const otherThread = handoffRouteRegistry.tryAcceptRoute({
+    ...input,
+    threadId: "thread-b",
+  });
+
+  assert.equal(first.accepted, true);
+  assert.equal(duplicate.accepted, false);
+  assert.equal(otherThread.accepted, true);
+  assert.notEqual(first.record.handoffId, otherThread.record.handoffId);
+});
+
 function completeHandoffText(to = "opencode") {
   return [
     `@${to === "opencode" ? "OpenCode" : "Grok"} continue`,

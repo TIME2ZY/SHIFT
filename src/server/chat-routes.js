@@ -746,6 +746,7 @@ function createChatRoutes({
         if (parentInvocationId && triggerType === "a2a-handoff") {
           try {
             handoffRouteRegistry.bindTargetInvocation({
+              threadId: sessionId,
               sourceInvocationId: parentInvocationId,
               targetAgent: agent,
               targetInvocationId: invocationId,

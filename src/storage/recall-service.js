@@ -1,5 +1,4 @@
 const {
-  renderActiveMemoryCard,
   renderActiveMemoryCardDetailed,
   resolveA2AMemoryBudget,
   resolveBudgetBuckets,

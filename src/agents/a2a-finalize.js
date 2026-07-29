@@ -288,6 +288,7 @@ function finalizeA2ARoutes(input = {}) {
 
     // Phase 3: idempotent accept — one route per (sourceInvocation, target).
     const accept = handoffRouteRegistry.tryAcceptRoute({
+      threadId: sessionId,
       sourceAgent: fromAgent,
       targetAgent: target,
       sourceInvocationId: invocationId || null,

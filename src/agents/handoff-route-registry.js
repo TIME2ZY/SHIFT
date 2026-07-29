@@ -13,13 +13,13 @@ const {
   isEffectiveA2aHop,
 } = require("../shared/collab-contracts");
 
-/** @type {Map<string, object>} flightKey sourceInvocation::target → record */
+/** @type {Map<string, object>} flightKey thread::sourceInvocation::target → record */
 const byFlightKey = new Map();
 /** @type {Map<string, object>} handoffId → record */
 const byHandoffId = new Map();
 /** @type {Map<string, string>} targetInvocationId → handoffId */
 const byTargetInvocation = new Map();
-/** @type {Map<string, object>} contentKey target::contentHash → last completed record */
+/** @type {Map<string, object>} contentKey thread::target::contentHash → last completed record */
 const byContentCompleted = new Map();
 
 function makeHandoffId() {
@@ -44,12 +44,20 @@ function hashHandoffContent(handoff, targetAgent) {
   return crypto.createHash("sha256").update(parts.join("\n")).digest("hex").slice(0, 16);
 }
 
-function flightKey(sourceInvocationId, targetAgent) {
-  return `${String(sourceInvocationId || "?")}::${String(targetAgent || "").toLowerCase()}`;
+function flightKey(threadId, sourceInvocationId, targetAgent) {
+  return [
+    String(threadId || "?"),
+    String(sourceInvocationId || "?"),
+    String(targetAgent || "").toLowerCase(),
+  ].join("::");
 }
 
-function contentKey(targetAgent, contentHash) {
-  return `${String(targetAgent || "").toLowerCase()}::${String(contentHash || "empty")}`;
+function contentKey(threadId, targetAgent, contentHash) {
+  return [
+    String(threadId || "?"),
+    String(targetAgent || "").toLowerCase(),
+    String(contentHash || "empty"),
+  ].join("::");
 }
 
 /**
@@ -65,6 +73,7 @@ function contentKey(targetAgent, contentHash) {
 function tryAcceptRoute(input = {}) {
   const sourceAgent = String(input.sourceAgent || "");
   const targetAgent = String(input.targetAgent || "");
+  const threadId = input.threadId || null;
   const sourceInvocationId = input.sourceInvocationId || null;
   const contentHash =
     input.contentHash || hashHandoffContent(input.handoff, targetAgent);
@@ -75,7 +84,9 @@ function tryAcceptRoute(input = {}) {
   const reason = input.reason || "a2a-route";
   const source = input.source || "chat";
 
-  const completedPrior = byContentCompleted.get(contentKey(targetAgent, contentHash));
+  const completedPrior = byContentCompleted.get(
+    contentKey(threadId, targetAgent, contentHash)
+  );
   if (completedPrior && completedPrior.completeStatus === HANDOFF_COMPLETE_STATUS.COMPLETED) {
     const dup = {
       ...completedPrior,
@@ -86,7 +97,7 @@ function tryAcceptRoute(input = {}) {
     return { status: HANDOFF_ROUTE_STATUS.ALREADY_COMPLETED, record: dup, accepted: false };
   }
 
-  const fKey = flightKey(sourceInvocationId, targetAgent);
+  const fKey = flightKey(threadId, sourceInvocationId, targetAgent);
   const existing = byFlightKey.get(fKey);
   if (existing) {
     const dup = {
@@ -108,6 +119,7 @@ function tryAcceptRoute(input = {}) {
   const handoffId = input.handoffId || makeHandoffId();
   const record = {
     handoffId,
+    threadId,
     sourceAgent,
     targetAgent,
     sourceInvocationId,
@@ -135,6 +147,7 @@ function tryAcceptRoute(input = {}) {
  * Bind the child invocation once it starts (A2A receive).
  */
 function bindTargetInvocation({
+  threadId,
   sourceInvocationId,
   targetAgent,
   targetInvocationId,
@@ -142,7 +155,8 @@ function bindTargetInvocation({
 } = {}) {
   let record = handoffId ? byHandoffId.get(handoffId) : null;
   if (!record && sourceInvocationId && targetAgent) {
-    record = byFlightKey.get(flightKey(sourceInvocationId, targetAgent)) || null;
+    record =
+      byFlightKey.get(flightKey(threadId, sourceInvocationId, targetAgent)) || null;
   }
   if (!record || !targetInvocationId) return null;
   record.targetInvocationId = targetInvocationId;
@@ -164,7 +178,10 @@ function completeByTargetInvocation(targetInvocationId, { ok = true } = {}) {
     : HANDOFF_COMPLETE_STATUS.FAILED;
   record.completedAt = new Date().toISOString();
   if (record.completeStatus === HANDOFF_COMPLETE_STATUS.COMPLETED) {
-    byContentCompleted.set(contentKey(record.targetAgent, record.contentHash), record);
+    byContentCompleted.set(
+      contentKey(record.threadId, record.targetAgent, record.contentHash),
+      record
+    );
   }
   return record;
 }

@@ -105,6 +105,7 @@ async function startSpawn(opts, ctx) {
     uiToken,
     async close() {
       await new Promise((resolve) => server.close(resolve));
+      await server.closeStorageContext?.();
     },
   };
 }

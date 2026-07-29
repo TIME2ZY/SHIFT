@@ -74,6 +74,12 @@ test("loadSessions auto-switches to the first session when none is active", asyn
     usage: null,
     showUsage: true,
     scroll: false,
+    kind: "",
+    messageType: "",
+    from: null,
+    to: null,
+    handoffId: null,
+    routeStatus: null,
   }]);
 });
 

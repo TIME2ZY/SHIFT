@@ -200,10 +200,6 @@ function uniqueTopics(list) {
   return out;
 }
 
-function renderFlatCard(memories, heading, budgetChars) {
-  return renderFlatCardDetailed(memories, heading, budgetChars).text;
-}
-
 function renderFlatCardDetailed(memories, heading, budgetChars, extras = {}) {
   const footer = "<!-- /Active Memories -->";
   const truncatedNote = "truncated: true（其余活跃记忆因预算未注入）\n";

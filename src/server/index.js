@@ -353,16 +353,18 @@ function createServer(options = {}) {
   const server = http.createServer(
     createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
   );
-  let storageClosed = false;
-  async function closeStorageContext() {
-    if (storageClosed) return;
-    storageClosed = true;
+  let storageClosePromise = null;
+  function closeStorageContext() {
+    if (storageClosePromise) return storageClosePromise;
     _previewManagers.delete(worktreeManager);
-    try {
-      await storageContext.close();
-    } catch (error) {
-      logger.error?.(`[server] storage shutdown failed: ${error.message}`);
-    }
+    storageClosePromise = (async () => {
+      try {
+        await storageContext.close();
+      } catch (error) {
+        logger.error?.(`[server] storage shutdown failed: ${error.message}`);
+      }
+    })();
+    return storageClosePromise;
   }
   server.once("close", () => {
     void closeStorageContext();
