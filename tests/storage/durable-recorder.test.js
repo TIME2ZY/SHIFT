@@ -143,37 +143,28 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
         }),
       /message recall failed/
     );
-    assert.equal(storage.invocations.get("invocation-atomic").state, "active");
+    assert.equal(storage.invocations.get("invocation-atomic").state, "failed");
     assert.equal(storage.messages.get("message-assistant"), null);
-    assert.equal(
-      storage.invocations.listEvents("invocation-atomic").map((event) => event.kind).join(","),
-      "invocation-start"
+    assert.deepEqual(
+      storage.invocations.listEvents("invocation-atomic").map((event) => event.kind),
+      ["invocation-start", "invocation-end"]
     );
-
-    storage.recall.upsert = () => {
-      throw new Error("strict sqlite failure");
-    };
-    assert.throws(
-      () =>
-        recorder.finishWithAssistantMessage({
-          invocationId: "invocation-atomic",
-          code: 0,
-          signal: null,
-          session,
-          message: {
-            id: "message-assistant",
-            role: "assistant",
-            agent: "codex",
-            content: "done",
-          },
-        }),
-      /strict sqlite failure/
-    );
-    assert.equal(storage.invocations.get("invocation-atomic").state, "active");
 
     storage.recall.upsert = originalUpsert;
+    recorder.startInvocation({
+      session,
+      invocationId: "invocation-atomic-success",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+      startedAt: "2026-07-12T00:00:04.000Z",
+      triggerMessageId: "message-user",
+      triggerType: "user-message",
+    });
     const completed = recorder.finishWithAssistantMessage({
-      invocationId: "invocation-atomic",
+      invocationId: "invocation-atomic-success",
       code: 0,
       signal: null,
       session,
@@ -182,13 +173,19 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
         role: "assistant",
         agent: "codex",
         content: "done",
-        createdAt: "2026-07-12T00:00:03.000Z",
+        createdAt: "2026-07-12T00:00:05.000Z",
       },
     });
     assert.equal(completed.invocation.state, "completed");
     assert.equal(completed.message.id, "message-assistant");
     assert.deepEqual(
       storage.invocations.listEvents("invocation-atomic").map((event) => event.kind),
+      ["invocation-start", "invocation-end"]
+    );
+    assert.deepEqual(
+      storage.invocations
+        .listEvents("invocation-atomic-success")
+        .map((event) => event.kind),
       ["invocation-start", "invocation-end"]
     );
     // Assistant must not rewrite the user-chosen lastAgent.

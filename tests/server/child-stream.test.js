@@ -1,7 +1,34 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
-const { runChildStream, filterBenignStderr } = require("../../src/server/child-stream");
+const {
+  buildAgentChildEnvironment,
+  runChildStream,
+  filterBenignStderr,
+} = require("../../src/server/child-stream");
+
+test("agent child environment excludes server-owned storage and harness settings", () => {
+  const env = buildAgentChildEnvironment(
+    {
+      PATH: "base-path",
+      SHIFT_MEMORY_DB: "server.sqlite",
+      SHIFT_TRANSCRIPT_DIR: "server-transcripts",
+      SHIFT_AUDIT_TRANSCRIPT_DIR: "server-audit",
+      SHIFT_TEST_CAPACITY: "48000",
+    },
+    {
+      SHIFT_API_URL: "http://127.0.0.1:61223",
+      SHIFT_MEMORY_DB: "override.sqlite",
+    }
+  );
+
+  assert.equal(env.PATH, "base-path");
+  assert.equal(env.SHIFT_API_URL, "http://127.0.0.1:61223");
+  assert.equal(env.SHIFT_MEMORY_DB, undefined);
+  assert.equal(env.SHIFT_TRANSCRIPT_DIR, undefined);
+  assert.equal(env.SHIFT_AUDIT_TRANSCRIPT_DIR, undefined);
+  assert.equal(env.SHIFT_TEST_CAPACITY, undefined);
+});
 
 test("child stream removes abort and response listeners after exit", async () => {
   const child = new EventEmitter();
@@ -23,7 +50,11 @@ test("child stream removes abort and response listeners after exit", async () =>
   assert.equal(res.listenerCount("close"), 1);
   child.emit("close", 0, null);
 
-  assert.deepEqual(await completed, { code: 0, signal: null });
+  const result = await completed;
+  assert.equal(result.code, 0);
+  assert.equal(result.signal, null);
+  assert.ok(result.encoding);
+  assert.equal(result.encoding.total, 0);
   assert.equal(res.listenerCount("close"), 0);
 });
 

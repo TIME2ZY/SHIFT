@@ -4,6 +4,7 @@ const {
   createAntigravityRuntime,
   resolveAgyModelLabel,
   resolveAgyCommand,
+  resolveAgyOutputFormat,
   sessionIdFromEvent,
   normalizeToolArgs,
   antigravityProvider,
@@ -42,7 +43,7 @@ test("resolveAgyModelLabel embeds effort in CLI model name", () => {
   );
 });
 
-test("buildInvocation for gemini uses stream-json print mode", () => {
+test("buildInvocation for gemini uses the platform-safe print mode", () => {
   const inv = buildInvocation(AGENTS.gemini, "brainstorm names");
   assert.match(String(inv.command), /agy(\.exe)?$/i);
   assert.ok(inv.args.includes("-p"));
@@ -54,7 +55,21 @@ test("buildInvocation for gemini uses stream-json print mode", () => {
   assert.ok(inv.args.includes("plan"));
   const fmtIdx = inv.args.indexOf("--output-format");
   assert.ok(fmtIdx >= 0);
-  assert.equal(inv.args[fmtIdx + 1], "stream-json");
+  assert.equal(inv.args[fmtIdx + 1], process.platform === "win32" ? "json" : "stream-json");
+});
+
+test("Windows defaults to buffered json while explicit output format wins", () => {
+  assert.equal(resolveAgyOutputFormat({}, {}, "win32"), "json");
+  assert.equal(resolveAgyOutputFormat({}, {}, "linux"), "stream-json");
+  assert.equal(resolveAgyOutputFormat({ outputFormat: "text" }, {}, "win32"), "text");
+  assert.equal(
+    resolveAgyOutputFormat({}, { AGY_OUTPUT_FORMAT: "stream-json" }, "win32"),
+    "stream-json"
+  );
+  assert.throws(
+    () => resolveAgyOutputFormat({}, { AGY_OUTPUT_FORMAT: "invalid" }, "win32"),
+    /Unsupported Antigravity outputFormat/
+  );
 });
 
 test("buildInvocation resumes with --conversation", () => {

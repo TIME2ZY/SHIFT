@@ -14,14 +14,14 @@ const {
   safeEpochDirectory,
 } = require("../../src/storage/server-storage");
 
-test("audit transcript boolean accepts explicit and environment-style values", () => {
+test("audit transcript boolean accepts explicit and environment-style values", async () => {
   assert.equal(resolveBoolean(undefined, "off", true), false);
   assert.equal(resolveBoolean(undefined, "ON", false), true);
   assert.equal(resolveBoolean(false, "on", true), false);
   assert.equal(resolveBoolean(undefined, "unknown", true), true);
 });
 
-test("epoch audit directory rejects dot segments and remains inside its root", () => {
+test("epoch audit directory rejects dot segments and remains inside its root", async () => {
   const root = path.resolve("audit-transcripts");
   assert.throws(() => safeEpochDirectory("."), /Unsafe storage epoch id/);
   assert.throws(() => safeEpochDirectory(".."), /Unsafe storage epoch id/);
@@ -32,7 +32,7 @@ test("epoch audit directory rejects dot segments and remains inside its root", (
   );
 });
 
-test("online storage rejects retired files and dual modes", () => {
+test("online storage rejects retired files and dual modes", async () => {
   assert.throws(
     () => createServerStorage({ storageMode: "files" }, "sessions.json"),
     /only accepts sqlite/
@@ -43,7 +43,7 @@ test("online storage rejects retired files and dual modes", () => {
   );
 });
 
-test("default storage mode uses an activated SQLite database beside a custom sessions file", () => {
+test("default storage mode uses an activated SQLite database beside a custom sessions file", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-"));
   const databaseFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: databaseFile });
@@ -53,12 +53,12 @@ test("default storage mode uses an activated SQLite database beside a custom ses
     assert.equal(context.recorder.enabled, true);
     assert.equal(fs.existsSync(databaseFile), true);
   } finally {
-    context.close();
+    await context.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sqlite storage mode opens the durable database", () => {
+test("sqlite storage mode opens the durable database", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-"));
   const databaseFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: databaseFile });
@@ -73,12 +73,12 @@ test("sqlite storage mode opens the durable database", () => {
     assert.ok(context.eventStore);
     assert.ok(context.sessionService);
   } finally {
-    context.close();
+    await context.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sqlite audit transcript switch disables outbox archive independently", () => {
+test("sqlite audit transcript switch disables outbox archive independently", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
   const context = createServerStorage({
@@ -98,7 +98,7 @@ test("sqlite audit transcript switch disables outbox archive independently", () 
     assert.equal(context.outboxHealth().state, "disabled");
     assert.equal(context.eventStore.archiveCanonical, false);
   } finally {
-    context.close();
+    await context.close();
     storage.close();
   }
 });
@@ -151,7 +151,7 @@ test("sqlite outbox writes canonical events only to the dedicated audit sink", a
     assert.deepEqual(legacyWrites, []);
     assert.equal(auditWrites.length, 1);
   } finally {
-    context.close();
+    await context.close();
     storage.close();
   }
 });
@@ -171,7 +171,7 @@ test("sqlite canonical archive is namespaced by the active storage epoch", async
     const epoch = context.storage.metadata.getCurrent();
     assert.equal(context.auditTranscriptDir, path.join(auditRoot, epoch.epochId));
   } finally {
-    context.close();
+    await context.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -220,12 +220,12 @@ test("disabling new audit writes still drains previously committed outbox rows",
     assert.equal(delivered.length, 1);
     assert.equal(context.outboxHealth().state, "disabled");
   } finally {
-    context.close();
+    await context.close();
     storage.close();
   }
 });
 
-test("sqlite storage mode fails hard when SQLite initialization fails", () => {
+test("sqlite storage mode fails hard when SQLite initialization fails", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-fail-"));
   assert.throws(
     () =>
@@ -239,7 +239,7 @@ test("sqlite storage mode fails hard when SQLite initialization fails", () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test("sqlite mode refuses a missing, inactive, or legacy-validation database", () => {
+test("sqlite mode refuses a missing, inactive, or legacy-validation database", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-epoch-gate-"));
   const missing = path.join(tmpDir, "missing.sqlite");
   assert.throws(

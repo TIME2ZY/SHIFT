@@ -104,6 +104,7 @@ async function withServer(options, fn) {
     await fn(`http://127.0.0.1:${port}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     if (!prevTranscriptDir) {
       delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
@@ -1226,6 +1227,7 @@ test("chat ignores legacy session maps when switching into worktree mode", async
     assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     if (!prevTranscriptDir) {
       delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
@@ -1354,6 +1356,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     if (!prevTranscriptDir) {
       delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
@@ -1509,7 +1512,21 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.equal(second.status, 200);
 
       const text = await second.text();
-      assert.match(text, /event: agent-start\ndata: \{"agent":"opencode","invocationId":"[^"]+"\}/);
+      const startMatch = text.match(
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+      );
+      assert.ok(startMatch, "agent-start must retain its stable two-field payload");
+      const windowMeta = text
+        .split("\n\n")
+        .find(
+          (frame) =>
+            frame.startsWith("event: window-meta\n") &&
+            frame.includes(`"invocationId":"${startMatch[1]}"`)
+        );
+      assert.ok(windowMeta, "window-meta must correlate by invocationId");
+      assert.match(windowMeta, /"parentInvocationId":null/);
+      assert.match(windowMeta, /"triggerMessageId":"[^"]+"/);
+      assert.match(windowMeta, /"triggerType":"user-message"/);
       assert.equal(callCount, 2);
     }
   );
@@ -1664,13 +1681,13 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   assert.match(joined, /event: message\ndata: \{"agent":"codex","role":"assistant","text":"@Gemini 请继续实现"\}/);
   assert.match(joined, /event: a2a-route\ndata: \{"from":"codex","to":"gemini"/);
 
-  // Same target may re-enter via callback even if already on the worklist.
+  // Idempotency: the same source invocation cannot route to the same target twice.
   const ok2 = callbacks.postMessage(sessionId, invocationId, "@Gemini 请按补充意见继续", {
     appendToSession: appendFn,
   });
-  assert.equal(ok2.handoff.status, "accepted");
-  assert.deepEqual(worklist, ["codex", "gemini", "gemini"]);
-  assert.equal(threadCtx.a2aCount, 2);
+  assert.equal(ok2.handoff.status, "skipped");
+  assert.deepEqual(worklist, ["codex", "gemini"]);
+  assert.equal(threadCtx.a2aCount, 1);
 
   callbacks.unregisterThread(sessionId);
 });

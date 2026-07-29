@@ -1,7 +1,8 @@
 const PRAGMAS = Object.freeze({
   journalMode: "WAL",
   foreignKeys: true,
-  busyTimeoutMs: 5000,
+  // Multi-agent finish paths still contend; OS busy_timeout + app-level retry.
+  busyTimeoutMs: 8000,
 });
 
 const MIGRATIONS = Object.freeze([

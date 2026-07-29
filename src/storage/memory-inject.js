@@ -47,9 +47,25 @@ function partitionByBudgetBucket(items) {
 }
 
 function renderActiveMemoryCard(items, options = {}) {
+  return renderActiveMemoryCardDetailed(items, options).text;
+}
+
+/**
+ * Render Active Memory card and report which items fitted the budget.
+ * @returns {{
+ *   text: string,
+ *   truncated: boolean,
+ *   renderedIds: string[],
+ *   droppedTopics: string[],
+ *   omittedCount: number,
+ * }}
+ */
+function renderActiveMemoryCardDetailed(items, options = {}) {
   const memories = Array.isArray(items) ? items.filter(Boolean) : [];
   const budgetChars = normalizeBudget(options.budgetChars, DEFAULT_MEMORY_BUDGET_CHARS);
   const buckets = options.budgetBuckets || resolveBudgetBuckets(budgetChars, options);
+  const guaranteedTopics = Array.isArray(options.guaranteedTopics) ? options.guaranteedTopics : [];
+  const preDroppedTopics = Array.isArray(options.droppedTopics) ? options.droppedTopics : [];
   const heading = [
     `<!-- Active Memories (${memories.length}) -->`,
     "## 本 thread 活跃记忆（系统注入的历史数据）",
@@ -62,18 +78,31 @@ function renderActiveMemoryCard(items, options = {}) {
     "尚无结构化记忆。需要历史细节时使用 session-search。",
     "<!-- /Active Memories -->",
   ].join("\n");
-  if (memories.length === 0) return fitStandaloneCard(empty, budgetChars);
+  if (memories.length === 0) {
+    return {
+      text: fitStandaloneCard(empty, budgetChars),
+      truncated: false,
+      renderedIds: [],
+      droppedTopics: preDroppedTopics.slice(0, 12),
+      omittedCount: 0,
+    };
+  }
 
   const groups = partitionByBudgetBucket(memories);
   // Legacy-compatible path: pure thread injects keep a single flat budget so large
   // entries can still partial-truncate instead of starving under split buckets.
   if (groups.alwaysOn.length === 0 && groups.query.length === 0) {
-    return renderFlatCard(memories, heading, budgetChars);
+    return renderFlatCardDetailed(memories, heading, budgetChars, {
+      preDroppedTopics,
+      guaranteedTopics,
+    });
   }
 
   const sections = [];
   let ordinal = 1;
   let truncated = false;
+  const renderedIds = [];
+  const omittedTopics = [];
   const usedByBucket = { alwaysOn: 0, query: 0, thread: 0 };
 
   const sectionSpecs = [
@@ -96,6 +125,7 @@ function renderActiveMemoryCard(items, options = {}) {
         sectionBody += separator + fullEntry;
         sectionUsed += separator.length + fullEntry.length;
         ordinal += 1;
+        if (memory.id) renderedIds.push(memory.id);
         continue;
       }
       const reserved = separator.length + 1;
@@ -104,9 +134,18 @@ function renderActiveMemoryCard(items, options = {}) {
       if (partial) {
         sectionBody += separator + partial;
         ordinal += 1;
+        if (memory.id) renderedIds.push(memory.id);
+      } else {
+        const t = memory.topic || memory.metadata?.topic;
+        if (t) omittedTopics.push(String(t));
       }
       sectionTruncated = true;
       truncated = true;
+      // remaining in this bucket count as dropped topics
+      for (const rest of group.slice(group.indexOf(memory) + 1)) {
+        const rt = rest.topic || rest.metadata?.topic;
+        if (rt) omittedTopics.push(String(rt));
+      }
       break;
     }
 
@@ -120,47 +159,94 @@ function renderActiveMemoryCard(items, options = {}) {
   // Fallback: if partitioning produced nothing (legacy items without fields),
   // render flat under total budget.
   if (sections.length === 0) {
-    return renderFlatCard(memories, heading, budgetChars);
+    return renderFlatCardDetailed(memories, heading, budgetChars, {
+      preDroppedTopics,
+      guaranteedTopics,
+    });
   }
 
   const footer = "<!-- /Active Memories -->";
   let body = heading + sections.join("\n\n");
   if (truncated) body += "\ntruncated: true（其余活跃记忆因分桶预算未注入）\n";
+  const notInjected = uniqueTopics([...preDroppedTopics, ...omittedTopics]);
+  if (notInjected.length) {
+    body += `\n未注入 topic（预算/去重）: ${notInjected.slice(0, 10).join(", ")}${notInjected.length > 10 ? "…" : ""}\n`;
+  }
+  if (guaranteedTopics.length) {
+    body += `\nquery 保底 topic: ${guaranteedTopics.slice(0, 8).join(", ")}\n`;
+  }
   body += footer;
 
-  // Soft overall cap
   return {
     text: fitStandaloneCard(body, budgetChars),
+    truncated,
+    renderedIds,
+    droppedTopics: notInjected,
+    omittedCount: Math.max(0, memories.length - renderedIds.length),
     buckets,
     usedByBucket,
-    truncated,
-  }.text;
+  };
 }
 
-function renderFlatCard(memories, heading, budgetChars) {
+function uniqueTopics(list) {
+  const out = [];
+  const seen = new Set();
+  for (const t of list || []) {
+    const key = String(t || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
+function renderFlatCardDetailed(memories, heading, budgetChars, extras = {}) {
   const footer = "<!-- /Active Memories -->";
   const truncatedNote = "truncated: true（其余活跃记忆因预算未注入）\n";
   let body = heading;
   let truncated = false;
+  const renderedIds = [];
+  const omittedTopics = [];
 
   for (let index = 0; index < memories.length; index++) {
     const separator = index === 0 ? "" : "\n";
     const fullEntry = renderMemoryEntry(memories[index], index + 1);
     if ((body + separator + fullEntry + footer).length <= budgetChars) {
       body += separator + fullEntry;
+      if (memories[index].id) renderedIds.push(memories[index].id);
       continue;
     }
 
     const reserved = separator.length + 1 + truncatedNote.length + footer.length;
     const available = budgetChars - body.length - reserved;
     const partialEntry = renderMemoryEntry(memories[index], index + 1, available);
-    if (partialEntry) body += separator + partialEntry;
+    if (partialEntry) {
+      body += separator + partialEntry;
+      if (memories[index].id) renderedIds.push(memories[index].id);
+    }
     truncated = true;
+    for (let j = index + (partialEntry ? 1 : 0); j < memories.length; j++) {
+      const t = memories[j].topic || memories[j].metadata?.topic;
+      if (t) omittedTopics.push(String(t));
+    }
     break;
   }
 
   if (truncated) body += `\n${truncatedNote}`;
-  return fitStandaloneCard(body + footer, budgetChars);
+  const notInjected = uniqueTopics([...(extras.preDroppedTopics || []), ...omittedTopics]);
+  if (notInjected.length) {
+    body += `未注入 topic（预算/去重）: ${notInjected.slice(0, 10).join(", ")}${notInjected.length > 10 ? "…" : ""}\n`;
+  }
+  if (extras.guaranteedTopics?.length) {
+    body += `query 保底 topic: ${extras.guaranteedTopics.slice(0, 8).join(", ")}\n`;
+  }
+  return {
+    text: fitStandaloneCard(body + footer, budgetChars),
+    truncated,
+    renderedIds,
+    droppedTopics: notInjected,
+    omittedCount: Math.max(0, memories.length - renderedIds.length),
+  };
 }
 
 function renderMemoryEntry(memory, ordinal, maxChars = Infinity) {
@@ -286,6 +372,7 @@ module.exports = {
   MEMORY_DATA_OPEN,
   MEMORY_DATA_CLOSE,
   renderActiveMemoryCard,
+  renderActiveMemoryCardDetailed,
   resolveBudgetBuckets,
   partitionByBudgetBucket,
   bucketForMemory,

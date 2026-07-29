@@ -135,6 +135,8 @@ test("extractPrimaryHandoffMatch retains the selected parsed block index", () =>
   assert.deepEqual(handoff.extractPrimaryHandoffMatch("no block"), {
     handoff: null,
     blockIndex: null,
+    blockCount: 0,
+    canonical: false,
   });
 });
 

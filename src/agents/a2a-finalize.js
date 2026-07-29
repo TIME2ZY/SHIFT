@@ -4,13 +4,21 @@ const {
   decidePolicy,
   canEnqueue,
   buildRepairPayload,
+  buildPhaseRejectPayload,
   resolveHandoffPolicyMode,
+  resolveCollabPhase,
   DECISIONS,
 } = require("./handoff-policy");
 const {
   buildFinalizeMetrics,
   logFinalizeMetrics,
 } = require("./handoff-metrics");
+const handoffRouteRegistry = require("./handoff-route-registry");
+const collabTaskRegistry = require("./collab-task-registry");
+const {
+  HANDOFF_PARSE_STATUS,
+  HANDOFF_ROUTE_STATUS,
+} = require("../shared/collab-contracts");
 
 /**
  * Unified A2A route finalization for chat turn-end and callback postMessage.
@@ -69,19 +77,26 @@ function finalizeA2ARoutes(input = {}) {
   const enqueued = [];
   const skipped = [];
   const repairs = [];
+  const hopRecords = [];
   let capturedCount = 0;
+  let duplicateRoutes = 0;
 
   for (const target of mentions) {
     if (aborted) break;
 
     const fromLabel = agentLabels[fromAgent] || fromAgent;
     const toLabel = agentLabels[target] || target;
-    const handoffMatch = agentHandoff.extractPrimaryHandoffMatch(text, {
+    // Canonical fence only (last matching block); earlier duplicate fences ignored.
+    const handoffMatch = agentHandoff.selectCanonicalHandoffMatch(text, {
       currentAgentId: fromAgent,
       routedTo: target,
       mentionCount: mentions.length,
     });
     const handoff = handoffMatch.handoff;
+    const contentHash = handoffRouteRegistry.hashHandoffContent(handoff, target);
+    const parseStatus = handoff
+      ? HANDOFF_PARSE_STATUS.PARSED
+      : HANDOFF_PARSE_STATUS.FAILED;
     const quality = agentHandoff.evaluateHandoff(handoff, {
       routedTo: target,
       toAgentId: target,
@@ -90,10 +105,39 @@ function finalizeA2ARoutes(input = {}) {
       riskFlags: [
         ...(mentions.length > 1 ? ["multi_target"] : []),
         ...(useWorktree ? ["worktree"] : []),
+        ...(handoffMatch.blockCount > 1 ? ["multi_handoff_block"] : []),
       ],
     });
-    const decision = decidePolicy({ quality, useWorktree, mode });
+    const phaseId =
+      input.phaseId ||
+      resolveCollabPhase({
+        useWorktree,
+        intent: quality.intent,
+        fromAgent,
+        toAgent: target,
+      });
+    const taskSkip = collabTaskRegistry.shouldSkipRedundantReview({
+      threadId: sessionId,
+      toAgent: target,
+      intent: quality.intent,
+      contentHash,
+      handoff,
+    });
+    const policyInput = {
+      quality,
+      useWorktree,
+      mode,
+      fromAgent,
+      toAgent: target,
+      intent: quality.intent,
+      phaseId,
+      taskSkip,
+    };
+    const decision = decidePolicy(policyInput);
+    const phaseCheck = policyInput._phaseCheck || null;
     quality.policy = decision;
+    quality.phase = phaseCheck?.phase || phaseId;
+    quality.taskSkip = taskSkip.skip ? taskSkip : null;
     handoffByTarget[target] = handoff;
     handoffQualityByTarget[target] = quality;
 
@@ -104,6 +148,13 @@ function finalizeA2ARoutes(input = {}) {
       policy: decision,
       handoffPolicy: mode,
       source,
+      contentHash,
+      parseStatus,
+      blockIndex: handoffMatch.blockIndex,
+      blockCount: handoffMatch.blockCount,
+      canonical: handoffMatch.canonical,
+      phase: quality.phase,
+      taskState: collabTaskRegistry.getTask(sessionId)?.state || null,
     };
 
     emitHandoffParsed({
@@ -142,6 +193,8 @@ function finalizeA2ARoutes(input = {}) {
         reason: "max_depth",
         maxDepth,
         policy: DECISIONS.REJECT,
+        routeStatus: HANDOFF_ROUTE_STATUS.REJECTED,
+        contentHash,
       };
       skipped.push(skip);
       emitSkip({
@@ -162,6 +215,55 @@ function finalizeA2ARoutes(input = {}) {
     }
 
     if (!canEnqueue(decision)) {
+      // Phase/task reject vs handoff repair (incomplete fence).
+      const isPhaseOrTaskReject =
+        taskSkip.skip || (phaseCheck && phaseCheck.ok === false && decision === DECISIONS.REJECT);
+      if (isPhaseOrTaskReject) {
+        const reject = buildPhaseRejectPayload({
+          fromAgent,
+          toAgent: target,
+          phaseCheck,
+          taskSkip,
+          mode,
+        });
+        skipped.push({
+          from: fromAgent,
+          to: target,
+          reason: reject.reason,
+          policy: DECISIONS.REJECT,
+          phase: reject.phase,
+          taskState: reject.taskState,
+        });
+        if (sendSse) sendSse("a2a-skipped", reject);
+        if (appendToSession && sessionsFile && sessionId) {
+          appendToSession(
+            sessionsFile,
+            sessionId,
+            {
+              role: "system",
+              agent: "system",
+              content: reject.message,
+              kind: "a2a-skipped",
+              messageType: "a2a-phase-rejected",
+              from: fromAgent,
+              to: target,
+              reason: reject.reason,
+              source,
+            },
+            { allowCreate: false }
+          );
+        }
+        appendRouteEvent({
+          eventStore,
+          transcript,
+          durableRecorder,
+          sessionId,
+          invocationId,
+          kind: "a2a-skipped",
+          payload: reject,
+        });
+        continue;
+      }
       const repair = buildRepairPayload({
         fromAgent,
         toAgent: target,
@@ -184,6 +286,63 @@ function finalizeA2ARoutes(input = {}) {
       continue;
     }
 
+    // Phase 3: idempotent accept — one route per (sourceInvocation, target).
+    const accept = handoffRouteRegistry.tryAcceptRoute({
+      threadId: sessionId,
+      sourceAgent: fromAgent,
+      targetAgent: target,
+      sourceInvocationId: invocationId || null,
+      handoff,
+      contentHash,
+      depth: a2aCount + 1,
+      parseStatus,
+      policy: decision,
+      source,
+      reason: quality.intent || "a2a-route",
+      phaseId: quality.phase || phaseId,
+    });
+    hopRecords.push(accept.record);
+    summary.handoffId = accept.record.handoffId;
+    summary.routeStatus = accept.status;
+    summary.duplicateOf = accept.record.duplicateOf || null;
+
+    if (!accept.accepted) {
+      duplicateRoutes += 1;
+      const skip = {
+        from: fromAgent,
+        to: target,
+        reason: accept.status,
+        policy: DECISIONS.REJECT,
+        routeStatus: accept.status,
+        handoffId: accept.record.handoffId,
+        duplicateOf: accept.record.duplicateOf || accept.record.handoffId,
+        contentHash,
+      };
+      skipped.push(skip);
+      if (sendSse) {
+        sendSse("a2a-skipped", {
+          from: skip.from,
+          to: skip.to,
+          reason: skip.reason,
+          handoffId: skip.handoffId,
+          routeStatus: skip.routeStatus,
+          duplicateOf: skip.duplicateOf,
+        });
+      }
+      appendRouteEvent({
+        eventStore,
+        transcript,
+        durableRecorder,
+        sessionId,
+        invocationId,
+        kind: "a2a-skipped",
+        payload: skip,
+      });
+      // Re-emit parsed with routeStatus for clients that only watch handoff-parsed.
+      if (sendSse) sendSse("handoff-parsed", { ...summary, routeStatus: accept.status });
+      continue;
+    }
+
     // Enqueue
     if (worklist) worklist.push(target);
     a2aCount += 1;
@@ -198,6 +357,11 @@ function finalizeA2ARoutes(input = {}) {
       emptyPacket: quality.emptyPacket,
       toMismatch: quality.toMismatch,
       reentry,
+      handoffId: accept.record.handoffId,
+      contentHash,
+      routeStatus: HANDOFF_ROUTE_STATUS.ACCEPTED,
+      depth: accept.record.depth,
+      parseStatus,
     };
     enqueued.push(entry);
     emitRoute({
@@ -214,12 +378,28 @@ function finalizeA2ARoutes(input = {}) {
       appendToSession,
       source,
     });
+    // Advance collab task state after successful enqueue.
+    try {
+      collabTaskRegistry.noteAcceptedRoute({
+        threadId: sessionId,
+        fromAgent,
+        toAgent: target,
+        intent: quality.intent,
+        contentHash,
+        useWorktree,
+        handoff,
+        text,
+      });
+    } catch (error) {
+      logger.warn?.(`[collab-task] note route failed: ${error.message}`);
+    }
     if (Array.isArray(input.a2aState?.a2aCauses)) {
       input.a2aState.a2aCauses.push({
         agentId: target,
         parentInvocationId: invocationId || null,
         triggerMessageId: entry.routeMessageId || null,
         triggerType: "a2a-handoff",
+        handoffId: entry.handoffId,
       });
     }
   }
@@ -258,6 +438,9 @@ function finalizeA2ARoutes(input = {}) {
     a2aCount,
     metrics,
     capturedCount,
+    hopRecords,
+    duplicateRoutes,
+    effectiveHops: handoffRouteRegistry.listEffectiveHops(),
   };
 }
 
@@ -413,6 +596,7 @@ function emitRoute({
         messageType: "a2a-route",
         from: entry.from,
         to: entry.to,
+        parentInvocationId: entry.parentInvocationId,
         handoffOk: entry.handoffOk,
         handoffDegraded: entry.handoffDegraded,
         handoffPolicy: entry.policy,
@@ -430,10 +614,18 @@ function emitRoute({
     sendSse("a2a-route", {
       from: entry.from,
       to: entry.to,
+      parentInvocationId: entry.parentInvocationId,
+      routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
       handoffDegraded: entry.handoffDegraded,
       handoffPolicy: entry.policy,
       reentry: entry.reentry,
+      handoffId: entry.handoffId || null,
+      contentHash: entry.contentHash || null,
+      routeStatus: entry.routeStatus || HANDOFF_ROUTE_STATUS.ACCEPTED,
+      depth: entry.depth ?? null,
+      parseStatus: entry.parseStatus || null,
+      sourceInvocationId: invocationId || null,
     });
   }
   appendRouteEvent({
@@ -446,10 +638,18 @@ function emitRoute({
     payload: {
       from: entry.from,
       to: entry.to,
+      parentInvocationId: entry.parentInvocationId,
+      routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
       handoffDegraded: entry.handoffDegraded,
       handoffPolicy: entry.policy,
       reentry: entry.reentry,
+      handoffId: entry.handoffId || null,
+      contentHash: entry.contentHash || null,
+      routeStatus: entry.routeStatus || HANDOFF_ROUTE_STATUS.ACCEPTED,
+      depth: entry.depth ?? null,
+      parseStatus: entry.parseStatus || null,
+      sourceInvocationId: invocationId || null,
     },
   });
 }
@@ -484,4 +684,6 @@ function appendRouteEvent({
 
 module.exports = {
   finalizeA2ARoutes,
+  handoffRouteRegistry,
+  collabTaskRegistry,
 };

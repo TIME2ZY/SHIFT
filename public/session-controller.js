@@ -11,6 +11,7 @@
       ensureSpacer,
       showEmpty,
       createMessage,
+      organizeCollabMessages,
       messagesEl,
       promptEl,
       projectDirPath,
@@ -115,14 +116,23 @@
             for (const msg of messages) {
               createMessage({
                 role: msg.role,
-                agent: msg.agent,
+                agent: msg.agent || msg.agentId || null,
                 content: msg.content || "",
                 variant: msg.exitCode && msg.exitCode !== 0 ? "error" : "",
                 invocationId: msg.invocationId || null,
                 usage: msg.usage || null,
                 showUsage: msg.source !== "callback",
                 scroll: false,
+                kind: msg.kind || msg.messageType || msg.metadata?.kind || "",
+                messageType: msg.messageType || msg.kind || "",
+                from: msg.from || msg.metadata?.from || null,
+                to: msg.to || msg.metadata?.to || null,
+                handoffId: msg.handoffId || msg.metadata?.handoffId || null,
+                routeStatus: msg.routeStatus || msg.metadata?.routeStatus || null,
               });
+            }
+            if (typeof organizeCollabMessages === "function") {
+              organizeCollabMessages({ openLast: true });
             }
           } finally {
             if (messagesEl && messagesEl.classList) {
@@ -162,6 +172,12 @@
               agent: notice.agent || "system",
               content: notice.content,
               variant: notice.variant || "",
+              kind: notice.kind || "",
+              messageType: notice.kind || "",
+              from: notice.from || null,
+              to: notice.to || null,
+              handoffId: notice.handoffId || null,
+              routeStatus: notice.routeStatus || null,
             });
           }
         }

@@ -6,7 +6,10 @@ const {
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
+const handoffRouteRegistry = require("../agents/handoff-route-registry");
+const { createRunObservability } = require("../agents/run-observability");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
+const { scanReplacementChars } = require("../shared/encoding-guard");
 const { applyMemoryBlocks } = require("../agents/memory-block");
 const {
   emptyWriteStats,
@@ -25,6 +28,12 @@ const {
   shouldEmergencyStop,
   charsToTokens,
 } = require("../session/context-budget");
+const {
+  resolveRotateCapacity,
+  buildSealMeta,
+  formatSealReason,
+} = require("../session/seal-lifecycle");
+const { DurableWriteError } = require("../storage/sqlite-retry");
 
 const BILLING_FIELDS = Object.freeze([
   "inputTokens",
@@ -427,6 +436,7 @@ function createChatRoutes({
     const a2aHistory = [];
     let aborted = false;
     let previousInvocationId = null;
+    const runObs = createRunObservability({ startedAt: Date.now() });
     const threadCtx = {
       sessionId,
       res,
@@ -636,28 +646,46 @@ function createChatRoutes({
           })
         ) {
           const ratio0 = healthTracker.getFillRatio();
+          const rotateCapacity = resolveRotateCapacity({
+            agentId: agent,
+            getAgentCapacity: contextHealth.getAgentCapacity,
+            previousCapacity: healthTracker.capacityTokens,
+          });
+          const preSealReason = formatSealReason("pre-call-projected", true);
           const rotated = durable.sealAndRotateWindow({
             session,
             threadId: sessionId,
             agentId: agent,
             providerKey,
             workspaceKey,
-            capacityTokens: healthTracker.capacityTokens,
+            capacityTokens: rotateCapacity,
             reserveRatio: healthTracker.reserveRatio,
             windowId: openWindow?.id || null,
-            reason: "pre-call-projected",
+            reason: preSealReason,
           });
           if (rotated?.next || rotated?.sealed) {
             preCallRotated = true;
             preCallSealedWindowId = openWindow?.id || rotated?.sealed?.id || null;
             preCallSealedGeneration = openWindow?.generation || rotated?.sealed?.generation || null;
             preCallSealedRatio = ratio0;
+            const sealMeta = buildSealMeta({
+              partial: true,
+              reason: "pre-call-projected",
+              ratio: ratio0,
+              workspaceKey,
+              generation: preCallSealedGeneration,
+              nextCapacityTokens: rotateCapacity,
+              missingFields: ["assistantContent"],
+            });
             sendSse(res, "sealed", {
               agent,
               ratio: ratio0,
               reason: "pre-call-projected",
               projected: preBudget.projected,
               usable: healthTracker.usableContextTokens,
+              ...sealMeta,
+              nextCapacityTokens: rotateCapacity,
+              workspaceKey,
             });
             contextSealedSseSent = true;
             // Capture after startInvocation (needs a real invocation id for SQLite FK).
@@ -671,7 +699,7 @@ function createChatRoutes({
               });
             resumeSessionId = "";
             healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
+              capacityTokens: openWindow?.capacityTokens || rotateCapacity,
               inputChars: openWindow?.inputChars,
               outputChars: openWindow?.outputChars,
               reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
@@ -714,6 +742,20 @@ function createChatRoutes({
         if (!durableRun) {
           throw new Error(`Failed to persist invocation start for ${invocationId}.`);
         }
+        // Bind A2A hop → target invocation when this agent was started by a handoff.
+        if (parentInvocationId && triggerType === "a2a-handoff") {
+          try {
+            handoffRouteRegistry.bindTargetInvocation({
+              threadId: sessionId,
+              sourceInvocationId: parentInvocationId,
+              targetAgent: agent,
+              targetInvocationId: invocationId,
+              handoffId: queuedCause?.handoffId || null,
+            });
+          } catch (error) {
+            log.warn?.(`[handoff-route] bind target failed: ${error.message}`);
+          }
+        }
         let activeInvocationId = invocationId;
         // Prefer tracker bound to the durable window snapshot when present.
         if (durableRun.window) {
@@ -737,14 +779,35 @@ function createChatRoutes({
         const sealer = sessionSealer.makeSealer();
         sealer.update(healthTracker.getFillRatio());
         threadCtx.sealer = sealer;
-        // Keep agent-start payload stable for clients/tests; extras go on window-meta.
+        // Keep this payload stable for existing clients. A2A causality lives on
+        // window-meta and is joined by invocationId in live-test auditing.
         sendSse(res, "agent-start", { agent, invocationId });
         sendSse(res, "window-meta", {
           agent,
           invocationId,
           generation: durableRun?.window?.generation || openWindow?.generation || 1,
           preCallRotated,
+          capacityTokens:
+            durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
+          workspaceKey,
+          worktree: Boolean(activeWorktree),
+          cwd: runWorkspace.worktreeDir,
+          baseDir: runWorkspace.baseDir,
+          parentInvocationId,
+          triggerMessageId,
+          triggerType,
         });
+        // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
+        sendSse(res, "workspace-meta", {
+          agent,
+          invocationId,
+          workspaceKey,
+          cwd: runWorkspace.worktreeDir,
+          baseDir: runWorkspace.baseDir,
+          useWorktree: Boolean(activeWorktree),
+          branch: runWorkspace.branch || "",
+        });
+        runObs.noteInvocationStart({ agent, invocationId });
         if (preCallRotated && preCallSealedWindowId) {
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
@@ -859,10 +922,23 @@ function createChatRoutes({
           ...resolveCoalesceOptionsFromEnv(),
           write: persistDurableEvent,
         });
-        const sealContextWindow = (ratio, reason = "post-turn-soft") => {
+        const sealContextWindow = (ratio, reason = "post-turn-soft", opts = {}) => {
           if (contextSealHandled) return null;
           contextSealHandled = true;
           durableCoalescer.flushAll();
+          // Mid-stream / emergency → partial; completed post-turn soft seal → complete.
+          const partial =
+            opts.partial !== undefined
+              ? Boolean(opts.partial)
+              : /physical-ceiling|emergency|mid-stream|pre-call/i.test(String(reason));
+          const rotateCapacity = resolveRotateCapacity({
+            agentId: agent,
+            getAgentCapacity: contextHealth.getAgentCapacity,
+            previousCapacity:
+              durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
+            explicitCapacity: opts.capacityTokens,
+          });
+          const sealReason = formatSealReason(reason, partial);
           let rotated = null;
           if (durableRun?.window?.id) {
             rotated = durable.sealAndRotateWindow({
@@ -871,15 +947,37 @@ function createChatRoutes({
               agentId: agent,
               providerKey,
               workspaceKey,
-              capacityTokens: durableRun.window.capacityTokens,
-              reserveRatio: durableRun.window.reserveRatio,
+              capacityTokens: rotateCapacity,
+              reserveRatio:
+                durableRun.window.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
               windowId: durableRun.window.id,
-              reason,
+              reason: sealReason,
             });
             if (!rotated) {
-              durable.sealWindow(durableRun.window.id, reason);
+              durable.sealWindow(durableRun.window.id, sealReason);
+            } else if (rotated.next) {
+              // Keep runtime tracker aligned with new generation capacity.
+              durableRun = {
+                ...durableRun,
+                window: rotated.next,
+              };
+              healthTracker = contextHealth.makeTracker(agent, {
+                capacityTokens: rotated.next.capacityTokens || rotateCapacity,
+                reserveRatio: rotated.next.reserveRatio,
+              });
             }
           }
+          const sealMeta = buildSealMeta({
+            partial,
+            reason,
+            ratio,
+            workspaceKey,
+            generation: durableRun?.window?.generation || null,
+            nextCapacityTokens: rotateCapacity,
+            missingFields: partial && !String(assistantContent || "").trim()
+              ? ["assistantContent"]
+              : [],
+          });
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
             invocationId: activeInvocationId,
@@ -887,16 +985,16 @@ function createChatRoutes({
             agentId: agent,
             generation: durableRun?.window?.generation || null,
             ratio,
-            reason,
+            reason: sealReason,
             assistantContent,
-            // Mid-stream kill is always a partial snapshot.
-            partial: true,
-            invocationState: "sealed",
+            partial,
+            invocationState: partial ? "sealed-partial" : "sealed-complete",
+            sealMeta,
           });
           if (capture?.captured) {
             sendSse(res, "memory-captured", capture.event);
           }
-          return rotated;
+          return { rotated, sealMeta, rotateCapacity };
         };
         const noteContextPressure = () => {
           const usableRatio = healthTracker.getFillRatio();
@@ -979,7 +1077,26 @@ function createChatRoutes({
               invocationId: retry.invocationId,
               generation: retryRun.window?.generation || 2,
               replay: true,
+              capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
+              workspaceKey,
+              worktree: Boolean(activeWorktree),
+              cwd: runWorkspace.worktreeDir,
+              baseDir: runWorkspace.baseDir,
+              parentInvocationId,
+              triggerMessageId,
+              triggerType,
             });
+            sendSse(res, "workspace-meta", {
+              agent,
+              invocationId: retry.invocationId,
+              workspaceKey,
+              cwd: runWorkspace.worktreeDir,
+              baseDir: runWorkspace.baseDir,
+              useWorktree: Boolean(activeWorktree),
+              branch: runWorkspace.branch || "",
+              replay: true,
+            });
+            runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
             replayedAfterEmpty = true;
           }
 
@@ -1007,6 +1124,9 @@ function createChatRoutes({
                 assistantContent += text;
                 sendSse(res, "message", { agent, role: "assistant", text });
               }
+              if (event.type === "tool.started" || event.type === "tool.finished") {
+                runObs.noteToolEvent();
+              }
               if (event.type === "usage.update") {
                 healthTracker.applyUsage(event);
                 if (durableRun?.window?.id) {
@@ -1024,6 +1144,22 @@ function createChatRoutes({
               const visible = filterBenignStderr(text);
               if (visible) sendSse(res, "stderr", { agent, text: visible });
             },
+            onEncodingWarning(payload) {
+              runObs.noteEncoding(payload.count || 1);
+              if (payload.first) {
+                sendSse(res, "encoding-warning", {
+                  agent,
+                  invocationId: activeInvocationId,
+                  channel: payload.channel,
+                  count: payload.count,
+                  total: payload.total,
+                  samples: payload.samples,
+                  cwd: payload.cwd,
+                  message:
+                    "Replacement character U+FFFD detected in agent stream (encoding mismatch).",
+                });
+              }
+            },
             onHealth: addObservedContext,
             // Only physical/emergency stop mid-stream — never soft usable seal.
             shouldStop: () => emergencyStop,
@@ -1031,6 +1167,9 @@ function createChatRoutes({
           code = streamResult.code;
           signal = streamResult.signal;
           durableCoalescer.flushAll();
+          if (streamResult.encoding?.total > 0) {
+            runObs.noteDegraded("encoding_in_stream");
+          }
 
           if (durableRun) {
             durable.addWindowUsage(durableRun.window.id, {
@@ -1089,14 +1228,15 @@ function createChatRoutes({
         };
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
-          durable.finishInvocation(
-            threadCtx.currentInvocationId || invocationId,
-            code,
-            signal,
-            endPayload
-          );
+          const abortInvId = threadCtx.currentInvocationId || invocationId;
+          durable.finishInvocation(abortInvId, code, signal, endPayload);
+          try {
+            handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
+          } catch {
+            /* ignore */
+          }
           aborted = true;
-          previousInvocationId = threadCtx.currentInvocationId || invocationId;
+          previousInvocationId = abortInvId;
           break;
         }
 
@@ -1163,9 +1303,34 @@ function createChatRoutes({
             messages: [...(session.messages || []), assistantMessage],
           };
         } else {
-          throw new Error(`Failed to atomically persist completion for ${finalInvocationId}.`);
+          throw new DurableWriteError(
+            `Failed to atomically persist completion for ${finalInvocationId}.`,
+            {
+              code: "durable_write_failed",
+              invocationId: finalInvocationId,
+              retryable: true,
+            }
+          );
         }
         previousInvocationId = finalInvocationId;
+        // Final text scan (in case deltas were clean but concat/store introduced issues).
+        const finalEnc = scanReplacementChars(assistantContent);
+        if (!finalEnc.ok) {
+          runObs.noteEncoding(finalEnc.count);
+          sendSse(res, "encoding-warning", {
+            agent,
+            invocationId: finalInvocationId,
+            channel: "assistant-final",
+            count: finalEnc.count,
+            samples: finalEnc.samples,
+            message: "Replacement character U+FFFD in final assistant text.",
+          });
+        }
+        runObs.noteInvocationEnd(finalInvocationId, {
+          exitCode: code,
+          usage: invocationUsage,
+          encodingWarnings: finalEnc.count || 0,
+        });
         sendSse(res, "agent-exit", {
           agent,
           code,
@@ -1173,6 +1338,25 @@ function createChatRoutes({
           invocationId: finalInvocationId,
           usage: invocationUsage,
         });
+
+        // Close A2A hop when this agent was the handoff target.
+        try {
+          const hop = handoffRouteRegistry.completeByTargetInvocation(finalInvocationId, {
+            ok: code === 0,
+          });
+          if (hop && !res.writableEnded && !res.destroyed) {
+            sendSse(res, "a2a-hop-complete", {
+              handoffId: hop.handoffId,
+              sourceInvocationId: hop.sourceInvocationId,
+              targetInvocationId: hop.targetInvocationId,
+              completeStatus: hop.completeStatus,
+              routeStatus: hop.routeStatus,
+              effective: handoffRouteRegistry.isEffectiveA2aHop(hop),
+            });
+          }
+        } catch (error) {
+          log.warn?.(`[handoff-route] complete hop failed: ${error.message}`);
+        }
 
         // POST soft seal after a complete answer (never mid-stream kill path).
         const postSoft = shouldSoftSealAfterTurn({
@@ -1186,11 +1370,20 @@ function createChatRoutes({
             : postSoft.reason
               ? `post-turn-${postSoft.reason}`
               : "post-turn-soft";
+          // Emergency mid-stream remains partial; normal post-turn soft seal is complete.
+          const partial = Boolean(emergencyStop);
           if (!contextSealedSseSent) {
-            sendSse(res, "sealed", { agent, ratio, reason });
+            sendSse(res, "sealed", {
+              agent,
+              ratio,
+              reason,
+              partial,
+              complete: !partial,
+              workspaceKey,
+            });
             contextSealedSseSent = true;
           }
-          sealContextWindow(ratio, reason);
+          sealContextWindow(ratio, reason, { partial });
         } else if (durableRun && !contextSealHandled) {
           const persistedProviderSessionId =
             observedProviderSessionId || durableRun.window.providerSessionId || "";
@@ -1319,9 +1512,60 @@ function createChatRoutes({
       }
     }
 
+    // Observability summary (emit-only; does not fail the request).
+    try {
+      const costSummary = runObs.summarize();
+      if (!res.writableEnded && !res.destroyed) {
+        sendSse(res, "run-cost", costSummary);
+        if (costSummary.degraded) {
+          sendSse(res, "run-degraded", {
+            reasons: costSummary.degradedReasons,
+            durationMs: costSummary.durationMs,
+            encodingWarnings: costSummary.encodingWarnings,
+          });
+        }
+      }
+    } catch (error) {
+      log.warn?.(`[run-obs] summarize failed: ${error.message}`);
+    }
+
+    // Phase 2: no open invocations may survive past stream end (orphan reconcile).
+    // One chat owns the session at a time (activeInvocations), so thread-wide cleanup is safe.
+    if (durable.enabled && typeof durable.reconcileThreadActive === "function") {
+      try {
+        const reconcile = durable.reconcileThreadActive(sessionId, {
+          reason: aborted ? "request-aborted-orphan" : "request-done-orphan",
+          state: aborted ? "aborted" : "failed",
+        });
+        if (reconcile?.forced?.length && !res.writableEnded && !res.destroyed) {
+          sendSse(res, "invocation-reconcile", {
+            threadId: sessionId,
+            reason: reconcile.reason,
+            forced: reconcile.forced,
+            remainingActive: reconcile.remainingActive,
+          });
+        }
+      } catch (error) {
+        log.error?.(`[invocation-lifecycle] reconcile failed: ${error.message}`);
+      }
+    }
+
     threadCtx.currentInvocationId = null;
     threadCtx.windowId = null;
     if (!aborted) {
+      // Hard invariant: done implies no open durable invocations for this thread.
+      const stillOpen =
+        durable.enabled && typeof durable.listOpenInvocations === "function"
+          ? durable.listOpenInvocations(sessionId)
+          : [];
+      if (stillOpen.length > 0 && !res.writableEnded && !res.destroyed) {
+        sendSse(res, "error", {
+          error: "Open invocations remained after reconcile.",
+          code: "invocation_orphan_remaining",
+          retryable: false,
+          openInvocationIds: stillOpen.map((row) => row.id),
+        });
+      }
       sendSse(res, "done", {});
     }
     res.end();

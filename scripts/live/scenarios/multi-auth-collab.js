@@ -6,6 +6,44 @@
 const SCENARIO_ID = "multi-auth-collab";
 const TITLE = "Live · 多 Agent 串行协作（讨论→实现）";
 
+const MEMORY_EXPECTATIONS = Object.freeze({
+  minRetrievedFacts: 4,
+  minRecalledFacts: 4,
+  minGroundedFacts: 3,
+  facts: [
+    {
+      id: "auth-token-ttl",
+      patterns: [/auth-(?:token|session)-ttl/i, /约?\s*(?:一周|7\s*天)/i, /604800/],
+      forbiddenPatterns: [/(?:当前|默认|改为)[^\n]{0,24}(?:24\s*小时|24h|86400)/i],
+    },
+    {
+      id: "auth-no-refresh",
+      patterns: [
+        /auth-no-refresh(?:-token)?/i,
+        /不(?:做|使用|提供|启用|支持)\s*refresh/i,
+        /无\s*refresh/i,
+        /no\s*refresh/i,
+      ],
+      forbiddenPatterns: [
+        /(?<!不)(?<!不再)(?:启用|使用|提供)\s*refresh(?:\s*token)?/i,
+      ],
+    },
+    {
+      id: "storage-primary",
+      patterns: [/storage-primary/i, /SQLite/i],
+    },
+    {
+      id: "local-dev-port",
+      patterns: [/local-dev-port/i, /dev-port/i, /\b8787\b/],
+    },
+    {
+      id: "auth-password-hash",
+      patterns: [/auth-password-hash/i, /argon2id/i, /\bscrypt\b/i, /\bbcrypt\b/i],
+      forbiddenPatterns: [/\bMD5\b/i, /\bSHA-?1\b/i],
+    },
+  ],
+});
+
 /** @type {import('../lib/multi-types').PhaseDef[]} */
 const PHASES = [
   {
@@ -126,4 +164,5 @@ module.exports = {
   TITLE,
   PHASES,
   REQUIRED_CLIS: ["gemini", "codex", "grok", "opencode"],
+  MEMORY_EXPECTATIONS,
 };

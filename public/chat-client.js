@@ -27,6 +27,7 @@
       addToast,
       finishStream,
       finalizeLiveAgent,
+      organizeCollabMessages,
       agentLabel,
       syncComposerControls,
       onRuntimeStatusChange,
@@ -173,14 +174,24 @@
             : `🔄 ${fromLabel} → ${toLabel}`;
           // Always buffer for session remount; only paint when this session is visible.
           // Server also persists this as a system message for hard reloads.
-          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
-          rt.systemNotices.push({
+          const notice = {
             role: "system",
             agent: "system",
             content: text,
             kind: "a2a-route",
-          });
-          if (active) addSystem(text);
+            from: data.from,
+            to: data.to,
+            handoffId: data.handoffId || null,
+            routeStatus: data.routeStatus || data.handoffPolicy || null,
+          };
+          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
+          rt.systemNotices.push(notice);
+          if (active) {
+            addSystem(text, "", notice);
+            if (typeof organizeCollabMessages === "function") {
+              organizeCollabMessages({ openLast: true });
+            }
+          }
           break;
         }
         case "a2a-skipped": {
@@ -189,14 +200,35 @@
           const reason =
             data.reason === "max_depth" ? "已达 A2A 深度上限" : data.reason || "未入队";
           const text = `⏭ ${fromLabel} → ${toLabel}（${reason}，未入队）`;
-          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
-          rt.systemNotices.push({
+          const notice = {
             role: "system",
             agent: "system",
             content: text,
             kind: "a2a-skipped",
-          });
-          if (active) addSystem(text);
+            from: data.from,
+            to: data.to,
+            handoffId: data.handoffId || null,
+            routeStatus: data.routeStatus || data.reason || null,
+          };
+          if (!Array.isArray(rt.systemNotices)) rt.systemNotices = [];
+          rt.systemNotices.push(notice);
+          if (active) addSystem(text, "", notice);
+          break;
+        }
+        case "encoding-warning": {
+          if (active) {
+            addSystem(
+              `⚠ 编码警告: ${data.message || "检测到替换字符 U+FFFD"}` +
+                (data.channel ? ` (${data.channel})` : ""),
+              "error"
+            );
+          }
+          break;
+        }
+        case "run-degraded": {
+          if (active && Array.isArray(data.reasons) && data.reasons.length) {
+            addSystem(`⚠ 运行降级: ${data.reasons.join(", ")}`, "error");
+          }
           break;
         }
         case "memory":

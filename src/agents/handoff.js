@@ -209,6 +209,10 @@ function extractPrimaryHandoff(text, opts = {}) {
 /**
  * Pick the primary handoff and retain its parsed block index for stable capture keys.
  *
+ * Canonical block rule (phase 3): at most **one** fence is authoritative per route target.
+ * Multiple ```handoff blocks with the same/empty `to` collapse to the last match —
+ * earlier duplicates are ignored (not multi-route).
+ *
  * Per-target selection (Wave H0 / handoff-design §4.2–4.3):
  * 1. Prefer last block whose `to` matches routedTo
  * 2. If multi-@ and no match → null (do not silently share one pack as ok)
@@ -216,11 +220,13 @@ function extractPrimaryHandoff(text, opts = {}) {
  *
  * @param {string} text
  * @param {{ currentAgentId?: string, routedTo?: string, mentionCount?: number, multiTarget?: boolean }} [opts]
- * @returns {{ handoff: Handoff | null, blockIndex: number | null }}
+ * @returns {{ handoff: Handoff | null, blockIndex: number | null, blockCount: number, canonical: boolean }}
  */
 function extractPrimaryHandoffMatch(text, opts = {}) {
   const blocks = parseHandoffBlocks(text);
-  if (blocks.length === 0) return { handoff: null, blockIndex: null };
+  if (blocks.length === 0) {
+    return { handoff: null, blockIndex: null, blockCount: 0, canonical: false };
+  }
 
   const routedTo = opts.routedTo ? String(opts.routedTo).toLowerCase() : "";
   const multiTarget = isMultiTarget(opts);
@@ -228,20 +234,40 @@ function extractPrimaryHandoffMatch(text, opts = {}) {
   if (routedTo) {
     for (let i = blocks.length - 1; i >= 0; i--) {
       if (toMatchesRoute(blocks[i].to, routedTo)) {
-        return { handoff: blocks[i], blockIndex: i };
+        return {
+          handoff: blocks[i],
+          blockIndex: i,
+          blockCount: blocks.length,
+          canonical: true,
+        };
       }
     }
     if (multiTarget) {
-      return { handoff: null, blockIndex: null };
+      return { handoff: null, blockIndex: null, blockCount: blocks.length, canonical: false };
     }
     for (let i = blocks.length - 1; i >= 0; i--) {
       if (!normalizeTo(blocks[i].to)) {
-        return { handoff: blocks[i], blockIndex: i };
+        return {
+          handoff: blocks[i],
+          blockIndex: i,
+          blockCount: blocks.length,
+          canonical: true,
+        };
       }
     }
   }
 
-  return { handoff: blocks[blocks.length - 1], blockIndex: blocks.length - 1 };
+  return {
+    handoff: blocks[blocks.length - 1],
+    blockIndex: blocks.length - 1,
+    blockCount: blocks.length,
+    canonical: true,
+  };
+}
+
+/** Alias: explicit name for phase-3 “one canonical fence per target”. */
+function selectCanonicalHandoffMatch(text, opts = {}) {
+  return extractPrimaryHandoffMatch(text, opts);
 }
 
 function isMultiTarget(opts = {}) {
@@ -808,6 +834,7 @@ module.exports = {
   parseHandoffBody,
   extractPrimaryHandoff,
   extractPrimaryHandoffMatch,
+  selectCanonicalHandoffMatch,
   evaluateHandoff,
   computeToMismatch,
   inferIntent,

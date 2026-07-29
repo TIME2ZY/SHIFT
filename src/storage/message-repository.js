@@ -104,6 +104,7 @@ const MESSAGE_TYPES = new Set([
   "assistant-callback",
   "a2a-route",
   "a2a-skipped",
+  "a2a-phase-rejected",
   "handoff-repair-needed",
   "memory-notice",
   "system-notice",
@@ -135,6 +136,7 @@ function assertMessageTypeMatchesRole(messageType, role) {
           ? new Set([
               "a2a-route",
               "a2a-skipped",
+              "a2a-phase-rejected",
               "handoff-repair-needed",
               "memory-notice",
               "system-notice",

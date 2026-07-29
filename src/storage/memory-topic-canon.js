@@ -23,6 +23,13 @@ const TOPIC_ALIASES = Object.freeze({
   "auth-scope": "auth-scope",
   "auth-token-isolation": "auth-token-isolation",
   "auth-callback-token-isolation": "auth-token-isolation",
+  // TTL / duration aliases (semantic collision domain)
+  "auth-ttl": "auth-token-ttl",
+  "jwt-ttl": "auth-token-ttl",
+  "session-ttl": "auth-token-ttl",
+  "default-ttl-7d": "auth-token-ttl",
+  "default-ttl-86400": "auth-token-ttl",
+  "access-ttl-7d": "auth-token-ttl",
   // storage / runtime
   "storage-primary": "storage-primary",
   "dev-port": "local-dev-port",

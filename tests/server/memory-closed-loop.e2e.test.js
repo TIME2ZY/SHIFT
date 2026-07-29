@@ -235,6 +235,7 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     assert.ok(all.some((m) => m.kind === "window-seal"));
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

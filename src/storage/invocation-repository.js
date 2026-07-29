@@ -1,4 +1,9 @@
 const { withTransaction } = require("./database");
+const {
+  fromDbInvocationState,
+  isTerminalInvocationState,
+  toDbInvocationState,
+} = require("../shared/collab-contracts");
 
 function createInvocationRepository(db) {
   const insertInvocation = db.prepare(`
@@ -13,6 +18,11 @@ function createInvocationRepository(db) {
   const findMessageOwner = db.prepare("SELECT thread_id FROM messages WHERE id = ?");
   const listByThread = db.prepare(`
     SELECT * FROM invocations WHERE thread_id = ? ORDER BY started_at ASC
+  `);
+  const listActiveByThread = db.prepare(`
+    SELECT * FROM invocations
+    WHERE thread_id = ? AND state = 'active'
+    ORDER BY started_at ASC
   `);
   const allocateEventSequence = db.prepare(`
     UPDATE invocations
@@ -109,6 +119,11 @@ function createInvocationRepository(db) {
       return listByThread.all(threadId).map(mapInvocation);
     },
 
+    /** Open (DB state=active) invocations for a thread — candidates for orphan reconcile. */
+    listActiveForThread(threadId) {
+      return listActiveByThread.all(threadId).map(mapInvocation);
+    },
+
     listForThreadWithMeta(threadId) {
       return listWithMeta.all(threadId).map((row) => ({
         ...mapInvocation(row),
@@ -153,12 +168,23 @@ function createInvocationRepository(db) {
 
 function mapInvocation(row) {
   if (!row) return null;
+  const state = row.state;
+  let canonicalState;
+  try {
+    canonicalState = fromDbInvocationState(state);
+  } catch {
+    canonicalState = state;
+  }
   return {
     id: row.id,
     threadId: row.thread_id,
     windowId: row.window_id,
     agentId: row.agent_id,
-    state: row.state,
+    state,
+    /** Canonical lifecycle state (collab-contracts); DB may still say active/aborted. */
+    canonicalState,
+    isTerminal: isTerminalInvocationState(canonicalState) || isTerminalInvocationState(state),
+    isOpen: state === "active" || !row.ended_at,
     exitCode: row.exit_code,
     signal: row.signal,
     startedAt: row.started_at,
@@ -181,11 +207,19 @@ function mapEvent(row) {
   };
 }
 
+/**
+ * Accept DB terminal states or canonical (cancelled→aborted, sealed→completed).
+ */
 function normalizeTerminalState(state) {
-  if (!["completed", "failed", "aborted"].includes(state)) {
-    throw new Error("Invocation terminal state must be completed, failed, or aborted.");
+  const raw = String(state || "");
+  if (["completed", "failed", "aborted"].includes(raw)) return raw;
+  try {
+    const dbState = toDbInvocationState(raw);
+    if (["completed", "failed", "aborted"].includes(dbState)) return dbState;
+  } catch {
+    // fall through
   }
-  return state;
+  throw new Error("Invocation terminal state must be completed, failed, or aborted.");
 }
 
 function requiredString(value, label) {

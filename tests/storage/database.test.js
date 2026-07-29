@@ -24,7 +24,7 @@ test("memory database applies schema and safety pragmas", () => {
     );
 
     assert.equal(db.pragma("foreign_keys", { simple: true }), 1);
-    assert.equal(db.pragma("busy_timeout", { simple: true }), 5000);
+    assert.equal(db.pragma("busy_timeout", { simple: true }), 8000);
     assert.equal(
       db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version,
       MIGRATIONS.length

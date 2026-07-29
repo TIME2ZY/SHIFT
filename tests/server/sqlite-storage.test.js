@@ -205,6 +205,7 @@ test("chat reads and writes thread state only through SQLite", async () => {
     );
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
     else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
@@ -272,6 +273,7 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
     assert.equal(memoryHit.kind, "memory.handoff");
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -353,6 +355,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.match(prompts[2], /partial=true/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -410,6 +413,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
     assert.equal(providerCalls[0].sessionFile, "");
     assert.equal(fs.existsSync(path.join(tmpDir, "session-maps")), false);
     await new Promise((resolve) => firstServer.close(resolve));
+    await firstServer.closeStorageContext?.();
     firstServer = null;
 
     fs.rmSync(sessionsFile, { force: true });
@@ -473,8 +477,14 @@ test("default sqlite mode restores sessions after restart without legacy writes"
       storage.close();
     }
   } finally {
-    if (firstServer) await new Promise((resolve) => firstServer.close(resolve));
-    if (secondServer) await new Promise((resolve) => secondServer.close(resolve));
+    if (firstServer) {
+      await new Promise((resolve) => firstServer.close(resolve));
+      await firstServer.closeStorageContext?.();
+    }
+    if (secondServer) {
+      await new Promise((resolve) => secondServer.close(resolve));
+      await secondServer.closeStorageContext?.();
+    }
     if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
     else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });

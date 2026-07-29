@@ -208,7 +208,7 @@ async function main() {
   opts.capacity = opts.discussCapacity;
   setLiveCapacity(opts.discussCapacity);
 
-  const dumpDir = createDumpDir(opts.dumpDir);
+  const dumpDir = createDumpDir(opts.dumpDir, "multi-collab");
   console.log(`\n[live] dump → ${dumpDir}\n`);
 
   const startedAt = Date.now();
@@ -353,7 +353,9 @@ async function main() {
     writeJson(path.join(dumpDir, "snapshot-windows.json"), { windows });
     writeJson(path.join(dumpDir, "turns-trace.json"), turnRecords);
 
-    const aggregate = aggregateTrace(turnRecords);
+    const aggregate = aggregateTrace(turnRecords, {
+      memoryExpectations: scenario.MEMORY_EXPECTATIONS,
+    });
     writeJson(path.join(dumpDir, "aggregate.json"), aggregate);
 
     const evaluated = evaluateMultiCollab({
@@ -361,6 +363,7 @@ async function main() {
       sessionId,
       turns: turnRecords,
       aggregate,
+      memoryExpectations: scenario.MEMORY_EXPECTATIONS,
       runKind,
       windows,
       memoriesPayload,
@@ -438,6 +441,24 @@ function printSummary(report, dumpDir) {
     console.log(
       `agents=${(report.aggregate.agentsSeen || []).join(",")} a2aHops=${report.aggregate.a2aHops} seals=${report.aggregate.sealEvents}`
     );
+    const memory = report.aggregate.memoryRetrievalAudit;
+    if (memory) {
+      console.log(
+        `memory retrieval availability=${formatPercent(memory.availabilityRate)} ` +
+          `nonEmpty=${formatPercent(memory.nonEmptyHitRate)} ` +
+          `related=${formatPercent(memory.relatedHitRate)} ` +
+          `recall=${formatPercent(memory.recallSuccessRate)}`
+      );
+      const semantics = report.aggregate.memorySemanticAudit;
+      if (semantics?.configured) {
+        console.log(
+          `memory semantics retrieved=${formatPercent(semantics.retrievalCoverage)} ` +
+            `answer=${formatPercent(semantics.answerCoverage)} ` +
+            `grounded=${formatPercent(semantics.groundedCoverage)} ` +
+            `itemPrecision=${formatPercent(semantics.itemPrecision)}`
+        );
+      }
+    }
   }
   for (const a of report.hard || []) {
     console.log(`  hard ${a.ok ? "OK" : "FAIL"} ${a.id}: ${a.message}`);
@@ -447,6 +468,10 @@ function printSummary(report, dumpDir) {
   }
   if (dumpDir) console.log(`report: ${path.join(dumpDir, "report.md")}`);
   console.log("══════════════════════════════════════\n");
+}
+
+function formatPercent(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
 }
 
 main().catch((error) => {

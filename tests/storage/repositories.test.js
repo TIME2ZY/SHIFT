@@ -93,6 +93,14 @@ test("message repository allocates durable sequences and classifies message type
       content: "Codex → Gemini",
       metadata: { kind: "a2a-route" },
     });
+    const phaseRejected = storage.messages.append({
+      id: "message-phase-rejected",
+      threadId: "thread-1",
+      role: "system",
+      messageType: "a2a-phase-rejected",
+      content: "Gemini → Codex rejected by phase policy",
+      metadata: { kind: "a2a-skipped" },
+    });
     const imported = storage.messages.append({
       id: "message-imported",
       threadId: "thread-1",
@@ -109,10 +117,14 @@ test("message repository allocates durable sequences and classifies message type
     });
 
     assert.deepEqual(
-      [user, route, imported, next].map((message) => [message.sequenceNo, message.messageType]),
+      [user, route, phaseRejected, imported, next].map((message) => [
+        message.sequenceNo,
+        message.messageType,
+      ]),
       [
         [0, "user"],
         [1, "a2a-route"],
+        [2, "a2a-phase-rejected"],
         [7, "assistant-callback"],
         [8, "assistant-final"],
       ]

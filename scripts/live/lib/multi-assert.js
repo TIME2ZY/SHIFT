@@ -25,6 +25,30 @@ function evaluateMultiCollab(input) {
     emptyAssistants: 0,
     userTurns: turns.length,
     phases: {},
+    invocationAudit: {
+      lifecycleClosed: false,
+      orphanInvocationIds: [],
+      violations: [],
+    },
+    handoffAudit: {
+      handoffsClosed: false,
+      validA2AHops: 0,
+      duplicateRouteKeys: [],
+      violations: [],
+    },
+    memoryRetrievalAudit: {
+      totalAttempts: 0,
+      unavailable: [],
+      recallTurns: 0,
+      successfulRecallTurns: 0,
+      recallSuccessRate: 0,
+    },
+    memorySemanticAudit: {
+      configured: false,
+      expectedFacts: 0,
+      staleItems: [],
+      contradictions: [],
+    },
   };
 
   hard.push({
@@ -37,29 +61,45 @@ function evaluateMultiCollab(input) {
       : "clean continuous multi-collab run",
   });
 
+  const httpOk = turns.every(
+    (t) =>
+      t.ok !== false &&
+      (!t.status || t.status < 400) &&
+      (t.summary?.errors || []).length === 0
+  );
   hard.push({
     id: "M1-HTTP",
-    ok: turns.every((t) => !t.status || t.status < 400),
-    message: turns.every((t) => !t.status || t.status < 400)
+    ok: httpOk,
+    message: httpOk
       ? "all chat HTTP ok"
-      : `HTTP failures: ${turns
-          .filter((t) => t.status >= 400)
-          .map((t) => `${t.turnId}:${t.status}`)
+      : `turn failures: ${turns
+          .filter(
+            (t) =>
+              t.ok === false ||
+              t.status >= 400 ||
+              (t.summary?.errors || []).length > 0
+          )
+          .map((t) => `${t.turnId}:${t.status || "event-error"}`)
           .join(", ")}`,
   });
 
   const needDiscuss = ["gemini", "codex"];
   const needImpl = ["grok", "opencode"];
-  const seen = new Set(agg.agentsSeen || []);
-  const discussOk = needDiscuss.every((a) => seen.has(a));
-  const implOk = needImpl.every((a) => seen.has(a));
+  const discussSeen = new Set(agg.phases?.discuss?.agents || []);
+  const implSeen = new Set(agg.phases?.implement?.agents || []);
+  const discussOk =
+    needDiscuss.every((a) => discussSeen.has(a)) &&
+    [...discussSeen].every((a) => needDiscuss.includes(a));
+  const implOk =
+    needImpl.every((a) => implSeen.has(a)) &&
+    [...implSeen].every((a) => needImpl.includes(a));
 
   hard.push({
     id: "M2-AGENTS-DISCUSS",
     ok: discussOk,
     message: discussOk
       ? "discuss agents present (gemini, codex)"
-      : `missing discuss agents; seen=${[...seen].join(",")}`,
+      : `invalid discuss agents; seen=${[...discussSeen].join(",")}`,
   });
 
   hard.push({
@@ -67,7 +107,7 @@ function evaluateMultiCollab(input) {
     ok: implOk,
     message: implOk
       ? "implement agents present (grok, opencode)"
-      : `missing implement agents; seen=${[...seen].join(",")}`,
+      : `invalid implement agents; seen=${[...implSeen].join(",")}`,
   });
 
   hard.push({
@@ -75,8 +115,8 @@ function evaluateMultiCollab(input) {
     ok: (agg.a2aHops || 0) >= 1,
     message:
       (agg.a2aHops || 0) >= 1
-        ? `a2a hops=${agg.a2aHops}`
-        : "no A2A hop observed (agent-start count never >1 in a user turn)",
+        ? `closed a2a hops=${agg.a2aHops}`
+        : "no closed A2A handoff observed",
   });
 
   const sealTurns = turns.filter((t) => (t.sealed || []).length > 0);
@@ -108,6 +148,147 @@ function evaluateMultiCollab(input) {
     id: "M7-SESSION",
     ok: Boolean(sessionId),
     message: sessionId ? `session ${sessionId}` : "missing sessionId",
+  });
+
+  const lifecycle = agg.invocationAudit || {
+    lifecycleClosed: false,
+    orphanInvocationIds: [],
+    violations: [],
+  };
+  hard.push({
+    id: "M8-INVOCATION-CLOSED",
+    ok: lifecycle.lifecycleClosed === true,
+    message:
+      lifecycle.lifecycleClosed === true
+        ? `all ${lifecycle.closed || 0} invocation(s) reached agent-exit`
+        : `invocation lifecycle violations: ${(lifecycle.violations || [])
+            .map((item) => `${item.turnId || "?"}/${item.invocationId || "?"}:${item.code}`)
+            .join(", ")}`,
+  });
+
+  hard.push({
+    id: "M9-NO-ORPHANS",
+    ok: (lifecycle.orphanInvocationIds || []).length === 0,
+    message:
+      (lifecycle.orphanInvocationIds || []).length === 0
+        ? "no orphan invocations"
+        : `orphan invocations: ${lifecycle.orphanInvocationIds.join(", ")}`,
+  });
+
+  const handoffs = agg.handoffAudit || {
+    handoffsClosed: false,
+    duplicateRouteKeys: [],
+    violations: [],
+  };
+  hard.push({
+    id: "M10-HANDOFF-CLOSED",
+    ok: handoffs.handoffsClosed === true,
+    message:
+      handoffs.handoffsClosed === true
+        ? `all ${handoffs.validA2AHops || 0} routed handoff(s) closed`
+        : `handoff violations: ${(handoffs.violations || [])
+            .map(
+              (item) =>
+                `${item.turnId || "?"}/${item.handoffId || "?"}:${item.code}`
+            )
+            .join(", ")}`,
+  });
+
+  hard.push({
+    id: "M11-HANDOFF-DEDUP",
+    ok: (handoffs.duplicateRouteKeys || []).length === 0,
+    message:
+      (handoffs.duplicateRouteKeys || []).length === 0
+        ? "no duplicate handoff routes"
+        : `duplicate handoff routes: ${handoffs.duplicateRouteKeys.join(", ")}`,
+  });
+
+  const retrieval = agg.memoryRetrievalAudit || {
+    totalAttempts: 0,
+    unavailable: [],
+    recallTurns: 0,
+    successfulRecallTurns: 0,
+    recallSuccessRate: 0,
+  };
+  hard.push({
+    id: "M12-MEMORY-AVAILABLE",
+    ok: retrieval.totalAttempts > 0 && retrieval.unavailable.length === 0,
+    message:
+      retrieval.totalAttempts === 0
+        ? "no memory-inject retrieval attempts observed"
+        : retrieval.unavailable.length === 0
+          ? `memory retrieval available on ${retrieval.totalAttempts}/${retrieval.totalAttempts} attempt(s)`
+          : `unavailable memory retrieval: ${retrieval.unavailable
+              .map((item) => `${item.turnId}:${item.reason || "unknown"}`)
+              .join(", ")}`,
+  });
+
+  hard.push({
+    id: "M13-MEMORY-RECALL",
+    ok:
+      retrieval.recallTurns > 0 &&
+      retrieval.successfulRecallTurns === retrieval.recallTurns,
+    message:
+      retrieval.recallTurns > 0
+        ? `recall retrieval success=${formatRate(retrieval.recallSuccessRate)} (${retrieval.successfulRecallTurns}/${retrieval.recallTurns} turn(s))`
+        : "no recall phase turn observed",
+  });
+
+  const semantics = agg.memorySemanticAudit || {
+    configured: false,
+    expectedFacts: 0,
+    staleItems: [],
+    contradictions: [],
+  };
+  const semanticThresholds = input.memoryExpectations || {};
+  const minRetrievedFacts = threshold(
+    semanticThresholds.minRetrievedFacts,
+    semantics.expectedFacts
+  );
+  const minRecalledFacts = threshold(
+    semanticThresholds.minRecalledFacts,
+    semantics.expectedFacts
+  );
+  const minGroundedFacts = threshold(
+    semanticThresholds.minGroundedFacts,
+    semantics.expectedFacts
+  );
+
+  hard.push({
+    id: "M14-MEMORY-FACT-RETRIEVAL",
+    ok:
+      semantics.configured === true &&
+      semantics.retrievedFacts >= minRetrievedFacts,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : `retrieved expected facts=${semantics.retrievedFacts}/${semantics.expectedFacts} (${formatRate(semantics.retrievalCoverage)}); missing=${(semantics.missingRetrievedFacts || []).join(",") || "none"}`,
+  });
+
+  hard.push({
+    id: "M15-MEMORY-GROUNDED-RECALL",
+    ok:
+      semantics.configured === true &&
+      semantics.recalledFacts >= minRecalledFacts &&
+      semantics.groundedFacts >= minGroundedFacts,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : `answer=${semantics.recalledFacts}/${semantics.expectedFacts}, grounded=${semantics.groundedFacts}/${semantics.expectedFacts} (${formatRate(semantics.groundedCoverage)}); unsupported=${(semantics.unsupportedRecallFacts || []).join(",") || "none"}`,
+  });
+
+  hard.push({
+    id: "M16-MEMORY-NO-STALE-CONFLICT",
+    ok:
+      semantics.configured === true &&
+      semantics.staleItems.length === 0 &&
+      semantics.contradictions.length === 0,
+    message:
+      semantics.configured !== true
+        ? "memory semantic expectations not configured"
+        : semantics.staleItems.length === 0 && semantics.contradictions.length === 0
+          ? "no retired injected memories or scenario contradictions"
+          : `stale=${semantics.staleItems.map((item) => item.id || item.topic || "?").join(",") || "none"} contradictions=${semantics.contradictions.map((item) => `${item.factId}:${item.source}`).join(",") || "none"}`,
   });
 
   // Soft: discuss should ideally seal under 22K
@@ -161,6 +342,24 @@ function evaluateMultiCollab(input) {
         : "no active product memories",
   });
 
+  soft.push({
+    id: "S-MEMORY-HIT-RATES",
+    ok: retrieval.nonEmptyHitRate > 0 && retrieval.relatedHitRate > 0,
+    message:
+      `availability=${formatRate(retrieval.availabilityRate)} ` +
+      `nonEmpty=${formatRate(retrieval.nonEmptyHitRate)} ` +
+      `related=${formatRate(retrieval.relatedHitRate)}`,
+  });
+
+  soft.push({
+    id: "S-MEMORY-SEMANTIC-PRECISION",
+    ok: semantics.configured === true && semantics.itemPrecision >= 0.5,
+    message:
+      semantics.configured === true
+        ? `expected-fact item precision=${formatRate(semantics.itemPrecision)} (${semantics.relevantItemCount}/${semantics.injectItemCount})`
+        : "memory semantic expectations not configured",
+  });
+
   const hardFailed = hard.filter((a) => !a.ok);
   const softFailed = soft.filter((a) => !a.ok);
   let exitCode = 0;
@@ -179,6 +378,17 @@ function evaluateMultiCollab(input) {
     softFailed: softFailed.map((a) => a.id),
     aggregate: agg,
   };
+}
+
+function formatRate(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function threshold(value, expectedFacts) {
+  if (Number.isFinite(Number(value))) {
+    return Math.max(0, Math.min(expectedFacts, Math.floor(Number(value))));
+  }
+  return expectedFacts;
 }
 
 module.exports = { evaluateMultiCollab };

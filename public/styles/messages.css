@@ -167,6 +167,155 @@
   opacity: 0.9;
 }
 
+/* Multi-agent: per-agent identity chips */
+.msg-invocation-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* Handoff / A2A structured cards */
+.msg-bubble-handoff {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.handoff-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--surface-raised) 88%, var(--accent));
+  min-width: min(100%, 18rem);
+}
+
+.handoff-card[data-kind="a2a-skipped"],
+.handoff-card[data-kind="handoff-repair-needed"] {
+  border-color: color-mix(in srgb, var(--stderr, #c9a227) 40%, var(--border));
+  background: color-mix(in srgb, var(--surface-raised) 90%, var(--stderr, #c9a227));
+}
+
+.handoff-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.handoff-card-route {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.handoff-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+
+.handoff-pill.from {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.handoff-pill.to {
+  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border));
+}
+
+.handoff-arrow {
+  color: var(--text-tertiary);
+  font-weight: 700;
+}
+
+.handoff-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.handoff-meta-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-canvas) 80%, var(--border));
+  color: var(--text-tertiary);
+}
+
+.handoff-meta-chip.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.handoff-card-body {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Collapsed prior multi-agent collaboration */
+.collab-group {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: min(94%, 52rem);
+  align-self: flex-start;
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, var(--accent));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-canvas) 92%, var(--surface-raised));
+  padding: 4px 8px 8px;
+}
+
+.collab-group-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 6px;
+  user-select: none;
+}
+
+.collab-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collab-group-summary::before {
+  content: "▸ ";
+  color: var(--text-tertiary);
+}
+
+.collab-group[open] > .collab-group-summary::before {
+  content: "▾ ";
+}
+
+.collab-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--msg-gap, 12px);
+  padding: 4px 2px 6px;
+}
+
+.collab-group-body > .message {
+  max-width: 100%;
+}
+
+.message.kind-a2a-route,
+.message.kind-a2a-skipped {
+  max-width: min(80%, 40rem);
+  opacity: 1;
+}
+
 /* Identity row: larger than bubble body so speaker is scannable */
 .msg-meta {
   display: flex;

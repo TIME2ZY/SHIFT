@@ -22,13 +22,18 @@
    * Parent already aborted → abort child immediately.
    * Otherwise → forward parent abort to child.
    */
+  /**
+   * @param {AbortSignal|null|undefined} parent - caller AbortSignal (not AbortController)
+   * @param {AbortController} child - internal timeout/link controller
+   */
   function linkAbort(parent, child) {
     if (!parent) return;
-    if (parent.signal.aborted) {
-      child.abort();
+    // parent is AbortSignal: use parent.aborted, never parent.signal.aborted
+    if (parent.aborted) {
+      child.abort(parent.reason);
       return;
     }
-    const onParentAbort = () => child.abort();
+    const onParentAbort = () => child.abort(parent.reason);
     parent.addEventListener("abort", onParentAbort, { once: true });
     child.signal.addEventListener(
       "abort",
@@ -75,12 +80,22 @@
       });
     }
 
+    function abortError(reason) {
+      const err = new Error(reason != null ? String(reason) : "aborted");
+      err.name = "AbortError";
+      return err;
+    }
+
     async function attemptOnce(input, init, timeoutMs) {
       const headers = new Headers(init.headers || {});
       headers.set(UI_TOKEN_HEADER, uiToken || "");
       const callerSignal = init.signal || null;
       const timeoutController = new AbortController();
       linkAbort(callerSignal, timeoutController);
+      // Do not call fetch when already cancelled (mocks may ignore signal.aborted).
+      if (timeoutController.signal.aborted) {
+        throw abortError(timeoutController.signal.reason ?? callerSignal?.reason);
+      }
       // Only arm a timer for finite positive ms. Infinity/0 must not become
       // setTimeout(fn, Infinity) which engines clamp to ~0–1ms and abort streams.
       const timer =

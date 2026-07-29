@@ -83,6 +83,7 @@ async function withSealServer(spawnRunner, fn) {
     await fn({ baseUrl, storage, tmpDir });
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
@@ -262,6 +263,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
     assert.ok(!assistants.some((m) => m.content === "" && m.messageType === "assistant-final"));
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
     storage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
