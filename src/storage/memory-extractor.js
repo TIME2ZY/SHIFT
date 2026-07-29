@@ -11,8 +11,16 @@
 
 const { looksLikeDecisionLanguage, DECISION_PATTERNS } = require("./decision-language");
 const { slugifyTopic } = require("./memory-keys");
+const { ENV } = require("../shared/brand");
 
 const EXTRACTOR_VERSION = "heuristic-v1";
+
+function isSuggestionExtractorEnabled(env = process.env) {
+  const value = String(env?.[ENV.MEMORY_SUGGESTIONS_ENABLED] || "")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "yes", "on"].includes(value);
+}
 
 const CONSTRAINT_PATTERNS = [
   /以后别\s*([^\n。！？.!?]+)/u,
@@ -280,6 +288,7 @@ function buildAnchors({ role, messageId, invocationId, threadId, projectKey, sen
 
 module.exports = {
   EXTRACTOR_VERSION,
+  isSuggestionExtractorEnabled,
   extractDecisionCandidates,
   extractSuggestionsFromTurn,
   buildAnchors,

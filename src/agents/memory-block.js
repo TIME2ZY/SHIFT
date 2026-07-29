@@ -4,10 +4,18 @@
  */
 
 const { PRODUCT_KINDS } = require("../storage/memory-keys");
+const { ENV } = require("../shared/brand");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 const MIN_CONTENT_CHARS = 4;
 const KNOWN_FIELDS = new Set(["kind", "topic", "content"]);
+
+function isFencedMemoryBlocksEnabled(env = process.env) {
+  const value = String(env?.[ENV.MEMORY_FENCED_BLOCKS_ENABLED] || "")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "yes", "on"].includes(value);
+}
 
 /**
  * @param {string} text
@@ -112,6 +120,7 @@ function applyMemoryBlocks(input = {}) {
   const eventStore = input.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
   const logger = input.logger || console;
+  const env = input.env || process.env;
 
   const parsed = parseMemoryBlocks(text);
   const stats = {
@@ -123,7 +132,11 @@ function applyMemoryBlocks(input = {}) {
   };
 
   if (!parsed.length) return stats;
-  if (!memoryService || typeof memoryService.createProduct !== "function") {
+  if (!isFencedMemoryBlocksEnabled(env)) {
+    stats.blockSkipped = parsed.length;
+    return stats;
+  }
+  if (!memoryService || typeof memoryService.writeMemoryCandidate !== "function") {
     stats.blockSkipped = parsed.length;
     return stats;
   }
@@ -135,32 +148,20 @@ function applyMemoryBlocks(input = {}) {
 
   for (const block of parsed) {
     try {
-      const baseInput = {
-        threadId,
-        kind: block.kind,
-        topic: block.topic,
-        content: block.content,
-        createdBy: agentId,
-        writeChannel: "agent",
-        metadata: {
-          source: "block:memory",
-          blockIndex: block.blockIndex,
-          callbackInvocationId: invocationId,
+      const outcome = memoryService.writeMemoryCandidate(
+        {
+          kind: block.kind,
+          topic: block.topic,
+          content: block.content,
         },
-      };
-      let outcome;
-      try {
-        outcome = memoryService.createProduct({
-          ...baseInput,
-          sourceInvocationId: invocationId,
-        });
-      } catch (error) {
-        // Invocation may not be mirrored yet; still accept the product write.
-        if (!/Source invocation .* does not exist/i.test(String(error.message || ""))) {
-          throw error;
+        {
+          threadId,
+          invocationId,
+          agentId,
+          source: "block:memory",
+          allowUnmirroredInvocation: true,
         }
-        outcome = memoryService.createProduct(baseInput);
-      }
+      );
 
       if (outcome?.memory) {
         stats.blockWritten += 1;
@@ -232,6 +233,7 @@ module.exports = {
   PRODUCT_KINDS,
   MAX_MEMORY_CONTENT_CHARS,
   MIN_CONTENT_CHARS,
+  isFencedMemoryBlocksEnabled,
   parseMemoryBlocks,
   parseMemoryBody,
   applyMemoryBlocks,

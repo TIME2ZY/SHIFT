@@ -8,6 +8,7 @@ const { createStorage } = require("../../src/storage");
 const {
   extractDecisionCandidates,
   extractSuggestionsFromTurn,
+  isSuggestionExtractorEnabled,
   EXTRACTOR_VERSION,
 } = require("../../src/storage/memory-extractor");
 const {
@@ -31,6 +32,22 @@ test("extractDecisionCandidates finds decisions and skips questions", () => {
   assert.ok(found.some((c) => c.kind === "constraint" && /force push|main/.test(c.content)));
   assert.ok(!found.some((c) => /要不要/.test(c.content)));
   assert.ok(found.every((c) => c.confidence < 0.5));
+});
+
+test("suggestion extractor is disabled by default and explicitly reversible", () => {
+  assert.equal(isSuggestionExtractorEnabled({}), false);
+  assert.equal(
+    isSuggestionExtractorEnabled({ SHIFT_MEMORY_SUGGESTIONS_ENABLED: "1" }),
+    true
+  );
+  assert.equal(
+    isSuggestionExtractorEnabled({ SHIFT_MEMORY_SUGGESTIONS_ENABLED: "true" }),
+    true
+  );
+  assert.equal(
+    isSuggestionExtractorEnabled({ SHIFT_MEMORY_SUGGESTIONS_ENABLED: "false" }),
+    false
+  );
 });
 
 test("extractSuggestionsFromTurn never writes product memories", () => {

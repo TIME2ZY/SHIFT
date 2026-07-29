@@ -149,7 +149,80 @@ test("handleCallbackRoutes returns 404 when invocation replay is missing", async
   assert.deepEqual(res.body, { error: "Invocation not found." });
 });
 
-test("handleCallbackRoutes memory-upsert writes product memory and emits SSE", async () => {
+test("handleCallbackRoutes lists only successful current-invocation memory evidence", async () => {
+  const res = makeRes();
+  const reads = [];
+  const handle = callbackRoutes.createCallbackRoutes({
+    callbacks: {
+      validateToken: (sessionId, invocationId, token) =>
+        sessionId === "s1" && invocationId === "i1" && token === "tok",
+    },
+    transcript: {
+      readInvocationPage: async (_threadId, _invocationId, options) => {
+        reads.push(options);
+        if (options.limit === 1) {
+          return { total: 4, from: 0, limit: 1, events: [] };
+        }
+        return {
+          total: 4,
+          from: 0,
+          limit: 4,
+          events: [
+            {
+              eventNo: 1,
+              kind: "tool.finished",
+              payload: { toolName: "tests", result: "944 passed", status: "ok" },
+              ts: "2026-07-29T00:00:00.000Z",
+            },
+            {
+              eventNo: 2,
+              kind: "tool.finished",
+              payload: { toolName: "lint", status: "error" },
+            },
+            {
+              eventNo: 3,
+              kind: "text.delta",
+              payload: { text: "assistant prose" },
+            },
+            {
+              eventNo: 4,
+              kind: "tool_result",
+              payload: { result: "build ok" },
+            },
+          ],
+        };
+      },
+    },
+    appendToSession() {},
+    getSession: () => null,
+    sendJson: makeSendJson(res),
+    readJsonBody: async () => ({}),
+  });
+
+  const handled = await handle(
+    makeReq("GET", { "x-callback-token": "tok" }),
+    res,
+    new URL(
+      "http://127.0.0.1/api/callbacks/memory-evidence" +
+        "?sessionId=s1&invocationId=i1&limit=10"
+    )
+  );
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.invocationId, "i1");
+  assert.deepEqual(
+    res.body.events.map((event) => event.eventNo),
+    [1, 4]
+  );
+  assert.match(res.body.events[0].summary, /944 passed/);
+  assert.equal(res.body.hasMore, false);
+  assert.deepEqual(reads, [
+    { from: 0, limit: 1 },
+    { from: 0, limit: 4 },
+  ]);
+});
+
+test("handleCallbackRoutes memory-write and legacy memory-upsert share one path", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
   try {
@@ -167,12 +240,14 @@ test("handleCallbackRoutes memory-upsert writes product memory and emits SSE", a
     });
 
     assert.equal(
-      await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-upsert")),
+      await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-write")),
       true
     );
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.ok, true);
     assert.equal(res.body.created, true);
+    assert.equal(res.body.outcome, "created");
+    assert.equal(res.body.memoryId, res.body.memory.id);
     assert.equal(res.body.topic, "storage-primary");
     assert.equal(res.body.memory.kind, "decision");
     assert.equal(res.body.memory.createdBy, "codex");

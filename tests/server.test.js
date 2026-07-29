@@ -2347,7 +2347,8 @@ test("buildCallbackInstructions mentions recall and memory-write commands", () =
   assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
   assert.match(tpl, /callback-client\.js memory-upsert/);
-  assert.match(tpl, /callback-client\.js memory-invalidate/);
+  assert.match(tpl, /memory_write/);
+  assert.doesNotMatch(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
 });
 

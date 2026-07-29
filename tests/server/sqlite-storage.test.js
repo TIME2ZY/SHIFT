@@ -269,8 +269,8 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent("登录流程")}`
     ).then((response) => response.json());
     const memoryHit = search.hits.find((hit) => hit.sourceKind === "memory-entry");
-    assert.ok(memoryHit);
-    assert.equal(memoryHit.kind, "memory.handoff");
+    assert.equal(memoryHit, undefined);
+    assert.ok(search.hits.some((hit) => hit.layer === "evidence"));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();

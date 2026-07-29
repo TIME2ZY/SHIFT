@@ -24,6 +24,9 @@ const LAYER_EVIDENCE = "evidence";
 const LAYER_PROJECT_DOC = "project-doc";
 const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE, LAYER_PROJECT_DOC];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
+const {
+  isRetrievableMemory,
+} = require("./memory-retrieval-contract");
 const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 /** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
 const DEFAULT_MAX_AUTO_MEMORY = 2;
@@ -392,6 +395,12 @@ function createRecallService({ storage, logger = console } = {}) {
         if (!row) continue;
         const id = row.memoryId || row.sourceId || row.id;
         if (seen.has(id)) continue;
+        if (
+          (row.sourceKind === "memory-entry" || row.memoryId) &&
+          !isRetrievableMemory(row, { includeRetired })
+        ) {
+          continue;
+        }
         if (!includeRetired && isRetiredMemory(row)) continue;
         if (!includeThinking && isThinkingEvidence(row)) continue;
         seen.add(id);
@@ -550,9 +559,7 @@ function createRecallService({ storage, logger = console } = {}) {
         });
         for (const row of relatedRows.slice(0, relatedLimit * 3)) {
           const memory = memoryFromRecallItem(row, storage);
-          // Inject gate: unconfirmed lessons stay out of the Active Card.
-          if (memory?.kind === "lesson" && memory.status !== "confirmed") continue;
-          if (memory) noteChannel(memory, "related", 4);
+          if (isRetrievableMemory(memory)) noteChannel(memory, "related", 4);
         }
       } catch (error) {
         relatedOk = false;

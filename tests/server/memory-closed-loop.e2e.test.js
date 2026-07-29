@@ -168,15 +168,22 @@ test("memory closed loop e2e: handoff → inject → seal → bootstrap", async 
     assert.ok(injectMetrics.prompt_bytes > 0);
     assert.deepEqual(metricLogs, [], "handoff metrics should be silent in the terminal by default");
 
-    // Search must surface the memory layer hit.
+    // Recovery records remain in the bootstrap path but are isolated from the
+    // product-memory search layer.
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent(
         "dual-loop-e2e-token"
       )}&layers=memory`
     ).then((response) => response.json());
     assert.ok(
-      search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry")
+      !search.hits?.some((hit) => hit.layer === "memory" || hit.sourceKind === "memory-entry")
     );
+    const evidenceSearch = await apiFetch(
+      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent(
+        "dual-loop-e2e-token"
+      )}&layers=evidence`
+    ).then((response) => response.json());
+    assert.ok(evidenceSearch.hits?.some((hit) => hit.layer === "evidence"));
 
     // --- Step 3: force seal and capture window-seal ---
     const firstWindow = storage.windows.listForThread(session.id)[0];
