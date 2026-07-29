@@ -15,6 +15,9 @@ const {
   isSuccessfulMemoryEvidenceEvent,
   summarizeMemoryEvidenceEvent,
 } = require("./memory-evidence");
+const {
+  isRetrievableMemory,
+} = require("./memory-retrieval-contract");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
@@ -502,7 +505,9 @@ function createMemoryService({
     }
     items = [...byId.values()];
 
-    // Inject gate: lesson is project-capable but only confirmed lessons enter Active Card.
+    // Legacy inject gate: confirmed lessons may enter the recovery card.
+    // The product-only contract is exposed separately by listRetrievableForTurn
+    // until handoff/window-seal recovery has its own injection channel.
     if (options.forInject !== false) {
       items = items.filter((item) => {
         if (item.kind === "lesson") return item.status === "confirmed";
@@ -539,6 +544,14 @@ function createMemoryService({
 
   function listActiveForTurn(threadId, options = {}) {
     return listActive(threadId, { ...options, scope: "all", forInject: true });
+  }
+
+  function listRetrievableForTurn(threadId, options = {}) {
+    return listActive(threadId, {
+      ...options,
+      scope: "all",
+      forInject: false,
+    }).filter((item) => isRetrievableMemory(item));
   }
 
   function list(threadId, options = {}) {
@@ -713,6 +726,7 @@ function createMemoryService({
     writeMemoryCandidate,
     listActive,
     listActiveForTurn,
+    listRetrievableForTurn,
     list,
     get,
     confirm,
