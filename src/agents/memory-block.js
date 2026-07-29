@@ -123,7 +123,7 @@ function applyMemoryBlocks(input = {}) {
   };
 
   if (!parsed.length) return stats;
-  if (!memoryService || typeof memoryService.createProduct !== "function") {
+  if (!memoryService || typeof memoryService.writeMemoryCandidate !== "function") {
     stats.blockSkipped = parsed.length;
     return stats;
   }
@@ -135,32 +135,20 @@ function applyMemoryBlocks(input = {}) {
 
   for (const block of parsed) {
     try {
-      const baseInput = {
-        threadId,
-        kind: block.kind,
-        topic: block.topic,
-        content: block.content,
-        createdBy: agentId,
-        writeChannel: "agent",
-        metadata: {
-          source: "block:memory",
-          blockIndex: block.blockIndex,
-          callbackInvocationId: invocationId,
+      const outcome = memoryService.writeMemoryCandidate(
+        {
+          kind: block.kind,
+          topic: block.topic,
+          content: block.content,
         },
-      };
-      let outcome;
-      try {
-        outcome = memoryService.createProduct({
-          ...baseInput,
-          sourceInvocationId: invocationId,
-        });
-      } catch (error) {
-        // Invocation may not be mirrored yet; still accept the product write.
-        if (!/Source invocation .* does not exist/i.test(String(error.message || ""))) {
-          throw error;
+        {
+          threadId,
+          invocationId,
+          agentId,
+          source: "block:memory",
+          allowUnmirroredInvocation: true,
         }
-        outcome = memoryService.createProduct(baseInput);
-      }
+      );
 
       if (outcome?.memory) {
         stats.blockWritten += 1;

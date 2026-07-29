@@ -261,6 +261,179 @@ test("createProduct writes decision/constraint/fact with supersession", () => {
   }
 });
 
+test("writeMemoryCandidate derives trusted fields and returns stable outcomes", () => {
+  const storage = createFixture();
+  try {
+    storage.messages.append({
+      id: "message-user-1",
+      threadId: "thread-1",
+      role: "user",
+      content: "Use SQLite as the source of truth.",
+    });
+    storage.invocations.start({
+      id: "invocation-1",
+      threadId: "thread-1",
+      windowId: "window-1",
+      agentId: "codex",
+      triggerMessageId: "message-user-1",
+      triggerType: "user-message",
+    });
+
+    const created = storage.memory.writeMemoryCandidate(
+      {
+        kind: "decision",
+        topic: "storage-primary",
+        content: "  SQLite   is the online source of truth.  ",
+        scope: "thread",
+      },
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-1",
+        agentId: "codex",
+      }
+    );
+
+    assert.equal(created.outcome, "created");
+    assert.equal(created.memoryId, created.memory.id);
+    assert.equal(created.memory.content, "SQLite is the online source of truth.");
+    assert.equal(created.memory.authority, "agent");
+    assert.equal(created.memory.status, "captured");
+    assert.equal(created.memory.activation, "query");
+    assert.equal(created.memory.sourceInvocationId, "invocation-1");
+    assert.equal(created.memory.sourceMessageId, "message-user-1");
+    assert.match(created.memory.contentHash, /^[a-f0-9]{64}$/);
+
+    const unchanged = storage.memory.writeMemoryCandidate(
+      {
+        kind: "decision",
+        topic: "storage-primary",
+        content: "SQLite is the online source of truth.",
+        scope: "thread",
+      },
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-1",
+        agentId: "codex",
+      }
+    );
+    assert.equal(unchanged.outcome, "unchanged");
+    assert.equal(unchanged.memoryId, created.memoryId);
+    assert.equal(storage.memory.listActive("thread-1").length, 1);
+
+    const superseded = storage.memory.writeMemoryCandidate(
+      {
+        kind: "decision",
+        topic: "storage-primary",
+        content: "SQLite remains authoritative; JSONL is audit-only.",
+        scope: "thread",
+      },
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-1",
+        agentId: "codex",
+      }
+    );
+    assert.equal(superseded.outcome, "superseded");
+    assert.equal(superseded.replacedMemoryId, created.memoryId);
+    assert.equal(storage.memories.get(created.memoryId).status, "superseded");
+    assert.equal(storage.memory.listActive("thread-1").length, 1);
+  } finally {
+    storage.close();
+  }
+});
+
+test("writeMemoryCandidate rejects forged fields and untrusted provenance", () => {
+  const storage = createFixture();
+  try {
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime-database",
+            content: "SQLite is available at runtime.",
+            authority: "system",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "missing",
+            agentId: "codex",
+          }
+        ),
+      /forbidden fields: authority/
+    );
+
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "lesson",
+            topic: "runtime-database",
+            content: "SQLite is available at runtime.",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "missing",
+            agentId: "codex",
+          }
+        ),
+      /decision, constraint, fact/
+    );
+
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime-database",
+            content: "SQLite is available at runtime.",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "missing",
+            agentId: "codex",
+          }
+        ),
+      /does not exist/
+    );
+
+    storage.threads.create({ id: "thread-2" });
+    storage.windows.create({
+      id: "window-2",
+      threadId: "thread-2",
+      agentId: "codex",
+      providerKey: "codex:test",
+      workspaceKey: "base:C:/repo-2",
+      generation: 1,
+      capacityTokens: 200000,
+    });
+    storage.invocations.start({
+      id: "invocation-2",
+      threadId: "thread-2",
+      windowId: "window-2",
+      agentId: "codex",
+    });
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime-database",
+            content: "SQLite is available at runtime.",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-2",
+            agentId: "codex",
+          }
+        ),
+      /belongs to another thread/
+    );
+  } finally {
+    storage.close();
+  }
+});
+
 test("createProduct rejects cross-kind supersession keys and cross-thread sources", () => {
   const storage = createFixture();
   try {

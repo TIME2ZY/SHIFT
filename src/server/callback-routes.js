@@ -292,7 +292,13 @@ function createCallbackRoutes({
       return true;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-upsert") {
+    if (
+      req.method === "POST" &&
+      new Set([
+        "/api/callbacks/memory-write",
+        "/api/callbacks/memory-upsert",
+      ]).has(url.pathname)
+    ) {
       let body;
       try {
         body = await readJsonBody(req);
@@ -307,6 +313,7 @@ function createCallbackRoutes({
       const kind = typeof body.kind === "string" ? body.kind.trim() : "";
       const topic = typeof body.topic === "string" ? body.topic.trim() : "";
       const content = typeof body.content === "string" ? body.content.trim() : "";
+      const scope = typeof body.scope === "string" ? body.scope.trim() : undefined;
 
       if (!sessionId || !invocationId || !callbackToken) {
         sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
@@ -349,35 +356,25 @@ function createCallbackRoutes({
 
       const agentId = resolveAgentId(callbacks, sessionId, invocationId);
       try {
-        // Prefer linking the active callback invocation; if SQLite has not mirrored
-        // it yet (or tests omit the row), still accept the write with metadata only.
-        const baseInput = {
-          threadId: sessionId,
-          kind,
-          topic,
-          content,
-          supersessionKey:
-            typeof body.supersessionKey === "string" ? body.supersessionKey : undefined,
-          createdBy: agentId,
-          writeChannel: "agent",
-          metadata: {
-            ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
-            source: "callback:memory-upsert",
-            callbackInvocationId: invocationId,
+        // callbackToken validation above makes this a trusted compatibility
+        // context. The unified service derives ownership and authority from it.
+        const outcome = memoryService.writeMemoryCandidate(
+          {
+            kind,
+            topic,
+            content,
+            ...(scope ? { scope } : {}),
           },
-        };
-        let outcome;
-        try {
-          outcome = memoryService.createProduct({
-            ...baseInput,
-            sourceInvocationId: invocationId,
-          });
-        } catch (error) {
-          if (!/Source invocation .* does not exist/i.test(String(error.message || ""))) {
-            throw error;
+          {
+            threadId: sessionId,
+            invocationId,
+            agentId,
+            source: "callback:memory-upsert",
+            // Some providers call back before the invocation mirror is durable.
+            // Keep this rollout exception isolated to the token-authenticated route.
+            allowUnmirroredInvocation: true,
           }
-          outcome = memoryService.createProduct(baseInput);
-        }
+        );
 
         try {
           appendMemoryCapturedEvent(
@@ -427,6 +424,9 @@ function createCallbackRoutes({
 
         sendJson(res, 200, {
           ok: true,
+          outcome: outcome.outcome,
+          memoryId: outcome.memoryId,
+          replacedMemoryId: outcome.replacedMemoryId,
           created: outcome.created,
           topic: outcome.topic,
           supersessionKey: outcome.supersessionKey,
@@ -436,7 +436,12 @@ function createCallbackRoutes({
       } catch (error) {
         logger.error?.(`[memory-upsert] failed: ${error.message}`);
         bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
-        sendJson(res, 400, { error: error.message });
+        sendJson(res, 400, {
+          outcome: "rejected",
+          code: "invalid_candidate",
+          reason: error.message,
+          error: error.message,
+        });
       }
       return true;
     }

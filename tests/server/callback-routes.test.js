@@ -149,7 +149,7 @@ test("handleCallbackRoutes returns 404 when invocation replay is missing", async
   assert.deepEqual(res.body, { error: "Invocation not found." });
 });
 
-test("handleCallbackRoutes memory-upsert writes product memory and emits SSE", async () => {
+test("handleCallbackRoutes memory-write and legacy memory-upsert share one path", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
   try {
@@ -167,12 +167,14 @@ test("handleCallbackRoutes memory-upsert writes product memory and emits SSE", a
     });
 
     assert.equal(
-      await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-upsert")),
+      await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-write")),
       true
     );
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.ok, true);
     assert.equal(res.body.created, true);
+    assert.equal(res.body.outcome, "created");
+    assert.equal(res.body.memoryId, res.body.memory.id);
     assert.equal(res.body.topic, "storage-primary");
     assert.equal(res.body.memory.kind, "decision");
     assert.equal(res.body.memory.createdBy, "codex");

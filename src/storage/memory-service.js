@@ -12,6 +12,12 @@ const {
 } = require("./memory-keys");
 
 const MAX_SUPERSESSION_RETRIES = 3;
+const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
+const MEMORY_WRITE_SCOPES = Object.freeze(["thread", "project"]);
+const MEMORY_WRITE_INPUT_FIELDS = new Set(["kind", "topic", "content", "scope"]);
+const MEMORY_WRITE_TOPIC_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+const MEMORY_WRITE_MIN_CONTENT_CHARS = 10;
+const MEMORY_WRITE_MAX_CONTENT_CHARS = 500;
 
 function createMemoryService({
   storage,
@@ -266,6 +272,7 @@ function createMemoryService({
         : null,
       kind,
       content,
+      contentHash: input.contentHash || null,
       topic,
       summary: input.summary || null,
       anchors: input.anchors || null,
@@ -287,6 +294,134 @@ function createMemoryService({
       supersessionKey,
     });
     return { ...outcome, topic, supersessionKey, scope };
+  }
+
+  /**
+   * Unified agent-facing product-memory write path.
+   *
+   * Candidate contains only semantic fields selected by the agent. Ownership,
+   * provenance, authority, activation, status, and idempotency are derived from
+   * trusted invocation context on the server.
+   */
+  function writeMemoryCandidate(candidate = {}, invocationContext = {}) {
+    assertMemoryWriteCandidateShape(candidate);
+
+    const threadId = requiredString(invocationContext.threadId, "invocation thread id");
+    const agentId = requiredString(invocationContext.agentId, "invocation agent id");
+    const invocationId = nullableString(invocationContext.invocationId);
+    const requestedSourceMessageId = nullableString(invocationContext.sourceMessageId);
+
+    const storedInvocation = invocationId ? storage.invocations?.get?.(invocationId) : null;
+    if (!invocationId && invocationContext.allowUnmirroredInvocation !== true) {
+      throw new Error("invocation id is required for memory_write.");
+    }
+    if (
+      invocationId &&
+      !storedInvocation &&
+      invocationContext.allowUnmirroredInvocation !== true
+    ) {
+      throw new Error(`Source invocation ${invocationId} does not exist.`);
+    }
+    if (storedInvocation && storedInvocation.threadId !== threadId) {
+      throw new Error(`Source invocation ${invocationId} belongs to another thread.`);
+    }
+    const sourceMessageId =
+      requestedSourceMessageId ||
+      nullableString(storedInvocation?.triggerMessageId);
+    if (sourceMessageId) {
+      const sourceMessage = storage.messages?.get?.(sourceMessageId);
+      if (!sourceMessage) throw new Error(`Source message ${sourceMessageId} does not exist.`);
+      if (sourceMessage.threadId !== threadId) {
+        throw new Error(`Source message ${sourceMessageId} belongs to another thread.`);
+      }
+    }
+
+    const kind = candidate.kind;
+    const { canonicalizeTopic } = require("./memory-topic-canon");
+    const topic = canonicalizeTopic(candidate.topic);
+    if (!MEMORY_WRITE_TOPIC_PATTERN.test(topic)) {
+      throw new Error(
+        "Memory topic must contain lowercase ASCII segments separated by dots or hyphens."
+      );
+    }
+
+    const content = normalizeMemoryWriteContent(candidate.content);
+    if (content.length < MEMORY_WRITE_MIN_CONTENT_CHARS) {
+      throw new Error(
+        `Memory content must contain at least ${MEMORY_WRITE_MIN_CONTENT_CHARS} characters.`
+      );
+    }
+    if (content.length > MEMORY_WRITE_MAX_CONTENT_CHARS) {
+      throw new Error(
+        `Memory content exceeds ${MEMORY_WRITE_MAX_CONTENT_CHARS} characters.`
+      );
+    }
+
+    const thread = storage.threads?.get?.(threadId) || null;
+    if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
+    const scope = resolveProductScope(kind, candidate.scope, thread);
+    if (candidate.scope === "project" && scope !== "project") {
+      throw new Error("Cannot write project-scoped memory without a resolved project identity.");
+    }
+
+    const ownerThreadId = scope === "thread" ? threadId : null;
+    const projectKey = scope === "project" ? thread.projectKey : null;
+    const existing = storage.memories.listActiveProductByTopic({
+      scope,
+      ownerThreadId,
+      projectKey,
+      topic,
+    })[0];
+    const contentHash = hashMemoryWriteContent(content);
+
+    if (
+      existing &&
+      existing.kind === kind &&
+      normalizeMemoryWriteContent(existing.content) === content
+    ) {
+      return formatMemoryWriteOutcome("unchanged", {
+        memory: existing,
+        created: false,
+        superseded: [],
+        topic,
+        supersessionKey: existing.supersessionKey,
+        scope,
+      });
+    }
+
+    const captureKey = [
+      "memory-write",
+      invocationId || "internal",
+      kind,
+      topic,
+      contentHash.slice(0, 20),
+    ].join(":");
+    const outcome = createProduct({
+      threadId,
+      kind,
+      topic,
+      content,
+      contentHash,
+      scope,
+      captureKey,
+      sourceInvocationId: storedInvocation ? invocationId : null,
+      sourceMessageId,
+      createdBy: agentId,
+      writeChannel: "agent",
+      metadata: {
+        writeSource: invocationContext.source || "memory_write",
+        callbackInvocationId: invocationId,
+        evidenceEventNo:
+          Number.isInteger(invocationContext.evidenceEventNo)
+            ? invocationContext.evidenceEventNo
+            : null,
+      },
+    });
+
+    return formatMemoryWriteOutcome(
+      outcome.superseded?.length ? "superseded" : outcome.created ? "created" : "unchanged",
+      outcome
+    );
   }
 
   function assertProductSourceAffinity(threadId, input) {
@@ -556,6 +691,7 @@ function createMemoryService({
   return {
     capture,
     createProduct,
+    writeMemoryCandidate,
     listActive,
     listActiveForTurn,
     list,
@@ -564,6 +700,54 @@ function createMemoryService({
     invalidate,
     canAccessFromThread,
     PRODUCT_KINDS,
+  };
+}
+
+function assertMemoryWriteCandidateShape(candidate) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new Error("Memory candidate must be an object.");
+  }
+  const unknown = Object.keys(candidate).filter((key) => !MEMORY_WRITE_INPUT_FIELDS.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`Memory candidate contains forbidden fields: ${unknown.join(", ")}.`);
+  }
+  if (!MEMORY_WRITE_KINDS.includes(candidate.kind)) {
+    throw new Error(`Memory kind must be one of: ${MEMORY_WRITE_KINDS.join(", ")}.`);
+  }
+  if (typeof candidate.topic !== "string" || !candidate.topic.trim()) {
+    throw new Error("Memory topic is required.");
+  }
+  if (typeof candidate.content !== "string" || !candidate.content.trim()) {
+    throw new Error("Memory content is required.");
+  }
+  if (
+    candidate.scope !== undefined &&
+    !MEMORY_WRITE_SCOPES.includes(candidate.scope)
+  ) {
+    throw new Error(`Memory scope must be one of: ${MEMORY_WRITE_SCOPES.join(", ")}.`);
+  }
+}
+
+function normalizeMemoryWriteContent(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function hashMemoryWriteContent(content) {
+  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function formatMemoryWriteOutcome(outcome, result) {
+  const superseded = Array.isArray(result.superseded) ? result.superseded : [];
+  return {
+    ...result,
+    outcome,
+    memoryId: result.memory?.id || null,
+    replacedMemoryId: outcome === "superseded" ? superseded[0] || null : undefined,
   };
 }
 

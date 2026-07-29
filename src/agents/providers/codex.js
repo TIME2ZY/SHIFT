@@ -1,4 +1,5 @@
 const { makeEvent } = require("../event-protocol");
+const path = require("node:path");
 const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
 const {
@@ -12,6 +13,27 @@ const {
 function buildCodexEnvironment(_options = {}, env = process.env) {
   const codexHome = String(env.INVOKE_CODEX_HOME || "").trim();
   return codexHome ? { CODEX_HOME: codexHome } : {};
+}
+
+function shiftContextMcpConfigArgs() {
+  const serverScript = path.resolve(
+    __dirname,
+    "../../../scripts/shift-context-mcp.js"
+  );
+  return [
+    "-c",
+    `mcp_servers.shift_context.command=${JSON.stringify(process.execPath)}`,
+    "-c",
+    `mcp_servers.shift_context.args=[${JSON.stringify(serverScript)}]`,
+    "-c",
+    'mcp_servers.shift_context.env_vars=["SHIFT_API_URL","SHIFT_THREAD_ID","SHIFT_INVOCATION_ID","SHIFT_CALLBACK_TOKEN"]',
+    "-c",
+    'mcp_servers.shift_context.enabled_tools=["memory_write"]',
+    "-c",
+    'mcp_servers.shift_context.default_tools_approval_mode="auto"',
+    "-c",
+    "mcp_servers.shift_context.required=false",
+  ];
 }
 
 function codexDiagnostic(code, severity, message, options = {}) {
@@ -414,6 +436,7 @@ const codexProvider = {
     if (config.reasoningEffort) {
       args.push("-c", `model_reasoning_effort="${config.reasoningEffort}"`);
     }
+    args.push(...shiftContextMcpConfigArgs());
     if (config.model) args.push("-m", config.model);
     if (config.resumeSessionId) {
       args.push("exec", "resume", "--json", config.resumeSessionId, prompt);
@@ -426,6 +449,7 @@ const codexProvider = {
 
 module.exports = {
   buildCodexEnvironment,
+  shiftContextMcpConfigArgs,
   classifyCodexStderr,
   createCodexRuntime,
   codexProvider,
