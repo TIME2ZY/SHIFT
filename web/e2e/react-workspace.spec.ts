@@ -30,7 +30,10 @@ async function mockShiftApi(page: Page): Promise<MockState> {
     if (url.pathname === "/api/agents" && method === "GET") {
       await route.fulfill({
         json: {
-          agents: [{ id: "codex", label: "Codex", description: "实现与验证" }],
+          agents: [
+            { id: "codex", label: "Codex", description: "实现与验证" },
+            { id: "gemini", label: "Gemini", description: "发散与交叉验证" },
+          ],
         },
       });
       return;
@@ -89,6 +92,29 @@ async function mockShiftApi(page: Page): Promise<MockState> {
       return;
     }
 
+    if (url.pathname === "/api/sessions/session-1/usage" && method === "GET") {
+      await route.fulfill({
+        json: {
+          available: true,
+          session: { totalTokens: state.chatCompleted ? 321 : 0 },
+          agents: state.chatCompleted
+            ? [
+                {
+                  agentId: "gemini",
+                  billing: { totalTokens: 321 },
+                  context: {
+                    usableContextTokens: 800000,
+                    contextUsedTokens: 80000,
+                    budgetFillRatio: 0.1,
+                  },
+                },
+              ]
+            : [],
+        },
+      });
+      return;
+    }
+
     if (url.pathname === "/api/sessions/session-1/worktree/status" && method === "GET") {
       await route.fulfill({
         json: {
@@ -111,9 +137,9 @@ async function mockShiftApi(page: Page): Promise<MockState> {
         contentType: "text/event-stream",
         body: [
           'event: session\ndata: {"sessionId":"session-1"}\n\n',
-          'event: agent-start\ndata: {"agent":"codex","invocationId":"invocation-1"}\n\n',
-          'event: agent-event\ndata: {"type":"text.delta","agent":"codex","text":"工作区改动已完成。"}\n\n',
-          'event: agent-exit\ndata: {"agent":"codex","code":0}\n\n',
+          'event: agent-start\ndata: {"agent":"gemini","invocationId":"invocation-1"}\n\n',
+          'event: agent-event\ndata: {"type":"text.delta","agent":"gemini","text":"工作区改动已完成。"}\n\n',
+          'event: agent-exit\ndata: {"agent":"gemini","code":0}\n\n',
           "event: done\ndata: {}\n\n",
         ].join(""),
       });
@@ -146,16 +172,18 @@ test("edits the project directory and completes a worktree chat run", async ({ p
   await page.getByRole("checkbox", { name: "改代码" }).check();
   await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
 
-  await page.getByRole("textbox", { name: "消息" }).fill("实现工作区功能");
+  await page.getByRole("textbox", { name: "消息" }).fill("@Gemini 实现工作区功能");
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.getByText("工作区改动已完成。")).toBeVisible();
   await expect(page.getByText("已完成", { exact: true })).toBeVisible();
   await expect(page.getByText("shift/session-1")).toBeVisible();
+  await expect(page.getByText("会话 321")).toBeVisible();
+  await expect(page.getByText("上下文 10%")).toBeVisible();
   expect(state.chatBody).toMatchObject({
     sessionId: "session-1",
-    agent: "codex",
-    prompt: "实现工作区功能",
+    agent: "gemini",
+    prompt: "@Gemini 实现工作区功能",
     useWorktree: true,
   });
 });

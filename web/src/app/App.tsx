@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAgentsQuery } from "../features/agents/queries";
+import { findExplicitLeadingAgent } from "../features/agents/routing";
 import { Composer } from "../features/chat/Composer";
 import { useChatActions } from "../features/chat/useChatActions";
 import { MessageList } from "../features/messages/MessageList";
@@ -8,6 +9,7 @@ import { RightPanel } from "../features/right-panel/RightPanel";
 import { SessionList } from "../features/sessions/SessionList";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
+import { UsageSummaryBadge } from "../features/usage/UsageSummaryBadge";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
 
@@ -59,6 +61,15 @@ export function App() {
   function selectAgent(agentId: string) {
     if (!activeSessionId) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
+  }
+
+  function sendPrompt(prompt: string, useWorktree: boolean) {
+    if (!activeSessionId) return Promise.resolve();
+    const explicitAgent = findExplicitLeadingAgent(prompt, agents.data ?? []);
+    const targetAgentId = explicitAgent?.id || selectedAgentId;
+    if (!targetAgentId) return Promise.resolve();
+    if (explicitAgent) selectAgent(explicitAgent.id);
+    return chat.send(activeSessionId, targetAgentId, prompt, useWorktree);
   }
 
   function createNewSession() {
@@ -128,6 +139,7 @@ export function App() {
             <strong>{activeSession?.title || activeSessionId || "未选择"}</strong>
           </div>
           <div className="react-chat-actions">
+            <UsageSummaryBadge sessionId={activeSessionId} agentId={selectedAgentId} />
             <span className="react-run-status" data-status={run?.status || "idle"}>
               {statusLabel(run?.status)}
             </span>
@@ -149,11 +161,7 @@ export function App() {
           selectedAgentId={selectedAgentId}
           running={running}
           onAgentChange={selectAgent}
-          onSend={(prompt, useWorktree) =>
-            activeSessionId && selectedAgentId
-              ? chat.send(activeSessionId, selectedAgentId, prompt, useWorktree)
-              : Promise.resolve()
-          }
+          onSend={sendPrompt}
           onStop={() => {
             if (activeSessionId) chat.stop(activeSessionId);
           }}

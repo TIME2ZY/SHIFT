@@ -51,6 +51,9 @@ export function useChatActions() {
             queryClient.invalidateQueries({
               queryKey: sessionQueryKeys.messages(resultSessionId),
             }),
+            queryClient.invalidateQueries({
+              queryKey: sessionQueryKeys.usage(resultSessionId),
+            }),
             queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),
           ]);
           store.dispatch({ type: "run/synced", sessionId: resultSessionId });
