@@ -142,9 +142,26 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
           branch: "shift/session-1",
           worktreeDir: "C:/projects/shift.worktrees/session-1",
           baseDir: state.projectDir,
-          clean: true,
-          porcelain: [],
+          clean: false,
+          porcelain: [" M web/src/app/App.tsx"],
+          previewUrl: "http://localhost:4173",
         },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/sessions/session-1/worktree/diff" && method === "GET") {
+      const diff = [
+        "diff --git a/web/src/app/App.tsx b/web/src/app/App.tsx",
+        "index 1111111..2222222 100644",
+        "--- a/web/src/app/App.tsx",
+        "+++ b/web/src/app/App.tsx",
+        "@@ -1 +1,2 @@",
+        " export function App() {",
+        '+  return <main data-page="workspace" />;',
+      ].join("\n");
+      await route.fulfill({
+        json: { diff, truncated: false, totalChars: diff.length },
       });
       return;
     }
@@ -211,13 +228,14 @@ test("edits the project directory and completes a worktree chat run", async ({ p
   await page.goto("./");
   await expect(page.locator("#main-content").getByText("React E2E")).toBeVisible();
 
-  await page.getByRole("tab", { name: "工作区" }).click();
-  await expect(page.getByText("C:/projects/shift")).toBeVisible();
+  await page.getByRole("button", { name: "工作区", exact: true }).click();
+  await expect(page.getByRole("code").filter({ hasText: "C:/projects/shift" })).toBeVisible();
   await page.getByRole("button", { name: "编辑" }).click();
   await page.getByRole("textbox", { name: "项目目录" }).fill("D:/projects/shift-next");
   await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByText("D:/projects/shift-next")).toBeVisible();
+  await expect(page.getByRole("code").filter({ hasText: "D:/projects/shift-next" })).toBeVisible();
 
+  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText("只读讨论 · Enter 发送")).toBeVisible();
   await page.getByRole("checkbox", { name: "改代码" }).check();
   await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
@@ -227,7 +245,6 @@ test("edits the project directory and completes a worktree chat run", async ({ p
 
   await expect(page.getByText("工作区改动已完成。")).toBeVisible();
   await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  await expect(page.getByText("shift/session-1")).toBeVisible();
   await expect(page.getByText("会话 321")).toBeVisible();
   await expect(page.getByText("上下文 10%")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
@@ -237,6 +254,16 @@ test("edits the project directory and completes a worktree chat run", async ({ p
   await expect(
     page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
   ).toBeVisible();
+  await page.getByRole("button", { name: "工作区", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "shift/session-1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /web\/src\/app\/App\.tsx/ })).toBeVisible();
+  await expect(page.getByLabel("web/src/app/App.tsx Diff")).toContainText(
+    'return <main data-page="workspace" />;'
+  );
+  await expect(page.getByRole("link", { name: "打开预览" })).toHaveAttribute(
+    "href",
+    "http://localhost:4173"
+  );
   expect(state.chatBody).toMatchObject({
     sessionId: "session-1",
     agent: "gemini",

@@ -17,12 +17,34 @@ async function updateProjectDir({ sessionId, dir }: UpdateProjectDirInput): Prom
   return response.dir || "";
 }
 
+async function discardWorktree(sessionId: string): Promise<void> {
+  await apiRequest(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/discard`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+}
+
 export function useUpdateProjectDirMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: updateProjectDir,
     onSuccess: async (_dir, { sessionId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.session(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),
+      ]);
+    },
+  });
+}
+
+export function useDiscardWorktreeMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: discardWorktree,
+    onSuccess: async (_data, sessionId) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.session(sessionId) }),
         queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),

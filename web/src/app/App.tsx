@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAppNavigation } from "./navigation";
 import { useAgentsQuery } from "../features/agents/queries";
 import { findExplicitLeadingAgent } from "../features/agents/routing";
 import { Composer } from "../features/chat/Composer";
@@ -10,6 +11,7 @@ import { SessionList } from "../features/sessions/SessionList";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
 import { UsageSummaryBadge } from "../features/usage/UsageSummaryBadge";
+import { WorkspacePage } from "../features/workspace/WorkspacePage";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
 
@@ -33,6 +35,7 @@ function statusLabel(status: RunStatus | undefined): string {
 }
 
 export function App() {
+  const navigation = useAppNavigation();
   const sessions = useSessionsQuery();
   const agents = useAgentsQuery();
   const chat = useChatActions();
@@ -96,7 +99,7 @@ export function App() {
   }
 
   return (
-    <div className="react-shell">
+    <div className="react-shell" data-page={navigation.page}>
       <aside className="react-sidebar" aria-label="对话列表">
         <header className="react-brand">
           <span className="react-brand-mark" aria-hidden="true">
@@ -107,6 +110,31 @@ export function App() {
             <small>多智能体交班台</small>
           </span>
         </header>
+
+        <nav className="react-app-nav" aria-label="主要功能">
+          <button
+            type="button"
+            data-active={navigation.page === "chat" || undefined}
+            aria-current={navigation.page === "chat" ? "page" : undefined}
+            onClick={() => navigation.navigate("chat")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 5.5h16v11H9l-5 3v-14Z" />
+            </svg>
+            <span>对话</span>
+          </button>
+          <button
+            type="button"
+            data-active={navigation.page === "workspace" || undefined}
+            aria-current={navigation.page === "workspace" ? "page" : undefined}
+            onClick={() => navigation.navigate("workspace")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6.5h6l2 2h8v9H4v-11Z" />
+            </svg>
+            <span>工作区</span>
+          </button>
+        </nav>
 
         <div className="react-sidebar-title">
           <span>对话</span>
@@ -132,47 +160,57 @@ export function App() {
         ) : null}
       </aside>
 
-      <main id="main-content" className="react-chat">
-        <header className="react-chat-header">
-          <div>
-            <span className="react-chat-eyebrow">当前对话</span>
-            <strong>{activeSession?.title || activeSessionId || "未选择"}</strong>
-          </div>
-          <div className="react-chat-actions">
-            <UsageSummaryBadge sessionId={activeSessionId} agentId={selectedAgentId} />
-            <span className="react-run-status" data-status={run?.status || "idle"}>
-              {statusLabel(run?.status)}
-            </span>
-            <a href="/">稳定版</a>
-          </div>
-        </header>
+      {navigation.page === "chat" ? (
+        <>
+          <main id="main-content" className="react-chat">
+            <header className="react-chat-header">
+              <div>
+                <span className="react-chat-eyebrow">当前对话</span>
+                <strong>{activeSession?.title || activeSessionId || "未选择"}</strong>
+              </div>
+              <div className="react-chat-actions">
+                <UsageSummaryBadge sessionId={activeSessionId} agentId={selectedAgentId} />
+                <span className="react-run-status" data-status={run?.status || "idle"}>
+                  {statusLabel(run?.status)}
+                </span>
+                <button type="button" onClick={() => navigation.navigate("workspace")}>
+                  查看工作区
+                </button>
+                <a href="/">稳定版</a>
+              </div>
+            </header>
 
-        <MessageList
-          messages={messages.data ?? []}
-          run={run}
-          isLoading={messages.isPending && Boolean(activeSessionId)}
-          error={messages.error}
-          onRetry={() => void messages.refetch()}
-        />
+            <MessageList
+              messages={messages.data ?? []}
+              run={run}
+              isLoading={messages.isPending && Boolean(activeSessionId)}
+              error={messages.error}
+              onRetry={() => void messages.refetch()}
+            />
 
-        <Composer
+            <Composer
+              sessionId={activeSessionId}
+              agents={agents.data ?? []}
+              selectedAgentId={selectedAgentId}
+              running={running}
+              onAgentChange={selectAgent}
+              onSend={sendPrompt}
+              onStop={() => {
+                if (activeSessionId) chat.stop(activeSessionId);
+              }}
+            />
+          </main>
+
+          <RightPanel sessionId={activeSessionId} agents={agents.data ?? []} />
+        </>
+      ) : (
+        <WorkspacePage
           sessionId={activeSessionId}
-          agents={agents.data ?? []}
-          selectedAgentId={selectedAgentId}
-          running={running}
-          onAgentChange={selectAgent}
-          onSend={sendPrompt}
-          onStop={() => {
-            if (activeSessionId) chat.stop(activeSessionId);
-          }}
+          sessionTitle={activeSession?.title || activeSessionId || "未选择"}
+          worktreeAttached={Boolean(activeSession?.worktree)}
+          onOpenChat={() => navigation.navigate("chat")}
         />
-      </main>
-
-      <RightPanel
-        sessionId={activeSessionId}
-        agents={agents.data ?? []}
-        worktreeAttached={Boolean(activeSession?.worktree)}
-      />
+      )}
     </div>
   );
 }

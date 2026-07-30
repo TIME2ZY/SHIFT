@@ -2,17 +2,15 @@ import { useState } from "react";
 import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery, useMemoryInjectQuery } from "../memory/queries";
 import { RecallPanel } from "../recall/RecallPanel";
-import { WorkspacePanel } from "../workspace/WorkspacePanel";
 
-type PanelTab = "agents" | "workspace" | "memory" | "recall";
+type PanelTab = "agents" | "memory" | "recall";
 
 interface RightPanelProps {
   sessionId: string | null;
   agents: AgentSummary[];
-  worktreeAttached?: boolean;
 }
 
-export function RightPanel({ sessionId, agents, worktreeAttached = false }: RightPanelProps) {
+export function RightPanel({ sessionId, agents }: RightPanelProps) {
   const [tab, setTab] = useState<PanelTab>("agents");
   const memories = useMemoriesQuery(sessionId, tab === "memory");
   const memoryInject = useMemoryInjectQuery(sessionId);
@@ -23,7 +21,6 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
         {(
           [
             ["agents", "Agent"],
-            ["workspace", "工作区"],
             ["memory", "记忆"],
             ["recall", "Recall"],
           ] as const
@@ -57,14 +54,6 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
               ))}
             </div>
           </section>
-        ) : null}
-
-        {tab === "workspace" ? (
-          <WorkspacePanel
-            sessionId={sessionId}
-            worktreeAttached={worktreeAttached}
-            active={tab === "workspace"}
-          />
         ) : null}
 
         {tab === "memory" ? (
