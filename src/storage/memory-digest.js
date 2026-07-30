@@ -59,7 +59,7 @@ function mapDigest(row) {
 }
 
 /**
- * Build a short heuristic digest for a thread from recent messages + suggestions.
+ * Build a short heuristic digest for a thread from recent messages + active product memory.
  * Does not call an LLM.
  */
 function buildHeuristicDigest(input = {}) {
@@ -91,16 +91,7 @@ function buildHeuristicDigest(input = {}) {
     .filter(Boolean)
     .slice(-3);
 
-  const pending =
-    storage.suggestionService?.list?.(threadId, {
-      status: "pending",
-      includeProject: true,
-      limit: 8,
-    }) || [];
   const topics = [];
-  for (const item of pending) {
-    if (item.topic && !topics.includes(item.topic)) topics.push(item.topic);
-  }
 
   const active =
     storage.memory?.listActive?.(threadId, {
@@ -120,65 +111,29 @@ function buildHeuristicDigest(input = {}) {
       ? `最近结论与进展:\n- ${assistantLines.join("\n- ")}`
       : "最近结论与进展: (无)",
     `活跃记忆: ${active.length}`,
-    `待确认候选: ${pending.length}`,
     topics.length ? `topics: ${topics.slice(0, 8).join(", ")}` : "topics: (无)",
   ];
-  const handoffs = active.filter((item) => item.kind === "handoff").slice(0, 3);
-  if (handoffs.length > 0) {
-    lines.push(
-      `当前交接（派生状态）:\n- ${handoffs
-        .map((item) => compactText(item.content, 420))
-        .join("\n- ")}`
-    );
-  }
-
-  const durableCandidates = pending.slice(0, 5).map((item) => ({
-    suggestionId: item.id,
-    kind: item.proposedKind,
-    topic: item.topic,
-    confidence: item.confidence,
-    content: String(item.content || "").slice(0, 160),
-  }));
 
   return {
     summary: lines.join("\n").slice(0, 4000),
     topics: topics.slice(0, 12),
-    durableCandidates,
+    durableCandidates: [],
     messageCount: messages.length,
     source: "heuristic",
   };
 }
 
 /**
- * Refresh digest + run extractor for a completed turn. Fail-soft.
+ * Refresh the recovery digest for a completed turn. Fail-soft.
  */
-function refreshDigestAndExtract(input = {}) {
+function refreshDigest(input = {}) {
   const storage = input.storage;
   const threadId = input.threadId;
   const logger = input.logger || console;
-  const result = {
-    digest: null,
-    extract: { created: 0, skipped: 0, errors: 0, suggestions: [] },
-  };
+  const result = { digest: null };
   if (!storage || !threadId) return result;
 
   try {
-    // Extract first so digest can include new pending candidates.
-    if (typeof input.extractSuggestionsFromTurn === "function") {
-      result.extract = input.extractSuggestionsFromTurn({
-        storage,
-        suggestionService: storage.suggestionService,
-        threadId,
-        userText: input.userText,
-        assistantText: input.assistantText,
-        userMessageId: input.userMessageId,
-        assistantMessageId: input.assistantMessageId,
-        invocationId: input.invocationId,
-        projectKey: input.projectKey || storage.threads?.get?.(threadId)?.projectKey || null,
-        logger,
-      });
-    }
-
     if (storage.digests) {
       const built = buildHeuristicDigest({ storage, threadId });
       result.digest = storage.digests.upsert({
@@ -240,6 +195,6 @@ function requiredString(value, label) {
 module.exports = {
   createMemoryDigestRepository,
   buildHeuristicDigest,
-  refreshDigestAndExtract,
+  refreshDigest,
   summarizeAssistantOutcome,
 };

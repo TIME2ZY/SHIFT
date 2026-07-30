@@ -43,7 +43,7 @@ function auditMemorySemantics(turns = [], expectations = {}) {
 
   const staleItems = injectItems
     .filter((item) =>
-      ["superseded", "invalidated", "rejected"].includes(
+      ["superseded"].includes(
         String(item?.status || "").toLowerCase()
       )
     )

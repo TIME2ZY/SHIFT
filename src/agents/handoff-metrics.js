@@ -111,7 +111,7 @@ function memoryCardHasActiveItems(card) {
   const countMatch = card.match(/Active Memories\s*\(\s*(\d+)\s*\)/);
   if (countMatch) return Number(countMatch[1]) > 0;
   // Fallback: rendered entries always include status tokens.
-  return /\[(?:captured|confirmed)\]/.test(card);
+  return /\[active\]/.test(card);
 }
 
 /**

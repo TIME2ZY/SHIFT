@@ -39,7 +39,7 @@ test("migrate imports sessions and transcript events into SQLite", async () => {
     assert.ok(first.totals.messagesImported >= 2);
     assert.ok(first.totals.eventsImported >= 5);
     assert.equal(first.totals.invocationsCreated, 1);
-    assert.equal(first.totals.memoriesImported, 1);
+    assert.equal(first.totals.memoriesImported, 0);
     assert.equal(first.integrity.ok, true);
 
     const storage = createStorage({ file: memoryDbFile });
@@ -51,7 +51,7 @@ test("migrate imports sessions and transcript events into SQLite", async () => {
         storage.invocations.listEvents("inv-1").map((event) => event.kind),
         ["invocation-start", "text.delta", "handoff", "memory-captured", "invocation-end"]
       );
-      assert.ok(storage.memories.getByCaptureKey("thread-1", "handoff:inv-1:gemini:0"));
+      assert.equal(storage.memories.getByCaptureKey("thread-1", "handoff:inv-1:gemini:0"), null);
       assert.ok(storage.recall.search("thread-1", "synthetic fixture").length >= 1);
       assert.ok(storage.recall.search("thread-1", "review").length >= 1);
 

@@ -23,11 +23,9 @@ const LAYER_MESSAGE = "message";
 const LAYER_EVIDENCE = "evidence";
 const LAYER_PROJECT_DOC = "project-doc";
 const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE, LAYER_PROJECT_DOC];
-const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
+const RETIRED_STATUSES = new Set(["superseded"]);
 const { isRetrievableMemory } = require("./memory-retrieval-contract");
-const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 /** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
-const DEFAULT_MAX_AUTO_MEMORY = 2;
 const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
 function createRecallService({ storage, embeddingRuntime = null, logger = console } = {}) {
@@ -169,6 +167,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
           memoryQuota: options.memoryQuota,
           messageQuota: options.messageQuota,
           memoryScope,
+          deferQuotas: Boolean(embeddingRuntime?.available),
         });
       });
 
@@ -186,6 +185,14 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         if (hybrid.attempted) {
           result = null;
           sqliteHits = fuseRecallChannels(sqliteHits, hybrid.hits, {
+            limit,
+            layers,
+            memoryQuota: options.memoryQuota,
+            messageQuota: options.messageQuota,
+            projectDocQuota: options.projectDocQuota,
+          });
+        } else if (embeddingRuntime?.available) {
+          sqliteHits = allocateFlatHitsByLayer(sqliteHits, {
             limit,
             layers,
             memoryQuota: options.memoryQuota,
@@ -366,7 +373,6 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
             score:
               20 +
               recencyBoost(memory.createdAt) +
-              (memory.status === "confirmed" ? 10 : 0) +
               kindBoost(memory.kind) +
               (memory.scope === "project" ? 4 : 0),
             matchChannels: ["recency"],
@@ -405,6 +411,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     messageQuota,
     projectDocQuota,
     memoryScope = "all",
+    deferQuotas = false,
   }) {
     const byLayer = {
       [LAYER_MEMORY]: [],
@@ -473,6 +480,11 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         .sort(compareHits),
     };
 
+    if (deferQuotas) {
+      return ALL_LAYERS.filter((layer) => layers.includes(layer)).flatMap(
+        (layer) => scored[layer]
+      );
+    }
     return allocateByLayerQuotas(scored, {
       limit,
       memoryQuota: clampQuota(memoryQuota, resolveSearchMemoryQuota()),
@@ -524,7 +536,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         if (!includeRetired && isRetiredMemory(row)) continue;
         if (!includeThinking && isThinkingEvidence(row)) continue;
         seen.add(id);
-        out.push(normalizeCandidateRow(row));
+        out.push(normalizeCandidateRow(row, out.length + 1));
         if (out.length >= limit) return true;
       }
       return false;
@@ -584,7 +596,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     return out;
   }
 
-  function normalizeCandidateRow(row) {
+  function normalizeCandidateRow(row, keywordRank = null) {
     if (row.sourceKind === "memory-entry" || row.memoryId) {
       return {
         id: row.id,
@@ -602,9 +614,13 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         metadata: row.metadata,
         rank: row.rank,
         matchChannel: row.matchChannel,
+        keywordRank,
       };
     }
-    return row;
+    return {
+      ...row,
+      keywordRank,
+    };
   }
 
   /**
@@ -735,7 +751,6 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
       recentLimit,
       relatedLimit,
       totalLimit,
-      maxAuto: DEFAULT_MAX_AUTO_MEMORY,
     });
 
     const queryTopics = extractQueryTopicHints(prompt);
@@ -1157,40 +1172,23 @@ function scoreAndMapProjectDoc(item, terms) {
   };
 }
 
-function isProductMemoryKind(kind) {
-  return PRODUCT_MEMORY_KINDS.has(kind);
-}
-
-function selectRetrieveItems(
-  ranked,
-  { recentLimit, relatedLimit, totalLimit, maxAuto = DEFAULT_MAX_AUTO_MEMORY }
-) {
+function selectRetrieveItems(ranked, { recentLimit, relatedLimit, totalLimit }) {
   const selected = [];
   const seen = new Set();
-  let autoCount = 0;
-  const autoCap = Math.max(0, Number(maxAuto) || 0);
 
   const take = (predicate, max) => {
     let count = 0;
     for (const item of ranked) {
       if (count >= max || selected.length >= totalLimit) break;
       if (seen.has(item.id) || !predicate(item)) continue;
-      const isAuto = !isProductMemoryKind(item.kind);
-      if (isAuto && autoCount >= autoCap) continue;
       selected.push(item);
       seen.add(item.id);
       count += 1;
-      if (isAuto) autoCount += 1;
     }
   };
 
-  // Product recency first, then remaining recency (auto capped), then related, then score fill.
-  take((item) => item.channels?.includes("recency") && isProductMemoryKind(item.kind), recentLimit);
+  // Product recency first, then related matches, then score fill.
   take((item) => item.channels?.includes("recency"), recentLimit);
-  take(
-    (item) => item.channels?.includes("related") && isProductMemoryKind(item.kind),
-    relatedLimit
-  );
   take((item) => item.channels?.includes("related"), relatedLimit);
   take(() => true, totalLimit);
   return selected.sort((a, b) => {
@@ -1207,14 +1205,8 @@ function kindBoost(kind) {
       return 30;
     case "constraint":
       return 28;
-    case "lesson":
-      return 26;
     case "fact":
       return 24;
-    case "handoff":
-      return 6;
-    case "window-seal":
-      return 2;
     default:
       return 0;
   }
@@ -1281,6 +1273,7 @@ function scoreAndMapHit(item, terms) {
     memoryScope: item.scope || item.metadata?.scope || null,
     memoryOwnerThreadId: item.ownerThreadId || null,
     memoryOriginThreadId: item.originThreadId || null,
+    keywordRank: item.keywordRank || null,
     content:
       item.sourceKind === "memory-entry" ? String(item.content || "").slice(0, 2048) : undefined,
   };
@@ -1288,8 +1281,6 @@ function scoreAndMapHit(item, terms) {
 
 function scoreRecallItem(item, terms) {
   let score = matchScore(item, terms);
-  const status = item.metadata?.status;
-  if (status === "confirmed") score += 10;
   score += recencyBoost(item.createdAt);
   score += kindBoost(item.metadata?.kind || item.memoryKind || null);
   if (item.metadata?.quality?.ok) score += 2;
@@ -1333,10 +1324,8 @@ function matchScore(item, terms) {
   if (channel === "exact-topic") return 60;
   if (channel === "exact") return 50;
   if (channel === "fts") {
-    // bm25 ranks are typically negative; closer to zero is better.
-    if (typeof item.rank === "number" && Number.isFinite(item.rank)) {
-      return Math.max(10, Math.min(45, 35 + item.rank));
-    }
+    // FTS relevance is rank-based. The repository already returns BM25 rows in
+    // ascending order; do not reinterpret the backend-specific numeric scale.
     return 30;
   }
   if (channel === "contains") return 18;
@@ -1364,6 +1353,14 @@ function recencyBoost(createdAt) {
 }
 
 function compareHits(a, b) {
+  // Fused hits all carry channel ranks. Their RRF-derived score must remain
+  // authoritative; keywordRank is only the ordering contract for pure FTS.
+  if ((a.ranks || b.ranks) && (b.score || 0) !== (a.score || 0)) {
+    return (b.score || 0) - (a.score || 0);
+  }
+  if (a.keywordRank && b.keywordRank && a.keywordRank !== b.keywordRank) {
+    return a.keywordRank - b.keywordRank;
+  }
   if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
   return String(b.ts || "").localeCompare(String(a.ts || ""));
 }
@@ -1383,7 +1380,7 @@ function memoryFromRecallItem(row, storage) {
     projectKey: row.projectKey || row.metadata?.projectKey || null,
     scope: row.scope || row.metadata?.scope || "thread",
     kind: row.metadata?.kind || "memory",
-    status: row.metadata?.status || "captured",
+    status: row.metadata?.status || "active",
     authority: row.metadata?.authority || null,
     activation: row.metadata?.activation || null,
     content: row.content,
@@ -1438,9 +1435,30 @@ function clampQuota(value, fallback) {
 }
 
 function statusRank(status) {
-  if (status === "confirmed") return 0;
-  if (status === "captured") return 1;
-  return 2;
+  return status === "active" ? 0 : 1;
+}
+
+function allocateFlatHitsByLayer(hits, options) {
+  const byLayer = {
+    [LAYER_MEMORY]: [],
+    [LAYER_MESSAGE]: [],
+    [LAYER_EVIDENCE]: [],
+    [LAYER_PROJECT_DOC]: [],
+  };
+  for (const hit of hits || []) {
+    const layer = hit.layer || layerForSourceKind(hit.sourceKind);
+    if (byLayer[layer]) byLayer[layer].push(hit);
+  }
+  return allocateByLayerQuotas(byLayer, {
+    limit: options.limit,
+    memoryQuota: clampQuota(options.memoryQuota, resolveSearchMemoryQuota()),
+    messageQuota: clampQuota(options.messageQuota, resolveSearchMessageQuota()),
+    projectDocQuota: clampQuota(
+      options.projectDocQuota,
+      DEFAULT_SEARCH_PROJECT_DOC_QUOTA
+    ),
+    layers: options.layers,
+  });
 }
 
 function hitKey(hit) {

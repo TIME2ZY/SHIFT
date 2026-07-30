@@ -62,27 +62,11 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
       };
       const memories = await getJson(`${baseUrl}/api/memories?sessionId=${encoded}`, token);
       checks.context = {
-        ok:
-          memories.status === 200 &&
-          memories.body.memories?.length === expected.memoryCount &&
-          Boolean(memories.body.context) &&
-          Boolean(memories.body.context.digest) === expected.hasDigest &&
-          memories.body.context.handoffs?.length === expected.handoffCount &&
-          memories.body.context.pendingSuggestions?.length === expected.pendingSuggestionCount,
+        ok: memories.status === 200 && memories.body.memories?.length === expected.memoryCount,
         status: memories.status,
         threadId: expected.threadId,
-        expected: {
-          memories: expected.memoryCount,
-          digest: expected.hasDigest,
-          handoffs: expected.handoffCount,
-          pendingSuggestions: expected.pendingSuggestionCount,
-        },
-        actual: {
-          memories: memories.body.memories?.length ?? null,
-          digest: Boolean(memories.body.context?.digest),
-          handoffs: memories.body.context?.handoffs?.length ?? null,
-          pendingSuggestions: memories.body.context?.pendingSuggestions?.length ?? null,
-        },
+        expected: expected.memoryCount,
+        actual: memories.body.memories?.length ?? null,
       };
     }
   } finally {
@@ -129,17 +113,6 @@ function selectExpected(file) {
       threadId: thread.id,
       threadMessageCount: Number(thread.message_count),
       memoryCount: Number(thread.memory_count),
-      hasDigest: Boolean(storage.digests.get(thread.id)),
-      handoffCount: storage.memory.list(thread.id, {
-        kinds: "handoff",
-        includeRetired: false,
-        limit: 10,
-      }).length,
-      pendingSuggestionCount: storage.suggestionService.list(thread.id, {
-        status: "pending",
-        includeProject: true,
-        limit: 20,
-      }).length,
     };
   } finally {
     storage.close();

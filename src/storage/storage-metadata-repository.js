@@ -18,7 +18,7 @@ function createStorageMetadataRepository(db) {
       EXISTS (SELECT 1 FROM threads LIMIT 1)
       OR EXISTS (SELECT 1 FROM memory_entries LIMIT 1)
       OR EXISTS (SELECT 1 FROM memory_events LIMIT 1)
-      OR EXISTS (SELECT 1 FROM memory_suggestions LIMIT 1)
+      OR EXISTS (SELECT 1 FROM legacy_memory_archive LIMIT 1)
       OR EXISTS (SELECT 1 FROM purged_threads LIMIT 1)
       OR EXISTS (SELECT 1 FROM projects LIMIT 1)
       OR EXISTS (SELECT 1 FROM recall_items LIMIT 1)

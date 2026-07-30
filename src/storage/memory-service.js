@@ -76,6 +76,7 @@ function createMemoryService({
   }
 
   function captureOnce(input) {
+    normalizeProductKind(input?.kind);
     const scope = input.scope === "project" ? "project" : "thread";
     const captureKey = requiredString(input?.captureKey, "memory capture key");
     const ownerThreadId =
@@ -134,40 +135,6 @@ function createMemoryService({
           topic: topicForPeers,
         });
       }
-      // Same canon topic must not stay active as both project decision and thread fact.
-      if (topicForPeers) {
-        if (scope === "project" && originThreadId) {
-          retire({
-            scope: "thread",
-            ownerThreadId: originThreadId,
-            projectKey: null,
-            supersessionKey: null,
-            topic: topicForPeers,
-          });
-        }
-        if (scope === "thread" && projectKey) {
-          retire({
-            scope: "project",
-            ownerThreadId: null,
-            projectKey,
-            supersessionKey: null,
-            topic: topicForPeers,
-          });
-        } else if (scope === "thread" && originThreadId) {
-          // Resolve projectKey from origin thread when writing thread-scoped product.
-          const origin = storage.threads?.get?.(originThreadId);
-          if (origin?.projectKey) {
-            retire({
-              scope: "project",
-              ownerThreadId: null,
-              projectKey: origin.projectKey,
-              supersessionKey: null,
-              topic: topicForPeers,
-            });
-          }
-        }
-      }
-
       const memory = storage.memories.create({
         ...input,
         id,
@@ -177,11 +144,10 @@ function createMemoryService({
         originThreadId,
         captureKey,
         supersessionKey,
-        status: input.status || "captured",
+        status: input.status || "active",
         authority: writeFields.authority,
         activation: writeFields.activation,
         createdBy: writeFields.createdBy,
-        confirmedBy: input.confirmedBy || null,
         createdAt: input.createdAt || nowIso(clock),
       });
       enqueueMemoryEmbedding(storage, memory);
@@ -191,6 +157,9 @@ function createMemoryService({
           previous.map((item) => item.id),
           memory.id
         );
+        for (const item of previous) {
+          storage.embeddings?.retireSource?.("memory", item.id);
+        }
       }
 
       return {
@@ -225,7 +194,7 @@ function createMemoryService({
   }
 
   /**
-   * Product write path for decision / constraint / fact / lesson.
+   * Product write path for decision / constraint / fact.
    */
   function createProduct(input = {}) {
     const threadId = requiredString(input.threadId, "thread id");
@@ -507,20 +476,12 @@ function createMemoryService({
     }
     items = [...byId.values()];
 
-    // Legacy inject gate: confirmed lessons may enter the recovery card.
-    // The product-only contract is exposed separately by listRetrievableForTurn
-    // until handoff/window-seal recovery has its own injection channel.
     if (options.forInject !== false) {
-      items = items.filter((item) => {
-        if (item.kind === "lesson") return item.status === "confirmed";
-        return true;
-      });
+      items = items.filter((item) => isRetrievableMemory(item));
     }
 
-    // Prefer confirmed + product kinds, then recency.
+    // Product kind priority, then recency.
     items.sort((a, b) => {
-      const statusDelta = statusRank(a.status) - statusRank(b.status);
-      if (statusDelta !== 0) return statusDelta;
       const kindDelta = kindRank(b.kind) - kindRank(a.kind);
       if (kindDelta !== 0) return kindDelta;
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
@@ -588,68 +549,8 @@ function createMemoryService({
     return memory ? enrichMemory(memory) : null;
   }
 
-  function confirm(id, audit = {}) {
-    const confirmedBy = requiredString(audit.confirmedBy, "memory confirmer");
-    const confirmationSource = requiredString(
-      audit.confirmationSource,
-      "memory confirmation source"
-    );
-    const existing = storage.memories.get(id);
-    if (!existing) return null;
-    assertTransitionAllowed(existing, "confirmed");
-    const confirmedAt = audit.confirmedAt || nowIso(clock);
-    // User confirmation raises authority to user (contract §6.3).
-    storage.memories.transition(id, "confirmed", {
-      confirmedBy,
-      verifiedAt: confirmedAt,
-      authority: "user",
-      metadata: {
-        ...(existing.metadata || {}),
-        confirmedBy,
-        confirmedAt,
-        confirmationSource,
-      },
-    });
-    const confirmed = enrichMemory(storage.memories.get(id));
-    storage.memoryEvents?.recordSafe?.({
-      eventType: "memory_confirmed",
-      threadId: confirmed?.ownerThreadId || confirmed?.originThreadId || confirmed?.threadId,
-      projectKey: confirmed?.projectKey || null,
-      memoryId: confirmed?.id,
-      agentId: confirmedBy,
-      payload: { confirmationSource, previousAuthority: existing.authority },
-    });
-    return confirmed;
-  }
-
-  function invalidate(id, audit = {}) {
-    const existing = storage.memories.get(id);
-    if (!existing) return null;
-    assertTransitionAllowed(existing, "invalidated");
-    const invalidatedBy = requiredString(audit.invalidatedBy, "memory invalidator");
-    storage.memories.transition(id, "invalidated", {
-      metadata: {
-        ...(existing.metadata || {}),
-        invalidatedBy,
-        invalidatedAt: audit.invalidatedAt || nowIso(clock),
-        invalidationReason: nullableString(audit.reason),
-      },
-    });
-    const invalidated = enrichMemory(storage.memories.get(id));
-    storage.memoryEvents?.recordSafe?.({
-      eventType: "memory_invalidated",
-      threadId:
-        invalidated?.ownerThreadId || invalidated?.originThreadId || invalidated?.threadId,
-      projectKey: invalidated?.projectKey || null,
-      memoryId: invalidated?.id,
-      agentId: invalidatedBy,
-      payload: { reason: nullableString(audit.reason) },
-    });
-    return invalidated;
-  }
-
   /**
-   * Whether a live thread may mutate (invalidate/confirm-adjacent) this memory.
+   * Whether a live thread may access this memory.
    * - thread-scoped: owner/origin must match session
    * - project-scoped: same projectKey as the calling thread
    */
@@ -731,8 +632,6 @@ function createMemoryService({
     listRetrievableForTurn,
     list,
     get,
-    confirm,
-    invalidate,
     canAccessFromThread,
     PRODUCT_KINDS,
   };
@@ -883,26 +782,14 @@ function formatMemoryWriteOutcome(outcome, result) {
   };
 }
 
-function statusRank(status) {
-  if (status === "confirmed") return 0;
-  if (status === "captured") return 1;
-  return 2;
-}
-
 function kindRank(kind) {
   switch (kind) {
     case "decision":
       return 30;
     case "constraint":
       return 28;
-    case "lesson":
-      return 26;
     case "fact":
       return 24;
-    case "handoff":
-      return 6;
-    case "window-seal":
-      return 2;
     default:
       return 0;
   }
@@ -914,7 +801,6 @@ function kindRank(kind) {
  */
 function deriveWriteFields(input = {}) {
   const channel = input.writeChannel || inferWriteChannel(input);
-  const kind = input.kind || "fact";
   const requestedBy = typeof input.createdBy === "string" && input.createdBy ? input.createdBy : null;
 
   if (channel === "system") {
@@ -933,12 +819,11 @@ function deriveWriteFields(input = {}) {
     };
   }
 
-  // agent / callback / block / auto
-  const auto = kind === "handoff" || kind === "window-seal" || kind === "digest";
+  // Agent and callback writes are query-activated product Memory.
   return {
     createdBy: requestedBy || "agent",
     authority: "agent",
-    activation: auto ? "backstop" : "query",
+    activation: "query",
   };
 }
 
@@ -947,10 +832,6 @@ function inferWriteChannel(input = {}) {
   const by = String(input.createdBy || "");
   if (by === "user" || by.startsWith("user:")) return "user";
   if (by.startsWith("system:") || by === "system") return "system";
-  if (input.metadata?.source === "block:memory") return "agent";
-  if (input.metadata?.source === "handoff" || input.metadata?.source === "window-seal") {
-    return "agent";
-  }
   return "agent";
 }
 
@@ -963,24 +844,8 @@ function resolveProductScope(kind, requested, thread) {
   }
   // Defaults from contract §8
   if (!thread?.projectKey) return "thread";
-  if (kind === "decision" || kind === "constraint" || kind === "lesson") return "project";
+  if (kind === "decision" || kind === "constraint") return "project";
   return "thread"; // fact
-}
-
-function assertTransitionAllowed(memory, nextStatus) {
-  if (memory.status === nextStatus) return;
-  if (new Set(["superseded", "invalidated"]).has(memory.status)) {
-    throw new Error(`Cannot transition retired memory ${memory.id} from ${memory.status}.`);
-  }
-  if (nextStatus === "confirmed" && memory.status !== "captured") {
-    throw new Error(`Cannot confirm memory ${memory.id} from ${memory.status}.`);
-  }
-  if (
-    nextStatus === "invalidated" &&
-    !new Set(["captured", "confirmed"]).has(memory.status)
-  ) {
-    throw new Error(`Cannot invalidate memory ${memory.id} from ${memory.status}.`);
-  }
 }
 
 function nowIso(clock) {

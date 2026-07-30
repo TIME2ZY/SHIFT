@@ -21,7 +21,7 @@ test("recall eval calculates ranking and security metrics", () => {
         {
           source: { memoryId: "memory-good" },
           matchedBy: ["exact-topic"],
-          metadata: { status: "captured" },
+          metadata: { status: "active" },
         },
       ],
     },

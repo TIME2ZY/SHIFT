@@ -66,7 +66,7 @@ function appendMemoryCapturedEvent(eventStore, sessionId, invocationId, memory, 
   eventStore.append({
     threadId: sessionId,
     invocationId,
-    kind: "memory-captured",
+    kind: "memory-written",
     payload: {
       id: memory.id,
       threadId: sessionId,
@@ -551,6 +551,8 @@ function createCallbackRoutes({
 
         sendJson(res, 200, {
           ok: true,
+          deprecated: true,
+          replacement: "memory_write",
           outcome: outcome.outcome,
           memoryId: outcome.memoryId,
           replacedMemoryId: outcome.replacedMemoryId,
@@ -569,102 +571,6 @@ function createCallbackRoutes({
           reason: error.message,
           error: error.message,
         });
-      }
-      return true;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-invalidate") {
-      let body;
-      try {
-        body = await readJsonBody(req);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
-      }
-
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-      const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
-      const callbackToken = typeof body.callbackToken === "string" ? body.callbackToken : "";
-      const memoryId = typeof body.id === "string" ? body.id.trim() : "";
-      const reason = typeof body.reason === "string" ? body.reason : "";
-
-      if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
-        return true;
-      }
-      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
-        sendJson(res, 401, { error: "Invalid callback token." });
-        return true;
-      }
-      if (!memoryService) {
-        sendJson(res, 503, {
-          error: "Memory service unavailable. SQLite storage is required.",
-        });
-        return true;
-      }
-      if (!memoryId) {
-        sendJson(res, 400, { error: "id is required." });
-        return true;
-      }
-      if (getSession && !getSession(sessionsFile, sessionId)) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
-
-      const existing = memoryService.get(memoryId);
-      // Project memories are readable project-wide; invalidate must use the same
-      // projectKey rule (not origin-thread equality), or agents cannot correct
-      // institutional memory from a new session.
-      const accessible =
-        existing &&
-        (typeof memoryService.canAccessFromThread === "function"
-          ? memoryService.canAccessFromThread(existing, sessionId)
-          : existing.threadId === sessionId);
-      if (!accessible) {
-        sendJson(res, 404, { error: "Memory not found." });
-        return true;
-      }
-
-      const agentId = resolveAgentId(callbacks, sessionId, invocationId);
-      try {
-        const memory = memoryService.invalidate(memoryId, {
-          invalidatedBy: agentId,
-          reason,
-        });
-        const payload = {
-          action: "invalidate",
-          sessionId,
-          memory: {
-            id: memory.id,
-            kind: memory.kind,
-            status: memory.status,
-            content: memory.content,
-            topic: memory.topic,
-            supersessionKey: memory.supersessionKey,
-            createdBy: memory.createdBy,
-            createdAt: memory.createdAt,
-          },
-        };
-        broadcastMemoryEvent(callbacks, sessionId, payload);
-        const liveStats = bumpThreadWriteStat(callbacks, sessionId, "invalidateCallback", 1);
-        const writeMetrics = buildMemoryWriteMetrics({
-          source: "callback",
-          threadId: sessionId,
-          invocationId,
-          agent: agentId,
-          stats: liveStats,
-        });
-        logMemoryWriteMetrics(writeMetrics, logger);
-        if (typeof callbacks.sendSse === "function") {
-          const thread =
-            typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
-          if (thread?.res) callbacks.sendSse(thread.res, "memory-metrics", writeMetrics);
-        }
-        sendJson(res, 200, { ok: true, memory });
-      } catch (error) {
-        logger.error?.(`[memory-invalidate] failed: ${error.message}`);
-        bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
-        sendJson(res, 400, { error: error.message });
       }
       return true;
     }

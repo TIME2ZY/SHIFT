@@ -15,7 +15,7 @@ const SOURCE_TABLES = Object.freeze([
   "projects",
   "memory_entries",
   "memory_events",
-  "memory_suggestions",
+  "legacy_memory_archive",
   "purged_threads",
   "storage_outbox",
 ]);

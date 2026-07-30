@@ -12,24 +12,21 @@ const {
 
 test("mergeWriteStats adds numeric fields", () => {
   const merged = mergeWriteStats(
-    { upsertCallback: 1, blockWritten: 2 },
-    { blockParsed: 3, errors: 1 }
+    { upsertCallback: 1 },
+    { errors: 1 }
   );
   assert.equal(merged.upsertCallback, 1);
-  assert.equal(merged.blockWritten, 2);
-  assert.equal(merged.blockParsed, 3);
   assert.equal(merged.errors, 1);
-  assert.equal(merged.invalidateCallback, 0);
 });
 
 test("buildMemoryWriteMetrics totals writes", () => {
   const metrics = buildMemoryWriteMetrics({
     source: "chat",
     agent: "codex",
-    stats: { upsertCallback: 1, blockWritten: 2, blockParsed: 2 },
+    stats: { upsertCallback: 1 },
   });
   assert.equal(metrics.kind, "memory_write");
-  assert.equal(metrics.totalWrites, 3);
+  assert.equal(metrics.totalWrites, 1);
   assert.equal(metrics.agent, "codex");
 });
 
@@ -41,7 +38,7 @@ test("isMemoryMetricsLogEnabled reads SHIFT_MEMORY_METRICS_LOG", () => {
 
 test("slimInjectItems truncates content", () => {
   const items = slimInjectItems([
-    { id: "m1", kind: "decision", content: "x".repeat(200), status: "captured" },
+    { id: "m1", kind: "decision", content: "x".repeat(200), status: "active" },
   ]);
   assert.equal(items[0].content.length, 120);
   assert.equal(items[0].id, "m1");

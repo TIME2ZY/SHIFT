@@ -382,7 +382,6 @@ test("handleCallbackRoutes memory-write and legacy memory-upsert share one path"
     storage.close();
   }
 });
-
 test("handleCallbackRoutes memory-upsert validates topic and availability", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
@@ -430,57 +429,6 @@ test("handleCallbackRoutes memory-upsert validates topic and availability", asyn
       new URL("http://127.0.0.1/api/callbacks/memory-upsert")
     );
     assert.equal(unavailable.statusCode, 503);
-  } finally {
-    storage.close();
-  }
-});
-
-test("handleCallbackRoutes memory-invalidate retires thread-local memory", async () => {
-  const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "s1" });
-  storage.threads.create({ id: "other" });
-  try {
-    const created = storage.memory.createProduct({
-      threadId: "s1",
-      kind: "constraint",
-      topic: "no-spawn",
-      content: "Do not spawn nested subagents.",
-      createdBy: "user",
-    });
-
-    const res = makeRes();
-    const { handle, sseEvents } = makeMemoryHandle(storage, {
-      sendJson: makeSendJson(res),
-      readJsonBody: async () => ({
-        sessionId: "s1",
-        invocationId: "i1",
-        callbackToken: "tok",
-        id: created.memory.id,
-        reason: "policy changed",
-      }),
-    });
-    await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-invalidate"));
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.memory.status, "invalidated");
-    assert.equal(sseEvents[0].data.action, "invalidate");
-
-    const otherRes = makeRes();
-    const foreign = makeMemoryHandle(storage, {
-      sendJson: makeSendJson(otherRes),
-      readJsonBody: async () => ({
-        sessionId: "other",
-        invocationId: "i1",
-        callbackToken: "tok",
-        id: created.memory.id,
-      }),
-    });
-    // Token map agent is fine; membership check is by thread id.
-    await foreign.handle(
-      makeReq("POST"),
-      otherRes,
-      new URL("http://127.0.0.1/api/callbacks/memory-invalidate")
-    );
-    assert.equal(otherRes.statusCode, 404);
   } finally {
     storage.close();
   }

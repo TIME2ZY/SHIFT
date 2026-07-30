@@ -192,7 +192,7 @@ test("multi-collab hard-fails orphan invocation even when HTTP and text are gree
     turns,
     aggregate,
     memoriesPayload: {
-      memories: [{ kind: "decision", status: "captured" }],
+      memories: [{ kind: "decision", status: "active" }],
     },
   });
   assert.equal(result.exitCode, 1);
@@ -219,7 +219,7 @@ test("phase assertions reject an implementation agent appearing in discuss", () 
     turns,
     aggregate: aggregateTrace(turns),
     memoriesPayload: {
-      memories: [{ kind: "decision", status: "captured" }],
+      memories: [{ kind: "decision", status: "active" }],
     },
   });
   assert.ok(result.hardFailed.includes("M2-AGENTS-DISCUSS"));
@@ -276,7 +276,7 @@ test("duplicate route from the same invocation to the same target hard-fails", (
     turns,
     aggregate: aggregateTrace(turns),
     memoriesPayload: {
-      memories: [{ kind: "decision", status: "captured" }],
+      memories: [{ kind: "decision", status: "active" }],
     },
   });
   assert.ok(result.hardFailed.includes("M10-HANDOFF-CLOSED"));
@@ -372,7 +372,7 @@ test("multi-collab hard-fails unavailable or empty recall retrieval", () => {
     turns,
     aggregate: aggregateTrace(turns),
     memoriesPayload: {
-      memories: [{ kind: "decision", status: "captured" }],
+      memories: [{ kind: "decision", status: "active" }],
     },
   });
   assert.ok(result.hardFailed.includes("M12-MEMORY-AVAILABLE"));
@@ -392,31 +392,31 @@ test("memory semantic audit separates retrieved, answered, and grounded facts", 
             items: [
               {
                 id: "ttl",
-                status: "captured",
+                status: "active",
                 topic: "auth-token-ttl",
                 content: "登录态约一周",
               },
               {
                 id: "refresh",
-                status: "captured",
+                status: "active",
                 topic: "auth-no-refresh",
                 content: "本期不启用 refresh token",
               },
               {
                 id: "storage",
-                status: "captured",
+                status: "active",
                 topic: "storage-primary",
                 content: "SQLite 是主存储",
               },
               {
                 id: "port",
-                status: "captured",
+                status: "active",
                 topic: "local-dev-port",
                 content: "监听 8787",
               },
               {
                 id: "hash",
-                status: "captured",
+                status: "active",
                 topic: "auth-password-hash",
                 content: "使用 Argon2id",
               },
@@ -490,11 +490,11 @@ test("multi-collab passes semantic gates with retrieved and grounded scenario fa
       availability: { state: "available", empty: false },
       stats: { channels: { recency: 2, related: 3 } },
       items: [
-        { id: "ttl", status: "captured", content: "登录态约一周" },
-        { id: "refresh", status: "captured", content: "不做 refresh token" },
-        { id: "storage", status: "captured", content: "SQLite 主存储" },
-        { id: "port", status: "captured", content: "本地端口 8787" },
-        { id: "hash", status: "captured", content: "密码使用 Argon2id" },
+        { id: "ttl", status: "active", content: "登录态约一周" },
+        { id: "refresh", status: "active", content: "不做 refresh token" },
+        { id: "storage", status: "active", content: "SQLite 主存储" },
+        { id: "port", status: "active", content: "本地端口 8787" },
+        { id: "hash", status: "active", content: "密码使用 Argon2id" },
       ],
     },
   ];
@@ -507,7 +507,7 @@ test("multi-collab passes semantic gates with retrieved and grounded scenario fa
     aggregate,
     memoryExpectations: MEMORY_EXPECTATIONS,
     memoriesPayload: {
-      memories: [{ kind: "decision", status: "captured" }],
+      memories: [{ kind: "decision", status: "active" }],
     },
   });
   assert.equal(result.exitCode, 0, JSON.stringify(result.hardFailed));

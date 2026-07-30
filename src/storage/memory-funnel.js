@@ -8,7 +8,7 @@
 const { canonicalizeTopic } = require("./memory-topic-canon");
 const { MEMORY_DROP_REASONS, MEMORY_FUNNEL_LAYERS } = require("../shared/collab-contracts");
 
-const PRODUCT_KINDS = new Set(["decision", "constraint", "fact", "lesson"]);
+const PRODUCT_KINDS = new Set(["decision", "constraint", "fact"]);
 
 function isProductKind(kind) {
   return PRODUCT_KINDS.has(kind);
@@ -60,7 +60,7 @@ function extractQueryTopicHints(prompt) {
 
 /**
  * Deduplicate product memories by canonical topic; keep highest score.
- * Non-product (handoff/window-seal) pass through without topic collapse.
+ * Rows outside the product contract pass through defensively without topic collapse.
  *
  * @param {object[]} ranked
  * @returns {{ ranked: object[], dropped: object[] }}
@@ -140,7 +140,7 @@ function applyGuaranteedSlots(selected, ranked, queryTopics, totalLimit) {
       (item) => isProductKind(item.kind) && topicOf(item) === topic && !selectedIds.has(item.id)
     );
     if (!hit) continue;
-    // Evict lowest-score non-guaranteed auto/handoff if at cap
+    // Evict the lowest-score non-product row if legacy data reaches this boundary.
     if (selected.length >= totalLimit) {
       let evictIdx = -1;
       let evictScore = Infinity;

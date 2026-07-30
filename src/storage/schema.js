@@ -781,7 +781,244 @@ const MIGRATIONS = Object.freeze([
         WHERE status = 'ready';
     `,
   },
+  {
+    version: 17,
+    name: "active_memory_lifecycle",
+    up: migrateActiveMemoryLifecycle,
+  },
+  {
+    version: 18,
+    name: "remove_memory_suggestions",
+    up: migrateRemoveMemorySuggestions,
+  },
 ]);
+
+function migrateRemoveMemorySuggestions(db) {
+  const exists = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_suggestions'")
+    .get();
+  if (!exists) return;
+
+  db.transaction(() => {
+    const archive = db.prepare(`
+      INSERT OR IGNORE INTO legacy_memory_archive
+        (category, source_table, source_id, payload_json, archived_at)
+      VALUES ('memory-suggestion', 'memory_suggestions', ?, ?, ?)
+    `);
+    const archivedAt = new Date().toISOString();
+    for (const row of db.prepare("SELECT * FROM memory_suggestions").all()) {
+      archive.run(row.id, JSON.stringify(row), archivedAt);
+    }
+    db.exec("DROP TABLE memory_suggestions");
+  })();
+}
+
+function migrateActiveMemoryLifecycle(db) {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legacy_memory_archive (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        source_table TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        archived_at TEXT NOT NULL,
+        UNIQUE (source_table, source_id)
+      );
+    `);
+
+    const archive = db.prepare(`
+      INSERT OR IGNORE INTO legacy_memory_archive
+        (category, source_table, source_id, payload_json, archived_at)
+      VALUES (?, 'memory_entries', ?, ?, ?)
+    `);
+    const archivedAt = new Date().toISOString();
+    for (const row of db
+      .prepare(
+        `SELECT * FROM memory_entries
+         WHERE status = 'invalidated'
+            OR kind NOT IN ('decision', 'constraint', 'fact')`
+      )
+      .all()) {
+      const category =
+        row.status === "invalidated" ? "invalidated-memory" : "non-product-memory";
+      archive.run(category, row.id, JSON.stringify(row), archivedAt);
+    }
+
+    db.exec(`
+      DROP INDEX IF EXISTS memory_active_thread_supersession;
+      DROP INDEX IF EXISTS memory_active_project_supersession;
+      DROP INDEX IF EXISTS memory_capture_thread;
+      DROP INDEX IF EXISTS memory_capture_project;
+      DROP INDEX IF EXISTS memory_project_active;
+      DROP INDEX IF EXISTS memory_thread_active;
+      DROP INDEX IF EXISTS memory_origin_thread;
+
+      CREATE TABLE memory_entries_active (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL CHECK (scope IN ('thread', 'project')),
+        owner_thread_id TEXT,
+        project_key TEXT,
+        origin_thread_id TEXT,
+        kind TEXT NOT NULL CHECK (kind IN ('decision', 'constraint', 'fact')),
+        status TEXT NOT NULL CHECK (status IN ('active', 'superseded')),
+        authority TEXT NOT NULL CHECK (authority IN ('system', 'user', 'agent')),
+        activation TEXT NOT NULL CHECK (activation IN ('always_on', 'query', 'backstop')),
+        content TEXT NOT NULL,
+        summary TEXT,
+        topic TEXT,
+        supersession_key TEXT,
+        capture_key TEXT NOT NULL,
+        content_hash TEXT,
+        anchors_json TEXT,
+        metadata_json TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        superseded_by TEXT,
+        source_message_id TEXT,
+        source_invocation_id TEXT,
+        window_id TEXT,
+        CHECK (
+          (scope = 'thread'  AND owner_thread_id IS NOT NULL AND project_key IS NULL)
+          OR
+          (scope = 'project' AND project_key IS NOT NULL AND owner_thread_id IS NULL)
+        ),
+        FOREIGN KEY (owner_thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (origin_thread_id) REFERENCES threads(id) ON DELETE SET NULL,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE RESTRICT,
+        FOREIGN KEY (superseded_by) REFERENCES memory_entries_active(id) ON DELETE SET NULL,
+        FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL,
+        FOREIGN KEY (source_invocation_id) REFERENCES invocations(id) ON DELETE SET NULL,
+        FOREIGN KEY (window_id) REFERENCES context_windows(id) ON DELETE SET NULL
+      );
+
+      INSERT INTO memory_entries_active (
+        id, scope, owner_thread_id, project_key, origin_thread_id,
+        kind, status, authority, activation, content, summary, topic,
+        supersession_key, capture_key, content_hash, anchors_json, metadata_json,
+        created_by, created_at, superseded_by, source_message_id,
+        source_invocation_id, window_id
+      )
+      SELECT
+        current.id,
+        current.scope,
+        current.owner_thread_id,
+        current.project_key,
+        current.origin_thread_id,
+        current.kind,
+        CASE
+          WHEN current.status = 'superseded' THEN 'superseded'
+          WHEN current.topic IS NOT NULL AND EXISTS (
+            SELECT 1
+            FROM memory_entries newer
+            WHERE newer.status IN ('captured', 'confirmed')
+              AND newer.scope = current.scope
+              AND COALESCE(newer.owner_thread_id, '') = COALESCE(current.owner_thread_id, '')
+              AND COALESCE(newer.project_key, '') = COALESCE(current.project_key, '')
+              AND newer.topic = current.topic
+              AND (
+                newer.created_at > current.created_at
+                OR (newer.created_at = current.created_at AND newer.id > current.id)
+              )
+          ) THEN 'superseded'
+          ELSE 'active'
+        END,
+        current.authority,
+        current.activation,
+        current.content,
+        current.summary,
+        current.topic,
+        current.supersession_key,
+        current.capture_key,
+        current.content_hash,
+        current.anchors_json,
+        current.metadata_json,
+        current.created_by,
+        current.created_at,
+        CASE
+          WHEN current.superseded_by IN (
+            SELECT id FROM memory_entries
+            WHERE status <> 'invalidated'
+              AND kind IN ('decision', 'constraint', 'fact')
+          ) THEN current.superseded_by
+          ELSE NULL
+        END,
+        current.source_message_id,
+        current.source_invocation_id,
+        current.window_id
+      FROM memory_entries current
+      WHERE current.status <> 'invalidated'
+        AND current.kind IN ('decision', 'constraint', 'fact');
+
+      DELETE FROM memory_search
+      WHERE memory_id NOT IN (SELECT id FROM memory_entries_active);
+
+      UPDATE embedding_items
+      SET status = 'stale',
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE source_kind = 'memory'
+        AND source_id NOT IN (SELECT id FROM memory_entries_active);
+
+      DROP TABLE memory_entries;
+      ALTER TABLE memory_entries_active RENAME TO memory_entries;
+
+      CREATE UNIQUE INDEX memory_active_thread_topic
+        ON memory_entries(owner_thread_id, topic)
+        WHERE scope = 'thread' AND topic IS NOT NULL AND status = 'active';
+
+      CREATE UNIQUE INDEX memory_active_project_topic
+        ON memory_entries(project_key, topic)
+        WHERE scope = 'project' AND topic IS NOT NULL AND status = 'active';
+
+      CREATE UNIQUE INDEX memory_capture_thread
+        ON memory_entries(owner_thread_id, capture_key)
+        WHERE scope = 'thread';
+
+      CREATE UNIQUE INDEX memory_capture_project
+        ON memory_entries(project_key, capture_key)
+        WHERE scope = 'project';
+
+      CREATE INDEX memory_project_active
+        ON memory_entries(project_key, kind, created_at)
+        WHERE scope = 'project' AND status = 'active';
+
+      CREATE INDEX memory_thread_active
+        ON memory_entries(owner_thread_id, kind, created_at)
+        WHERE scope = 'thread' AND status = 'active';
+
+      CREATE INDEX memory_origin_thread
+        ON memory_entries(origin_thread_id)
+        WHERE origin_thread_id IS NOT NULL;
+
+      UPDATE memory_search
+      SET status = CASE status
+        WHEN 'superseded' THEN 'superseded'
+        ELSE 'active'
+      END,
+      title = kind || ':' || CASE status
+        WHEN 'superseded' THEN 'superseded'
+        ELSE 'active'
+      END;
+    `);
+
+    const fkViolations = db.pragma("foreign_key_check");
+    if (Array.isArray(fkViolations) && fkViolations.length > 0) {
+      throw new Error(
+        `active memory lifecycle migration foreign_key_check failed: ${JSON.stringify(fkViolations.slice(0, 5))}`
+      );
+    }
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+
+  const integrity = db.pragma("integrity_check", { simple: true });
+  if (integrity !== "ok") {
+    throw new Error(`active memory lifecycle migration integrity_check failed: ${integrity}`);
+  }
+}
 
 function migrateMemoryFoundationOwnership(db) {
   db.pragma("foreign_keys = OFF");

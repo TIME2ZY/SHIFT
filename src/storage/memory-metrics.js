@@ -12,10 +12,6 @@ function isMemoryMetricsLogEnabled(env = process.env) {
 function emptyWriteStats() {
   return {
     upsertCallback: 0,
-    invalidateCallback: 0,
-    blockParsed: 0,
-    blockWritten: 0,
-    blockSkipped: 0,
     errors: 0,
   };
 }
@@ -43,7 +39,7 @@ function buildMemoryWriteMetrics(input = {}) {
     invocationId: input.invocationId || null,
     agent: input.agent || null,
     ...stats,
-    totalWrites: stats.upsertCallback + stats.blockWritten,
+    totalWrites: stats.upsertCallback,
   };
 }
 
@@ -55,10 +51,6 @@ function formatMemoryWriteMetricsLine(metrics) {
     ` source=${metrics.source}` +
     ` agent=${metrics.agent || "?"}` +
     ` upsert=${metrics.upsertCallback}` +
-    ` invalidate=${metrics.invalidateCallback}` +
-    ` blockParsed=${metrics.blockParsed}` +
-    ` blockWritten=${metrics.blockWritten}` +
-    ` blockSkipped=${metrics.blockSkipped}` +
     ` errors=${metrics.errors}` +
     ` totalWrites=${metrics.totalWrites}` +
     (metrics.threadId ? ` thread=${metrics.threadId}` : "") +

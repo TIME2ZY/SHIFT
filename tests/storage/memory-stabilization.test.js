@@ -12,7 +12,7 @@ function product(overrides = {}) {
     scope: "thread",
     ownerThreadId: "thread-1",
     kind: "decision",
-    status: "captured",
+    status: "active",
     topic: "storage.authoritative",
     content: "SQLite is authoritative.",
     anchors: [{ type: "message", ref: "message-1" }],

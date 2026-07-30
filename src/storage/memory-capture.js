@@ -4,7 +4,6 @@ const { validateCaptureEncoding } = require("./memory-funnel");
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 
 function createMemoryCapture({
-  memoryService = null,
   transcript,
   eventStore = null,
   allowTranscriptReplay = true,
@@ -16,19 +15,18 @@ function createMemoryCapture({
   if (!hasTranscript && !hasEventStore) {
     throw new Error("Memory capture requires an eventStore or transcript event sink.");
   }
-  const replayedThreads = new Set();
-
-  function emitMemoryEvent(threadId, invocationId, event) {
+  function emitCollaborationEvent(threadId, invocationId, event) {
+    const eventKind = event.kind === "window-seal" ? "window-sealed" : "handoff-captured";
     if (hasEventStore) {
       eventStore.append({
         threadId,
         invocationId,
-        kind: "memory-captured",
+        kind: eventKind,
         payload: event,
       });
       return;
     }
-    transcript.appendEvent(threadId, invocationId, "memory-captured", event);
+    transcript.appendEvent(threadId, invocationId, eventKind, event);
   }
 
   function persistCapture(input, eventInvocationId) {
@@ -45,39 +43,20 @@ function createMemoryCapture({
       return { captured: false, reason: encoding.reason || "encoding" };
     }
 
-    let outcome = null;
-    let error = null;
-    if (memoryService && typeof memoryService.capture === "function") {
-      try {
-        outcome = memoryService.capture(input);
-      } catch (captureError) {
-        error = captureError;
-        logger.error?.(`[memory-capture] SQLite capture failed: ${captureError.message}`);
-      }
-    }
-
-    const memory = outcome?.memory || { ...input, status: "captured" };
     const event = {
-      id: memory.id,
-      threadId: memory.threadId,
-      kind: memory.kind,
-      status: memory.status || "captured",
-      content: memory.content,
-      sourceMessageId: memory.sourceMessageId || null,
-      sourceInvocationId: memory.sourceInvocationId || null,
-      createdBy: memory.createdBy,
-      createdAt: memory.createdAt,
-      metadata: memory.metadata || null,
-      windowId: memory.windowId || null,
-      captureKey: memory.captureKey,
-      supersessionKey: memory.supersessionKey || null,
-      persisted: Boolean(outcome),
-      created: outcome?.created ?? false,
-      error: error ? error.message : null,
+      id: input.id,
+      threadId: input.threadId,
+      kind: input.kind,
+      content: input.content,
+      sourceInvocationId: input.sourceInvocationId || null,
+      createdBy: input.createdBy,
+      createdAt: input.createdAt,
+      metadata: input.metadata || null,
+      windowId: input.windowId || null,
+      captureKey: input.captureKey,
     };
-    emitMemoryEvent(input.threadId, eventInvocationId, event);
-    if (error) replayedThreads.delete(input.threadId);
-    return { captured: true, persisted: Boolean(outcome), memory, event, error };
+    emitCollaborationEvent(input.threadId, eventInvocationId, event);
+    return { captured: true, persisted: true, event };
   }
 
   function captureHandoffUnsafe(input) {
@@ -152,68 +131,16 @@ function createMemoryCapture({
   }
 
   async function replayThread(threadId) {
-    if (!allowTranscriptReplay) {
-      return {
-        replayed: 0,
-        existing: 0,
-        failed: 0,
-        available: false,
-        reason: "transcript-replay-disabled",
-      };
-    }
-    if (replayedThreads.has(threadId)) return { replayed: 0, existing: 0, failed: 0, cached: true };
-    if (
-      !memoryService ||
-      typeof memoryService.capture !== "function" ||
-      typeof transcript.listInvocations !== "function" ||
-      typeof transcript.readInvocation !== "function"
-    ) {
-      return { replayed: 0, existing: 0, failed: 0, available: false };
-    }
-
-    let replayed = 0;
-    let existing = 0;
-    let failed = 0;
-    try {
-      if (typeof transcript.flush === "function") await transcript.flush();
-      const invocationIds = await transcript.listInvocations(threadId);
-      /** @type {Array<{ captureKey: string, memoryInput: object, createdAt: string }>} */
-      const pending = [];
-      for (const invocationId of invocationIds) {
-        const events = await transcript.readInvocation(threadId, invocationId);
-        for (const event of events) {
-          if (event?.kind !== "memory-captured") continue;
-          const memoryInput = replayInput(event.payload, threadId);
-          if (!memoryInput) continue;
-          pending.push({
-            captureKey: memoryInput.captureKey,
-            memoryInput,
-            createdAt: typeof memoryInput.createdAt === "string" ? memoryInput.createdAt : "",
-          });
-        }
-      }
-      // Supersession is order-sensitive: always replay oldest captures first so a
-      // later version can retire earlier active rows for the same topic key.
-      pending.sort((a, b) => {
-        if (a.createdAt !== b.createdAt) return a.createdAt.localeCompare(b.createdAt);
-        return a.captureKey.localeCompare(b.captureKey);
-      });
-      for (const item of pending) {
-        try {
-          const outcome = memoryService.capture(item.memoryInput);
-          if (outcome.created) replayed += 1;
-          else existing += 1;
-        } catch (error) {
-          failed += 1;
-          logger.error?.(`[memory-capture] replay failed for ${item.captureKey}: ${error.message}`);
-        }
-      }
-    } catch (error) {
-      failed += 1;
-      logger.error?.(`[memory-capture] transcript replay failed for ${threadId}: ${error.message}`);
-    }
-    if (failed === 0) replayedThreads.add(threadId);
-    return { replayed, existing, failed, cached: false };
+    return {
+      threadId,
+      replayed: 0,
+      existing: 0,
+      failed: 0,
+      available: false,
+      reason: allowTranscriptReplay
+        ? "collaboration-events-are-not-memory"
+        : "transcript-replay-disabled",
+    };
   }
 
   function safelyCapture(source, work) {
@@ -290,29 +217,6 @@ function renderWindowSealMemory(input) {
     ].join("\n"),
     MAX_MEMORY_CONTENT_CHARS
   );
-}
-
-function replayInput(payload, threadId) {
-  if (!payload || payload.threadId !== threadId || !payload.captureKey) return null;
-  return {
-    id: payload.id,
-    threadId,
-    kind: payload.kind,
-    content: payload.content,
-    sourceMessageId: null,
-    sourceInvocationId: null,
-    createdBy: payload.createdBy,
-    createdAt: payload.createdAt,
-    metadata: {
-      ...(payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {}),
-      replayedSourceMessageId: payload.sourceMessageId || null,
-      replayedSourceInvocationId: payload.sourceInvocationId || null,
-      replayedWindowId: payload.windowId || null,
-    },
-    windowId: null,
-    captureKey: payload.captureKey,
-    supersessionKey: payload.supersessionKey,
-  };
 }
 
 function normalizeQuality(quality) {

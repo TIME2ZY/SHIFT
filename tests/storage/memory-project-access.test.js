@@ -1,5 +1,5 @@
 /**
- * Project-scoped memory: cross-thread invalidate + topic canon + cross-kind supersede.
+ * Project-scoped memory: access, topic canon, and scope-local replacement.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -9,7 +9,6 @@ const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
 const { canonicalizeTopic } = require("../../src/storage/memory-topic-canon");
-const { createMemoryCapture } = require("../../src/storage/memory-capture");
 
 function createProjectFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-mem-access-"));
@@ -52,8 +51,7 @@ test("canAccessFromThread allows project memory from sibling thread", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-test("sibling thread can invalidate project memory written on origin thread", () => {
+test("sibling thread replaces project memory by writing the same topic", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const written = storage.memory.createProduct({
@@ -65,12 +63,16 @@ test("sibling thread can invalidate project memory written on origin thread", ()
       writeChannel: "agent",
     });
     assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-b"), true);
-    const invalidated = storage.memory.invalidate(written.memory.id, {
-      invalidatedBy: "grok",
-      reason: "user revised to 7 days",
+    const replacement = storage.memory.createProduct({
+      threadId: "thread-b",
+      kind: "decision",
+      topic: "auth-token-ttl",
+      content: "TTL 7 days",
+      createdBy: "agent:grok",
+      writeChannel: "agent",
     });
-    assert.equal(invalidated.status, "invalidated");
-    assert.equal(storage.memories.get(written.memory.id).status, "invalidated");
+    assert.equal(storage.memories.get(written.memory.id).status, "superseded");
+    assert.equal(storage.memories.get(written.memory.id).supersededBy, replacement.memory.id);
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -100,7 +102,7 @@ test("topic alias supersedes prior active product memory", () => {
     });
     assert.equal(second.topic, "auth-token-ttl");
     assert.equal(storage.memories.get(first.memory.id).status, "superseded");
-    assert.equal(storage.memories.get(second.memory.id).status, "captured");
+    assert.equal(storage.memories.get(second.memory.id).status, "active");
 
     const active = storage.memory.listActiveForTurn("thread-b", { limit: 50 });
     const ttlActive = active.filter(
@@ -114,7 +116,7 @@ test("topic alias supersedes prior active product memory", () => {
   }
 });
 
-test("same canon topic decision then fact keeps one active", () => {
+test("same canon topic can coexist in project and thread scopes", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const decision = storage.memory.createProduct({
@@ -134,76 +136,15 @@ test("same canon topic decision then fact keeps one active", () => {
       writeChannel: "agent",
     });
     assert.equal(fact.topic, "local-dev-port");
-    assert.equal(storage.memories.get(decision.memory.id).status, "superseded");
-    assert.equal(storage.memories.get(fact.memory.id).status, "captured");
+    assert.equal(storage.memories.get(decision.memory.id).status, "active");
+    assert.equal(storage.memories.get(fact.memory.id).status, "active");
 
     const active = storage.memory.listActiveForTurn("thread-a", { limit: 50 });
     const ports = active.filter((m) => (m.topic || m.metadata?.topic) === "local-dev-port");
-    assert.equal(ports.length, 1);
+    assert.equal(ports.length, 2);
+    assert.deepEqual(new Set(ports.map((memory) => memory.scope)), new Set(["project", "thread"]));
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("window-seal partial false for post-turn reason", () => {
-  const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "t1", projectDir: "C:/proj", title: "t" });
-  const window = storage.windows.create({
-    id: "win-1",
-    threadId: "t1",
-    agentId: "codex",
-    providerKey: "codex:test",
-    workspaceKey: "base:C:/proj",
-    generation: 1,
-    capacityTokens: 100000,
-  });
-  storage.invocations.start({
-    id: "inv-1",
-    threadId: "t1",
-    windowId: window.id,
-    agentId: "codex",
-    startedAt: new Date().toISOString(),
-  });
-  const capture = createMemoryCapture({
-    memoryService: storage.memory,
-    eventStore: {
-      append() {},
-    },
-  });
-  try {
-    const complete = capture.captureWindowSeal({
-      threadId: "t1",
-      invocationId: "inv-1",
-      windowId: "win-1",
-      agentId: "codex",
-      generation: 1,
-      ratio: 0.92,
-      reason: "post-turn-soft-ratio",
-      assistantContent: "full answer body here",
-      partial: false,
-      invocationState: "completed",
-    });
-    assert.equal(complete.captured, true);
-    assert.equal(complete.memory.metadata.partial, false);
-    assert.match(complete.memory.content, /partial=false/);
-    assert.match(complete.memory.content, /完整轮次快照/);
-    assert.doesNotMatch(complete.memory.content, /中断快照/);
-
-    const partial = capture.captureWindowSeal({
-      threadId: "t1",
-      invocationId: "inv-1",
-      windowId: "win-2",
-      agentId: "codex",
-      generation: 1,
-      ratio: 1.1,
-      reason: "pre-call-projected",
-      assistantContent: "",
-      invocationState: "pre-call-rotate",
-    });
-    assert.equal(partial.memory.metadata.partial, true);
-    assert.match(partial.memory.content, /中断快照|partial=true/);
-  } finally {
-    storage.close();
   }
 });

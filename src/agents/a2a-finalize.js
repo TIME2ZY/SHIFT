@@ -181,7 +181,7 @@ function finalizeA2ARoutes(input = {}) {
       if (capture?.captured) {
         capturedCount += 1;
         if (sendSse && capture.event) {
-          sendSse("memory-captured", capture.event);
+          sendSse("handoff-captured", capture.event);
         }
       }
     }

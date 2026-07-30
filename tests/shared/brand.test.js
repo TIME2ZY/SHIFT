@@ -24,13 +24,5 @@ describe("brand identifiers", () => {
     assert.equal(brand.ENV.RETRIEVE_RELATED_LIMIT, "SHIFT_RETRIEVE_RELATED_LIMIT");
     assert.equal(brand.ENV.SEARCH_MEMORY_QUOTA, "SHIFT_SEARCH_MEMORY_QUOTA");
     assert.equal(brand.ENV.HANDOFF_POLICY, "SHIFT_HANDOFF_POLICY");
-    assert.equal(
-      brand.ENV.MEMORY_SUGGESTIONS_ENABLED,
-      "SHIFT_MEMORY_SUGGESTIONS_ENABLED"
-    );
-    assert.equal(
-      brand.ENV.MEMORY_FENCED_BLOCKS_ENABLED,
-      "SHIFT_MEMORY_FENCED_BLOCKS_ENABLED"
-    );
   });
 });

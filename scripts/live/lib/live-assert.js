@@ -432,7 +432,7 @@ function evaluateLiveRun(input) {
 
 function isRetiredStatus(status) {
   const s = String(status || "");
-  return s === "invalidated" || s === "superseded";
+  return s === "superseded";
 }
 
 function topicOf(m) {

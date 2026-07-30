@@ -10,7 +10,6 @@ const handoffRouteRegistry = require("../agents/handoff-route-registry");
 const { createRunObservability } = require("../agents/run-observability");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 const { scanReplacementChars } = require("../shared/encoding-guard");
-const { applyMemoryBlocks } = require("../agents/memory-block");
 const {
   emptyWriteStats,
   mergeWriteStats,
@@ -19,11 +18,7 @@ const {
   buildMemoryInjectPayload,
 } = require("../storage/memory-metrics");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
-const {
-  extractSuggestionsFromTurn,
-  isSuggestionExtractorEnabled,
-} = require("../storage/memory-extractor");
-const { refreshDigestAndExtract } = require("../storage/memory-digest");
+const { refreshDigest } = require("../storage/memory-digest");
 const {
   projectTurnBudget,
   shouldPreSealRotate,
@@ -340,7 +335,6 @@ function createChatRoutes({
     const { augmentedPrompt, skillNames } = augmentPrompt(rawPrompt, useWorktree);
     const protocol = req.headers["x-forwarded-proto"] || "http";
     const apiUrl = process.env[ENV.API_URL] || `${protocol}://${req.headers.host}`;
-    const callbackInstructions = callbacks.buildCallbackInstructions(apiUrl, sessionId);
     const worklist = [requestedAgent];
     const maxDepth = getMaxA2ADepth();
 
@@ -618,7 +612,11 @@ function createChatRoutes({
             sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
           }
         }
-        promptParts.push(callbackInstructions);
+        promptParts.push(
+          callbacks.buildCallbackInstructions(apiUrl, sessionId, {
+            supportsMemoryMcp: agent === "codex",
+          })
+        );
         let promptForAgent = promptParts.filter(Boolean).join("\n\n");
 
         // Tracker from open window *before* this prompt (for PRE projection).
@@ -824,7 +822,7 @@ function createChatRoutes({
             invocationState: "pre-call-rotate",
           });
           if (capture?.captured) {
-            sendSse(res, "memory-captured", capture.event);
+            sendSse(res, "window-sealed", capture.event);
           }
           // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
         }
@@ -995,7 +993,7 @@ function createChatRoutes({
             sealMeta,
           });
           if (capture?.captured) {
-            sendSse(res, "memory-captured", capture.event);
+            sendSse(res, "window-sealed", capture.event);
           }
           return { rotated, sealMeta, rotateCapacity };
         };
@@ -1445,63 +1443,40 @@ function createChatRoutes({
         Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
         threadCtx.a2aCount = finalized.a2aCount;
 
-        // L3 product memories from fenced ```memory blocks (soft — never blocks routing).
-        const blockStats = applyMemoryBlocks({
-          text: assistantContent,
-          threadId: sessionId,
-          invocationId: finalInvocationId,
-          agentId: agent,
-          memoryService,
-          eventStore: events,
-          sendSse: (event, payload) => sendSse(res, event, payload),
-          logger: log,
-        });
         const turnWriteStats = mergeWriteStats(
           emptyWriteStats(),
           threadCtx.memoryWriteStats || emptyWriteStats()
         );
-        const mergedWriteStats = mergeWriteStats(turnWriteStats, blockStats);
         threadCtx.memoryWriteStats = emptyWriteStats();
         const writeMetrics = buildMemoryWriteMetrics({
           source: "chat",
           threadId: sessionId,
           invocationId: finalInvocationId,
           agent,
-          stats: mergedWriteStats,
+          stats: turnWriteStats,
         });
         logMemoryWriteMetrics(writeMetrics, log);
         sendSse(res, "memory-metrics", writeMetrics);
 
-        // PR-4: heuristic digest + suggestion extractor (suggestions only, never L2).
+        // Recovery digest is derived state and never a product Memory write path.
         try {
-          const extractResult = refreshDigestAndExtract({
+          const digestResult = refreshDigest({
             storage,
             threadId: sessionId,
-            userText: rawPrompt,
-            assistantText: assistantContent,
-            userMessageId,
-            assistantMessageId: assistantMessage.id,
-            invocationId: finalInvocationId,
-            projectKey: storage?.threads?.get?.(sessionId)?.projectKey || null,
-            extractSuggestionsFromTurn: isSuggestionExtractorEnabled()
-              ? extractSuggestionsFromTurn
-              : null,
             logger: log,
           });
-          if (extractResult?.extract?.created > 0 || extractResult?.digest) {
+          if (digestResult?.digest) {
             sendSse(res, "memory-digest", {
               sessionId,
               invocationId: finalInvocationId,
-              digest: extractResult.digest
+              digest: digestResult.digest
                 ? {
-                    summary: extractResult.digest.summary,
-                    topics: extractResult.digest.topics,
-                    messageCount: extractResult.digest.messageCount,
-                    updatedAt: extractResult.digest.updatedAt,
+                    summary: digestResult.digest.summary,
+                    topics: digestResult.digest.topics,
+                    messageCount: digestResult.digest.messageCount,
+                    updatedAt: digestResult.digest.updatedAt,
                   }
                 : null,
-              suggestionsCreated: extractResult.extract?.created || 0,
-              suggestionIds: (extractResult.extract?.suggestions || []).map((item) => item.id),
             });
           }
         } catch (error) {

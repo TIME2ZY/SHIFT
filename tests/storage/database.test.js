@@ -38,7 +38,7 @@ test("memory database applies schema and safety pragmas", () => {
       "memory_entries",
       "memory_search",
       "memory_events",
-      "memory_suggestions",
+      "legacy_memory_archive",
       "thread_digests",
       "project_documents",
       "project_passages",

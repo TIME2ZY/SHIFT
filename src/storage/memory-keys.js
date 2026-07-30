@@ -7,11 +7,11 @@
  *   fact:runtime-database
  */
 
-const PRODUCT_KINDS = Object.freeze(["decision", "constraint", "fact", "lesson"]);
-const AUTO_KINDS = Object.freeze(["handoff", "window-seal", "digest"]);
+const PRODUCT_KINDS = Object.freeze(["decision", "constraint", "fact"]);
+const AUTO_KINDS = Object.freeze([]);
 const ALL_KINDS = Object.freeze([...PRODUCT_KINDS, ...AUTO_KINDS]);
-const ACTIVE_STATUSES = Object.freeze(["captured", "confirmed"]);
-const ALL_STATUSES = Object.freeze(["captured", "confirmed", "superseded", "invalidated"]);
+const ACTIVE_STATUSES = Object.freeze(["active"]);
+const ALL_STATUSES = Object.freeze(["active", "superseded"]);
 
 function isProductKind(kind) {
   return PRODUCT_KINDS.includes(kind);

@@ -27,13 +27,13 @@ test("memory panel discards a stale response after switching sessions", async ()
   currentSessionId = "s2";
   const second = panel.load();
   pending.get("s2")({
-    memories: [{ id: "m2", kind: "fact", status: "captured", content: "new session" }],
-    counts: { captured: 1 },
+    memories: [{ id: "m2", kind: "fact", status: "active", content: "new session" }],
+    counts: { active: 1 },
   });
   await second;
   pending.get("s1")({
-    memories: [{ id: "m1", kind: "fact", status: "captured", content: "old session" }],
-    counts: { captured: 1 },
+    memories: [{ id: "m1", kind: "fact", status: "active", content: "old session" }],
+    counts: { active: 1 },
   });
   await first;
 

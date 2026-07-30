@@ -10,7 +10,6 @@ const COMMANDS = new Set([
   "session-search",
   "read-invocation",
   "memory-upsert",
-  "memory-invalidate",
 ]);
 
 function parseArgs(argv) {
@@ -112,25 +111,6 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-      },
-    };
-  }
-
-  if (command === "memory-invalidate") {
-    if (!options.id) throw new Error("memory-invalidate requires --id");
-    headers["Content-Type"] = "application/json; charset=utf-8";
-    return {
-      url,
-      init: {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          sessionId: context.sessionId,
-          invocationId: context.invocationId,
-          callbackToken: context.callbackToken,
-          id: options.id,
-          reason: typeof options.reason === "string" ? options.reason : "",
-        }),
       },
     };
   }

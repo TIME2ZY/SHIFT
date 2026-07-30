@@ -1,10 +1,10 @@
 const crypto = require("node:crypto");
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
-function enqueueMemoryEmbedding(storage, memory) {
+function enqueueMemoryEmbedding(storage, memory, index = null) {
   if (!memory?.id || !memory?.content) return null;
   const topic = memory.topic || memory.metadata?.topic || "";
-  return enqueueForActiveIndex(storage, {
+  return enqueueForIndex(storage, index, {
     sourceKind: "memory",
     sourceId: memory.id,
     content: [memory.kind ? `${memory.kind}.` : "", topic ? `${topic}.` : "", memory.content]
@@ -16,7 +16,7 @@ function enqueueMemoryEmbedding(storage, memory) {
   });
 }
 
-function enqueueRecallEmbedding(storage, item) {
+function enqueueRecallEmbedding(storage, item, index = null) {
   if (!item?.sourceId || !item?.content) return null;
   if (item.sourceKind === "message") {
     const role = item.metadata?.role;
@@ -29,7 +29,7 @@ function enqueueRecallEmbedding(storage, item) {
       return null;
     }
     if (!isUsefulText(item.content)) return null;
-    return enqueueForActiveIndex(storage, {
+    return enqueueForIndex(storage, index, {
       sourceKind: "message",
       sourceId: item.sourceId,
       content: item.content,
@@ -39,7 +39,7 @@ function enqueueRecallEmbedding(storage, item) {
   }
   if (item.sourceKind === "invocation-event") {
     if (!isUsefulEvidence(item)) return null;
-    return enqueueForActiveIndex(storage, {
+    return enqueueForIndex(storage, index, {
       sourceKind: "evidence",
       sourceId: item.sourceId,
       content: `${item.title || "Tool result"}.\n${item.content}`,
@@ -51,7 +51,11 @@ function enqueueRecallEmbedding(storage, item) {
 }
 
 function enqueueForActiveIndex(storage, input) {
-  const index = storage?.embeddings?.getActiveIndex?.();
+  return enqueueForIndex(storage, null, input);
+}
+
+function enqueueForIndex(storage, requestedIndex, input) {
+  const index = requestedIndex || storage?.embeddings?.getActiveIndex?.();
   if (!index) return null;
   const content = normalizeContent(input.content);
   if (!content) return null;
@@ -67,10 +71,10 @@ function enqueueForActiveIndex(storage, input) {
   });
 }
 
-function enqueueProjectDocumentEmbedding(storage, passage) {
+function enqueueProjectDocumentEmbedding(storage, passage, index = null) {
   if (!passage?.id || !passage?.projectKey) return null;
   const content = [passage.path, passage.heading, passage.content].filter(Boolean).join("\n");
-  return enqueueForActiveIndex(storage, {
+  return enqueueForIndex(storage, index, {
     sourceKind: "project-doc",
     sourceId: String(passage.id),
     content,
@@ -110,6 +114,7 @@ module.exports = {
   enqueueMemoryEmbedding,
   enqueueRecallEmbedding,
   enqueueForActiveIndex,
+  enqueueForIndex,
   enqueueProjectDocumentEmbedding,
   isUsefulEvidence,
   isUsefulText,

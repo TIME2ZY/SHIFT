@@ -22,7 +22,7 @@ function capture(storage, overrides = {}) {
   return storage.memory.capture({
     id: "memory-1",
     threadId: "thread-1",
-    kind: "handoff",
+    kind: "fact",
     content: "Implement the login flow.",
     createdBy: "codex",
     captureKey: "handoff:invocation-1:opencode:0",
@@ -46,7 +46,7 @@ test("capture_key makes memory capture idempotent and preserves enriched fields"
     assert.equal(replay.created, false);
     assert.equal(replay.memory.id, "memory-1");
     assert.equal(storage.memories.listForThread("thread-1").length, 1);
-    assert.equal(first.memory.status, "captured");
+    assert.equal(first.memory.status, "active");
     assert.equal(first.memory.windowId, "window-1");
     assert.equal(first.memory.captureKey, "handoff:invocation-1:opencode:0");
     assert.deepEqual(first.memory.metadata, { quality: { ok: true } });
@@ -60,7 +60,7 @@ test("capture_key makes memory capture idempotent and preserves enriched fields"
         storage.memories.create({
           id: "memory-duplicate-key",
           threadId: "thread-1",
-          kind: "handoff",
+          kind: "fact",
           content: "duplicate",
           createdBy: "test",
           captureKey: first.memory.captureKey,
@@ -106,21 +106,21 @@ test("supersession only retires active memories with the same explicit topic key
     capture(storage, {
       id: "login-v1",
       captureKey: "handoff:inv-c:opencode:0",
-      supersessionKey: "handoff:login",
+      supersessionKey: "fact:login",
       content: "Use cookie sessions.",
     });
     const replacement = capture(storage, {
       id: "login-v2",
       captureKey: "handoff:inv-d:opencode:0",
-      supersessionKey: "handoff:login",
+      supersessionKey: "fact:login",
       content: "Use signed cookie sessions.",
     });
 
     assert.deepEqual(replacement.superseded, ["login-v1"]);
     assert.equal(storage.memories.get("login-v1").status, "superseded");
     assert.equal(storage.memories.get("login-v1").supersededBy, "login-v2");
-    assert.equal(storage.memories.get("parallel-a").status, "captured");
-    assert.equal(storage.memories.get("parallel-b").status, "captured");
+    assert.equal(storage.memories.get("parallel-a").status, "active");
+    assert.equal(storage.memories.get("parallel-b").status, "active");
     assert.deepEqual(
       storage.memory
         .listActive("thread-1")
@@ -137,41 +137,70 @@ test("supersession only retires active memories with the same explicit topic key
   }
 });
 
-test("confirm requires auditable provenance and active listing filters retired entries", () => {
+test("same-topic replacement is the only retirement path", () => {
   const storage = createFixture();
   try {
-    capture(storage, { id: "confirm-me" });
-    assert.throws(() => storage.memory.confirm("confirm-me"), /memory confirmer is required/);
-
-    const confirmed = storage.memory.confirm("confirm-me", {
-      confirmedBy: "user",
-      confirmationSource: "user-message:42",
-      confirmedAt: "2026-07-16T01:00:00.000Z",
+    capture(storage, {
+      id: "first",
+      captureKey: "fact:first",
+      supersessionKey: "fact:requirement",
     });
-    assert.equal(confirmed.status, "confirmed");
-    assert.equal(confirmed.metadata.confirmedBy, "user");
-    assert.equal(confirmed.metadata.confirmationSource, "user-message:42");
-    assert.equal(
-      storage.memories.getSearchProjection("confirm-me").metadata.status,
-      "confirmed"
-    );
-    assert.equal(confirmed.authority, "user");
-
-    storage.memory.invalidate("confirm-me", {
-      invalidatedBy: "user",
-      reason: "requirement changed",
-      invalidatedAt: "2026-07-16T02:00:00.000Z",
+    capture(storage, {
+      id: "replacement",
+      captureKey: "fact:replacement",
+      supersessionKey: "fact:requirement",
     });
-    assert.equal(storage.memories.get("confirm-me").status, "invalidated");
-    assert.deepEqual(storage.memory.listActive("thread-1"), []);
-    assert.throws(
-      () =>
-        storage.memory.confirm("confirm-me", {
-          confirmedBy: "user",
-          confirmationSource: "user-message:43",
-        }),
-      /Cannot transition retired memory/
-    );
+    assert.equal(storage.memories.get("first").status, "superseded");
+    assert.equal(storage.memories.get("replacement").status, "active");
+    assert.deepEqual(storage.memory.listActive("thread-1").map((item) => item.id), [
+      "replacement",
+    ]);
+  } finally {
+    storage.close();
+  }
+});
+
+test("same-topic replacement retires the superseded Memory embedding", () => {
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-embedding" });
+  storage.embeddings.registerIndex({
+    generation: "memory-retirement-3",
+    model: "semantic-test",
+    dimensions: 3,
+    tableName: "embedding_vec_memory_retirement_3",
+  });
+  storage.embeddings.activateIndex("memory-retirement-3");
+  try {
+    const first = storage.memory.createProduct({
+      id: "memory-embedding-v1",
+      threadId: "thread-embedding",
+      kind: "fact",
+      topic: "runtime-port",
+      content: "The runtime port is 8787.",
+      scope: "thread",
+      createdBy: "agent:codex",
+      writeChannel: "agent",
+    });
+    const embedding = storage.db
+      .prepare(
+        "SELECT * FROM embedding_items WHERE source_kind = 'memory' AND source_id = ?"
+      )
+      .get(first.memory.id);
+    assert.ok(embedding);
+
+    storage.memory.createProduct({
+      id: "memory-embedding-v2",
+      threadId: "thread-embedding",
+      kind: "fact",
+      topic: "runtime-port",
+      content: "The runtime port is 9999.",
+      scope: "thread",
+      createdBy: "agent:codex",
+      writeChannel: "agent",
+    });
+
+    assert.equal(storage.memories.get(first.memory.id).status, "superseded");
+    assert.equal(storage.embeddings.get(embedding.id).status, "stale");
   } finally {
     storage.close();
   }
@@ -188,8 +217,9 @@ test("listActive supports kind, limit, and content budget filters", () => {
       createdAt: "2026-07-16T00:00:00.000Z",
     });
     capture(storage, {
-      id: "handoff-1",
-      captureKey: "handoff:2",
+      id: "constraint-1",
+      kind: "constraint",
+      captureKey: "constraint:2",
       content: "67890",
       createdAt: "2026-07-16T00:00:01.000Z",
     });
@@ -219,7 +249,7 @@ test("createProduct writes decision/constraint/fact with supersession", () => {
     assert.equal(first.created, true);
     assert.equal(first.memory.kind, "decision");
     assert.equal(first.supersessionKey, "decision:storage-primary");
-    assert.equal(first.memory.status, "captured");
+    assert.equal(first.memory.status, "active");
 
     const second = storage.memory.createProduct({
       threadId: "thread-1",
@@ -246,16 +276,8 @@ test("createProduct writes decision/constraint/fact with supersession", () => {
     assert.ok(listed.every((item) => item.related !== undefined));
     assert.ok(listed.find((item) => item.id === second.memory.id).isActive);
 
-    const confirmed = storage.memory.confirm(second.memory.id, {
-      confirmedBy: "user",
-      confirmationSource: "ui:memory-panel",
-    });
-    assert.equal(confirmed.status, "confirmed");
-    const invalidated = storage.memory.invalidate(fact.memory.id, {
-      invalidatedBy: "user",
-      reason: "path changed",
-    });
-    assert.equal(invalidated.status, "invalidated");
+    assert.equal(second.memory.status, "active");
+    assert.equal(fact.memory.status, "active");
   } finally {
     storage.close();
   }
@@ -297,7 +319,7 @@ test("writeMemoryCandidate derives trusted fields and returns stable outcomes", 
     assert.equal(created.memoryId, created.memory.id);
     assert.equal(created.memory.content, "SQLite is the online source of truth.");
     assert.equal(created.memory.authority, "agent");
-    assert.equal(created.memory.status, "captured");
+    assert.equal(created.memory.status, "active");
     assert.equal(created.memory.activation, "query");
     assert.equal(created.memory.sourceInvocationId, "invocation-1");
     assert.equal(created.memory.sourceMessageId, "message-user-1");
@@ -578,7 +600,7 @@ test("createProduct rejects cross-kind supersession keys and cross-thread source
         }),
       /does not match/
     );
-    assert.equal(storage.memories.get(decision.memory.id).status, "captured");
+    assert.equal(storage.memories.get(decision.memory.id).status, "active");
 
     storage.threads.create({ id: "thread-2" });
     const window = storage.windows.create({
@@ -619,7 +641,7 @@ test("capture rolls back new memory and supersession when projection fails", () 
     capture(storage, {
       id: "login-v1",
       captureKey: "handoff:old",
-      supersessionKey: "handoff:login",
+      supersessionKey: "fact:login",
     });
     const originalCreate = storage.memories.create.bind(storage.memories);
     storage.memories.create = (input) => {
@@ -632,17 +654,17 @@ test("capture rolls back new memory and supersession when projection fails", () 
         capture(storage, {
           id: "login-v2",
           captureKey: "handoff:new",
-          supersessionKey: "handoff:login",
+          supersessionKey: "fact:login",
         }),
       /recall unavailable/
     );
     assert.equal(storage.memories.get("login-v2"), null);
-    assert.equal(storage.memories.get("login-v1").status, "captured");
+    assert.equal(storage.memories.get("login-v1").status, "active");
     assert.equal(storage.memories.get("login-v1").supersededBy, null);
     assert.equal(storage.memories.getSearchProjection("login-v2"), null);
     assert.equal(
       storage.memories.getSearchProjection("login-v1").metadata.status,
-      "captured"
+      "active"
     );
   } finally {
     storage.close();
