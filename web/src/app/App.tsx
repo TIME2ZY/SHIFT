@@ -176,7 +176,6 @@ export function App() {
                 <button type="button" onClick={() => navigation.navigate("workspace")}>
                   查看工作区
                 </button>
-                <a href="/">稳定版</a>
               </div>
             </header>
 

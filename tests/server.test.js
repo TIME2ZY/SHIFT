@@ -146,17 +146,45 @@ test("server startup rejects retired online storage modes", () => {
   assert.throws(() => createServer({ storageMode: "dual" }), /only accepts sqlite/);
 });
 
-test("index injects the per-process UI token and loads the authenticated API client", async () => {
-  await withServer({}, async (baseUrl) => {
-    const response = await nativeFetch(`${baseUrl}/`);
-    const html = await response.text();
-    assert.equal(response.status, 200);
-    assert.match(html, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
-    assert.doesNotMatch(html, /__SHIFT_UI_TOKEN__/);
-    assert.match(html, /src="\/public\/boot\.js"/);
-    const boot = require("../public/boot.js");
-    assert.ok(boot.MODULES.includes("/public/api-client.js"));
-  });
+test("serves React at the root and keeps the legacy UI as a fallback", async () => {
+  const webDistDir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-web-test-"));
+  const webIndexPath = path.join(webDistDir, "index.html");
+  fs.mkdirSync(path.join(webDistDir, "assets"));
+  fs.writeFileSync(
+    webIndexPath,
+    [
+      '<meta name="shift-ui-token" content="__SHIFT_UI_TOKEN__" />',
+      '<script type="module" src="/assets/app.js"></script>',
+    ].join("\n")
+  );
+  fs.writeFileSync(path.join(webDistDir, "assets", "app.js"), "export {};\n");
+
+  try {
+    await withServer({ webDistDir, webIndexPath }, async (baseUrl) => {
+      const response = await nativeFetch(`${baseUrl}/`);
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(html, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
+      assert.doesNotMatch(html, /__SHIFT_UI_TOKEN__/);
+      assert.match(html, /src="\/assets\/app\.js"/);
+
+      const assetResponse = await nativeFetch(`${baseUrl}/assets/app.js`);
+      assert.equal(assetResponse.status, 200);
+      assert.match(assetResponse.headers.get("content-type"), /javascript/);
+
+      const reactRedirect = await nativeFetch(`${baseUrl}/react/`, { redirect: "manual" });
+      assert.equal(reactRedirect.status, 308);
+      assert.equal(reactRedirect.headers.get("location"), "/");
+
+      const legacyResponse = await nativeFetch(`${baseUrl}/legacy/`);
+      const legacyHtml = await legacyResponse.text();
+      assert.equal(legacyResponse.status, 200);
+      assert.match(legacyHtml, /src="\/public\/boot\.js"/);
+      assert.match(legacyHtml, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
+    });
+  } finally {
+    fs.rmSync(webDistDir, { recursive: true, force: true });
+  }
 });
 
 test("UI API rejects requests without the per-process token", async () => {

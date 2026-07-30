@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "prestart": "npm run build:web",
     "start": "node src/server/index.js",
     "dev:web": "node scripts/dev-web.js",
     "dev:web:vite": "vite --config web/vite.config.ts",

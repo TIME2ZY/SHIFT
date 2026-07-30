@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: webRoot,
-    base: "/react/",
+    base: "/",
     plugins: [
       react(),
       {

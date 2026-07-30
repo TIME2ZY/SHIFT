@@ -10,7 +10,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["line"]],
   use: {
-    baseURL: "http://127.0.0.1:5173/react/",
+    baseURL: "http://127.0.0.1:5173/",
     channel: "chrome",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -18,7 +18,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev:web:vite -- --host 127.0.0.1",
     cwd: repositoryRoot,
-    url: "http://127.0.0.1:5173/react/",
+    url: "http://127.0.0.1:5173/",
     reuseExistingServer: true,
     timeout: 30_000,
   },

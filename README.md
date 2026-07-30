@@ -128,7 +128,7 @@ Copy-Item .env.example .env
 | ---------------------------------- | ---------------------------------- |
 | `npm start`                        | 启动控制台                         |
 | `npm run dev:web`                  | 启动 Node API 与 React/Vite 预览   |
-| `npm run build:web`                | 构建 React 迁移版                  |
+| `npm run build:web`                | 构建 React 前端                    |
 | `npm run typecheck:web`            | 检查 React/TypeScript 类型         |
 | `npm run test:web`                 | 运行 Vitest 前端测试               |
 | `npm run test:web:e2e`             | 运行 React Playwright 核心流程测试 |
@@ -141,10 +141,11 @@ Copy-Item .env.example .env
 | `npm run plan:storage:cleanup`     | 只读生成 legacy 清理清单           |
 | `npm run audit:storage:divergence` | 只读比较 legacy 验证语料与 SQLite  |
 
-React 前端迁移期间与当前界面并行存在。执行 `npm run build:web && npm start` 后，
-通过 [http://127.0.0.1:8787/react/](http://127.0.0.1:8787/react/) 查看迁移版；
-根路径仍然使用当前稳定界面。`npm run dev:web` 会为 Node API 与 Vite 生成并共享同一个
-临时 UI Token，开发入口为 [http://127.0.0.1:5173/react/](http://127.0.0.1:5173/react/)。
+React 是默认前端。执行 `npm start` 会先完成前端构建，再通过
+[http://127.0.0.1:8787/](http://127.0.0.1:8787/) 打开控制台。`npm run dev:web`
+会为 Node API 与 Vite 生成并共享同一个临时 UI Token，开发入口为
+[http://127.0.0.1:5173/](http://127.0.0.1:5173/)。旧界面暂时保留在
+[http://127.0.0.1:8787/legacy/](http://127.0.0.1:8787/legacy/) 作为回退入口。
 
 Storage 脚本与服务共同加载项目 `.env` / `.env.local`；`SHIFT_MEMORY_DB`、
 `SHIFT_TRANSCRIPT_DIR`、`SHIFT_AUDIT_TRANSCRIPT_DIR` 是默认路径，命令行显式参数优先。
