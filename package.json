@@ -15,6 +15,7 @@
     "typecheck:web": "tsc -p web/tsconfig.json --noEmit",
     "test:web": "vitest run --config web/vite.config.ts",
     "test:web:watch": "vitest --config web/vite.config.ts",
+    "test:web:e2e": "playwright test --config web/playwright.config.ts",
     "test": "node scripts/run-tests.js",
     "check": "node scripts/check-syntax.js",
     "lint": "eslint .",
