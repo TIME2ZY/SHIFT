@@ -26,7 +26,7 @@ body {
 
 .react-shell {
   display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) minmax(248px, 292px);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) minmax(280px, 320px);
   height: 100%;
   background: var(--surface-canvas);
 }
@@ -673,7 +673,7 @@ body {
 
 .react-panel-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   min-height: 62px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -827,6 +827,256 @@ body {
   color: var(--text-tertiary);
   font: 10px/1.55 var(--font-mono);
   white-space: pre-wrap;
+}
+
+.react-recall-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: var(--space-3);
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+}
+
+.react-recall-modes button {
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.react-recall-modes button[data-active] {
+  color: var(--text-primary);
+  background: var(--surface-instrument);
+}
+
+.react-recall-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.react-recall-search input {
+  min-width: 0;
+  height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: none;
+  background: var(--surface-instrument);
+  font-size: 12px;
+}
+
+.react-recall-search input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.react-recall-search button {
+  min-width: 52px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--accent-text);
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.react-recall-search button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.react-recall-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.react-recall-summary > span {
+  margin-right: auto;
+}
+
+.react-recall-summary small {
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font: 9px/1.3 var(--font-mono);
+}
+
+.react-invocation-list,
+.react-recall-results {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.react-invocation-list > article,
+.react-recall-results > article {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-instrument);
+}
+
+.react-invocation-list > article[data-open] {
+  border-color: var(--border-hard);
+}
+
+.react-invocation-list > article > button {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  text-align: left;
+}
+
+.react-invocation-list > article > button:hover {
+  background: var(--surface-instrument-raised);
+}
+
+.react-invocation-list > article > button > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-invocation-list strong {
+  font-size: 12px;
+}
+
+.react-invocation-list small,
+.react-invocation-list time {
+  color: var(--text-tertiary);
+  font: 10px/1.3 var(--font-mono);
+}
+
+.react-invocation-list small[data-state="completed"] {
+  color: var(--success);
+}
+
+.react-invocation-list small[data-state="failed"],
+.react-invocation-list small[data-state="aborted"] {
+  color: var(--danger);
+}
+
+.react-invocation-list small[data-state="active"] {
+  color: var(--accent);
+}
+
+.react-invocation-events {
+  display: grid;
+  gap: 1px;
+  max-height: 420px;
+  padding: 0 var(--space-2) var(--space-2);
+  overflow: auto;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-inset);
+}
+
+.react-invocation-events article {
+  padding: var(--space-2);
+  border-left: 1px solid var(--border-hard);
+}
+
+.react-invocation-events header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.react-invocation-events code,
+.react-invocation-events time {
+  color: var(--text-tertiary);
+  font: 9px/1.3 var(--font-mono);
+}
+
+.react-invocation-events strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 10px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-invocation-events pre {
+  max-height: 140px;
+  margin: var(--space-1) 0 0;
+  overflow: auto;
+  color: var(--text-tertiary);
+  font: 10px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.react-recall-inline-state {
+  margin: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.react-recall-results > article {
+  padding: var(--space-3);
+  border-left: 2px solid var(--border-hard);
+}
+
+.react-recall-results > article[data-layer="memory"] {
+  border-left-color: var(--success);
+}
+
+.react-recall-results > article[data-layer="message"] {
+  border-left-color: var(--accent);
+}
+
+.react-recall-results > article > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.react-recall-results > article > header span {
+  color: var(--accent);
+  font: 600 9px/1.3 var(--font-mono);
+}
+
+.react-recall-results > article > header small,
+.react-recall-results > article > header time {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 9px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-recall-results > article > p {
+  display: -webkit-box;
+  margin: var(--space-2) 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.react-recall-results > article > button {
+  margin-top: var(--space-2);
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.react-recall-results .react-invocation-events {
+  margin: var(--space-3) calc(var(--space-3) * -1) calc(var(--space-3) * -1);
 }
 
 @media (max-width: 1050px) {

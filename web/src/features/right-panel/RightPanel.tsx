@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery } from "../memory/queries";
+import { RecallPanel } from "../recall/RecallPanel";
 import { useWorkspaceQuery } from "../workspace/queries";
 
-type PanelTab = "agents" | "workspace" | "memory";
+type PanelTab = "agents" | "workspace" | "memory" | "recall";
 
 interface RightPanelProps {
   sessionId: string | null;
@@ -24,6 +25,7 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
             ["agents", "Agent"],
             ["workspace", "工作区"],
             ["memory", "记忆"],
+            ["recall", "Recall"],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -124,6 +126,8 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
             </div>
           </section>
         ) : null}
+
+        {tab === "recall" ? <RecallPanel sessionId={sessionId} /> : null}
       </div>
     </aside>
   );
