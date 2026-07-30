@@ -296,6 +296,21 @@ function createServer(options = {}) {
       return;
     }
 
+    if (req.method === "GET" && ["/react", "/react/"].includes(url.pathname)) {
+      serveIndex(res, {
+        indexPath: path.join(ROOT, "dist", "web", "index.html"),
+        uiToken,
+        sendJson,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/react/assets/")) {
+      const relative = url.pathname.slice("/react".length);
+      serveStatic(res, relative, path.join(ROOT, "dist", "web"), sendJson);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname.startsWith("/public/")) {
       const relative = url.pathname.slice("/public".length);
       serveStatic(res, relative, path.join(ROOT, "public"), sendJson);
