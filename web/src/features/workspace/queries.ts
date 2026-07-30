@@ -14,6 +14,12 @@ export interface WorkspaceSnapshot {
   worktree: WorktreeStatus | null;
 }
 
+export const workspaceQueryKeys = {
+  session: (sessionId: string) => ["sessions", sessionId, "workspace"] as const,
+  detail: (sessionId: string, worktreeAttached: boolean) =>
+    [...workspaceQueryKeys.session(sessionId), worktreeAttached] as const,
+};
+
 async function readWorkspace(
   sessionId: string,
   worktreeAttached: boolean,
@@ -51,7 +57,7 @@ export function useWorkspaceQuery(
   enabled: boolean
 ) {
   return useQuery({
-    queryKey: ["sessions", sessionId ?? "", "workspace", worktreeAttached],
+    queryKey: workspaceQueryKeys.detail(sessionId ?? "", worktreeAttached),
     queryFn: ({ signal }) => readWorkspace(sessionId!, worktreeAttached, signal),
     enabled: enabled && Boolean(sessionId),
   });

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery } from "../memory/queries";
 import { RecallPanel } from "../recall/RecallPanel";
-import { useWorkspaceQuery } from "../workspace/queries";
+import { WorkspacePanel } from "../workspace/WorkspacePanel";
 
 type PanelTab = "agents" | "workspace" | "memory" | "recall";
 
@@ -14,7 +14,6 @@ interface RightPanelProps {
 
 export function RightPanel({ sessionId, agents, worktreeAttached = false }: RightPanelProps) {
   const [tab, setTab] = useState<PanelTab>("agents");
-  const workspace = useWorkspaceQuery(sessionId, worktreeAttached, tab === "workspace");
   const memories = useMemoriesQuery(sessionId, tab === "memory");
 
   return (
@@ -60,45 +59,11 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
         ) : null}
 
         {tab === "workspace" ? (
-          <section aria-label="工作区状态">
-            <p className="react-panel-kicker">SESSION WORKSPACE</p>
-            {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
-            {workspace.isPending && sessionId ? (
-              <p className="react-panel-empty">正在读取工作区…</p>
-            ) : null}
-            {workspace.error ? (
-              <p className="react-panel-error">{workspace.error.message}</p>
-            ) : null}
-            {workspace.data ? (
-              <div className="react-workspace-summary">
-                <div>
-                  <span>项目目录</span>
-                  <code>{workspace.data.projectDir || "未设置"}</code>
-                </div>
-                {workspace.data.worktree ? (
-                  <>
-                    <div>
-                      <span>分支</span>
-                      <code>{workspace.data.worktree.branch || "未命名"}</code>
-                    </div>
-                    <div>
-                      <span>状态</span>
-                      <strong>
-                        {workspace.data.worktree.clean
-                          ? "干净"
-                          : `${workspace.data.worktree.porcelain?.length || 0} 个变更`}
-                      </strong>
-                    </div>
-                    {workspace.data.worktree.porcelain?.length ? (
-                      <pre>{workspace.data.worktree.porcelain.join("\n")}</pre>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="react-panel-empty">此对话未启用隔离工作区。</p>
-                )}
-              </div>
-            ) : null}
-          </section>
+          <WorkspacePanel
+            sessionId={sessionId}
+            worktreeAttached={worktreeAttached}
+            active={tab === "workspace"}
+          />
         ) : null}
 
         {tab === "memory" ? (

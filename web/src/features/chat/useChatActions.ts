@@ -9,7 +9,7 @@ export function useChatActions() {
   const store = useSessionRunStore();
 
   const send = useCallback(
-    async (sessionId: string, agentId: string, prompt: string) => {
+    async (sessionId: string, agentId: string, prompt: string, useWorktree = false) => {
       const content = prompt.trim();
       if (!content) return;
 
@@ -24,7 +24,7 @@ export function useChatActions() {
       let resultSessionId = sessionId;
       try {
         const result = await runChatStream(
-          { sessionId, agentId, prompt: content },
+          { sessionId, agentId, prompt: content, useWorktree },
           store,
           controller
         );

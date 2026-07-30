@@ -595,6 +595,35 @@ body {
   font-size: 11px;
 }
 
+.react-worktree-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--surface-instrument);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.react-worktree-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-instrument));
+}
+
+.react-worktree-toggle input {
+  accent-color: var(--accent);
+}
+
+.react-worktree-toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .react-composer-tools select {
   min-height: 26px;
   padding: 0 24px 0 8px;
@@ -827,6 +856,54 @@ body {
   color: var(--text-tertiary);
   font: 10px/1.55 var(--font-mono);
   white-space: pre-wrap;
+}
+
+.react-project-dir-row > div {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.react-project-dir-row code {
+  min-width: 0;
+  flex: 1;
+}
+
+.react-project-dir-row button,
+.react-project-dir-row form button {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.react-project-dir-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.react-project-dir-row form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.react-project-dir-row form input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--surface-instrument);
+  font: 11px/1.4 var(--font-mono);
+}
+
+.react-project-dir-row form input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .react-recall-modes {

@@ -22,7 +22,7 @@ describe("Composer", () => {
     await userEvent.type(input, "  hello  ");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith("hello");
+    expect(onSend).toHaveBeenCalledWith("hello", false);
     expect(input).toHaveValue("");
   });
 
@@ -42,6 +42,28 @@ describe("Composer", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "停止" }));
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("sends in worktree mode only after the user enables code changes", async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        onAgentChange={vi.fn()}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "改代码" }));
+    expect(screen.getByText("将在隔离 worktree 中运行")).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "消息" }), "implement this");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(onSend).toHaveBeenCalledWith("implement this", true);
   });
 
   it("keeps drafts isolated when switching sessions", async () => {

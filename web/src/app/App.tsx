@@ -149,9 +149,9 @@ export function App() {
           selectedAgentId={selectedAgentId}
           running={running}
           onAgentChange={selectAgent}
-          onSend={(prompt) =>
+          onSend={(prompt, useWorktree) =>
             activeSessionId && selectedAgentId
-              ? chat.send(activeSessionId, selectedAgentId, prompt)
+              ? chat.send(activeSessionId, selectedAgentId, prompt, useWorktree)
               : Promise.resolve()
           }
           onStop={() => {

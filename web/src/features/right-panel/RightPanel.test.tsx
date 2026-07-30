@@ -86,11 +86,48 @@ describe("RightPanel", () => {
     await userEvent.click(screen.getByRole("tab", { name: "工作区" }));
 
     expect(await screen.findByText("C:/workspace")).toBeInTheDocument();
-    expect(screen.getByText("此对话未启用隔离工作区。")).toBeInTheDocument();
+    expect(
+      screen.getByText("尚未创建隔离工作区。发送消息前开启「改代码」即可创建。")
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/project?sessionId=session-1",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("updates the session project directory", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/project" && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ dir: "D:/next-project" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ dir: "D:/next-project" }), { status: 200 })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPanel();
+    await userEvent.click(screen.getByRole("tab", { name: "工作区" }));
+    await screen.findByText("D:/next-project");
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+
+    const input = screen.getByRole("textbox", { name: "项目目录" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "D:/updated-project");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/project",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: "session-1",
+          dir: "D:/updated-project",
+        }),
+      })
     );
   });
 });

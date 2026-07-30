@@ -7,7 +7,7 @@ interface ComposerProps {
   selectedAgentId: string;
   running: boolean;
   onAgentChange(agentId: string): void;
-  onSend(prompt: string): Promise<void>;
+  onSend(prompt: string, useWorktree: boolean): Promise<void>;
   onStop(): void;
 }
 
@@ -21,7 +21,9 @@ export function Composer({
   onStop,
 }: ComposerProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [worktreeModes, setWorktreeModes] = useState<Record<string, boolean>>({});
   const draft = sessionId ? (drafts[sessionId] ?? "") : "";
+  const useWorktree = sessionId ? (worktreeModes[sessionId] ?? false) : false;
 
   function setDraft(value: string) {
     if (!sessionId) return;
@@ -33,7 +35,7 @@ export function Composer({
     const prompt = draft.trim();
     if (!sessionId || running || !prompt) return;
     setDrafts((current) => ({ ...current, [sessionId]: "" }));
-    await onSend(prompt);
+    await onSend(prompt, useWorktree);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -60,7 +62,26 @@ export function Composer({
             ))}
           </select>
         </label>
-        <span>{running ? "Agent 正在运行" : "Enter 发送 · Shift+Enter 换行"}</span>
+        <label className="react-worktree-toggle">
+          <input
+            type="checkbox"
+            checked={useWorktree}
+            disabled={!sessionId || running}
+            onChange={(event) => {
+              if (!sessionId) return;
+              const checked = event.target.checked;
+              setWorktreeModes((current) => ({ ...current, [sessionId]: checked }));
+            }}
+          />
+          <span>改代码</span>
+        </label>
+        <span>
+          {running
+            ? "Agent 正在运行"
+            : useWorktree
+              ? "将在隔离 worktree 中运行"
+              : "只读讨论 · Enter 发送"}
+        </span>
       </div>
 
       <div className="react-composer-row">
