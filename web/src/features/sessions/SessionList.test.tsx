@@ -23,4 +23,29 @@ describe("SessionList", () => {
     await userEvent.click(screen.getByRole("button", { name: "第二轮" }));
     expect(onSelect).toHaveBeenCalledWith("s2");
   });
+
+  it("exposes create and delete actions without selecting the row", async () => {
+    const onCreate = vi.fn();
+    const onDelete = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <SessionList
+        sessions={[{ id: "s1", title: "第一轮" }]}
+        activeSessionId="s1"
+        isLoading={false}
+        error={null}
+        onCreate={onCreate}
+        onDelete={onDelete}
+        onSelect={onSelect}
+        onRetry={vi.fn()}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "新建对话" }));
+    await userEvent.click(screen.getByRole("button", { name: "删除对话 第一轮" }));
+
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onDelete).toHaveBeenCalledWith("s1");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

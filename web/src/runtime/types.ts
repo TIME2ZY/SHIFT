@@ -5,6 +5,22 @@ export interface LiveMessage {
   invocationId?: string;
   text: string;
   status: "thinking" | "streaming" | "done" | "error";
+  thinking?: string;
+  tools?: RunTool[];
+  progress?: RunProgressItem[];
+}
+
+export interface RunTool {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error";
+  detail?: string;
+}
+
+export interface RunProgressItem {
+  id: string;
+  label: string;
+  status: string;
 }
 
 export interface SessionRun {
@@ -37,6 +53,29 @@ export type SessionRunAction =
       invocationId?: string;
     }
   | { type: "message/delta"; sessionId: string; agentId: string; text: string }
+  | { type: "thinking/delta"; sessionId: string; agentId: string; text: string }
+  | {
+      type: "tool/started";
+      sessionId: string;
+      agentId: string;
+      toolId: string;
+      toolName: string;
+      detail?: string;
+    }
+  | {
+      type: "tool/finished";
+      sessionId: string;
+      agentId: string;
+      toolId: string;
+      failed?: boolean;
+      detail?: string;
+    }
+  | {
+      type: "progress/updated";
+      sessionId: string;
+      agentId: string;
+      items: RunProgressItem[];
+    }
   | {
       type: "agent/finished";
       sessionId: string;

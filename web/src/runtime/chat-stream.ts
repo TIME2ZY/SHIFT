@@ -22,6 +22,17 @@ interface CanonicalAgentEvent {
   invocationId?: string;
   text?: string;
   error?: string;
+  toolName?: string;
+  toolId?: string;
+  status?: string;
+  output?: string;
+  args?: Record<string, unknown>;
+  items?: Array<{
+    id?: string;
+    label?: string;
+    text?: string;
+    status?: string;
+  }>;
 }
 
 function objectData(data: unknown): Record<string, unknown> {
@@ -95,6 +106,42 @@ export async function runChatStream(
             sessionId: boundSessionId,
             agentId,
             text: agentEvent.text,
+          });
+        } else if (agentEvent.type === "thinking.delta" && agentEvent.text) {
+          store.dispatch({
+            type: "thinking/delta",
+            sessionId: boundSessionId,
+            agentId,
+            text: agentEvent.text,
+          });
+        } else if (agentEvent.type === "tool.started" && agentEvent.toolId && agentEvent.toolName) {
+          store.dispatch({
+            type: "tool/started",
+            sessionId: boundSessionId,
+            agentId,
+            toolId: agentEvent.toolId,
+            toolName: agentEvent.toolName,
+            detail: agentEvent.args ? JSON.stringify(agentEvent.args) : undefined,
+          });
+        } else if (agentEvent.type === "tool.finished" && agentEvent.toolId) {
+          store.dispatch({
+            type: "tool/finished",
+            sessionId: boundSessionId,
+            agentId,
+            toolId: agentEvent.toolId,
+            failed: ["error", "failed"].includes(agentEvent.status || ""),
+            detail: agentEvent.output,
+          });
+        } else if (agentEvent.type === "progress.update" && agentEvent.items) {
+          store.dispatch({
+            type: "progress/updated",
+            sessionId: boundSessionId,
+            agentId,
+            items: agentEvent.items.map((item, index) => ({
+              id: item.id || `step-${index + 1}`,
+              label: item.label || item.text || `步骤 ${index + 1}`,
+              status: item.status || "pending",
+            })),
           });
         } else if (agentEvent.type === "run.failed") {
           store.dispatch({

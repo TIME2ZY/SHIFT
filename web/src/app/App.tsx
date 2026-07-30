@@ -4,9 +4,11 @@ import { Composer } from "../features/chat/Composer";
 import { useChatActions } from "../features/chat/useChatActions";
 import { MessageList } from "../features/messages/MessageList";
 import { useMessagesQuery } from "../features/messages/queries";
+import { RightPanel } from "../features/right-panel/RightPanel";
 import { SessionList } from "../features/sessions/SessionList";
+import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
-import { useSessionRun } from "../runtime/session-run-provider";
+import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running"]);
@@ -32,6 +34,9 @@ export function App() {
   const sessions = useSessionsQuery();
   const agents = useAgentsQuery();
   const chat = useChatActions();
+  const runStore = useSessionRunStore();
+  const createSession = useCreateSessionMutation();
+  const deleteSession = useDeleteSessionMutation();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [agentBySession, setAgentBySession] = useState<Record<string, string>>({});
 
@@ -54,6 +59,29 @@ export function App() {
   function selectAgent(agentId: string) {
     if (!activeSessionId) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
+  }
+
+  function createNewSession() {
+    createSession.mutate(undefined, {
+      onSuccess(session) {
+        setSelectedSessionId(session.id);
+      },
+    });
+  }
+
+  function removeSession(sessionId: string) {
+    const session = sessions.data?.find((item) => item.id === sessionId);
+    const label = session?.title || sessionId;
+    if (!window.confirm(`删除对话“${label}”？此操作不能撤销。`)) return;
+
+    deleteSession.mutate(sessionId, {
+      onSuccess() {
+        runStore.dispose(sessionId);
+        if (selectedSessionId === sessionId || activeSessionId === sessionId) {
+          setSelectedSessionId(null);
+        }
+      },
+    });
   }
 
   return (
@@ -79,9 +107,18 @@ export function App() {
           activeSessionId={activeSessionId}
           isLoading={sessions.isPending}
           error={sessions.error}
+          isCreating={createSession.isPending}
+          deletingSessionId={deleteSession.isPending ? deleteSession.variables : null}
+          onCreate={createNewSession}
+          onDelete={removeSession}
           onSelect={setSelectedSessionId}
           onRetry={() => void sessions.refetch()}
         />
+        {createSession.error || deleteSession.error ? (
+          <p className="react-sidebar-error" role="alert">
+            {(createSession.error || deleteSession.error)?.message}
+          </p>
+        ) : null}
       </aside>
 
       <main id="main-content" className="react-chat">
@@ -122,6 +159,12 @@ export function App() {
           }}
         />
       </main>
+
+      <RightPanel
+        sessionId={activeSessionId}
+        agents={agents.data ?? []}
+        worktreeAttached={Boolean(activeSession?.worktree)}
+      />
     </div>
   );
 }

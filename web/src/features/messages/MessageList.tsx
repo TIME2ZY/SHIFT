@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { SessionRun } from "../../runtime/types";
+import { MarkdownContent } from "./MarkdownContent";
 import type { PersistedMessage } from "./types";
 
 interface MessageListProps {
@@ -19,7 +20,9 @@ function roleLabel(message: Pick<PersistedMessage, "role" | "agent" | "agentId">
 export function MessageList({ messages, run, isLoading, error, onRetry }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveMessages = run ? Object.values(run.liveMessages) : [];
-  const liveText = liveMessages.map((message) => message.text).join("");
+  const liveText = liveMessages
+    .map((message) => `${message.text}${message.thinking || ""}`)
+    .join("");
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -63,7 +66,13 @@ export function MessageList({ messages, run, isLoading, error, onRetry }: Messag
             <span>{roleLabel(message)}</span>
             {message.exitCode ? <small>运行失败</small> : null}
           </header>
-          <div className="react-message-content">{message.content}</div>
+          <div className="react-message-content">
+            {message.role === "assistant" ? (
+              <MarkdownContent content={message.content} />
+            ) : (
+              message.content
+            )}
+          </div>
         </article>
       ))}
 
@@ -95,8 +104,53 @@ export function MessageList({ messages, run, isLoading, error, onRetry }: Messag
             <small>{message.status === "thinking" ? "思考中" : "输出中"}</small>
           </header>
           <div className="react-message-content">
-            {message.text || <span className="react-thinking">正在准备回答…</span>}
+            {message.text ? (
+              message.status === "done" ? (
+                <MarkdownContent content={message.text} />
+              ) : (
+                message.text
+              )
+            ) : (
+              <span className="react-thinking">正在准备回答…</span>
+            )}
           </div>
+          {message.thinking || message.tools?.length || message.progress?.length ? (
+            <details className="react-process">
+              <summary>
+                运行过程
+                {message.tools?.length ? ` · ${message.tools.length} 个工具` : ""}
+              </summary>
+              {message.thinking ? (
+                <div className="react-process-thinking">{message.thinking}</div>
+              ) : null}
+              {message.progress?.length ? (
+                <ol className="react-progress-list">
+                  {message.progress.map((item) => (
+                    <li data-status={item.status} key={item.id}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+              {message.tools?.length ? (
+                <ul className="react-tool-list">
+                  {message.tools.map((tool) => (
+                    <li data-status={tool.status} key={tool.id}>
+                      <span>{tool.name}</span>
+                      <small>
+                        {tool.status === "running"
+                          ? "运行中"
+                          : tool.status === "error"
+                            ? "失败"
+                            : "完成"}
+                      </small>
+                      {tool.detail ? <code>{tool.detail}</code> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </details>
+          ) : null}
         </article>
       ))}
 

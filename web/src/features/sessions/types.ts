@@ -5,6 +5,10 @@ export interface SessionSummary {
   updatedAt?: string;
   lastAgent?: string;
   projectDir?: string;
+  worktree?: {
+    branch?: string;
+    worktreeDir?: string;
+  } | null;
 }
 
 export interface SessionsResponse {

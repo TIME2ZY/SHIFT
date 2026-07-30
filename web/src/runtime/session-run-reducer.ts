@@ -92,6 +92,100 @@ export function sessionRunReducer(
         };
       });
 
+    case "thinking/delta":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.agentId] ?? {
+          agentId: action.agentId,
+          text: "",
+          status: "thinking" as const,
+        };
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.agentId]: {
+              ...current,
+              thinking: (current.thinking || "") + action.text,
+            },
+          },
+        };
+      });
+
+    case "tool/started":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.agentId] ?? {
+          agentId: action.agentId,
+          text: "",
+          status: "thinking" as const,
+        };
+        const tools = (current.tools || []).filter((tool) => tool.id !== action.toolId);
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.agentId]: {
+              ...current,
+              tools: [
+                ...tools,
+                {
+                  id: action.toolId,
+                  name: action.toolName,
+                  status: "running",
+                  detail: action.detail,
+                },
+              ],
+            },
+          },
+        };
+      });
+
+    case "tool/finished":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.agentId];
+        if (!current) return { ...run, updatedAt: now };
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.agentId]: {
+              ...current,
+              tools: (current.tools || []).map((tool) =>
+                tool.id === action.toolId
+                  ? {
+                      ...tool,
+                      status: action.failed ? ("error" as const) : ("done" as const),
+                      detail: action.detail || tool.detail,
+                    }
+                  : tool
+              ),
+            },
+          },
+        };
+      });
+
+    case "progress/updated":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.agentId] ?? {
+          agentId: action.agentId,
+          text: "",
+          status: "thinking" as const,
+        };
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.agentId]: {
+              ...current,
+              progress: action.items,
+            },
+          },
+        };
+      });
+
     case "agent/finished":
       return updateRun(state, action.sessionId, (run) => {
         const current = run.liveMessages[action.agentId];

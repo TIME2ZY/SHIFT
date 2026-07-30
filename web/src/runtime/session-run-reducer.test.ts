@@ -80,4 +80,45 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.status).toBe("error");
     expect(state.runs.s1.doneReceived).toBe(true);
   });
+
+  it("tracks thinking, progress, and tool lifecycle per agent", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "thinking/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      text: "inspect",
+    });
+    state = sessionRunReducer(state, {
+      type: "tool/started",
+      sessionId: "s1",
+      agentId: "codex",
+      toolId: "t1",
+      toolName: "read_file",
+    });
+    state = sessionRunReducer(state, {
+      type: "tool/finished",
+      sessionId: "s1",
+      agentId: "codex",
+      toolId: "t1",
+    });
+    state = sessionRunReducer(state, {
+      type: "progress/updated",
+      sessionId: "s1",
+      agentId: "codex",
+      items: [{ id: "p1", label: "读取", status: "completed" }],
+    });
+
+    const message = state.runs.s1.liveMessages.codex;
+    expect(message.thinking).toBe("inspect");
+    expect(message.tools).toEqual([
+      { id: "t1", name: "read_file", status: "done", detail: undefined },
+    ]);
+    expect(message.progress).toEqual([{ id: "p1", label: "读取", status: "completed" }]);
+  });
 });
