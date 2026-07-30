@@ -139,6 +139,7 @@ function createServer(options = {}) {
   const memoryService = storageContext.storage?.memory || null;
   const recallService = createRecallService({
     storage: storageContext.storage,
+    embeddingRuntime: storageContext.embeddingRuntime,
     logger,
   });
   const memoryCapture = createMemoryCapture({

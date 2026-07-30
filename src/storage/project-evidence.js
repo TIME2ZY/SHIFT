@@ -56,7 +56,7 @@ const SECRET_NAME_PATTERNS = [
   /\.pfx$/i,
 ];
 
-function createProjectEvidenceRepository(db) {
+function createProjectEvidenceRepository(db, options = {}) {
   const insertDoc = db.prepare(`
     INSERT INTO project_documents
       (id, project_key, path, title, kind, content_hash, byte_size, mtime, indexed_at)
@@ -220,7 +220,7 @@ function createProjectEvidenceRepository(db) {
           maxPassageChars: input.maxPassageChars || DEFAULT_MAX_PASSAGE_CHARS,
         });
         for (const passage of passages) {
-          insertPassage.run({
+          const inserted = insertPassage.run({
             documentId: docId,
             projectKey,
             path: file.relativePath,
@@ -229,6 +229,16 @@ function createProjectEvidenceRepository(db) {
             endLine: passage.endLine,
             content: passage.content,
             contentHash: sha256(passage.content),
+          });
+          options.onPassage?.({
+            id: Number(inserted.lastInsertRowid),
+            documentId: docId,
+            projectKey,
+            path: file.relativePath,
+            heading: passage.heading,
+            startLine: passage.startLine,
+            endLine: passage.endLine,
+            content: passage.content,
           });
         }
         upserted += 1;

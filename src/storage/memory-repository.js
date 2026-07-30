@@ -70,10 +70,10 @@ function createMemoryRepository(db) {
   const upsertSearch = db.prepare(`
     INSERT INTO memory_search (
       memory_id, scope, owner_thread_id, project_key, origin_thread_id,
-      kind, status, title, content, created_at, metadata_json
+      kind, status, topic, title, content, created_at, metadata_json
     ) VALUES (
       @memoryId, @scope, @ownerThreadId, @projectKey, @originThreadId,
-      @kind, @status, @title, @content, @createdAt, @metadataJson
+      @kind, @status, @topic, @title, @content, @createdAt, @metadataJson
     )
     ON CONFLICT(memory_id) DO UPDATE SET
       scope = excluded.scope,
@@ -82,6 +82,7 @@ function createMemoryRepository(db) {
       origin_thread_id = excluded.origin_thread_id,
       kind = excluded.kind,
       status = excluded.status,
+      topic = excluded.topic,
       title = excluded.title,
       content = excluded.content,
       created_at = excluded.created_at,
@@ -103,6 +104,7 @@ function createMemoryRepository(db) {
       originThreadId: memory.originThreadId,
       kind: memory.kind,
       status: memory.status,
+      topic: memory.topic,
       title: `${memory.kind}:${memory.status}`,
       content: memory.content,
       createdAt: memory.createdAt,
@@ -457,6 +459,22 @@ function searchMemoryRows(db, query, options = {}) {
     db
       .prepare(
         `
+        SELECT *, content AS snippet, -2000 AS rank
+        FROM memory_search
+        WHERE ${ownerClause.sql}
+          AND topic = ? COLLATE NOCASE
+        ORDER BY status = 'confirmed' DESC, created_at DESC
+        LIMIT ?
+      `
+      )
+      .all(...ownerClause.params, normalizedQuery, limit),
+    "exact-topic"
+  );
+
+  append(
+    db
+      .prepare(
+        `
         SELECT *, content AS snippet, -1000 AS rank
         FROM memory_search
         WHERE ${ownerClause.sql}
@@ -545,6 +563,7 @@ function mapSearchRow(row, channel) {
     projectKey: row.project_key,
     originThreadId: row.origin_thread_id,
     scope: row.scope,
+    topic: row.topic,
     sourceKind: "memory-entry",
     sourceId: row.memory_id,
     title: row.title,

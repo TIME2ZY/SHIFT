@@ -96,7 +96,7 @@ test("supersession emits memory_superseded events", () => {
   }
 });
 
-test("retrieveForTurn records memory_injected with availability", () => {
+test("retrieveForTurn records memory_injected with availability", async () => {
   const storage = createFixture();
   try {
     storage.memory.createProduct({
@@ -115,7 +115,7 @@ test("retrieveForTurn records memory_injected with availability", () => {
         readInvocationPage: async () => ({ events: [], total: 0, from: 0, limit: 200 }),
       },
     });
-    const pack = service.retrieveForTurn({
+    const pack = await service.retrieveForTurn({
       threadId: "thread-1",
       prompt: "sqlite primary",
       budgetChars: 2000,

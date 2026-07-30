@@ -8,8 +8,7 @@ const PROTOCOL_VERSION = "2025-06-18";
 
 const MEMORY_WRITE_TOOL = Object.freeze({
   name: "memory_write",
-  description:
-    "Store one durable, grounded, atomic conclusion that will affect future work.",
+  description: "Store one durable, grounded, atomic conclusion that will affect future work.",
   inputSchema: {
     type: "object",
     properties: {
@@ -74,6 +73,46 @@ const MEMORY_EVIDENCE_LIST_TOOL = Object.freeze({
   },
 });
 
+const RECALL_SEARCH_TOOL = Object.freeze({
+  name: "recall_search",
+  description:
+    "Search durable memories and authorized historical evidence from the current thread and project.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        minLength: 2,
+        maxLength: 1000,
+      },
+      layers: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["memory", "message", "evidence", "project-doc"],
+        },
+        minItems: 1,
+        uniqueItems: true,
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 30,
+        default: 10,
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
+  },
+  annotations: {
+    title: "Search Shift recall",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+});
+
 function requireShiftContext(env = process.env) {
   const apiUrl = String(env.SHIFT_API_URL || "").replace(/\/+$/, "");
   const sessionId = String(env.SHIFT_THREAD_ID || "");
@@ -90,38 +129,30 @@ function requireShiftContext(env = process.env) {
   return { apiUrl, sessionId, invocationId, callbackToken };
 }
 
-async function callMemoryWrite(
-  args,
-  { env = process.env, fetchImpl = globalThis.fetch } = {}
-) {
+async function callMemoryWrite(args, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
   validateMemoryWriteArguments(args);
   if (typeof fetchImpl !== "function") {
     throw new Error("Global fetch is unavailable; Node 20+ is required.");
   }
   const context = requireShiftContext(env);
-  const response = await fetchImpl(
-    new URL("/api/callbacks/memory-write", `${context.apiUrl}/`),
-    {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json; charset=utf-8",
-        "X-Callback-Token": context.callbackToken,
-      },
-      body: JSON.stringify({
-        sessionId: context.sessionId,
-        invocationId: context.invocationId,
-        callbackToken: context.callbackToken,
-        kind: args?.kind,
-        topic: args?.topic,
-        content: args?.content,
-        scope: args?.scope,
-        ...(args?.evidenceEventNo === undefined
-          ? {}
-          : { evidenceEventNo: args.evidenceEventNo }),
-      }),
-    }
-  );
+  const response = await fetchImpl(new URL("/api/callbacks/memory-write", `${context.apiUrl}/`), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Callback-Token": context.callbackToken,
+    },
+    body: JSON.stringify({
+      sessionId: context.sessionId,
+      invocationId: context.invocationId,
+      callbackToken: context.callbackToken,
+      kind: args?.kind,
+      topic: args?.topic,
+      content: args?.content,
+      scope: args?.scope,
+      ...(args?.evidenceEventNo === undefined ? {} : { evidenceEventNo: args.evidenceEventNo }),
+    }),
+  });
   const text = await response.text();
   let value;
   try {
@@ -142,9 +173,7 @@ async function callMemoryWrite(
   return {
     outcome: value.outcome,
     memoryId: value.memoryId || value.memory?.id || null,
-    ...(value.replacedMemoryId
-      ? { replacedMemoryId: value.replacedMemoryId }
-      : {}),
+    ...(value.replacedMemoryId ? { replacedMemoryId: value.replacedMemoryId } : {}),
   };
 }
 
@@ -187,17 +216,45 @@ async function callMemoryEvidenceList(
   };
 }
 
+async function callRecallSearch(args, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  validateRecallSearchArguments(args);
+  if (typeof fetchImpl !== "function") {
+    throw new Error("Global fetch is unavailable; Node 20+ is required.");
+  }
+  const context = requireShiftContext(env);
+  const response = await fetchImpl(new URL("/api/callbacks/recall-search", `${context.apiUrl}/`), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Callback-Token": context.callbackToken,
+    },
+    body: JSON.stringify({
+      sessionId: context.sessionId,
+      invocationId: context.invocationId,
+      query: args.query.trim(),
+      ...(args.layers === undefined ? {} : { layers: args.layers }),
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    }),
+  });
+  const text = await response.text();
+  let value;
+  try {
+    value = text ? JSON.parse(text) : {};
+  } catch {
+    value = { error: text || "Invalid response from Shift." };
+  }
+  if (!response.ok) {
+    throw new Error(value?.error || `Shift recall_search failed with HTTP ${response.status}.`);
+  }
+  return value;
+}
+
 function validateMemoryWriteArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("memory_write arguments must be an object.");
   }
-  const allowed = new Set([
-    "kind",
-    "topic",
-    "content",
-    "scope",
-    "evidenceEventNo",
-  ]);
+  const allowed = new Set(["kind", "topic", "content", "scope", "evidenceEventNo"]);
   const unknown = Object.keys(args).filter((key) => !allowed.has(key));
   if (unknown.length > 0) {
     throw new Error(`memory_write received unknown fields: ${unknown.join(", ")}.`);
@@ -240,9 +297,7 @@ function validateMemoryEvidenceListArguments(args) {
   }
   const unknown = Object.keys(args).filter((key) => key !== "limit");
   if (unknown.length > 0) {
-    throw new Error(
-      `memory_evidence_list received unknown fields: ${unknown.join(", ")}.`
-    );
+    throw new Error(`memory_evidence_list received unknown fields: ${unknown.join(", ")}.`);
   }
   if (
     args.limit !== undefined &&
@@ -252,9 +307,45 @@ function validateMemoryEvidenceListArguments(args) {
   }
 }
 
+function validateRecallSearchArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("recall_search arguments must be an object.");
+  }
+  const allowed = new Set(["query", "layers", "limit"]);
+  const unknown = Object.keys(args).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`recall_search received unknown fields: ${unknown.join(", ")}.`);
+  }
+  if (
+    typeof args.query !== "string" ||
+    args.query.trim().length < 2 ||
+    args.query.trim().length > 1000
+  ) {
+    throw new Error("recall_search query must contain 2 to 1000 characters.");
+  }
+  if (args.layers !== undefined) {
+    const validLayers = new Set(["memory", "message", "evidence", "project-doc"]);
+    if (
+      !Array.isArray(args.layers) ||
+      args.layers.length < 1 ||
+      new Set(args.layers).size !== args.layers.length ||
+      args.layers.some((layer) => !validLayers.has(layer))
+    ) {
+      throw new Error("recall_search layers contains an invalid or duplicate layer.");
+    }
+  }
+  if (
+    args.limit !== undefined &&
+    (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 30)
+  ) {
+    throw new Error("recall_search limit must be an integer from 1 to 30.");
+  }
+}
+
 function createRequestHandler({
   memoryWrite = callMemoryWrite,
   memoryEvidenceList = callMemoryEvidenceList,
+  recallSearch = callRecallSearch,
 } = {}) {
   return async function handleRequest(request) {
     if (!request || request.jsonrpc !== "2.0" || typeof request.method !== "string") {
@@ -274,7 +365,7 @@ function createRequestHandler({
 
     if (request.method === "tools/list") {
       return jsonRpcResult(request.id, {
-        tools: [MEMORY_WRITE_TOOL, MEMORY_EVIDENCE_LIST_TOOL],
+        tools: [MEMORY_WRITE_TOOL, MEMORY_EVIDENCE_LIST_TOOL, RECALL_SEARCH_TOOL],
       });
     }
 
@@ -282,15 +373,20 @@ function createRequestHandler({
       const toolName = request.params?.name;
       if (
         toolName !== MEMORY_WRITE_TOOL.name &&
-        toolName !== MEMORY_EVIDENCE_LIST_TOOL.name
+        toolName !== MEMORY_EVIDENCE_LIST_TOOL.name &&
+        toolName !== RECALL_SEARCH_TOOL.name
       ) {
         return jsonRpcError(request.id, -32602, "Unknown tool.");
       }
       try {
-        const result =
-          toolName === MEMORY_WRITE_TOOL.name
-            ? await memoryWrite(request.params?.arguments || {})
-            : await memoryEvidenceList(request.params?.arguments || {});
+        let result;
+        if (toolName === MEMORY_WRITE_TOOL.name) {
+          result = await memoryWrite(request.params?.arguments || {});
+        } else if (toolName === MEMORY_EVIDENCE_LIST_TOOL.name) {
+          result = await memoryEvidenceList(request.params?.arguments || {});
+        } else {
+          result = await recallSearch(request.params?.arguments || {});
+        }
         return jsonRpcResult(request.id, {
           content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: result,
@@ -348,11 +444,14 @@ if (require.main === module) {
 module.exports = {
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
+  RECALL_SEARCH_TOOL,
   requireShiftContext,
   callMemoryWrite,
   callMemoryEvidenceList,
+  callRecallSearch,
   validateMemoryWriteArguments,
   validateMemoryEvidenceListArguments,
+  validateRecallSearchArguments,
   createRequestHandler,
   jsonRpcResult,
   jsonRpcError,

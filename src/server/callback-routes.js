@@ -7,6 +7,7 @@ const {
 const { describeMemoryEvidenceEvent } = require("../storage/memory-evidence");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
+const RECALL_LAYERS = new Set(["memory", "message", "evidence", "project-doc"]);
 
 function bumpThreadWriteStat(callbacks, sessionId, field, amount = 1) {
   const thread = typeof callbacks.getThread === "function" ? callbacks.getThread(sessionId) : null;
@@ -100,6 +101,80 @@ function createCallbackRoutes({
 }) {
   const recall = recallService || transcript;
   return async function handleCallbackRoutes(req, res, url) {
+    if (req.method === "POST" && url.pathname === "/api/callbacks/recall-search") {
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
+      const callbackToken = String(req.headers["x-callback-token"] || "");
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      const layers =
+        body.layers === undefined ? undefined : Array.isArray(body.layers) ? body.layers : null;
+      const limit = body.limit === undefined ? 10 : body.limit;
+      const allowedFields = new Set(["sessionId", "invocationId", "query", "layers", "limit"]);
+      const unknownFields = Object.keys(body).filter((field) => !allowedFields.has(field));
+
+      if (!sessionId || !invocationId || !callbackToken) {
+        sendJson(res, 400, {
+          error: "sessionId, invocationId, and X-Callback-Token are required.",
+        });
+        return true;
+      }
+      if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
+        sendJson(res, 401, { error: "Invalid callback token." });
+        return true;
+      }
+      if (unknownFields.length > 0) {
+        sendJson(res, 400, {
+          error: `Unknown recall-search fields: ${unknownFields.join(", ")}.`,
+        });
+        return true;
+      }
+      if (query.length < 2 || query.length > 1000) {
+        sendJson(res, 400, { error: "query must contain 2 to 1000 characters." });
+        return true;
+      }
+      if (
+        layers === null ||
+        (layers &&
+          (layers.length < 1 ||
+            new Set(layers).size !== layers.length ||
+            layers.some((layer) => !RECALL_LAYERS.has(layer))))
+      ) {
+        sendJson(res, 400, { error: "layers contains an invalid or duplicate recall layer." });
+        return true;
+      }
+      if (!Number.isInteger(limit) || limit < 1 || limit > 30) {
+        sendJson(res, 400, { error: "limit must be an integer from 1 to 30." });
+        return true;
+      }
+      if (!recall || typeof recall.searchForAgent !== "function") {
+        sendJson(res, 503, { error: "Agent recall is unavailable." });
+        return true;
+      }
+
+      const result = await recall.searchForAgent(
+        {
+          threadId: sessionId,
+          invocationId,
+          caller: "mcp",
+        },
+        {
+          query,
+          ...(layers ? { layers } : {}),
+          limit,
+        }
+      );
+      sendJson(res, 200, result);
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/callbacks/post-message") {
       let body;
       try {
@@ -222,7 +297,9 @@ function createCallbackRoutes({
         return true;
       }
 
-      const scopeRaw = String(url.searchParams.get("scope") || url.searchParams.get("memoryScope") || "")
+      const scopeRaw = String(
+        url.searchParams.get("scope") || url.searchParams.get("memoryScope") || ""
+      )
         .trim()
         .toLowerCase();
       const searchOptions = { limit, includeRetired, includeThinking };
@@ -298,7 +375,10 @@ function createCallbackRoutes({
       const invocationId = url.searchParams.get("invocationId") || "";
       const callbackToken = req.headers["x-callback-token"] || "";
       const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "20", 10);
-      const limit = Math.max(1, Math.min(50, Number.isFinite(requestedLimit) ? requestedLimit : 20));
+      const limit = Math.max(
+        1,
+        Math.min(50, Number.isFinite(requestedLimit) ? requestedLimit : 20)
+      );
 
       if (!sessionId || !invocationId || !callbackToken) {
         sendJson(res, 400, {
@@ -328,9 +408,7 @@ function createCallbackRoutes({
               from: Math.max(0, total - scanLimit),
               limit: scanLimit,
             });
-      const eligible = (page?.events || [])
-        .map(describeMemoryEvidenceEvent)
-        .filter(Boolean);
+      const eligible = (page?.events || []).map(describeMemoryEvidenceEvent).filter(Boolean);
       const selected = eligible.slice(-limit);
 
       sendJson(res, 200, {
@@ -343,10 +421,7 @@ function createCallbackRoutes({
 
     if (
       req.method === "POST" &&
-      new Set([
-        "/api/callbacks/memory-write",
-        "/api/callbacks/memory-upsert",
-      ]).has(url.pathname)
+      new Set(["/api/callbacks/memory-write", "/api/callbacks/memory-upsert"]).has(url.pathname)
     ) {
       let body;
       try {

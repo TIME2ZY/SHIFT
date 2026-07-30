@@ -46,6 +46,8 @@ test("memory database applies schema and safety pragmas", () => {
       "purged_threads",
       "storage_metadata",
       "storage_outbox",
+      "embedding_indexes",
+      "embedding_items",
       "recall_items",
       "recall_fts",
     ]) {
@@ -75,6 +77,53 @@ test("memory database applies schema and safety pragmas", () => {
       "activation",
     ]) {
       assert.ok(memoryColumns.has(column), `expected memory_entries.${column}`);
+    }
+    const memorySearchColumns = new Set(
+      db
+        .prepare("PRAGMA table_info(memory_search)")
+        .all()
+        .map((column) => column.name)
+    );
+    assert.ok(memorySearchColumns.has("topic"));
+    const memorySearchIndexes = new Set(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'memory_search'"
+        )
+        .all()
+        .map((row) => row.name)
+    );
+    assert.ok(memorySearchIndexes.has("memory_search_thread_topic"));
+    assert.ok(memorySearchIndexes.has("memory_search_project_topic"));
+    const memoryFtsSql = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_search_fts'"
+      )
+      .get().sql;
+    assert.match(memoryFtsSql, /tokenize='trigram'/);
+    const embeddingColumns = new Set(
+      db
+        .prepare("PRAGMA table_info(embedding_items)")
+        .all()
+        .map((column) => column.name)
+    );
+    for (const column of [
+      "source_kind",
+      "source_id",
+      "source_version",
+      "chunk_index",
+      "scope_key",
+      "content_hash",
+      "model",
+      "dimensions",
+      "index_generation",
+      "status",
+      "attempt_count",
+      "lease_owner",
+      "lease_expires_at",
+      "last_error",
+    ]) {
+      assert.ok(embeddingColumns.has(column), `expected embedding_items.${column}`);
     }
     const windowColumns = new Set(
       db
@@ -293,6 +342,69 @@ test("later migrations upgrade a version 2 database without losing memory rows",
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 3").get().count,
       1
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("topic migration backfills the existing memory search projection", () => {
+  const db = openMemoryDatabase({
+    file: ":memory:",
+    migrations: MIGRATIONS.slice(0, 13),
+  });
+  try {
+    db.prepare(
+      "INSERT INTO threads (id, title, project_dir, created_at, updated_at) VALUES (?, '', '', ?, ?)"
+    ).run("thread-topic", "2026-07-30T00:00:00.000Z", "2026-07-30T00:00:00.000Z");
+    db.prepare(
+      `
+      INSERT INTO memory_entries (
+        id, scope, owner_thread_id, origin_thread_id, kind, status,
+        authority, activation, content, topic, capture_key, created_by, created_at
+      ) VALUES (
+        'memory-topic', 'thread', 'thread-topic', 'thread-topic', 'decision', 'captured',
+        'agent', 'query', 'SQLite 是权威存储。', 'storage.authoritative',
+        'decision:storage.authoritative:migration', 'agent:codex', '2026-07-30T00:00:00.000Z'
+      )
+    `
+    ).run();
+    db.prepare(
+      `
+      INSERT INTO memory_search (
+        memory_id, scope, owner_thread_id, origin_thread_id,
+        kind, status, title, content, created_at, metadata_json
+      ) VALUES (
+        'memory-topic', 'thread', 'thread-topic', 'thread-topic',
+        'decision', 'captured', 'decision:captured', 'SQLite 是权威存储。',
+        '2026-07-30T00:00:00.000Z', '{}'
+      )
+    `
+    ).run();
+
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    assert.equal(
+      db
+        .prepare("SELECT topic FROM memory_search WHERE memory_id = 'memory-topic'")
+        .get().topic,
+      "storage.authoritative"
+    );
+    assert.equal(
+      db
+        .prepare(
+          `
+          SELECT COUNT(*) AS count
+          FROM memory_search_fts
+          WHERE memory_search_fts MATCH '"权威存储"'
+        `
+        )
+        .get().count,
+      1
+    );
+    assert.equal(
+      db.prepare("SELECT schema_version FROM storage_metadata WHERE singleton = 1").get()
+        .schema_version,
+      MIGRATIONS.length
     );
   } finally {
     db.close();

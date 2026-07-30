@@ -87,7 +87,11 @@ test("handleCallbackRoutes posts callback messages after token validation", asyn
     }),
   });
 
-  const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/post-message"));
+  const handled = await handle(
+    makeReq("POST"),
+    res,
+    new URL("http://127.0.0.1/api/callbacks/post-message")
+  );
   assert.equal(handled, true);
   assert.deepEqual(appended, {
     sessionId: "s1",
@@ -117,10 +121,103 @@ test("handleCallbackRoutes lists invocations for a session", async () => {
     readJsonBody: async () => ({}),
   });
 
-  const handled = await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/callbacks/list-invocations?sessionId=s1"));
+  const handled = await handle(
+    makeReq("GET"),
+    res,
+    new URL("http://127.0.0.1/api/callbacks/list-invocations?sessionId=s1")
+  );
   assert.equal(handled, true);
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { invocations: [{ invocationId: "i1" }] });
+});
+
+test("recall-search requires callback authentication and forwards only trusted context", async () => {
+  const res = makeRes();
+  const calls = [];
+  const handle = callbackRoutes.createCallbackRoutes({
+    callbacks: {
+      validateToken: (sessionId, invocationId, token) =>
+        sessionId === "s1" && invocationId === "i1" && token === "tok",
+    },
+    transcript: {},
+    recallService: {
+      searchForAgent: async (context, query) => {
+        calls.push({ context, query });
+        return { version: 2, query: query.query, hits: [] };
+      },
+    },
+    appendToSession() {},
+    getSession: () => null,
+    sendJson: makeSendJson(res),
+    readJsonBody: async () => ({
+      sessionId: "s1",
+      invocationId: "i1",
+      query: "previous decision",
+      layers: ["memory", "evidence"],
+      limit: 6,
+    }),
+  });
+
+  const handled = await handle(
+    makeReq("POST", { "x-callback-token": "tok" }),
+    res,
+    new URL("http://127.0.0.1/api/callbacks/recall-search")
+  );
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.version, 2);
+  assert.deepEqual(calls, [
+    {
+      context: { threadId: "s1", invocationId: "i1", caller: "mcp" },
+      query: {
+        query: "previous decision",
+        layers: ["memory", "evidence"],
+        limit: 6,
+      },
+    },
+  ]);
+});
+
+test("recall-search rejects missing tokens and agent-controlled scope fields", async () => {
+  const missingTokenRes = makeRes();
+  const missingTokenHandle = callbackRoutes.createCallbackRoutes({
+    callbacks: { validateToken: () => true },
+    transcript: {},
+    recallService: { searchForAgent: async () => ({ hits: [] }) },
+    sendJson: makeSendJson(missingTokenRes),
+    readJsonBody: async () => ({
+      sessionId: "s1",
+      invocationId: "i1",
+      query: "previous decision",
+    }),
+  });
+  await missingTokenHandle(
+    makeReq("POST"),
+    missingTokenRes,
+    new URL("http://127.0.0.1/api/callbacks/recall-search")
+  );
+  assert.equal(missingTokenRes.statusCode, 400);
+
+  const scopeRes = makeRes();
+  const scopeHandle = callbackRoutes.createCallbackRoutes({
+    callbacks: { validateToken: () => true },
+    transcript: {},
+    recallService: { searchForAgent: async () => ({ hits: [] }) },
+    sendJson: makeSendJson(scopeRes),
+    readJsonBody: async () => ({
+      sessionId: "s1",
+      invocationId: "i1",
+      query: "previous decision",
+      projectKey: "other-project",
+    }),
+  });
+  await scopeHandle(
+    makeReq("POST", { "x-callback-token": "tok" }),
+    scopeRes,
+    new URL("http://127.0.0.1/api/callbacks/recall-search")
+  );
+  assert.equal(scopeRes.statusCode, 400);
+  assert.match(scopeRes.body.error, /Unknown recall-search fields/);
 });
 
 test("handleCallbackRoutes returns 404 when invocation replay is missing", async () => {
@@ -142,7 +239,9 @@ test("handleCallbackRoutes returns 404 when invocation replay is missing", async
   const handled = await handle(
     makeReq("GET"),
     res,
-    new URL("http://127.0.0.1/api/callbacks/read-invocation?sessionId=s1&targetInvocationId=missing")
+    new URL(
+      "http://127.0.0.1/api/callbacks/read-invocation?sessionId=s1&targetInvocationId=missing"
+    )
   );
   assert.equal(handled, true);
   assert.equal(res.statusCode, 404);
@@ -203,8 +302,7 @@ test("handleCallbackRoutes lists only successful current-invocation memory evide
     makeReq("GET", { "x-callback-token": "tok" }),
     res,
     new URL(
-      "http://127.0.0.1/api/callbacks/memory-evidence" +
-        "?sessionId=s1&invocationId=i1&limit=10"
+      "http://127.0.0.1/api/callbacks/memory-evidence" + "?sessionId=s1&invocationId=i1&limit=10"
     )
   );
   assert.equal(handled, true);
@@ -361,11 +459,7 @@ test("handleCallbackRoutes memory-invalidate retires thread-local memory", async
         reason: "policy changed",
       }),
     });
-    await handle(
-      makeReq("POST"),
-      res,
-      new URL("http://127.0.0.1/api/callbacks/memory-invalidate")
-    );
+    await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/callbacks/memory-invalidate"));
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.memory.status, "invalidated");
     assert.equal(sseEvents[0].data.action, "invalidate");

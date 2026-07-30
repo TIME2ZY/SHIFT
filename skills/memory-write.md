@@ -32,11 +32,11 @@ always: true
 
 ## kind
 
-| kind | 含义 |
-|---|---|
-| `decision` | 已经选择的方案 |
-| `constraint` | 后续必须遵守的限制 |
-| `fact` | 已验证且未来有用的事实 |
+| kind         | 含义                   |
+| ------------ | ---------------------- |
+| `decision`   | 已经选择的方案         |
+| `constraint` | 后续必须遵守的限制     |
+| `fact`       | 已验证且未来有用的事实 |
 
 不要写 `lesson`、`handoff`、`window-seal`、`progress`、`todo` 或 `summary`。
 
@@ -70,6 +70,9 @@ always: true
 工具验证出的 `fact` 应尽量附带 `evidenceEventNo`。不知道事件编号时，先调用 `memory_evidence_list`；它只返回当前 invocation 中可用的成功工具结果。不要引用 assistant 文本、失败事件或其他 invocation。
 
 Provider 没有暴露 `memory_write` 时，才使用 prompt 中提供的兼容 callback 命令。
+
+写前需要检查已有结论时，优先调用 `recall_search` 并仅选择 `memory` 层；
+Provider 没有暴露该工具时，才使用兼容 `session-search` 命令。
 
 不要传入 ID、thread、project、invocation、authority、status、时间戳或版本关系。服务端会从可信 invocation 上下文推导这些字段，并完成去重与 supersession。
 

@@ -153,6 +153,7 @@ test(
 
 test("RECALL_RULE contains the three recall steps + key phrases", () => {
   assert.match(RECALL_RULE, /回忆铁律/);
+  assert.match(RECALL_RULE, /recall_search/);
   assert.match(RECALL_RULE, /session-search/);
   assert.match(RECALL_RULE, /read-invocation/);
   assert.match(RECALL_RULE, /不要凭印象猜/);
