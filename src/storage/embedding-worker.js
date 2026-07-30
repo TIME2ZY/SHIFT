@@ -25,7 +25,9 @@ function createEmbeddingWorker(options = {}) {
         failed: 0,
       };
     }
-    const index = repository.getActiveIndex();
+    const index = input.indexGeneration
+      ? repository.getIndex(input.indexGeneration)
+      : repository.getActiveIndex();
     if (!index) {
       return {
         state: "degraded",

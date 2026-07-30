@@ -32,28 +32,28 @@ function baseMemories() {
       {
         id: "m2",
         kind: "decision",
-        status: "captured",
+        status: "active",
         topic: "auth-session-ttl",
         content: "登录态/access token 有效期 24 小时 / 86400s",
       },
       {
         id: "m3",
         kind: "constraint",
-        status: "captured",
+        status: "active",
         topic: "auth-no-refresh-token",
         content: "本期明确不做 refresh token",
       },
       {
         id: "m4",
         kind: "decision",
-        status: "captured",
+        status: "active",
         topic: "storage-primary",
         content: "在线数据读写以 SQLite 为唯一真相源",
       },
       {
         id: "m5",
         kind: "fact",
-        status: "captured",
+        status: "active",
         topic: "dev-port",
         content: "本地开发默认端口 8787",
       },
@@ -97,14 +97,14 @@ function goodTurns() {
             {
               id: "m2",
               kind: "decision",
-              status: "captured",
+              status: "active",
               topic: "auth-session-ttl",
               content: "24 小时 / 86400",
             },
             {
               id: "m3",
               kind: "constraint",
-              status: "captured",
+              status: "active",
               topic: "auth-no-refresh-token",
               content: "不做 refresh",
             },
@@ -206,7 +206,7 @@ test("evaluateLiveRun: resume with --allow-resume can pass as resume only", () =
           stats: { channels: { related: 1, recency: 1 } },
           items: [
             {
-              status: "captured",
+              status: "active",
               topic: "auth-session-ttl",
               content: "24h 86400",
             },
@@ -263,7 +263,7 @@ test("evaluateLiveRun: seal-empty fails L9 and L10", () => {
       memoryInjects: [
         {
           count: 5,
-          items: [{ status: "captured", content: "24h", topic: "auth-session-ttl" }],
+          items: [{ status: "active", content: "24h", topic: "auth-session-ttl" }],
           stats: { channels: { related: 0, recency: 5 } },
         },
       ],
@@ -350,7 +350,7 @@ test("evaluateExpectedFacts: requires 24h and no-refresh when product present", 
       {
         topic: "auth-session-ttl",
         content: "约 7 天",
-        status: "captured",
+        status: "active",
         kind: "decision",
       },
     ],

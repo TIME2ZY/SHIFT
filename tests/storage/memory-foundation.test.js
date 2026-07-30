@@ -34,15 +34,15 @@ test("migration rebuilds memory_entries with owner columns and capture backfill"
     const outcome = storage.memory.capture({
       id: "m1",
       threadId: "thread-1",
-      kind: "handoff",
-      content: "handoff body",
+      kind: "fact",
+      content: "fact body",
       createdBy: "codex",
       captureKey: "handoff:1",
     });
     assert.equal(outcome.memory.scope, "thread");
     assert.equal(outcome.memory.ownerThreadId, "thread-1");
     assert.equal(outcome.memory.projectKey, null);
-    assert.equal(outcome.memory.activation, "backstop");
+    assert.equal(outcome.memory.activation, "query");
     assert.equal(outcome.memory.authority, "agent");
 
     const proj = storage.memories.getSearchProjection("m1");
@@ -123,6 +123,38 @@ test("project memory survives thread purge and remains searchable", () => {
   }
 });
 
+test("thread and project memories with the same topic occupy independent slots", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-mem-scope-slot-"));
+  const storage = createFixture({ projectDir: dir });
+  try {
+    const projectMemory = storage.memory.createProduct({
+      id: "project-storage",
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage.authoritative",
+      content: "The project source of truth is SQLite.",
+      createdBy: "user",
+      scope: "project",
+    });
+    const threadMemory = storage.memory.createProduct({
+      id: "thread-storage",
+      threadId: "thread-1",
+      kind: "fact",
+      topic: "storage.authoritative",
+      content: "This investigation is using an isolated fixture database.",
+      createdBy: "user",
+      scope: "thread",
+    });
+
+    assert.deepEqual(projectMemory.superseded, []);
+    assert.deepEqual(threadMemory.superseded, []);
+    assert.equal(storage.memories.get(projectMemory.memory.id).status, "active");
+    assert.equal(storage.memories.get(threadMemory.memory.id).status, "active");
+  } finally {
+    storage.close();
+  }
+});
+
 test("thread projectDir locks after L0 evidence exists", () => {
   const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "shift-a-"));
   const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "shift-b-"));
@@ -199,7 +231,7 @@ test("supersession retires peers before insert under unique active index", () =>
       createdBy: "user",
       writeChannel: "user",
     });
-    assert.equal(first.memory.status, "captured");
+    assert.equal(first.memory.status, "active");
     assert.equal(storage.memories.get(first.memory.id).status, "superseded");
     assert.equal(storage.memories.get(first.memory.id).supersededBy, second.memory.id);
     assert.equal(storage.memory.listActive("thread-1").length, 1);
@@ -252,7 +284,7 @@ test("dual-connection concurrent product write ends with one active", () => {
         `
         SELECT id, status FROM memory_entries
         WHERE supersession_key = 'decision:concurrent-topic'
-          AND status IN ('captured', 'confirmed')
+          AND status = 'active'
       `
       )
       .all();
@@ -300,8 +332,8 @@ test("legacy capture_key null rows migrate via open of prebuilt v5-like path", (
       .all()
       .map((r) => r.name);
     assert.ok(indexes.includes("memory_capture_thread"));
-    assert.ok(indexes.includes("memory_active_thread_supersession"));
-    assert.ok(indexes.includes("memory_active_project_supersession"));
+    assert.ok(indexes.includes("memory_active_thread_topic"));
+    assert.ok(indexes.includes("memory_active_project_topic"));
   } finally {
     storage.close();
   }

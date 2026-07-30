@@ -10,6 +10,11 @@ const {
   loadVectorExtension,
   searchVector,
 } = require("./vector-index");
+const {
+  enqueueMemoryEmbedding,
+  enqueueProjectDocumentEmbedding,
+  enqueueRecallEmbedding,
+} = require("./embedding-projection");
 
 function createEmbeddingRuntime(options = {}) {
   const storage = options.storage;
@@ -27,17 +32,36 @@ function createEmbeddingRuntime(options = {}) {
   if (!vector.available) {
     return disabledRuntime("vector_extension_unavailable", config, vector.reason);
   }
+  storage.embeddings.pruneStaleVectors?.();
   const provider =
     options.provider || createEmbeddingProvider(config, { fetch: options.fetch });
   if (provider.available === false) {
     return disabledRuntime(provider.reason || "provider_unavailable", config);
   }
 
-  let active = storage.embeddings.getActiveIndex();
-  if (active && (active.model !== provider.model || active.dimensions !== provider.dimensions)) {
-    return disabledRuntime("active_index_mismatch", config);
-  }
-  if (!active) {
+  let servingIndex = storage.embeddings.getActiveIndex();
+  let buildingIndex = null;
+  if (
+    servingIndex &&
+    (servingIndex.model !== provider.model || servingIndex.dimensions !== provider.dimensions)
+  ) {
+    const generation = generationFor(provider.model, provider.dimensions);
+    const tableName = tableNameFor(generation);
+    storage.transaction(() => {
+      createVectorIndex(storage.db, {
+        tableName,
+        dimensions: provider.dimensions,
+      });
+      storage.embeddings.registerIndex({
+        generation,
+        model: provider.model,
+        dimensions: provider.dimensions,
+        tableName,
+      });
+      enqueueAuthoritativeCorpus(storage, storage.embeddings.getIndex(generation));
+    });
+    buildingIndex = storage.embeddings.getIndex(generation);
+  } else if (!servingIndex) {
     const generation = generationFor(provider.model, provider.dimensions);
     const tableName = tableNameFor(generation);
     storage.transaction(() => {
@@ -53,11 +77,11 @@ function createEmbeddingRuntime(options = {}) {
       });
       storage.embeddings.activateIndex(generation);
     });
-    active = storage.embeddings.getActiveIndex();
+    servingIndex = storage.embeddings.getActiveIndex();
   } else {
     createVectorIndex(storage.db, {
-      tableName: active.tableName,
-      dimensions: active.dimensions,
+      tableName: servingIndex.tableName,
+      dimensions: servingIndex.dimensions,
     });
   }
 
@@ -79,10 +103,32 @@ function createEmbeddingRuntime(options = {}) {
     if (running) return running;
     running = worker.runOnce({
       limit: config.batchSize,
+      ...(buildingIndex ? { indexGeneration: buildingIndex.generation } : {}),
       ...input,
     });
     try {
-      return await running;
+      const result = await running;
+      if (buildingIndex && result.claimed === 0) {
+        storage.transaction(() => enqueueAuthoritativeCorpus(storage, buildingIndex));
+        const unfinished = Number(
+          storage.db
+            .prepare(
+              `SELECT COUNT(*) AS count
+               FROM embedding_items
+               WHERE index_generation = ?
+                 AND status NOT IN ('ready', 'stale')`
+            )
+            .get(buildingIndex.generation).count
+        );
+        if (unfinished === 0) {
+          storage.embeddings.activateIndex(buildingIndex.generation);
+          servingIndex = storage.embeddings.getActiveIndex();
+          buildingIndex = null;
+          return { ...result, activated: true };
+        }
+        return { ...result, building: true, remaining: unfinished };
+      }
+      return result;
     } finally {
       running = null;
     }
@@ -109,12 +155,19 @@ function createEmbeddingRuntime(options = {}) {
   }
 
   async function search(query, scopeKeys, limit = 30) {
+    if (buildingIndex) {
+      return {
+        state: "degraded",
+        reason: "index_building",
+        hits: [],
+      };
+    }
     try {
       const queryVector = await provider.embedQuery(query);
       return {
         state: "available",
         hits: searchVector(storage.db, {
-          tableName: active.tableName,
+          tableName: servingIndex.tableName,
           vector: queryVector,
           scopeKeys,
           limit,
@@ -131,13 +184,71 @@ function createEmbeddingRuntime(options = {}) {
     available: true,
     config,
     provider,
-    index: active,
+    get index() {
+      return servingIndex;
+    },
+    get buildingIndex() {
+      return buildingIndex;
+    },
     vectorVersion: vector.version,
     start,
     runOnce,
     search,
     close,
   };
+}
+
+function enqueueAuthoritativeCorpus(storage, index) {
+  if (!index) return 0;
+  let queued = 0;
+  const memories = storage.db
+    .prepare("SELECT id FROM memory_entries WHERE status = 'active' ORDER BY created_at")
+    .all();
+  for (const row of memories) {
+    if (enqueueMemoryEmbedding(storage, storage.memories.get(row.id), index)) queued += 1;
+  }
+
+  const recallRows = storage.db
+    .prepare(
+      `SELECT source_kind, source_id
+       FROM recall_items
+       WHERE source_kind IN ('message', 'invocation-event')
+       ORDER BY created_at`
+    )
+    .all();
+  for (const row of recallRows) {
+    const item = storage.recall.getBySource(row.source_kind, row.source_id);
+    if (enqueueRecallEmbedding(storage, item, index)) queued += 1;
+  }
+
+  const passages = storage.db
+    .prepare(
+      `SELECT id, document_id, project_key, path, heading, start_line, end_line, content
+       FROM project_passages
+       ORDER BY project_key, path, start_line`
+    )
+    .all();
+  for (const row of passages) {
+    if (
+      enqueueProjectDocumentEmbedding(
+        storage,
+        {
+          id: row.id,
+          documentId: row.document_id,
+          projectKey: row.project_key,
+          path: row.path,
+          heading: row.heading,
+          startLine: row.start_line,
+          endLine: row.end_line,
+          content: row.content,
+        },
+        index
+      )
+    ) {
+      queued += 1;
+    }
+  }
+  return queued;
 }
 
 function disabledRuntime(reason, config, detail) {
@@ -175,4 +286,5 @@ module.exports = {
   createEmbeddingRuntime,
   generationFor,
   tableNameFor,
+  enqueueAuthoritativeCorpus,
 };

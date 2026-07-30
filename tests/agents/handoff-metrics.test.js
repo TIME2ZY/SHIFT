@@ -58,7 +58,7 @@ test("memoryCardHasActiveItems detects empty and non-empty cards", () => {
   assert.equal(memoryCardHasActiveItems("<!-- Active Memories (0) -->\n尚无结构化记忆"), false);
   assert.equal(
     memoryCardHasActiveItems(
-      "<!-- Active Memories (1) -->\n1. [captured][handoff] id=m1\ncontent"
+      "<!-- Active Memories (1) -->\n1. [active][handoff] id=m1\ncontent"
     ),
     true
   );
@@ -73,7 +73,7 @@ test("buildA2AInjectMetrics flags a2a_prompt_has_memory", () => {
   assert.equal(empty.a2a_prompt_has_memory, 0);
   const full = buildA2AInjectMetrics({
     agent: "opencode",
-    memoryCard: "<!-- Active Memories (2) -->\n[captured]",
+    memoryCard: "<!-- Active Memories (2) -->\n[active]",
     promptBytes: 5000,
   });
   assert.equal(full.a2a_prompt_has_memory, 1);

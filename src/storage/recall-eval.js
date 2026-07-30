@@ -23,7 +23,7 @@ function evaluateRecallCases(cases, results, options = {}) {
     const leaked = ids.filter((id) => forbidden.has(id));
     forbiddenHits += leaked.length;
     retiredHits += hits.filter((hit) =>
-      ["superseded", "invalidated"].includes(hit.metadata?.status)
+      hit.metadata?.status === "superseded"
     ).length;
 
     if (expected.length > 0) {

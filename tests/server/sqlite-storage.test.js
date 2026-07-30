@@ -213,7 +213,7 @@ test("chat reads and writes thread state only through SQLite", async () => {
   }
 });
 
-test("routed structured handoff is captured in SQLite and announced over SSE", async () => {
+test("routed structured handoff is collaboration evidence, not product Memory", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
@@ -260,11 +260,8 @@ test("routed structured handoff is captured in SQLite and announced over SSE", a
     const memories = storage.memories.listForThread(session.id);
 
     assert.equal(run, 2);
-    assert.equal(memories.length, 1);
-    assert.equal(memories[0].kind, "handoff");
-    assert.match(memories[0].captureKey, /^handoff:.*:opencode:0$/);
-    assert.equal(memories[0].metadata.quality.ok, true);
-    assert.match(stream, /event: memory-captured/);
+    assert.equal(memories.length, 0);
+    assert.match(stream, /event: handoff-captured/);
     const search = await apiFetch(
       `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent("登录流程")}`
     ).then((response) => response.json());
@@ -332,15 +329,8 @@ test("chat seals from cumulative window usage and starts the next generation", a
     // PRE-call rotate may seal before provider output; generation still advances.
     const sealedWin = storage.windows.get(firstWindow.id);
     assert.equal(sealedWin.state, "sealed");
-    const sealMemories = storage.memories
-      .listForThread(session.id)
-      .filter((memory) => memory.kind === "window-seal");
-    assert.ok(sealMemories.length >= 1, "expected at least one window-seal memory");
-    assert.ok(
-      sealMemories.some((m) => m.captureKey === `window-seal:${firstWindow.id}`),
-      "expected seal memory for first window"
-    );
-    assert.match(sealedStream, /event: memory-captured/);
+    assert.equal(storage.memories.listForThread(session.id).length, 0);
+    assert.match(sealedStream, /event: window-sealed/);
 
     await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -350,9 +340,8 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.equal(windows.length, 2);
     assert.equal(windows[1].generation, 2);
     assert.match(prompts[2], /Generation: 2/);
-    assert.match(prompts[2], /<!-- Active Memories \(1\) -->/);
-    assert.match(prompts[2], /\[captured\]\[window-seal\]/);
-    assert.match(prompts[2], /partial=true/);
+    assert.match(prompts[2], /<!-- Active Memories \(0\) -->/);
+    assert.doesNotMatch(prompts[2], /\[window-seal\]/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();

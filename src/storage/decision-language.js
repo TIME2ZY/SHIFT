@@ -1,5 +1,5 @@
 /**
- * Heuristics for "decision language" turns — used only for write_or_suggest_rate
+ * Heuristics for "decision language" turns — used only for write rate
  * denominators. Not a substitute for true intent classification.
  */
 
@@ -47,9 +47,7 @@ function computeWriteOrSuggestRate(counts = {}) {
  */
 function ratesFromEventCounts(counts = {}) {
   const decisionTurns = Number(counts.decision_language_detected) || 0;
-  const writeTurns =
-    (Number(counts.memory_written) || 0) +
-    (Number(counts.memory_suggestion_created) || 0);
+  const writeTurns = Number(counts.memory_written) || 0;
   // "Turns with write" is approximated by write events when turn tagging is absent.
   const writeOrSuggestRate = computeWriteOrSuggestRate({
     decisionTurns,
@@ -73,8 +71,8 @@ function ratesFromEventCounts(counts = {}) {
     searchRate,
     definitions: {
       writeOrSuggestRate:
-        "turns_with_decision_language_and_(write|suggestion) / turns_with_decision_language_detected",
-      note: "Injected ≠ used. writeOrSuggestRate uses event counts as a proxy until turn-level tagging exists.",
+        "turns_with_decision_language_and_write / turns_with_decision_language_detected",
+      note: "Injected ≠ used. The write rate uses event counts as a proxy until turn-level tagging exists.",
     },
   };
 }

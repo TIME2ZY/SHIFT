@@ -74,7 +74,7 @@ test("callback client validates required environment and arguments", () => {
   });
 });
 
-test("callback client builds memory-upsert and memory-invalidate requests", () => {
+test("callback client builds the deprecated memory-upsert compatibility request", () => {
   const upsert = callbackClient.buildRequest(
     "memory-upsert",
     {
@@ -111,20 +111,6 @@ test("callback client builds memory-upsert and memory-invalidate requests", () =
     /requires --content/
   );
 
-  const invalidate = callbackClient.buildRequest(
-    "memory-invalidate",
-    { id: "mem-1", reason: "revoked" },
-    ENV
-  );
-  assert.equal(invalidate.url.href, "http://127.0.0.1:8787/api/callbacks/memory-invalidate");
-  assert.deepEqual(JSON.parse(invalidate.init.body), {
-    sessionId: "thread-中文",
-    invocationId: "inv-1",
-    callbackToken: "secret",
-    id: "mem-1",
-    reason: "revoked",
-  });
-  assert.throws(() => callbackClient.buildRequest("memory-invalidate", {}, ENV), /requires --id/);
 });
 
 test("callback client exit codes distinguish delivery from handoff acceptance", () => {

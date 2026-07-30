@@ -306,6 +306,141 @@ test("sqlite search reports unavailable without scanning transcripts on database
   assert.equal(transcriptCalls, 0);
 });
 
+test("FTS results preserve repository BM25 order instead of reversing negative ranks", async () => {
+  const rows = [
+    {
+      id: 1,
+      sourceKind: "invocation-event",
+      sourceId: "invocation-1:1",
+      content: "database failure exact diagnostic",
+      snippet: "database failure exact diagnostic",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      rank: -12,
+      matchChannel: "fts",
+      metadata: { invocationId: "invocation-1", eventNo: 1, kind: "text.delta" },
+    },
+    {
+      id: 2,
+      sourceKind: "invocation-event",
+      sourceId: "invocation-2:1",
+      content: "database failure incidental mention",
+      snippet: "database failure incidental mention",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      rank: -1,
+      matchChannel: "fts",
+      metadata: { invocationId: "invocation-2", eventNo: 1, kind: "text.delta" },
+    },
+  ];
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      recall: {
+        search() {
+          return rows;
+        },
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  const result = await service.searchSession("thread-1", "database failure", {
+    layers: "evidence",
+    limit: 2,
+  });
+
+  assert.deepEqual(
+    result.hits.map((hit) => hit.sourceId),
+    ["invocation-1:1", "invocation-2:1"]
+  );
+});
+
+test("hybrid fusion ranks by RRF score instead of preserving keyword order", async () => {
+  const keywordRows = [
+    {
+      id: 1,
+      sourceKind: "invocation-event",
+      sourceId: "keyword-first",
+      content: "database failure keyword first",
+      snippet: "database failure keyword first",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      rank: -12,
+      matchChannel: "fts",
+      metadata: { invocationId: "keyword-first", eventNo: 1, kind: "text.delta" },
+    },
+    {
+      id: 2,
+      sourceKind: "invocation-event",
+      sourceId: "hybrid-winner",
+      content: "database failure semantic winner",
+      snippet: "database failure semantic winner",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      rank: -8,
+      matchChannel: "fts",
+      metadata: { invocationId: "hybrid-winner", eventNo: 1, kind: "text.delta" },
+    },
+    {
+      id: 3,
+      sourceKind: "invocation-event",
+      sourceId: "vector-middle",
+      content: "database failure vector middle",
+      snippet: "database failure vector middle",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      rank: -4,
+      matchChannel: "fts",
+      metadata: { invocationId: "vector-middle", eventNo: 1, kind: "text.delta" },
+    },
+  ];
+  const embeddingRows = keywordRows.map((row, index) => ({
+    id: index + 101,
+    sourceKind: "evidence",
+    sourceId: row.sourceId,
+    status: "ready",
+  }));
+  const bySource = new Map(keywordRows.map((row) => [row.sourceId, row]));
+  const service = createRecallService({
+    mode: "sqlite",
+    storage: {
+      recall: {
+        search() {
+          return keywordRows;
+        },
+        getBySource(_kind, sourceId) {
+          return bySource.get(sourceId);
+        },
+      },
+      embeddings: {
+        getReadyByIds(ids) {
+          return embeddingRows.filter((row) => ids.includes(row.id));
+        },
+      },
+    },
+    embeddingRuntime: {
+      available: true,
+      index: { generation: "hybrid-test" },
+      async search() {
+        return {
+          state: "available",
+          hits: [
+            { itemId: 102, distance: 0.01 },
+            { itemId: 103, distance: 0.02 },
+            { itemId: 101, distance: 0.03 },
+          ],
+        };
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  const result = await service.searchSession("thread-1", "database failure", {
+    layers: "evidence",
+    limit: 3,
+  });
+
+  assert.equal(result.hits[0].sourceId, "hybrid-winner");
+  assert.deepEqual(result.hits[0].ranks, { fts: 2, vector: 1 });
+  assert.deepEqual(result.hits[0].matchChannels, ["fts", "vector"]);
+});
+
 test("sqlite mode skips transcript search after filling the requested limit", async () => {
   const { storage } = createFixture();
   let fileSearches = 0;
@@ -491,10 +626,10 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
     storage.memory.capture({
       id: "memory-recent",
       threadId: "thread-1",
-      kind: "window-seal",
-      content: "recent seal snapshot about cache",
-      createdBy: "system:window-seal",
-      captureKey: "window-seal:window-1",
+      kind: "fact",
+      content: "recent cache configuration",
+      createdBy: "agent",
+      captureKey: "fact:cache",
       createdAt: "2026-07-16T12:00:00.000Z",
     });
     storage.memory.capture({
@@ -509,10 +644,10 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
     storage.memory.capture({
       id: "memory-noise",
       threadId: "thread-1",
-      kind: "handoff",
-      content: "unrelated handoff about CSS layout",
+      kind: "fact",
+      content: "unrelated fact about CSS layout",
       createdBy: "codex",
-      captureKey: "handoff:css",
+      captureKey: "fact:css",
       createdAt: "2026-07-15T00:00:00.000Z",
     });
 
@@ -542,7 +677,7 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
   }
 });
 
-test("retrieveForTurn prefers product memories over dense handoff noise", async () => {
+test("retrieveForTurn rejects collaboration records as product Memory", async () => {
   const { storage, service } = createFixture();
   try {
     storage.memory.createProduct({
@@ -553,17 +688,18 @@ test("retrieveForTurn prefers product memories over dense handoff noise", async 
       createdBy: "codex",
       createdAt: "2026-07-01T00:00:00.000Z",
     });
-    for (let index = 0; index < 8; index += 1) {
-      storage.memory.capture({
-        id: `handoff-${index}`,
+    assert.throws(
+      () =>
+        storage.memory.capture({
+          id: "handoff-1",
         threadId: "thread-1",
         kind: "handoff",
-        content: `handoff noise ${index} about CSS and layout`,
+          content: "handoff noise about CSS and layout",
         createdBy: "codex",
-        captureKey: `handoff:inv-${index}:to:0`,
-        createdAt: `2026-07-20T0${index}:00:00.000Z`,
-      });
-    }
+          captureKey: "handoff:inv-1:to:0",
+        }),
+      /Memory kind must be one of/
+    );
 
     const result = await service.retrieveForTurn({
       threadId: "thread-1",
@@ -573,14 +709,8 @@ test("retrieveForTurn prefers product memories over dense handoff noise", async 
       relatedLimit: 2,
     });
 
-    assert.ok(
-      result.items.some((item) => item.kind === "decision"),
-      "decision should survive recency handoff flood"
-    );
-    const autoCount = result.items.filter(
-      (item) => item.kind === "handoff" || item.kind === "window-seal"
-    ).length;
-    assert.ok(autoCount <= 2, `expected at most 2 auto memories, got ${autoCount}`);
+    assert.ok(result.items.some((item) => item.kind === "decision"));
+    assert.ok(result.items.every((item) => ["decision", "constraint", "fact"].includes(item.kind)));
     assert.ok((result.stats.byKind.decision || 0) >= 1);
   } finally {
     storage.close();

@@ -1921,7 +1921,7 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
     assert.equal(captured[0].windowId, "window-cb-1");
     assert.equal(captured[0].quality.ok, true);
     assert.equal(captured[0].handoff.goal, "完成登录流程");
-    assert.match(sse.join(""), /event: memory-captured/);
+    assert.match(sse.join(""), /event: handoff-captured/);
   } finally {
     callbacks.unregisterThread(sessionId);
   }
@@ -1979,7 +1979,7 @@ test("callbacks.postMessage captures handoff even when A2A max depth skips enque
     assert.equal(captured[0].windowId, "window-depth-1");
     assert.deepEqual(threadCtx.worklist, ["codex"]);
     assert.equal(threadCtx.a2aCount, 1);
-    assert.match(sse.join(""), /event: memory-captured/);
+    assert.match(sse.join(""), /event: handoff-captured/);
     assert.match(sse.join(""), /event: a2a-skipped/);
   } finally {
     callbacks.unregisterThread(sessionId);

@@ -3,9 +3,9 @@ const RETRIEVABLE_MEMORY_KINDS = Object.freeze([
   "constraint",
   "fact",
 ]);
-const ACTIVE_MEMORY_STATUSES = Object.freeze(["captured", "confirmed"]);
-const RETIRED_MEMORY_STATUSES = Object.freeze(["superseded", "invalidated"]);
-const MEMORY_RETRIEVAL_CONTRACT_VERSION = "product-memory-v1";
+const ACTIVE_MEMORY_STATUSES = Object.freeze(["active"]);
+const RETIRED_MEMORY_STATUSES = Object.freeze(["superseded"]);
+const MEMORY_RETRIEVAL_CONTRACT_VERSION = "product-memory-v2";
 
 function memoryKind(memory) {
   return memory?.kind || memory?.memoryKind || memory?.metadata?.kind || null;

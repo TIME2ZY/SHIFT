@@ -3,7 +3,6 @@ const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { AGENTS } = require("./catalog");
-const { applyMemoryBlocks } = require("./memory-block");
 const {
   emptyWriteStats,
   mergeWriteStats,
@@ -189,7 +188,7 @@ function postMessage(
   threadId,
   invocationId,
   content,
-  { appendToSession, durableRecorder, memoryCapture, memoryService } = {}
+  { appendToSession, durableRecorder, memoryCapture } = {}
 ) {
   const thread = activeThreads.get(threadId);
   if (!thread) return false;
@@ -265,17 +264,10 @@ function postMessage(
     logger: console,
   });
 
-  const blockStats = applyMemoryBlocks({
-    text: content,
-    threadId: callbackSessionId,
-    invocationId: routeInvocationId,
-    agentId: agent,
-    memoryService: memoryService || null,
-    eventStore,
-    sendSse: (event, payload) => sendSse(thread.res, event, payload),
-    logger: console,
-  });
-  const writeStats = mergeWriteStats(thread.memoryWriteStats || emptyWriteStats(), blockStats);
+  const writeStats = mergeWriteStats(
+    thread.memoryWriteStats || emptyWriteStats(),
+    emptyWriteStats()
+  );
   thread.memoryWriteStats = emptyWriteStats();
   const writeMetrics = buildMemoryWriteMetrics({
     source: "callback",
@@ -291,11 +283,6 @@ function postMessage(
     ok: true,
     messagePosted: true,
     handoff: summarizeHandoffOutcome(finalized),
-    memory: {
-      blockParsed: blockStats.blockParsed,
-      blockWritten: blockStats.blockWritten,
-      blockSkipped: blockStats.blockSkipped,
-    },
   };
   if (currentInvocationId) {
     appendCallbackEvent({
@@ -320,7 +307,17 @@ function postMessage(
  * sessionId is the active chat thread id. The client reads it from the
  * SHIFT_THREAD_ID env var so agents never need to hard-code it.
  */
-function buildCallbackInstructions(_apiUrl, _sessionId) {
+function buildCallbackInstructions(_apiUrl, _sessionId, options = {}) {
+  const memoryCompatibility = options.supportsMemoryMcp
+    ? ""
+    : `
+Provider 暂不支持 \`memory_write\` 时，才使用已弃用的兼容命令：
+
+\`\`\`text
+node scripts/callback-client.js memory-upsert --kind decision --topic storage.authoritative --content "在线读写以 SQLite 为权威来源"
+\`\`\`
+
+多行内容用 \`--content-file <路径>\`。兼容入口只接受 decision / constraint / fact。`;
   // The Node client avoids shell-specific curl aliases, JSON quoting, and
   // Windows PowerShell encoding behavior.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
@@ -410,13 +407,7 @@ node scripts/callback-client.js session-search --query "redis 端口" --limit 10
 }
 \`\`\`
 
-Provider 暂不支持 \`memory_write\` 时，才使用兼容命令：
-
-\`\`\`text
-node scripts/callback-client.js memory-upsert --kind decision --topic storage.authoritative --content "在线读写以 SQLite 为权威来源"
-\`\`\`
-
-多行内容用 \`--content-file <路径>\`。
+${memoryCompatibility}
 
 参数：
 - \`--kind\`：\`decision\`（拍板）| \`constraint\`（禁止/必须）| \`fact\`（可核对事实）
@@ -429,7 +420,7 @@ node scripts/callback-client.js memory-upsert --kind decision --topic storage.au
 3. Active Memories 里已有且未变化 → **不重复写**
 4. 写前不确定是否已有 → 先调用 \`recall_search\`，仅搜索 memory 层
 5. 结论发生变化 → 使用相同 topic 写入新内容，不要自行删除旧版本
-6. 发现内容错误但没有替代结论 → 告知用户，由受信管理路径执行 invalidation
+6. 结论错误时通过相同 topic 写入正确结论；没有替代结论时不要创建新 Memory
 
 返回：\`created\` | \`unchanged\` | \`superseded\` | \`rejected\`。
 

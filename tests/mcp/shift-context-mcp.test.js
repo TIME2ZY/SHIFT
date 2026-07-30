@@ -163,7 +163,7 @@ test("shift context MCP returns structured memory_write results", async () => {
   const handle = createRequestHandler({
     memoryWrite: async (args) => {
       calls.push(args);
-      return { outcome: "created", memoryId: "memory-1", status: "captured" };
+      return { outcome: "created", memoryId: "memory-1", status: "active" };
     },
   });
   const response = await handle({

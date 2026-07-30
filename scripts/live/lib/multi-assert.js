@@ -330,7 +330,7 @@ function evaluateMultiCollab(input) {
         (m) =>
           ["decision", "constraint", "fact"].includes(m.kind) &&
           m.status !== "superseded" &&
-          m.status !== "invalidated"
+          m.status === "active"
       )
     : [];
   soft.push({

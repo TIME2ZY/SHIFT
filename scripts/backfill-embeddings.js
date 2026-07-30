@@ -39,7 +39,7 @@ async function main(argv = process.argv.slice(2)) {
         const rows = storage.db
           .prepare(
             `SELECT id FROM memory_entries
-             WHERE status NOT IN ('superseded', 'invalidated')
+             WHERE status = 'active'
              ORDER BY created_at`
           )
           .all();

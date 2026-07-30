@@ -391,6 +391,7 @@ function ensureMigrationWindow(storage, threadId, agentId) {
 
 function importMemoryCapture(storage, threadId, payload, logger) {
   if (!storage.memory?.capture || !payload?.captureKey) return false;
+  if (!["decision", "constraint", "fact"].includes(payload.kind)) return false;
   try {
     const existing = storage.memories.getByCaptureKey(threadId, payload.captureKey);
     if (existing) return false;
@@ -398,7 +399,7 @@ function importMemoryCapture(storage, threadId, payload, logger) {
     storage.memory.capture({
       id: payload.id || crypto.randomUUID(),
       threadId,
-      kind: payload.kind || "handoff",
+      kind: payload.kind,
       content: typeof payload.content === "string" ? payload.content : "",
       sourceMessageId: null,
       sourceInvocationId: null,

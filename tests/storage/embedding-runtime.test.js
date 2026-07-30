@@ -141,6 +141,152 @@ test("vector query failure degrades to FTS without failing recall", async () => 
   }
 });
 
+test("embedding model change backfills a building generation before atomic activation", async () => {
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-switch" });
+  const firstRuntime = createEmbeddingRuntime({
+    storage,
+    config: config(),
+    provider: provider(),
+    autoStart: false,
+    logger: { error() {} },
+  });
+  try {
+    storage.memory.createProduct({
+      id: "memory-switch",
+      threadId: "thread-switch",
+      kind: "decision",
+      topic: "storage-authority",
+      content: "SQLite is the durable source of truth.",
+      createdBy: "user",
+      writeChannel: "user",
+      scope: "thread",
+    });
+    await firstRuntime.runOnce();
+    const oldGeneration = storage.embeddings.getActiveIndex().generation;
+    await firstRuntime.close();
+
+    const nextConfig = { ...config(), model: "semantic-next", dimensions: 4 };
+    const nextProvider = {
+      available: true,
+      model: "semantic-next",
+      dimensions: 4,
+      async embedDocuments(texts) {
+        return texts.map(() => new Float32Array([1, 0, 0, 0]));
+      },
+      async embedQuery() {
+        return new Float32Array([1, 0, 0, 0]);
+      },
+    };
+    const nextRuntime = createEmbeddingRuntime({
+      storage,
+      config: nextConfig,
+      provider: nextProvider,
+      autoStart: false,
+      logger: { error() {} },
+    });
+    try {
+      assert.ok(nextRuntime.buildingIndex);
+      assert.equal(storage.embeddings.getActiveIndex().generation, oldGeneration);
+      assert.equal((await nextRuntime.search("authority", ["thread:thread-switch"])).reason, "index_building");
+
+      assert.equal((await nextRuntime.runOnce()).ready, 1);
+      const activated = await nextRuntime.runOnce();
+      assert.equal(activated.activated, true);
+      assert.equal(nextRuntime.buildingIndex, null);
+      assert.equal(storage.embeddings.getActiveIndex().model, "semantic-next");
+      assert.equal(storage.embeddings.getIndex(oldGeneration).status, "retired");
+    } finally {
+      await nextRuntime.close();
+    }
+  } finally {
+    storage.close();
+  }
+});
+
+test("stale superseded items do not block building generation activation", async () => {
+  const storage = createStorage({ file: ":memory:" });
+  storage.threads.create({ id: "thread-switch" });
+  const firstRuntime = createEmbeddingRuntime({
+    storage,
+    config: config(),
+    provider: provider(),
+    autoStart: false,
+    logger: { error() {} },
+  });
+  try {
+    storage.memory.createProduct({
+      id: "memory-old",
+      threadId: "thread-switch",
+      kind: "decision",
+      topic: "storage-authority",
+      content: "The old storage authority decision.",
+      createdBy: "user",
+      writeChannel: "user",
+      scope: "thread",
+    });
+    await firstRuntime.runOnce();
+    await firstRuntime.close();
+
+    const nextConfig = { ...config(), model: "semantic-next", dimensions: 4 };
+    const nextProvider = {
+      available: true,
+      model: "semantic-next",
+      dimensions: 4,
+      async embedDocuments(texts) {
+        return texts.map(() => new Float32Array([1, 0, 0, 0]));
+      },
+      async embedQuery() {
+        return new Float32Array([1, 0, 0, 0]);
+      },
+    };
+    const nextRuntime = createEmbeddingRuntime({
+      storage,
+      config: nextConfig,
+      provider: nextProvider,
+      autoStart: false,
+      logger: { error() {} },
+    });
+    try {
+      const buildingGeneration = nextRuntime.buildingIndex.generation;
+      storage.memory.createProduct({
+        id: "memory-new",
+        threadId: "thread-switch",
+        kind: "decision",
+        topic: "storage-authority",
+        content: "The replacement storage authority decision.",
+        createdBy: "user",
+        writeChannel: "user",
+        scope: "thread",
+      });
+
+      assert.equal(storage.memories.get("memory-old").status, "superseded");
+      assert.equal(
+        storage.db
+          .prepare(
+            `SELECT status FROM embedding_items
+             WHERE source_id = ? AND index_generation = ?`
+          )
+          .get("memory-old", buildingGeneration).status,
+        "stale"
+      );
+
+      const requeued = await nextRuntime.runOnce();
+      assert.equal(requeued.building, true);
+      assert.equal(requeued.remaining, 1);
+      assert.equal((await nextRuntime.runOnce()).ready, 1);
+      const activated = await nextRuntime.runOnce();
+      assert.equal(activated.activated, true);
+      assert.equal(nextRuntime.buildingIndex, null);
+      assert.equal(storage.embeddings.getActiveIndex().model, "semantic-next");
+    } finally {
+      await nextRuntime.close();
+    }
+  } finally {
+    storage.close();
+  }
+});
+
 test("embedding task failure rolls back the authoritative memory write", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "thread-1" });

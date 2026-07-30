@@ -8,12 +8,7 @@ const EVENT_TYPES = Object.freeze([
   "memory_injected",
   "memory_searched",
   "memory_opened",
-  "memory_confirmed",
   "memory_superseded",
-  "memory_invalidated",
-  "memory_suggestion_created",
-  "memory_suggestion_accepted",
-  "memory_suggestion_rejected",
   "decision_language_detected",
 ]);
 

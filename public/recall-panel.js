@@ -265,7 +265,7 @@
       const map = new Map();
       for (const memory of memories || []) {
         if (!memory || !PRODUCT_KINDS.has(memory.kind)) continue;
-        if (memory.status !== "captured" && memory.status !== "confirmed") continue;
+        if (memory.status !== "active") continue;
         const invId = memory.sourceInvocationId || memory.invocationId || "";
         if (!invId) continue;
         if (!map.has(invId)) map.set(invId, []);

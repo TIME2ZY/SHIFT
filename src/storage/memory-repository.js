@@ -4,13 +4,13 @@ function createMemoryRepository(db) {
       (id, scope, owner_thread_id, project_key, origin_thread_id,
        kind, status, authority, activation, content, summary, topic,
        supersession_key, capture_key, content_hash, anchors_json, metadata_json,
-       created_by, confirmed_by, created_at, verified_at, superseded_by,
+       created_by, created_at, superseded_by,
        source_message_id, source_invocation_id, window_id)
     VALUES
       (@id, @scope, @ownerThreadId, @projectKey, @originThreadId,
        @kind, @status, @authority, @activation, @content, @summary, @topic,
        @supersessionKey, @captureKey, @contentHash, @anchorsJson, @metadataJson,
-       @createdBy, @confirmedBy, @createdAt, @verifiedAt, @supersededBy,
+       @createdBy, @createdAt, @supersededBy,
        @sourceMessageId, @sourceInvocationId, @windowId)
   `);
   const findById = db.prepare("SELECT * FROM memory_entries WHERE id = ?");
@@ -41,13 +41,13 @@ function createMemoryRepository(db) {
   const listActiveByThreadSupersession = db.prepare(`
     SELECT * FROM memory_entries
     WHERE scope = 'thread' AND owner_thread_id = ? AND supersession_key = ?
-      AND status IN ('captured', 'confirmed')
+      AND status = 'active'
     ORDER BY created_at DESC, id DESC
   `);
   const listActiveByProjectSupersession = db.prepare(`
     SELECT * FROM memory_entries
     WHERE scope = 'project' AND project_key = ? AND supersession_key = ?
-      AND status IN ('captured', 'confirmed')
+      AND status = 'active'
     ORDER BY created_at DESC, id DESC
   `);
   const transition = db.prepare(`
@@ -55,8 +55,6 @@ function createMemoryRepository(db) {
     SET status = @status,
         superseded_by = @supersededBy,
         metadata_json = @metadataJson,
-        confirmed_by = @confirmedBy,
-        verified_at = @verifiedAt,
         authority = @authority,
         activation = @activation
     WHERE id = @id
@@ -113,7 +111,6 @@ function createMemoryRepository(db) {
         kind: memory.kind,
         status: memory.status,
         createdBy: memory.createdBy,
-        confirmedBy: memory.confirmedBy,
         sourceInvocationId: memory.sourceInvocationId,
         sourceMessageId: memory.sourceMessageId,
         captureKey: memory.captureKey,
@@ -143,7 +140,7 @@ function createMemoryRepository(db) {
           projectKey,
           originThreadId: nullableString(input.originThreadId || input.threadId || ownerThreadId),
           kind: requiredString(input.kind, "memory kind"),
-          status: input.status || "captured",
+          status: input.status || "active",
           authority: normalizeAuthority(input.authority),
           activation: normalizeActivation(input.activation, input.kind),
           content: requiredString(input.content, "memory content"),
@@ -158,9 +155,7 @@ function createMemoryRepository(db) {
           anchorsJson: serializeJson(input.anchors),
           metadataJson: serializeMetadata(input.metadata),
           createdBy: requiredString(input.createdBy, "memory creator"),
-          confirmedBy: nullableString(input.confirmedBy),
           createdAt: input.createdAt || new Date().toISOString(),
-          verifiedAt: nullableString(input.verifiedAt),
           supersededBy: nullableString(input.supersededBy),
           sourceMessageId: nullableString(input.sourceMessageId),
           sourceInvocationId: nullableString(input.sourceInvocationId),
@@ -207,10 +202,9 @@ function createMemoryRepository(db) {
           `
           SELECT * FROM memory_entries
           WHERE scope = 'thread' AND owner_thread_id = ?
-            AND status IN ('captured', 'confirmed')
+            AND status = 'active'
           ${kindClause}
-          ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END,
-                   created_at DESC,
+          ORDER BY created_at DESC,
                    id DESC
           LIMIT ?
         `
@@ -228,10 +222,9 @@ function createMemoryRepository(db) {
           `
           SELECT * FROM memory_entries
           WHERE scope = 'project' AND project_key = ?
-            AND status IN ('captured', 'confirmed')
+            AND status = 'active'
           ${kindClause}
-          ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END,
-                   created_at DESC,
+          ORDER BY created_at DESC,
                    id DESC
           LIMIT ?
         `
@@ -256,7 +249,7 @@ function createMemoryRepository(db) {
      */
     listActiveProductByTopic({ scope, ownerThreadId, projectKey, topic }) {
       if (!topic) return [];
-      const productKinds = ["decision", "constraint", "fact", "lesson"];
+      const productKinds = ["decision", "constraint", "fact"];
       const kindClause = `AND kind IN (${productKinds.map(() => "?").join(", ")})`;
       if (scope === "project") {
         if (!projectKey) return [];
@@ -265,7 +258,7 @@ function createMemoryRepository(db) {
             `
             SELECT * FROM memory_entries
             WHERE scope = 'project' AND project_key = ?
-              AND status IN ('captured', 'confirmed')
+              AND status = 'active'
               ${kindClause}
               AND (
                 supersession_key LIKE ?
@@ -283,7 +276,7 @@ function createMemoryRepository(db) {
           `
           SELECT * FROM memory_entries
           WHERE scope = 'thread' AND owner_thread_id = ?
-            AND status IN ('captured', 'confirmed')
+            AND status = 'active'
             ${kindClause}
             AND (
               supersession_key LIKE ?
@@ -358,10 +351,6 @@ function createMemoryRepository(db) {
           normalized.metadata === undefined ? existing.metadata : normalized.metadata;
         const supersededBy =
           normalized.supersededBy === undefined ? existing.supersededBy : normalized.supersededBy;
-        const confirmedBy =
-          normalized.confirmedBy === undefined ? existing.confirmedBy : normalized.confirmedBy;
-        const verifiedAt =
-          normalized.verifiedAt === undefined ? existing.verifiedAt : normalized.verifiedAt;
         const authority =
           normalized.authority === undefined ? existing.authority : normalized.authority;
         const activation =
@@ -372,8 +361,6 @@ function createMemoryRepository(db) {
             status: requiredString(status, "memory status"),
             supersededBy: nullableString(supersededBy),
             metadataJson: serializeMetadata(metadata),
-            confirmedBy: nullableString(confirmedBy),
-            verifiedAt: nullableString(verifiedAt),
             authority: normalizeAuthority(authority),
             activation: normalizeActivation(activation, existing.kind),
           }).changes > 0;
@@ -463,7 +450,7 @@ function searchMemoryRows(db, query, options = {}) {
         FROM memory_search
         WHERE ${ownerClause.sql}
           AND topic = ? COLLATE NOCASE
-        ORDER BY status = 'confirmed' DESC, created_at DESC
+        ORDER BY created_at DESC
         LIMIT ?
       `
       )
@@ -623,9 +610,7 @@ function mapMemory(row) {
     sourceMessageId: row.source_message_id,
     sourceInvocationId: row.source_invocation_id,
     createdBy: row.created_by,
-    confirmedBy: row.confirmed_by,
     createdAt: row.created_at,
-    verifiedAt: row.verified_at,
     supersededBy: row.superseded_by,
     metadata: parseMetadata(row.metadata_json),
     anchors: parseMetadata(row.anchors_json),
@@ -643,8 +628,6 @@ function normalizeTransitionOptions(value) {
         ? value.supersededBy
         : undefined,
       metadata: value.metadata,
-      confirmedBy: value.confirmedBy,
-      verifiedAt: value.verifiedAt,
       authority: value.authority,
       activation: value.activation,
     };
@@ -652,8 +635,6 @@ function normalizeTransitionOptions(value) {
   return {
     supersededBy: value,
     metadata: undefined,
-    confirmedBy: undefined,
-    verifiedAt: undefined,
     authority: undefined,
     activation: undefined,
   };

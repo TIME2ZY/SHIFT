@@ -273,6 +273,61 @@ function createEmbeddingRepository(db, options = {}) {
     );
   }
 
+  function retireSource(sourceKind, sourceId) {
+    const kind = requiredString(sourceKind, "embedding source kind");
+    const id = requiredString(sourceId, "embedding source id");
+    const now = iso(clock());
+    return db.transaction(() => {
+      const items = db
+        .prepare(
+          `SELECT id
+           FROM embedding_items
+           WHERE source_kind = ? AND source_id = ? AND status <> 'stale'`
+        )
+        .all(kind, id);
+      if (items.length === 0) return 0;
+      db.prepare(
+        `UPDATE embedding_items
+         SET status = 'stale',
+             lease_owner = NULL,
+             lease_expires_at = NULL,
+             updated_at = ?
+         WHERE source_kind = ? AND source_id = ?`
+      ).run(now, kind, id);
+      deleteVectorItems(items.map((item) => item.id));
+      return items.length;
+    })();
+  }
+
+  function pruneStaleVectors() {
+    const items = db.prepare("SELECT id FROM embedding_items WHERE status = 'stale'").all();
+    if (items.length === 0) return 0;
+    deleteVectorItems(items.map((item) => item.id));
+    return items.length;
+  }
+
+  function deleteVectorItems(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    const placeholders = ids.map(() => "?").join(", ");
+    const indexes = db.prepare("SELECT table_name FROM embedding_indexes").all();
+    for (const index of indexes) {
+      const tableName = String(index.table_name || "");
+      if (!/^embedding_vec_[a-z0-9_]+$/.test(tableName)) continue;
+      const exists = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(tableName);
+      if (!exists) continue;
+      try {
+        db.prepare(
+          `DELETE FROM ${tableName} WHERE embedding_item_id IN (${placeholders})`
+        ).run(...ids);
+      } catch {
+        // The vec0 extension may not be loaded during an offline migration.
+        // pruneStaleVectors retries after the runtime loads sqlite-vec.
+      }
+    }
+  }
+
   return {
     registerIndex,
     activateIndex,
@@ -282,6 +337,8 @@ function createEmbeddingRepository(db, options = {}) {
     claimBatch,
     markReady,
     markFailed,
+    retireSource,
+    pruneStaleVectors,
     getReadyByIds(ids, indexGeneration) {
       const normalizedIds = Array.from(
         new Set((ids || []).map((id) => positiveInteger(id, "embedding item id")))

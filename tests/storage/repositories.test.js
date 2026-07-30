@@ -347,7 +347,7 @@ test("only one open window is allowed per agent provider workspace coordinate", 
   }
 });
 
-test("memory candidates preserve provenance and default to captured", () => {
+test("memory candidates preserve provenance and default to active", () => {
   const { storage } = createFixture();
   try {
     storage.invocations.start({
@@ -375,10 +375,13 @@ test("memory candidates preserve provenance and default to captured", () => {
       createdBy: "codex",
     });
 
-    assert.equal(memory.status, "captured");
+    assert.equal(memory.status, "active");
     assert.equal(memory.sourceMessageId, "message-1");
-    assert.equal(storage.memories.transition("memory-1", "confirmed"), true);
-    assert.equal(storage.memories.get("memory-1").status, "confirmed");
+    assert.throws(
+      () => storage.memories.transition("memory-1", "confirmed"),
+      /CHECK constraint failed/
+    );
+    assert.equal(storage.memories.get("memory-1").status, "active");
   } finally {
     storage.close();
   }
@@ -401,11 +404,11 @@ test("purging a thread cascades through thread-owned durable memory records", ()
     storage.memories.create({
       id: "memory-1",
       threadId: "thread-1",
-      kind: "lesson",
+      kind: "fact",
       content: "Keep raw evidence.",
       sourceInvocationId: "invocation-1",
       createdBy: "codex",
-      captureKey: "lesson:evidence:1",
+      captureKey: "fact:evidence:1",
     });
 
     // Default delete is archive (soft); purge hard-deletes thread-owned rows.

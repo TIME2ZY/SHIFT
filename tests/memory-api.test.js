@@ -19,12 +19,12 @@ test("memory api builds list and mutation requests", async () => {
   const api = memoryApi.createMemoryApi(async (url, init = {}) => {
     calls.push({ url, init });
     if (String(url).includes("/confirm")) {
-      return jsonResponse({ memory: { id: "m1", status: "confirmed" } });
+      return jsonResponse({ memory: { id: "m1", status: "active" } });
     }
     if (String(url).startsWith("/api/memories?") || url === "/api/memories") {
-      return jsonResponse({ memories: [{ id: "m1" }], counts: { captured: 1 } });
+      return jsonResponse({ memories: [{ id: "m1" }], counts: { active: 1 } });
     }
-    return jsonResponse({ memory: { id: "m1", status: "captured" }, created: true });
+    return jsonResponse({ memory: { id: "m1", status: "active" }, created: true });
   });
 
   const listed = await api.listMemories("session-1", { kind: "decision", includeRetired: true });

@@ -222,13 +222,11 @@ function createServer(options = {}) {
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
-    suggestionService: storageContext.storage?.suggestionService || null,
     storage: storageContext.storage,
     getSession: getSessionDurable,
     sessionsFile,
     sendJson,
     readJsonBody,
-    eventStore,
     logger,
   });
   const handleStorageRoutes = createStorageRoutes({

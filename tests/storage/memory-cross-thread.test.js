@@ -181,35 +181,6 @@ test("fact defaults to thread scope and does not leak across threads", () => {
   }
 });
 
-test("unconfirmed lesson is not injected; confirmed lesson is", () => {
-  const { storage, dir } = createProjectFixture();
-  try {
-    const lesson = storage.memory.createProduct({
-      threadId: "thread-a",
-      kind: "lesson",
-      topic: "worktree-cleanup",
-      content: "坑: 在 worktree 内 remove 自己\n根因: 丢 CWD\n防护: 先 cd 回主仓",
-      createdBy: "agent:codex",
-      writeChannel: "agent",
-    });
-    assert.equal(lesson.scope, "project");
-    assert.equal(lesson.memory.status, "captured");
-
-    let forB = storage.memory.listActiveForTurn("thread-b");
-    assert.ok(!forB.some((m) => m.id === lesson.memory.id));
-
-    storage.memory.confirm(lesson.memory.id, {
-      confirmedBy: "user",
-      confirmationSource: "ui",
-    });
-    forB = storage.memory.listActiveForTurn("thread-b");
-    assert.ok(forB.some((m) => m.id === lesson.memory.id));
-  } finally {
-    storage.close();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test("searchSession memoryScope=project only returns project memories", async () => {
   const { storage, dir } = createProjectFixture();
   try {

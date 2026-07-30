@@ -34,7 +34,7 @@ test("memory_events table exists after migrations", () => {
   }
 });
 
-test("write/confirm/invalidate emit durable memory_events", () => {
+test("write emits a durable memory event", () => {
   const storage = createFixture();
   try {
     const written = storage.memory.createProduct({
@@ -47,19 +47,8 @@ test("write/confirm/invalidate emit durable memory_events", () => {
     });
     assert.equal(written.created, true);
 
-    storage.memory.confirm(written.memory.id, {
-      confirmedBy: "user",
-      confirmationSource: "ui",
-    });
-    storage.memory.invalidate(written.memory.id, {
-      invalidatedBy: "user",
-      reason: "changed",
-    });
-
     const counts = storage.memoryEvents.countsForThread("thread-1");
     assert.ok(counts.memory_written >= 1);
-    assert.ok(counts.memory_confirmed >= 1);
-    assert.ok(counts.memory_invalidated >= 1);
 
     const events = storage.memoryEvents.listForThread("thread-1", { limit: 20 });
     assert.ok(events.some((e) => e.eventType === "memory_written"));
@@ -160,7 +149,7 @@ test("searchSession records memory_searched", async () => {
   }
 });
 
-test("decision language detection and write_or_suggest_rate", () => {
+test("decision language detection and write rate", () => {
   assert.equal(looksLikeDecisionLanguage("就用 SQLite 作为在线存储"), true);
   assert.equal(looksLikeDecisionLanguage("hello"), false);
   assert.equal(looksLikeDecisionLanguage("use Redis as cache"), true);
@@ -170,11 +159,10 @@ test("decision language detection and write_or_suggest_rate", () => {
   const rates = ratesFromEventCounts({
     decision_language_detected: 4,
     memory_written: 1,
-    memory_suggestion_created: 1,
     memory_injected: 3,
     memory_searched: 2,
   });
-  assert.equal(rates.writeOrSuggestRate, 0.5);
+  assert.equal(rates.writeOrSuggestRate, 0.25);
   assert.ok(rates.definitions.writeOrSuggestRate.includes("decision_language"));
 });
 
@@ -191,7 +179,7 @@ test("renderActiveMemoryCard respects always_on vs thread buckets", () => {
     {
       id: "sys-1",
       kind: "constraint",
-      status: "confirmed",
+      status: "active",
       activation: "always_on",
       scope: "project",
       content: "SYSTEM:" + "A".repeat(800),
@@ -200,7 +188,7 @@ test("renderActiveMemoryCard respects always_on vs thread buckets", () => {
     {
       id: " thr-1",
       kind: "handoff",
-      status: "captured",
+      status: "active",
       activation: "backstop",
       scope: "thread",
       content: "THREAD:" + "B".repeat(800),
