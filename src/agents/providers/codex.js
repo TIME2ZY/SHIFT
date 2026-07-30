@@ -16,10 +16,7 @@ function buildCodexEnvironment(_options = {}, env = process.env) {
 }
 
 function shiftContextMcpConfigArgs() {
-  const serverScript = path.resolve(
-    __dirname,
-    "../../../scripts/shift-context-mcp.js"
-  );
+  const serverScript = path.resolve(__dirname, "../../../scripts/shift-context-mcp.js");
   return [
     "-c",
     `mcp_servers.shift_context.command=${JSON.stringify(process.execPath)}`,
@@ -28,7 +25,7 @@ function shiftContextMcpConfigArgs() {
     "-c",
     'mcp_servers.shift_context.env_vars=["SHIFT_API_URL","SHIFT_THREAD_ID","SHIFT_INVOCATION_ID","SHIFT_CALLBACK_TOKEN"]',
     "-c",
-    'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list"]',
+    'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search"]',
     "-c",
     'mcp_servers.shift_context.default_tools_approval_mode="auto"',
     "-c",

@@ -18,6 +18,7 @@ const {
 const {
   isRetrievableMemory,
 } = require("./memory-retrieval-contract");
+const { enqueueMemoryEmbedding } = require("./embedding-projection");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
@@ -183,6 +184,7 @@ function createMemoryService({
         confirmedBy: input.confirmedBy || null,
         createdAt: input.createdAt || nowIso(clock),
       });
+      enqueueMemoryEmbedding(storage, memory);
 
       if (previous.length > 0) {
         storage.memories.setSupersededBy(

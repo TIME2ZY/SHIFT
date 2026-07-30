@@ -75,7 +75,7 @@ function renderActiveMemoryCardDetailed(items, options = {}) {
   ].join("\n");
   const empty = [
     heading,
-    "尚无结构化记忆。需要历史细节时使用 session-search。",
+    "尚无结构化记忆。需要历史细节时优先使用 recall_search；工具不可用时使用 session-search。",
     "<!-- /Active Memories -->",
   ].join("\n");
   if (memories.length === 0) {

@@ -465,6 +465,26 @@ test("searchSession response includes layer score and layers counts", async () =
   }
 });
 
+test("searchForAgent applies fixed safe defaults and returns the v2 contract", async () => {
+  const { storage, service } = createFixture();
+  try {
+    const result = await service.searchForAgent(
+      { threadId: "thread-1", invocationId: "invocation-1", caller: "mcp" },
+      { query: "sqlite memory" }
+    );
+
+    assert.equal(result.version, 2);
+    assert.equal(result.query, "sqlite memory");
+    assert.ok(result.hits.length >= 1);
+    assert.ok(result.hits.every((hit) => ["memory", "message", "evidence"].includes(hit.layer)));
+    assert.ok(result.hits.every((hit) => typeof hit.finalScore === "number"));
+    assert.equal(result.availability.channels.vector.attempted, false);
+    assert.equal(result.availability.channels.vector.reason, "disabled");
+  } finally {
+    storage.close();
+  }
+});
+
 test("retrieveForTurn merges recency and related channels and fits budget", async () => {
   const { storage, service } = createFixture();
   try {
@@ -496,7 +516,7 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
       createdAt: "2026-07-15T00:00:00.000Z",
     });
 
-    const result = service.retrieveForTurn({
+    const result = await service.retrieveForTurn({
       threadId: "thread-1",
       prompt: "请继续完成 JWT 过期处理并检查错误码 AUTH_EXPIRED",
       budgetChars: 4000,
@@ -509,7 +529,7 @@ test("retrieveForTurn merges recency and related channels and fits budget", asyn
     assert.ok(result.stats.usedChars <= 4000);
     assert.ok(result.stats.channels.related >= 1);
 
-    const weak = service.retrieveForTurn({
+    const weak = await service.retrieveForTurn({
       threadId: "thread-1",
       prompt: "继续",
       budgetChars: 4000,
@@ -545,7 +565,7 @@ test("retrieveForTurn prefers product memories over dense handoff noise", async 
       });
     }
 
-    const result = service.retrieveForTurn({
+    const result = await service.retrieveForTurn({
       threadId: "thread-1",
       prompt: "继续",
       budgetChars: 4000,

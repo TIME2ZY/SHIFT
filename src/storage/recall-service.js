@@ -24,15 +24,13 @@ const LAYER_EVIDENCE = "evidence";
 const LAYER_PROJECT_DOC = "project-doc";
 const ALL_LAYERS = [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE, LAYER_PROJECT_DOC];
 const RETIRED_STATUSES = new Set(["superseded", "invalidated"]);
-const {
-  isRetrievableMemory,
-} = require("./memory-retrieval-contract");
+const { isRetrievableMemory } = require("./memory-retrieval-contract");
 const PRODUCT_MEMORY_KINDS = new Set(["decision", "constraint", "fact"]);
 /** Max handoff / window-seal rows kept in a retrieve pack so process noise cannot crowd out product memory. */
 const DEFAULT_MAX_AUTO_MEMORY = 2;
 const DEFAULT_SEARCH_PROJECT_DOC_QUOTA = 4;
 
-function createRecallService({ storage, logger = console } = {}) {
+function createRecallService({ storage, embeddingRuntime = null, logger = console } = {}) {
   if (!storage) {
     throw new Error("SQLite recall requires durable storage.");
   }
@@ -76,6 +74,31 @@ function createRecallService({ storage, logger = console } = {}) {
   async function searchTranscript(threadId, query, options = {}) {
     const result = await searchSession(threadId, query, options);
     return result.hits;
+  }
+
+  /**
+   * Trusted active-recall entry point used by the MCP bridge.
+   *
+   * The caller supplies only an already-authorized thread/invocation context.
+   * Project ownership is always resolved from the durable thread record inside
+   * the search implementation; an MCP argument can never select a project.
+   */
+  async function searchForAgent(context, input = {}) {
+    const threadId = requiredString(context?.threadId, "thread id");
+    requiredString(context?.invocationId, "invocation id");
+    const query = requiredString(input.query, "recall query");
+    const limit = Math.max(1, Math.min(Number(input.limit) || 10, 30));
+    const layers = normalizeLayers(
+      input.layers === undefined ? [LAYER_MEMORY, LAYER_MESSAGE, LAYER_EVIDENCE] : input.layers
+    );
+    const result = await searchSession(threadId, query, {
+      layers,
+      limit,
+      includeRetired: false,
+      includeThinking: false,
+      memoryScope: "all",
+    });
+    return toAgentRecallResult(result, { threadId });
   }
 
   /**
@@ -133,7 +156,7 @@ function createRecallService({ storage, logger = console } = {}) {
         };
       }
     } else {
-      const sqliteHits = trySqlite("search transcript", () => {
+      let sqliteHits = trySqlite("search transcript", () => {
         if (!storage.recall && !storage.memories) return [];
         return searchSqliteLayers({
           threadId,
@@ -150,11 +173,40 @@ function createRecallService({ storage, logger = console } = {}) {
       });
 
       if (sqliteHits !== undefined) {
+        const hybrid = await collectVectorHits({
+          threadId,
+          query: searchQuery,
+          terms,
+          layers,
+          limit,
+          includeRetired,
+          includeThinking,
+          memoryScope,
+        });
+        if (hybrid.attempted) {
+          result = null;
+          sqliteHits = fuseRecallChannels(sqliteHits, hybrid.hits, {
+            limit,
+            layers,
+            memoryQuota: options.memoryQuota,
+            messageQuota: options.messageQuota,
+            projectDocQuota: options.projectDocQuota,
+          });
+        }
         result = finalizeSearchResult(sqliteHits.slice(0, limit), {
           query: searchQuery,
           limit,
           weakQuery: false,
         });
+        result.channels = {
+          exact: { attempted: true, available: true },
+          fts: { attempted: true, available: true },
+          vector: {
+            attempted: hybrid.attempted,
+            available: hybrid.available,
+            ...(hybrid.reason ? { reason: hybrid.reason } : {}),
+          },
+        };
       } else {
         source = "sqlite-error";
         result = finalizeSearchResult([], {
@@ -201,6 +253,74 @@ function createRecallService({ storage, logger = console } = {}) {
       ms: Date.now() - started,
     });
     return result;
+  }
+
+  async function collectVectorHits({
+    threadId,
+    query,
+    terms,
+    layers,
+    limit,
+    includeRetired,
+    includeThinking,
+    memoryScope,
+  }) {
+    if (!embeddingRuntime?.available || typeof embeddingRuntime.search !== "function") {
+      return {
+        attempted: false,
+        available: false,
+        reason: embeddingRuntime?.reason || "disabled",
+        hits: [],
+      };
+    }
+    const projectKey = resolveThreadProjectKey(threadId);
+    const scopeKeys = [`thread:${threadId}`];
+    if (projectKey && memoryScope !== "thread") scopeKeys.push(`project:${projectKey}`);
+    const searched = await embeddingRuntime.search(query, scopeKeys, Math.max(limit * 4, 30));
+    if (searched.state !== "available") {
+      return {
+        attempted: true,
+        available: false,
+        reason: searched.reason || "vector_query_failed",
+        hits: [],
+      };
+    }
+    try {
+      const rows = storage.embeddings.getReadyByIds(
+        searched.hits.map((hit) => Number(hit.itemId)),
+        embeddingRuntime.index.generation
+      );
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const hits = [];
+      for (const vectorHit of searched.hits) {
+        const item = byId.get(Number(vectorHit.itemId));
+        const mapped = item
+          ? vectorItemToHit(item, {
+              storage,
+              terms,
+              layers,
+              includeRetired,
+              includeThinking,
+              memoryScope,
+              threadId,
+              projectKey,
+            })
+          : null;
+        if (!mapped) continue;
+        mapped.vectorDistance = Number(vectorHit.distance);
+        mapped.matchChannels = ["vector"];
+        hits.push(mapped);
+      }
+      return { attempted: true, available: true, hits };
+    } catch (error) {
+      logger.error?.(`[embedding-runtime] candidate mapping degraded: ${error.message}`);
+      return {
+        attempted: true,
+        available: false,
+        reason: "vector_candidate_mapping_failed",
+        hits: [],
+      };
+    }
   }
 
   function logSearchMetrics(metrics) {
@@ -469,6 +589,10 @@ function createRecallService({ storage, logger = console } = {}) {
       return {
         id: row.id,
         threadId: row.threadId || row.ownerThreadId,
+        ownerThreadId: row.ownerThreadId || null,
+        originThreadId: row.originThreadId || null,
+        projectKey: row.projectKey || null,
+        scope: row.scope || row.metadata?.scope || null,
         sourceKind: "memory-entry",
         sourceId: row.sourceId || row.memoryId,
         title: row.title,
@@ -486,7 +610,7 @@ function createRecallService({ storage, logger = console } = {}) {
   /**
    * Passive memory pack for bootstrap / A2A. Recency + related, memory-only by default.
    */
-  function retrieveForTurn(input = {}) {
+  async function retrieveForTurn(input = {}) {
     const threadId = requiredString(input.threadId, "thread id");
     const prompt = typeof input.prompt === "string" ? input.prompt : "";
     const budgetChars =
@@ -564,6 +688,22 @@ function createRecallService({ storage, logger = console } = {}) {
       } catch (error) {
         relatedOk = false;
         logger.error?.(`[retrieveForTurn] related search failed: ${error.message}`);
+      }
+    }
+    if (!weak && layers.includes(LAYER_MEMORY)) {
+      const vector = await collectVectorHits({
+        threadId,
+        query: clampSearchQuery(prompt, 200) || terms.join(" "),
+        terms,
+        layers: [LAYER_MEMORY],
+        limit: Math.max(relatedLimit * 4, 20),
+        includeRetired: false,
+        includeThinking: false,
+        memoryScope: "all",
+      });
+      for (const row of vector.hits.slice(0, relatedLimit * 3)) {
+        const memory = memoryFromRecallItem(row, storage);
+        if (isRetrievableMemory(memory)) noteChannel(memory, "vector", 4);
       }
     }
 
@@ -655,6 +795,7 @@ function createRecallService({ storage, logger = console } = {}) {
       channels: {
         recency: selected.filter((item) => item.channels?.includes("recency")).length,
         related: selected.filter((item) => item.channels?.includes("related")).length,
+        vector: selected.filter((item) => item.channels?.includes("vector")).length,
       },
       weakQuery: weak,
       termCount: terms.length,
@@ -738,11 +879,95 @@ function createRecallService({ storage, logger = console } = {}) {
     listInvocationsWithMeta,
     searchTranscript,
     searchSession,
+    searchForAgent,
     retrieveForTurn,
     readInvocationPage,
     // Helpers for tests / future wiring.
     resolveA2AMemoryBudget,
     resolveMemoryBudget,
+  };
+}
+
+function toAgentRecallResult(result, { threadId }) {
+  const startedAvailability = result?.availability || {
+    state: "available",
+    empty: !result?.hits?.length,
+  };
+  const keywordAvailable = startedAvailability.state !== "unavailable";
+  const hits = (result?.hits || []).map((hit) => {
+    const isMemory = hit.layer === LAYER_MEMORY;
+    const isCrossThreadProjectMemory =
+      isMemory &&
+      hit.memoryScope === "project" &&
+      hit.memoryOriginThreadId &&
+      hit.memoryOriginThreadId !== threadId;
+    const sourceAvailable = !isCrossThreadProjectMemory;
+    const invocationId = sourceAvailable ? String(hit.invocationId || "") : "";
+    const snippet = String(hit.snippet || hit.content || "").slice(0, 1200);
+    const content = isMemory ? String(hit.content || snippet).slice(0, 2048) : snippet;
+    return {
+      id: `${hit.sourceKind || "unknown"}:${hit.sourceId || hitKey(hit)}`,
+      layer: hit.layer,
+      content,
+      snippet,
+      finalScore: Number(hit.score) || 0,
+      matchedBy: Array.isArray(hit.matchChannels) ? hit.matchChannels : [],
+      ranks: hit.ranks || {},
+      source: {
+        sourceKind: hit.sourceKind || "invocation-event",
+        sourceId: hit.sourceId || "",
+        ...(hit.memoryId ? { memoryId: hit.memoryId } : {}),
+        ...(hit.sourceKind === "message" ? { messageId: hit.sourceId } : {}),
+        ...(invocationId ? { invocationId } : {}),
+        ...(Number.isInteger(hit.eventNo) ? { eventNo: hit.eventNo } : {}),
+        ...(hit.layer === LAYER_PROJECT_DOC ? { projectDocumentId: hit.sourceId } : {}),
+        sourceAvailable,
+      },
+      metadata: {
+        ...(hit.memoryTopic ? { topic: hit.memoryTopic } : {}),
+        ...(hit.memoryKind ? { kind: hit.memoryKind } : {}),
+        ...(hit.memoryStatus ? { status: hit.memoryStatus } : {}),
+        ...(hit.memoryScope ? { scope: hit.memoryScope } : {}),
+        createdAt: hit.ts || "",
+        trust:
+          hit.layer === LAYER_MEMORY
+            ? "durable-memory"
+            : hit.layer === LAYER_MESSAGE
+              ? "historical-message"
+              : "untrusted-evidence",
+        contentTruncated: String(hit.content || hit.snippet || "").length > content.length,
+      },
+    };
+  });
+  return {
+    version: 2,
+    query: result?.query || "",
+    hits,
+    availability: {
+      state: startedAvailability.state || "available",
+      channels: result?.channels || {
+        exact: {
+          attempted: true,
+          available: keywordAvailable,
+          ...(keywordAvailable ? {} : { reason: startedAvailability.reason || "search_failed" }),
+        },
+        fts: {
+          attempted: true,
+          available: keywordAvailable,
+          ...(keywordAvailable ? {} : { reason: startedAvailability.reason || "search_failed" }),
+        },
+        vector: {
+          attempted: false,
+          available: false,
+          reason: "disabled",
+        },
+      },
+    },
+    stats: {
+      candidateCount: hits.length,
+      returnedCount: hits.length,
+      truncated: Boolean(result?.truncated),
+    },
   };
 }
 
@@ -763,6 +988,141 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
     truncated: list.length >= limit,
     weakQuery: Boolean(weakQuery),
   };
+}
+
+function vectorItemToHit(item, context) {
+  const {
+    storage,
+    terms,
+    layers,
+    includeRetired,
+    includeThinking,
+    memoryScope,
+    projectKey,
+  } = context;
+  if (item.sourceKind === "memory") {
+    if (!layers.includes(LAYER_MEMORY)) return null;
+    const memory = storage.memories?.get?.(item.sourceId);
+    if (!memory || !isRetrievableMemory(memory, { includeRetired })) return null;
+    if (memoryScope === "thread" && memory.scope !== "thread") return null;
+    if (memoryScope === "project" && memory.scope !== "project") return null;
+    const candidate = {
+      id: memory.id,
+      threadId: memory.ownerThreadId,
+      ownerThreadId: memory.ownerThreadId,
+      originThreadId: memory.originThreadId,
+      projectKey: memory.projectKey,
+      scope: memory.scope,
+      sourceKind: "memory-entry",
+      sourceId: memory.id,
+      title: memory.topic || memory.kind,
+      content: memory.content,
+      snippet: String(memory.content || "").slice(0, 240),
+      createdAt: memory.createdAt,
+      metadata: {
+        ...(memory.metadata || {}),
+        status: memory.status,
+        kind: memory.kind,
+        topic: memory.topic || memory.metadata?.topic,
+        scope: memory.scope,
+      },
+    };
+    return scoreAndMapHit(candidate, terms);
+  }
+
+  if (item.sourceKind === "project-doc") {
+    if (!layers.includes(LAYER_PROJECT_DOC) || !projectKey) return null;
+    const row = storage.db
+      .prepare(
+        `SELECT p.*, d.id AS document_id
+         FROM project_passages p
+         JOIN project_documents d ON d.id = p.document_id
+         WHERE p.id = ? AND p.project_key = ?`
+      )
+      .get(Number(item.sourceId), projectKey);
+    if (!row) return null;
+    return scoreAndMapProjectDoc(
+      {
+        id: row.id,
+        sourceId: `passage:${row.id}`,
+        documentId: row.document_id,
+        path: row.path,
+        heading: row.heading,
+        startLine: row.start_line,
+        endLine: row.end_line,
+        content: row.content,
+      },
+      terms
+    );
+  }
+
+  const recallKind =
+    item.sourceKind === "evidence"
+      ? "invocation-event"
+      : item.sourceKind === "message"
+        ? "message"
+        : null;
+  const layer = recallKind ? layerForSourceKind(recallKind) : null;
+  if (!recallKind || !layers.includes(layer)) return null;
+  const candidate = storage.recall?.getBySource?.(recallKind, item.sourceId);
+  if (!candidate) return null;
+  if (!includeThinking && isThinkingEvidence(candidate)) return null;
+  return scoreAndMapHit(candidate, terms);
+}
+
+function fuseRecallChannels(keywordHits, vectorHits, options = {}) {
+  const fused = new Map();
+  const add = (hit, channel, rank) => {
+    const key = hitKey(hit);
+    const existing = fused.get(key) || {
+      ...hit,
+      matchChannels: [],
+      ranks: {},
+      rrfScore: 0,
+      businessScore: Number(hit.score) || 0,
+    };
+    if (!existing.matchChannels.includes(channel)) existing.matchChannels.push(channel);
+    if (!existing.ranks[channel]) existing.ranks[channel] = rank;
+    const weight = channel === "exact" ? 2 : 1;
+    existing.rrfScore += weight / (60 + rank);
+    existing.businessScore = Math.max(existing.businessScore, Number(hit.score) || 0);
+    fused.set(key, existing);
+  };
+
+  (keywordHits || []).forEach((hit, index) => {
+    const channels = hit.matchChannels || [];
+    const channel = channels.some((value) => value === "exact" || value === "exact-topic")
+      ? "exact"
+      : "fts";
+    add(hit, channel, index + 1);
+  });
+  (vectorHits || []).forEach((hit, index) => add(hit, "vector", index + 1));
+
+  const byLayer = {
+    [LAYER_MEMORY]: [],
+    [LAYER_MESSAGE]: [],
+    [LAYER_EVIDENCE]: [],
+    [LAYER_PROJECT_DOC]: [],
+  };
+  for (const hit of fused.values()) {
+    // RRF combines ranks only. Existing business rules remain a small,
+    // scale-independent tie-break/rerank signal.
+    hit.score = hit.rrfScore * 1000 + hit.businessScore * 0.01;
+    delete hit.rrfScore;
+    delete hit.businessScore;
+    byLayer[hit.layer || layerForSourceKind(hit.sourceKind)].push(hit);
+  }
+  for (const hits of Object.values(byLayer)) hits.sort(compareHits);
+  return allocateByLayerQuotas(byLayer, {
+    limit: options.limit,
+    memoryQuota: clampQuota(options.memoryQuota, resolveSearchMemoryQuota()),
+    messageQuota: clampQuota(options.messageQuota, resolveSearchMessageQuota()),
+    projectDocQuota: clampQuota(
+      options.projectDocQuota,
+      DEFAULT_SEARCH_PROJECT_DOC_QUOTA
+    ),
+    layers: options.layers,
+  });
 }
 
 function scoreAndMapProjectDoc(item, terms) {
@@ -917,6 +1277,10 @@ function scoreAndMapHit(item, terms) {
     memoryId: item.sourceKind === "memory-entry" ? item.sourceId : null,
     memoryStatus: item.metadata?.status || null,
     memoryKind: item.metadata?.kind || null,
+    memoryTopic: item.metadata?.topic || null,
+    memoryScope: item.scope || item.metadata?.scope || null,
+    memoryOwnerThreadId: item.ownerThreadId || null,
+    memoryOriginThreadId: item.originThreadId || null,
     content:
       item.sourceKind === "memory-entry" ? String(item.content || "").slice(0, 2048) : undefined,
   };
@@ -966,6 +1330,7 @@ function scoreMemoryRecord(memory, terms) {
 
 function matchScore(item, terms) {
   const channel = item.matchChannel;
+  if (channel === "exact-topic") return 60;
   if (channel === "exact") return 50;
   if (channel === "fts") {
     // bm25 ranks are typically negative; closer to zero is better.

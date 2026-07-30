@@ -1,5 +1,10 @@
 const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
+const { createEmbeddingRepository } = require("./embedding-repository");
+const {
+  enqueueProjectDocumentEmbedding,
+  enqueueRecallEmbedding,
+} = require("./embedding-projection");
 const { createMemoryDigestRepository } = require("./memory-digest");
 const { createMemoryEventRepository } = require("./memory-event-repository");
 const { createMemoryRepository } = require("./memory-repository");
@@ -16,9 +21,15 @@ const { createWindowRepository } = require("./window-repository");
 
 function createStorage(options = {}) {
   const db = options.db || openMemoryDatabase(options);
-  const recall = createRecallRepository(db);
+  const embeddings = createEmbeddingRepository(db);
+  let storage = null;
+  const recall = createRecallRepository(db, {
+    onUpsert(item) {
+      if (storage) enqueueRecallEmbedding(storage, item);
+    },
+  });
   const memoryEvents = createMemoryEventRepository(db);
-  const storage = {
+  storage = {
     db,
     threads: createThreadRepository(db),
     windows: createWindowRepository(db),
@@ -27,9 +38,14 @@ function createStorage(options = {}) {
     memories: createMemoryRepository(db, recall),
     suggestions: createMemorySuggestionRepository(db),
     digests: createMemoryDigestRepository(db),
-    projectEvidence: createProjectEvidenceRepository(db),
+    projectEvidence: createProjectEvidenceRepository(db, {
+      onPassage(passage) {
+        if (storage) enqueueProjectDocumentEmbedding(storage, passage);
+      },
+    }),
     memoryEvents,
     outbox: createOutboxRepository(db),
+    embeddings,
     recall,
     metadata: createStorageMetadataRepository(db),
     transaction(work) {

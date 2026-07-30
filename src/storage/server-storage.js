@@ -7,6 +7,7 @@ const { createDurableRecorder } = require("./durable-recorder");
 const { createEventStore } = require("./event-store");
 const { createOutboxFlusher } = require("./outbox-flusher");
 const { createStorage } = require("./index");
+const { createEmbeddingRuntime } = require("./embedding-runtime");
 const { createSqliteSessionService } = require("./sqlite-session-service");
 
 function createServerStorage(options = {}, sessionsFile, logger = console) {
@@ -94,6 +95,17 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
         })
       : null;
   outboxFlusher?.start();
+  const embeddingRuntime =
+    options.embeddingRuntime ||
+    createEmbeddingRuntime({
+      storage,
+      logger,
+      env: options.embeddingEnv || process.env,
+      provider: options.embeddingProvider,
+      fetch: options.embeddingFetch,
+      autoStart: options.embeddingAutoStart !== false,
+      intervalMs: options.embeddingIntervalMs,
+    });
 
   return {
     mode,
@@ -103,6 +115,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     recorder,
     eventStore,
     outboxFlusher,
+    embeddingRuntime,
     outboxHealth: () => {
       const health = storage?.outbox?.health?.() || { state: "unavailable", pending: 0 };
       if (!auditTranscript && health.pending === 0) {
@@ -141,6 +154,11 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
      * stores → checkpoint → close DB. Prefer awaiting the returned Promise.
      */
     async close() {
+      try {
+        await embeddingRuntime.close();
+      } catch (error) {
+        logger.error?.(`[sqlite-storage] embedding close failed: ${error.message}`);
+      }
       if (outboxFlusher) {
         try {
           await outboxFlusher.close();

@@ -48,7 +48,7 @@ test("decision written in thread A is injected into thread B same project", asyn
     assert.ok(forB.some((m) => m.id === written.memory.id));
 
     const service = createRecallService({ storage, transcript: emptyTranscript() });
-    const pack = service.retrieveForTurn({
+    const pack = await service.retrieveForTurn({
       threadId: "thread-b",
       prompt: "SQLite 存储怎么定的？",
       budgetChars: 3000,
@@ -56,6 +56,19 @@ test("decision written in thread A is injected into thread B same project", asyn
     assert.ok(pack.items.some((m) => m.id === written.memory.id));
     assert.match(pack.rendered, /SQLite/);
     assert.equal(pack.stats.availability.state, "available");
+
+    const agentResult = await service.searchForAgent(
+      { threadId: "thread-b", invocationId: "invocation-b", caller: "mcp" },
+      { query: "SQLite 存储", layers: ["memory"] }
+    );
+    const projectHit = agentResult.hits.find(
+      (hit) => hit.source.memoryId === written.memory.id
+    );
+    assert.ok(projectHit);
+    assert.equal(projectHit.metadata.scope, "project");
+    assert.equal(projectHit.metadata.topic, "storage-primary");
+    assert.equal(projectHit.source.sourceAvailable, false);
+    assert.equal(Object.hasOwn(projectHit.source, "invocationId"), false);
 
     const card = await buildActiveMemoryCard({
       threadId: "thread-b",

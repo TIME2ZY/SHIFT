@@ -71,7 +71,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS, options = {})
 
 - 跨 Agent **只用**行首 \`@队友\` + 共用 \`\`\`handoff\`\`\`；禁止 CLI 内嵌 subagent / Task / Agent / spawn
 - 禁止 @ 自己（你是 ${selfLabel} / ${selfId || "unknown"}）
-- 入站：优先 Structured Handoff + Active Memories；缺项先 session-search，勿表演性附和
+- 入站：优先 Structured Handoff + Active Memories；缺项先 recall_search（不可用时用 session-search），勿表演性附和
 - 出站示例目标：@${example.label}
 
 <!-- /Collaboration Rules -->`;

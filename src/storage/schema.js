@@ -558,6 +558,229 @@ const MIGRATIONS = Object.freeze([
         ON storage_outbox(status, delivered_at);
     `,
   },
+  {
+    version: 14,
+    name: "memory_search_topic",
+    sql: `
+      ALTER TABLE memory_search ADD COLUMN topic TEXT;
+
+      UPDATE memory_search
+      SET topic = (
+        SELECT memory_entries.topic
+        FROM memory_entries
+        WHERE memory_entries.id = memory_search.memory_id
+      );
+
+      CREATE INDEX memory_search_thread_topic
+        ON memory_search(owner_thread_id, topic)
+        WHERE scope = 'thread' AND topic IS NOT NULL;
+
+      CREATE INDEX memory_search_project_topic
+        ON memory_search(project_key, topic)
+        WHERE scope = 'project' AND topic IS NOT NULL;
+    `,
+  },
+  {
+    version: 15,
+    name: "recall_fts_trigram",
+    sql: `
+      DROP TRIGGER recall_items_ai;
+      DROP TRIGGER recall_items_ad;
+      DROP TRIGGER recall_items_au;
+      DROP TABLE recall_fts;
+
+      CREATE VIRTUAL TABLE recall_fts USING fts5(
+        title,
+        content,
+        content='recall_items',
+        content_rowid='id',
+        tokenize='trigram'
+      );
+
+      CREATE TRIGGER recall_items_ai AFTER INSERT ON recall_items BEGIN
+        INSERT INTO recall_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+
+      CREATE TRIGGER recall_items_ad AFTER DELETE ON recall_items BEGIN
+        INSERT INTO recall_fts(recall_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+      END;
+
+      CREATE TRIGGER recall_items_au AFTER UPDATE ON recall_items BEGIN
+        INSERT INTO recall_fts(recall_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+        INSERT INTO recall_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+
+      INSERT INTO recall_fts(recall_fts) VALUES('rebuild');
+
+      DROP TRIGGER memory_search_ai;
+      DROP TRIGGER memory_search_ad;
+      DROP TRIGGER memory_search_au;
+      DROP TABLE memory_search_fts;
+
+      CREATE VIRTUAL TABLE memory_search_fts USING fts5(
+        title,
+        content,
+        content='memory_search',
+        content_rowid='id',
+        tokenize='trigram'
+      );
+
+      CREATE TRIGGER memory_search_ai AFTER INSERT ON memory_search BEGIN
+        INSERT INTO memory_search_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+
+      CREATE TRIGGER memory_search_ad AFTER DELETE ON memory_search BEGIN
+        INSERT INTO memory_search_fts(memory_search_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+      END;
+
+      CREATE TRIGGER memory_search_au AFTER UPDATE ON memory_search BEGIN
+        INSERT INTO memory_search_fts(memory_search_fts, rowid, title, content)
+        VALUES ('delete', old.id, old.title, old.content);
+        INSERT INTO memory_search_fts(rowid, title, content)
+        VALUES (new.id, new.title, new.content);
+      END;
+
+      INSERT INTO memory_search_fts(memory_search_fts) VALUES('rebuild');
+
+      DROP TRIGGER project_passages_ai;
+      DROP TRIGGER project_passages_ad;
+      DROP TRIGGER project_passages_au;
+      DROP TABLE project_passages_fts;
+
+      CREATE VIRTUAL TABLE project_passages_fts USING fts5(
+        path,
+        heading,
+        content,
+        content='project_passages',
+        content_rowid='id',
+        tokenize='trigram'
+      );
+
+      CREATE TRIGGER project_passages_ai AFTER INSERT ON project_passages BEGIN
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+
+      CREATE TRIGGER project_passages_ad AFTER DELETE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+      END;
+
+      CREATE TRIGGER project_passages_au AFTER UPDATE ON project_passages BEGIN
+        INSERT INTO project_passages_fts(project_passages_fts, rowid, path, heading, content)
+        VALUES ('delete', old.id, old.path, old.heading, old.content);
+        INSERT INTO project_passages_fts(rowid, path, heading, content)
+        VALUES (new.id, new.path, new.heading, new.content);
+      END;
+
+      INSERT INTO project_passages_fts(project_passages_fts) VALUES('rebuild');
+    `,
+  },
+  {
+    version: 16,
+    name: "embedding_projection",
+    sql: `
+      CREATE TABLE embedding_indexes (
+        generation TEXT PRIMARY KEY,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+        table_name TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL
+          CHECK (status IN ('building', 'active', 'retired', 'failed')),
+        created_at TEXT NOT NULL,
+        activated_at TEXT,
+        retired_at TEXT,
+        last_error TEXT
+      );
+
+      CREATE UNIQUE INDEX embedding_indexes_one_active
+        ON embedding_indexes(status)
+        WHERE status = 'active';
+
+      CREATE TABLE embedding_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+        source_kind TEXT NOT NULL
+          CHECK (source_kind IN ('memory', 'message', 'evidence', 'project-doc')),
+        source_id TEXT NOT NULL,
+        source_version TEXT NOT NULL,
+
+        chunk_index INTEGER NOT NULL DEFAULT 0 CHECK (chunk_index >= 0),
+        start_offset INTEGER CHECK (start_offset IS NULL OR start_offset >= 0),
+        end_offset INTEGER CHECK (end_offset IS NULL OR end_offset >= 0),
+
+        scope TEXT NOT NULL CHECK (scope IN ('thread', 'project')),
+        scope_key TEXT NOT NULL,
+        owner_thread_id TEXT,
+        project_key TEXT,
+
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+        index_generation TEXT NOT NULL,
+
+        status TEXT NOT NULL
+          CHECK (status IN ('pending', 'processing', 'ready', 'failed', 'stale')),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        next_attempt_at TEXT,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        last_error TEXT,
+
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+
+        CHECK (end_offset IS NULL OR start_offset IS NULL OR end_offset >= start_offset),
+        CHECK (
+          (scope = 'thread'
+            AND owner_thread_id IS NOT NULL
+            AND project_key IS NULL
+            AND scope_key = 'thread:' || owner_thread_id)
+          OR
+          (scope = 'project'
+            AND project_key IS NOT NULL
+            AND owner_thread_id IS NULL
+            AND scope_key = 'project:' || project_key)
+        ),
+
+        UNIQUE (
+          source_kind,
+          source_id,
+          source_version,
+          chunk_index,
+          model
+        ),
+
+        FOREIGN KEY (owner_thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_key) REFERENCES projects(project_key) ON DELETE CASCADE,
+        FOREIGN KEY (index_generation)
+          REFERENCES embedding_indexes(generation) ON DELETE CASCADE
+      );
+
+      CREATE INDEX embedding_items_pending
+        ON embedding_items(status, next_attempt_at, created_at)
+        WHERE status IN ('pending', 'failed');
+
+      CREATE INDEX embedding_items_lease
+        ON embedding_items(status, lease_expires_at)
+        WHERE status = 'processing';
+
+      CREATE INDEX embedding_items_source
+        ON embedding_items(source_kind, source_id);
+
+      CREATE INDEX embedding_items_scope_ready
+        ON embedding_items(index_generation, scope_key, status)
+        WHERE status = 'ready';
+    `,
+  },
 ]);
 
 function migrateMemoryFoundationOwnership(db) {

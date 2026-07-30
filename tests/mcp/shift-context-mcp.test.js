@@ -4,13 +4,13 @@ const test = require("node:test");
 const {
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
+  RECALL_SEARCH_TOOL,
   callMemoryWrite,
   callMemoryEvidenceList,
+  callRecallSearch,
   createRequestHandler,
 } = require("../../scripts/shift-context-mcp");
-const {
-  shiftContextMcpConfigArgs,
-} = require("../../src/agents/providers/codex");
+const { shiftContextMcpConfigArgs } = require("../../src/agents/providers/codex");
 
 const ENV = {
   SHIFT_API_URL: "http://127.0.0.1:8787",
@@ -38,14 +38,67 @@ test("shift context MCP exposes memory write and current evidence discovery", as
   assert.deepEqual(listed.result.tools, [
     MEMORY_WRITE_TOOL,
     MEMORY_EVIDENCE_LIST_TOOL,
+    RECALL_SEARCH_TOOL,
   ]);
-  assert.deepEqual(MEMORY_WRITE_TOOL.inputSchema.required, [
-    "kind",
-    "topic",
-    "content",
-    "scope",
-  ]);
+  assert.deepEqual(MEMORY_WRITE_TOOL.inputSchema.required, ["kind", "topic", "content", "scope"]);
   assert.equal(MEMORY_WRITE_TOOL.inputSchema.additionalProperties, false);
+});
+
+test("shift context MCP returns structured recall results", async () => {
+  const calls = [];
+  const handle = createRequestHandler({
+    recallSearch: async (args) => {
+      calls.push(args);
+      return {
+        version: 2,
+        query: args.query,
+        hits: [{ id: "memory:1", layer: "memory", content: "SQLite is authoritative." }],
+      };
+    },
+  });
+  const response = await handle({
+    jsonrpc: "2.0",
+    id: 5,
+    method: "tools/call",
+    params: {
+      name: "recall_search",
+      arguments: { query: "authoritative storage", layers: ["memory"], limit: 5 },
+    },
+  });
+  assert.equal(response.result.isError, false);
+  assert.equal(response.result.structuredContent.version, 2);
+  assert.equal(response.result.structuredContent.hits[0].layer, "memory");
+  assert.deepEqual(calls, [{ query: "authoritative storage", layers: ["memory"], limit: 5 }]);
+});
+
+test("recall_search bridge binds trusted context outside the agent arguments", async () => {
+  let captured;
+  const result = await callRecallSearch(
+    { query: "why SQLite", layers: ["memory", "evidence"], limit: 8 },
+    {
+      env: ENV,
+      fetchImpl: async (url, init) => {
+        captured = { url, init };
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ version: 2, query: "why SQLite", hits: [] }),
+        };
+      },
+    }
+  );
+  assert.equal(result.version, 2);
+  assert.equal(captured.url.href, "http://127.0.0.1:8787/api/callbacks/recall-search");
+  assert.equal(captured.init.method, "POST");
+  assert.equal(captured.init.headers["X-Callback-Token"], "secret");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    sessionId: "thread-1",
+    invocationId: "invocation-1",
+    query: "why SQLite",
+    layers: ["memory", "evidence"],
+    limit: 8,
+  });
+  assert.equal(Object.hasOwn(JSON.parse(captured.init.body), "projectKey"), false);
 });
 
 test("shift context MCP returns current invocation evidence", async () => {
@@ -151,17 +204,13 @@ test("memory_write bridge binds callback credentials from environment", async ()
         return {
           ok: true,
           status: 200,
-          text: async () =>
-            JSON.stringify({ outcome: "created", memoryId: "memory-1" }),
+          text: async () => JSON.stringify({ outcome: "created", memoryId: "memory-1" }),
         };
       },
     }
   );
   assert.equal(result.outcome, "created");
-  assert.equal(
-    captured.url.href,
-    "http://127.0.0.1:8787/api/callbacks/memory-write"
-  );
+  assert.equal(captured.url.href, "http://127.0.0.1:8787/api/callbacks/memory-write");
   assert.equal(captured.init.headers["X-Callback-Token"], "secret");
   assert.deepEqual(JSON.parse(captured.init.body), {
     sessionId: "thread-1",
@@ -206,11 +255,7 @@ test("memory_write bridge returns policy rejection without an MCP transport erro
 
 test("Codex invocation config registers the per-invocation MCP bridge", () => {
   const args = shiftContextMcpConfigArgs();
-  assert.ok(
-    args.some((value) =>
-      value.startsWith("mcp_servers.shift_context.command=")
-    )
-  );
+  assert.ok(args.some((value) => value.startsWith("mcp_servers.shift_context.command=")));
   assert.ok(
     args.some(
       (value) =>
@@ -220,10 +265,8 @@ test("Codex invocation config registers the per-invocation MCP bridge", () => {
   );
   assert.ok(
     args.includes(
-      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list"]'
+      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search"]'
     )
   );
-  assert.ok(
-    args.some((value) => value.includes("SHIFT_CALLBACK_TOKEN"))
-  );
+  assert.ok(args.some((value) => value.includes("SHIFT_CALLBACK_TOKEN")));
 });

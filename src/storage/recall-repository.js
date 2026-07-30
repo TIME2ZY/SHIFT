@@ -3,7 +3,7 @@ const { eventPlainText } = require("./event-plain-text");
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
 
-function createRecallRepository(db) {
+function createRecallRepository(db, options = {}) {
   const upsertStatement = db.prepare(`
     INSERT INTO recall_items
       (thread_id, window_id, source_kind, source_id, title, content,
@@ -29,8 +29,11 @@ function createRecallRepository(db) {
   const deleteByThread = db.prepare("DELETE FROM recall_items WHERE thread_id = ?");
 
   function upsert(input) {
-    upsertStatement.run(normalizeRecallItem(input));
-    return getBySource(input.sourceKind, input.sourceId);
+    const normalized = normalizeRecallItem(input);
+    upsertStatement.run(normalized);
+    const stored = getBySource(input.sourceKind, input.sourceId);
+    options.onUpsert?.({ ...input, ...stored });
+    return stored;
   }
 
   function getBySource(sourceKind, sourceId) {

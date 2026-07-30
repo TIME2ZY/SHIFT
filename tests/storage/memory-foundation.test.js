@@ -306,3 +306,42 @@ test("legacy capture_key null rows migrate via open of prebuilt v5-like path", (
     storage.close();
   }
 });
+
+test("memory search projects topic and gives exact topic its own channel", () => {
+  const storage = createFixture();
+  try {
+    const written = storage.memory.createProduct({
+      threadId: "thread-1",
+      kind: "decision",
+      topic: "storage.authoritative",
+      content: "SQLite 是在线读写的权威存储。",
+      createdBy: "agent:codex",
+      writeChannel: "agent",
+    });
+
+    const projected = storage.db
+      .prepare("SELECT topic FROM memory_search WHERE memory_id = ?")
+      .get(written.memory.id);
+    assert.equal(projected.topic, "storage.authoritative");
+
+    const hits = storage.memories.searchMemory("storage.authoritative", {
+      projectKey: written.memory.projectKey,
+      threadId: written.memory.ownerThreadId,
+      limit: 10,
+    });
+    assert.equal(hits[0].memoryId, written.memory.id);
+    assert.equal(hits[0].topic, "storage.authoritative");
+    assert.equal(hits[0].matchChannel, "exact-topic");
+    assert.equal(hits[0].rank, -2000);
+
+    const chineseFtsHits = storage.memories.searchMemory("权威存储", {
+      projectKey: written.memory.projectKey,
+      threadId: written.memory.ownerThreadId,
+      limit: 10,
+    });
+    assert.equal(chineseFtsHits[0].memoryId, written.memory.id);
+    assert.equal(chineseFtsHits[0].matchChannel, "fts");
+  } finally {
+    storage.close();
+  }
+});

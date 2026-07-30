@@ -345,7 +345,7 @@ node scripts/callback-client.js post-message --content "你的消息"
 - 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
 - 想主动汇报进度 → 直接发消息
 - 需要更多上下文 → 发消息询问
-- 想"回忆"之前做过的决策 → **先读 prompt 顶部 Active Memories**，不足再用 session-search
+- 想"回忆"之前做过的决策 → **先读 prompt 顶部 Active Memories**，不足优先调用 \`recall_search\`
 
 注意：
 - @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
@@ -377,6 +377,8 @@ node scripts/callback-client.js list-invocations
 \`\`\`text
 node scripts/callback-client.js session-search --query "redis 端口" --limit 10 --layers memory,message,evidence
 \`\`\`
+
+这是未暴露 \`recall_search\` MCP 时的兼容调试入口；工具可用时必须优先调用工具。
 
 返回：\`{ query, limit, layers: { memory, message, evidence }, truncated, hits: [{ layer, score, snippet, sourceKind, sourceId, kind, invocationId, eventNo, memoryId? }] }\`。
 
@@ -425,7 +427,7 @@ node scripts/callback-client.js memory-upsert --kind decision --topic storage.au
 1. 用户拍板 / 架构约束 / 已核实的关键事实 → **写**
 2. 临时进度、猜测、一次性 debug 步骤 → **不写**
 3. Active Memories 里已有且未变化 → **不重复写**
-4. 写前不确定是否已有 → 先 \`session-search --layers memory --query "<topic>"\`
+4. 写前不确定是否已有 → 先调用 \`recall_search\`，仅搜索 memory 层
 5. 结论发生变化 → 使用相同 topic 写入新内容，不要自行删除旧版本
 6. 发现内容错误但没有替代结论 → 告知用户，由受信管理路径执行 invalidation
 
@@ -441,7 +443,7 @@ node scripts/callback-client.js read-invocation --target <invocationId> --from 0
 
 回忆工作流建议：
 1. 先读 Active Memories 卡片
-2. 不够 → \`session-search query="关键词"\`，优先 memory 层
+2. 不够 → 优先调用 \`recall_search\`，先看 memory 层
 3. 需要过程细节 → \`read-invocation targetInvocationId=<id>\`
 4. 确认了可复用结论 → 优先调用 \`memory_write\`，供后续 turn 注入
 5. 不要凭印象猜 — 先查再说

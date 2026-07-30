@@ -18,6 +18,8 @@
     "audit:storage": "node scripts/audit-sqlite-storage.js",
     "audit:memory:stabilization": "node scripts/audit-memory-stabilization.js",
     "eval:memory-write": "node scripts/eval-memory-write.js",
+    "eval:recall-fts": "node scripts/eval-recall-fts.js",
+    "backfill:embeddings": "node scripts/backfill-embeddings.js",
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "archive:storage:mixed-transcripts": "node scripts/archive-mixed-transcripts.js",
@@ -40,6 +42,7 @@
     "isomorphic-dompurify": "^3.19.0",
     "markdown-it": "^14.3.0",
     "markdown-it-multimd-table": "^4.2.3",
-    "markdown-it-task-lists": "^2.1.1"
+    "markdown-it-task-lists": "^2.1.1",
+    "sqlite-vec": "^0.1.9"
   }
 }

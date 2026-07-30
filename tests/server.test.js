@@ -71,7 +71,9 @@ function createPassthroughWorktreeManager() {
 async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
   const sessionsFile = path.join(tmpDir, "sessions.json");
-  const initialSessionIds = Array.isArray(options.initialSessionIds) ? options.initialSessionIds : [];
+  const initialSessionIds = Array.isArray(options.initialSessionIds)
+    ? options.initialSessionIds
+    : [];
   const serverOptions = { ...options };
   delete serverOptions.initialSessionIds;
   const memoryDbFile = path.join(tmpDir, "shift.sqlite");
@@ -118,13 +120,22 @@ test("serves fixed agent list", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.deepEqual(body.agents.map((agent) => agent.id), ["codex", "gemini", "grok", "opencode"]);
+    assert.deepEqual(
+      body.agents.map((agent) => agent.id),
+      ["codex", "gemini", "grok", "opencode"]
+    );
     // Every agent must surface a non-empty description so the UI can show it.
     for (const agent of body.agents) {
-      assert.ok(agent.description && agent.description.length > 0, `Agent ${agent.id} missing description`);
+      assert.ok(
+        agent.description && agent.description.length > 0,
+        `Agent ${agent.id} missing description`
+      );
       // Identity pack metadata (role / duties) comes from src/agents/identities/*.md
       assert.ok(agent.role && agent.role.length > 0, `Agent ${agent.id} missing role`);
-      assert.ok(Array.isArray(agent.duties) && agent.duties.length > 0, `Agent ${agent.id} missing duties`);
+      assert.ok(
+        Array.isArray(agent.duties) && agent.duties.length > 0,
+        `Agent ${agent.id} missing duties`
+      );
       assert.ok(Array.isArray(agent.boundaries), `Agent ${agent.id} missing boundaries array`);
     }
   });
@@ -171,48 +182,54 @@ test("UI API rejects cross-origin requests even with a valid token", async () =>
 
 test("UI API rejects non-JSON mutation requests before spawning an agent", async () => {
   let spawnCount = 0;
-  await withServer({
-    spawnRunner() {
-      spawnCount += 1;
-      return createMockChild();
-    },
-  }, async (baseUrl) => {
-    const response = await nativeFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        "content-type": "text/plain",
-        "X-Shift-UI-Token": TEST_UI_TOKEN,
+  await withServer(
+    {
+      spawnRunner() {
+        spawnCount += 1;
+        return createMockChild();
       },
-      body: JSON.stringify({ agent: "codex", prompt: "probe" }),
-    });
-    assert.equal(response.status, 415);
-    assert.equal(spawnCount, 0);
-  });
+    },
+    async (baseUrl) => {
+      const response = await nativeFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
+        body: JSON.stringify({ agent: "codex", prompt: "probe" }),
+      });
+      assert.equal(response.status, 415);
+      assert.equal(spawnCount, 0);
+    }
+  );
 });
 
 test("chat rejects unsafe and unknown client-supplied session IDs", async () => {
   let spawnCount = 0;
-  await withServer({
-    spawnRunner() {
-      spawnCount += 1;
-      return createMockChild();
+  await withServer(
+    {
+      spawnRunner() {
+        spawnCount += 1;
+        return createMockChild();
+      },
     },
-  }, async (baseUrl) => {
-    const unsafe = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: ".." }),
-    });
-    assert.equal(unsafe.status, 400);
+    async (baseUrl) => {
+      const unsafe = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: ".." }),
+      });
+      assert.equal(unsafe.status, 400);
 
-    const unknown = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: "unknown-session" }),
-    });
-    assert.equal(unknown.status, 404);
-    assert.equal(spawnCount, 0);
-  });
+      const unknown = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: "unknown-session" }),
+      });
+      assert.equal(unknown.status, 404);
+      assert.equal(spawnCount, 0);
+    }
+  );
 });
 
 test("rejects unknown agent", async () => {
@@ -259,8 +276,14 @@ test("streams child stdout and exit events", async () => {
       assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
       assert.equal(calls[0].args[1], "--agent");
       assert.equal(calls[0].args[2], "opencode");
-      assert.ok(calls[0].args[3].endsWith("hello"), `Expected last arg to end with "hello", got: ${calls[0].args[3]?.slice(-50)}`);
-      assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
+      assert.ok(
+        calls[0].args[3].endsWith("hello"),
+        `Expected last arg to end with "hello", got: ${calls[0].args[3]?.slice(-50)}`
+      );
+      assert.ok(
+        calls[0].args[3].includes("APPLICATION SKILL"),
+        "Expected augmented prompt to contain APPLICATION SKILL marker"
+      );
       assert.match(text, /event: stdout\ndata: \{"text":"hello"\}/);
       assert.match(text, /event: stderr\ndata: \{"text":"thinking"\}/);
       assert.match(text, /event: exit\ndata: \{"code":0,"signal":null\}/);
@@ -278,19 +301,35 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         calls.push({ command, args });
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-test", text: "partial " }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-test", text: "answer" }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "usage.update",
-            agent: "opencode",
-            invocationId: "inv-test",
-            provider: "opencode",
-            scope: "step",
-            mode: "delta",
-            inputTokens: 100,
-            outputTokens: 20,
-            totalTokens: 120,
-          }) + "\n");
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-test",
+              text: "partial ",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-test",
+              text: "answer",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "usage.update",
+              agent: "opencode",
+              invocationId: "inv-test",
+              provider: "opencode",
+              scope: "step",
+              mode: "delta",
+              inputTokens: 100,
+              outputTokens: 20,
+              totalTokens: 120,
+            }) + "\n"
+          );
           child.emit("close", 0, null);
         });
         return child;
@@ -308,13 +347,28 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
       assert.equal(calls[0].args[1], "--agent");
       assert.equal(calls[0].args[2], "opencode");
-      assert.ok(calls[0].args[3].includes("hello"), `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`);
-      assert.ok(calls[0].args[3].includes("APPLICATION SKILL"), "Expected augmented prompt to contain APPLICATION SKILL marker");
-      assert.ok(calls[0].args[3].includes("MCP 回调工具说明"), "Expected prompt to contain callback instructions");
+      assert.ok(
+        calls[0].args[3].includes("hello"),
+        `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`
+      );
+      assert.ok(
+        calls[0].args[3].includes("APPLICATION SKILL"),
+        "Expected augmented prompt to contain APPLICATION SKILL marker"
+      );
+      assert.ok(
+        calls[0].args[3].includes("MCP 回调工具说明"),
+        "Expected prompt to contain callback instructions"
+      );
       // Soft collab rules must be present on the first (non-A2A) turn.
       assert.match(calls[0].args[3], /<!-- Collaboration Rules -->/);
-      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"answer"\}/);
+      assert.match(
+        text,
+        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/
+      );
+      assert.match(
+        text,
+        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"answer"\}/
+      );
       // Verify session event is emitted
       const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sessionMatch, "Expected SSE session event with sessionId");
@@ -377,24 +431,30 @@ test("chat endpoint emits canonical agent-event SSE frames", async () => {
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({
-            type: "run.started",
-            agent: "opencode",
-            invocationId: "inv-1",
-            provider: "opencode",
-          }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "text.delta",
-            agent: "opencode",
-            invocationId: "inv-1",
-            text: "hello ",
-          }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "progress.update",
-            agent: "opencode",
-            invocationId: "inv-1",
-            items: [{ text: "done", done: true }],
-          }) + "\n");
+          child.stdout.write(
+            JSON.stringify({
+              type: "run.started",
+              agent: "opencode",
+              invocationId: "inv-1",
+              provider: "opencode",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-1",
+              text: "hello ",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "progress.update",
+              agent: "opencode",
+              invocationId: "inv-1",
+              items: [{ text: "done", done: true }],
+            }) + "\n"
+          );
           child.emit("close", 0, null);
         });
         return child;
@@ -420,31 +480,39 @@ test("chat history stores only assistant text reconstructed from text.delta", as
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({
-            type: "run.started",
-            agent: "opencode",
-            invocationId: "inv-2",
-            provider: "opencode",
-          }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "thinking.delta",
-            agent: "opencode",
-            invocationId: "inv-2",
-            text: "inspect",
-          }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "text.delta",
-            agent: "opencode",
-            invocationId: "inv-2",
-            text: "final answer",
-          }) + "\n");
-          child.stdout.write(JSON.stringify({
-            type: "run.finished",
-            agent: "opencode",
-            invocationId: "inv-2",
-            exitCode: 0,
-            signal: null,
-          }) + "\n");
+          child.stdout.write(
+            JSON.stringify({
+              type: "run.started",
+              agent: "opencode",
+              invocationId: "inv-2",
+              provider: "opencode",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "thinking.delta",
+              agent: "opencode",
+              invocationId: "inv-2",
+              text: "inspect",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-2",
+              text: "final answer",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "run.finished",
+              agent: "opencode",
+              invocationId: "inv-2",
+              exitCode: 0,
+              signal: null,
+            }) + "\n"
+          );
           child.emit("close", 0, null);
         });
         return child;
@@ -471,9 +539,30 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "line 1\n\n" }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "    code-ish indent\n" }) + "\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-chunks", text: "- list item" }) + "\n");
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-chunks",
+              text: "line 1\n\n",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-chunks",
+              text: "    code-ish indent\n",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "inv-chunks",
+              text: "- list item",
+            }) + "\n"
+          );
           child.emit("close", 0, null);
         });
         return child;
@@ -487,9 +576,18 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       });
       const text = await response.text();
 
-      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"line 1\\n\\n"\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":" {4}code-ish indent\\n"\}/);
-      assert.match(text, /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"- list item"\}/);
+      assert.match(
+        text,
+        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"line 1\\n\\n"\}/
+      );
+      assert.match(
+        text,
+        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":" {4}code-ish indent\\n"\}/
+      );
+      assert.match(
+        text,
+        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"- list item"\}/
+      );
     }
   );
 });
@@ -527,8 +625,17 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
         const child = createMockChild();
         process.nextTick(() => {
           child.stderr.write("Reading additional input from stdin...\n");
-          child.stderr.write("2026-06-28T13:52:47.421934Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported\n");
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-answer", text: "answer" }) + "\n");
+          child.stderr.write(
+            "2026-06-28T13:52:47.421934Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: maximum of 3 prompts is supported\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "codex",
+              invocationId: "inv-answer",
+              text: "answer",
+            }) + "\n"
+          );
           child.emit("close", 0, null);
         });
         return child;
@@ -561,9 +668,23 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
         const child = createMockChild();
         process.nextTick(() => {
           if (args[2] === "codex") {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-a2a-1", text: "@Gemini\n请继续实现。\ncodex result" }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "inv-a2a-1",
+                text: "@Gemini\n请继续实现。\ncodex result",
+              }) + "\n"
+            );
           } else {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "gemini", invocationId: "inv-a2a-2", text: "gemini received" }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "gemini",
+                invocationId: "inv-a2a-2",
+                text: "gemini received",
+              }) + "\n"
+            );
           }
           child.emit("close", 0, null);
         });
@@ -594,9 +715,13 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       // Handoff system markers must persist so session switch can reload them.
       const sessionId = (text.match(/"sessionId":"([^"]+)"/) || [])[1];
       assert.ok(sessionId);
-      const messagesResp = await fetch(`${baseUrl}/api/messages?sessionId=${encodeURIComponent(sessionId)}`);
+      const messagesResp = await fetch(
+        `${baseUrl}/api/messages?sessionId=${encodeURIComponent(sessionId)}`
+      );
       const body = await messagesResp.json();
-      const systemRoutes = (body.messages || []).filter((m) => m.role === "system" && m.kind === "a2a-route");
+      const systemRoutes = (body.messages || []).filter(
+        (m) => m.role === "system" && m.kind === "a2a-route"
+      );
       assert.equal(systemRoutes.length, 1);
       assert.equal(systemRoutes[0].from, "codex");
       assert.equal(systemRoutes[0].to, "gemini");
@@ -744,7 +869,12 @@ test("DELETE /api/sessions/:id discards an attached worktree", async () => {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "hello", projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "hello",
+          projectDir: baseDir,
+          useWorktree: true,
+        }),
       });
       const text = await response.text();
       const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
@@ -1015,7 +1145,12 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "@Gemini hello", projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "@Gemini hello",
+          projectDir: baseDir,
+          useWorktree: true,
+        }),
       });
       const text = await response.text();
 
@@ -1070,7 +1205,13 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
         const response = await fetch(`${baseUrl}/api/chat`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ agent: "opencode", prompt, sessionId: session.id, projectDir: baseDir, useWorktree: true }),
+          body: JSON.stringify({
+            agent: "opencode",
+            prompt,
+            sessionId: session.id,
+            projectDir: baseDir,
+            useWorktree: true,
+          }),
         });
         assert.equal(response.status, 200);
         await response.text();
@@ -1118,7 +1259,13 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       const first = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "first", sessionId: session.id, projectDir: baseDir, useWorktree: true }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "first",
+          sessionId: session.id,
+          projectDir: baseDir,
+          useWorktree: true,
+        }),
       });
       assert.equal(first.status, 200);
       await first.text();
@@ -1126,7 +1273,13 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       const second = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "second", sessionId: session.id, projectDir: baseDir, useWorktree: false }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "second",
+          sessionId: session.id,
+          projectDir: baseDir,
+          useWorktree: false,
+        }),
       });
       assert.equal(second.status, 200);
       await second.text();
@@ -1199,13 +1352,20 @@ test("chat ignores legacy session maps when switching into worktree mode", async
 
     const sessionMapDir = path.join(sessionMapRoot, session.id);
     fs.mkdirSync(sessionMapDir, { recursive: true });
-    fs.writeFileSync(path.join(sessionMapDir, "sessions.json"), JSON.stringify({
-      opencode: {
-        sessionId: "readonly-session-1",
-        workspaceKey: `base:${baseDir}`,
-        updatedAt: "2026-07-02T00:00:00.000Z",
-      },
-    }, null, 2));
+    fs.writeFileSync(
+      path.join(sessionMapDir, "sessions.json"),
+      JSON.stringify(
+        {
+          opencode: {
+            sessionId: "readonly-session-1",
+            workspaceKey: `base:${baseDir}`,
+            updatedAt: "2026-07-02T00:00:00.000Z",
+          },
+        },
+        null,
+        2
+      )
+    );
 
     const response = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -1371,7 +1531,12 @@ test("worktree status, diff, and discard endpoints delegate to manager", async (
       worktreeManager: {
         getStatus(sessionId) {
           calls.push(["status", sessionId]);
-          return { sessionId, branch: "codex/session-x", clean: false, porcelain: [" M server.js"] };
+          return {
+            sessionId,
+            branch: "codex/session-x",
+            clean: false,
+            porcelain: [" M server.js"],
+          };
         },
         getDiff(sessionId) {
           calls.push(["diff", sessionId]);
@@ -1395,7 +1560,10 @@ test("worktree status, diff, and discard endpoints delegate to manager", async (
       assert.equal(diffResponse.status, 200);
       assert.match((await diffResponse.json()).diff, /diff --git/);
 
-      const discardResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/worktree/discard`, { method: "POST" });
+      const discardResponse = await fetch(
+        `${baseUrl}/api/sessions/${session.id}/worktree/discard`,
+        { method: "POST" }
+      );
       assert.equal(discardResponse.status, 200);
       assert.equal((await discardResponse.json()).ok, true);
 
@@ -1452,7 +1620,9 @@ test("parseA2AMentions routes @label and @id consistently", () => {
 
 test("parseA2AMentions filters self and code blocks", () => {
   assert.deepEqual(parseA2AMentions("@gemini 帮我", "gemini"), []);
-  assert.deepEqual(parseA2AMentions("```\n@gemini 帮我\n```\n@OpenCode 看下", "codex"), ["opencode"]);
+  assert.deepEqual(parseA2AMentions("```\n@gemini 帮我\n```\n@OpenCode 看下", "codex"), [
+    "opencode",
+  ]);
 });
 
 test("parseA2AMentions caps at 2 targets", () => {
@@ -1568,7 +1738,11 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       const secondPromise = fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "replacement task", sessionId: session.id }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "replacement task",
+          sessionId: session.id,
+        }),
       }).then((r) => r.text());
 
       const deadline2 = Date.now() + 2000;
@@ -1585,7 +1759,9 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
         spawned[0].closeNow(null, "SIGTERM");
         await Promise.race([
           firstPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("first chat did not close")), 2000)),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("first chat did not close")), 2000)
+          ),
         ]);
 
         const env = spawned[1].env;
@@ -1678,7 +1854,10 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   assert.deepEqual(worklist, ["codex", "gemini"]);
 
   const joined = sseEvents.join("");
-  assert.match(joined, /event: message\ndata: \{"agent":"codex","role":"assistant","text":"@Gemini 请继续实现"\}/);
+  assert.match(
+    joined,
+    /event: message\ndata: \{"agent":"codex","role":"assistant","text":"@Gemini 请继续实现"\}/
+  );
   assert.match(joined, /event: a2a-route\ndata: \{"from":"codex","to":"gemini"/);
 
   // Idempotency: the same source invocation cannot route to the same target twice.
@@ -1831,7 +2010,13 @@ test("callbacks.validateToken accepts only exact matches", () => {
 test("createInvocation returns expiresAt and stamps expiresAt on the token", () => {
   const sessionId = "session-ttl-1";
   const threadCtx = {
-    res: { destroyed: false, writableEnded: false, write() { return true; } },
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write() {
+        return true;
+      },
+    },
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
@@ -1860,7 +2045,13 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
 test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   const sessionId = "session-ttl-2";
   const threadCtx = {
-    res: { destroyed: false, writableEnded: false, write() { return true; } },
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write() {
+        return true;
+      },
+    },
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
@@ -1874,7 +2065,10 @@ test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   try {
     const { expiresAt } = callbacks.createInvocation(sessionId, "codex");
     const expected = Date.now() + 60000;
-    assert.ok(Math.abs(expiresAt - expected) < 100, `expiresAt should be ~60s in the future, got diff ${Math.abs(expiresAt - expected)}ms`);
+    assert.ok(
+      Math.abs(expiresAt - expected) < 100,
+      `expiresAt should be ~60s in the future, got diff ${Math.abs(expiresAt - expected)}ms`
+    );
   } finally {
     if (prev === undefined) delete process.env.SHIFT_TOKEN_TTL_MS;
     else process.env.SHIFT_TOKEN_TTL_MS = prev;
@@ -1887,17 +2081,28 @@ test("validateToken rejects expired tokens and lazily cleans them up", () => {
   const invocationId = "invocation-exp-1";
   const callbackToken = "token-exp-1";
   const threadCtx = {
-    res: { destroyed: false, writableEnded: false, write() { return true; } },
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write() {
+        return true;
+      },
+    },
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
     sessionsFile: "/tmp/sessions.json",
-    tokens: new Map([[invocationId, {
-      agentId: "codex",
-      callbackToken,
-      createdAt: Date.now() - 60_000,
-      expiresAt: Date.now() - 1000, // already expired
-    }]]),
+    tokens: new Map([
+      [
+        invocationId,
+        {
+          agentId: "codex",
+          callbackToken,
+          createdAt: Date.now() - 60_000,
+          expiresAt: Date.now() - 1000, // already expired
+        },
+      ],
+    ]),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -1912,7 +2117,13 @@ test("validateToken accepts non-expiring legacy tokens (backward compat)", () =>
   const invocationId = "invocation-leg-1";
   const callbackToken = "token-leg-1";
   const threadCtx = {
-    res: { destroyed: false, writableEnded: false, write() { return true; } },
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write() {
+        return true;
+      },
+    },
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
@@ -1931,7 +2142,10 @@ test("postMessage rejects cross-thread callbacks (Thread Affinity guard)", () =>
   const fakeRes = {
     destroyed: false,
     writableEnded: false,
-    write(chunk) { sseEvents.push(chunk); return true; },
+    write(chunk) {
+      sseEvents.push(chunk);
+      return true;
+    },
   };
   const sessionId = "session-guard-1";
   const worklist = ["codex"];
@@ -1967,7 +2181,10 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   const fakeRes = {
     destroyed: false,
     writableEnded: false,
-    write(chunk) { sseEvents.push(chunk); return true; },
+    write(chunk) {
+      sseEvents.push(chunk);
+      return true;
+    },
   };
   const sessionId = "session-guard-2";
   const worklist = ["codex"];
@@ -1994,7 +2211,9 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
   assert.equal(ok.handoff.status, "none");
   assert.equal(appended.length, 1);
   // sendSse writes two lines per event (event: + data:), so count by event name.
-  const eventNames = sseEvents.filter((line) => line.startsWith("event: ")).map((line) => line.trim());
+  const eventNames = sseEvents
+    .filter((line) => line.startsWith("event: "))
+    .map((line) => line.trim());
   assert.deepEqual(eventNames, ["event: message", "event: memory-metrics"]);
 
   callbacks.unregisterThread(sessionId);
@@ -2025,7 +2244,14 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
             // 25 chars output → ratio 25/80 = 0.31 (under warn)
             // 60 chars output → ratio 60/80 = 0.75 (under warn, since warn is 0.85)
             // 80 chars output → ratio 80/80 = 1.0 (above action 0.90, triggers seal)
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "inv-warn", text: "x".repeat(80) }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "opencode",
+                invocationId: "inv-warn",
+                text: "x".repeat(80),
+              }) + "\n"
+            );
             child.emit("close", 0, null);
           });
           return child;
@@ -2041,7 +2267,10 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
         // We expect context-warning (or sealed, depending on ratio) because
         // the small test capacity forces the ratio above 0.85.
         const hasContextEvent = /event: (context-warning|sealed)/.test(text);
-        assert.ok(hasContextEvent, `expected context-warning or sealed event in stream, got: ${text.slice(-500)}`);
+        assert.ok(
+          hasContextEvent,
+          `expected context-warning or sealed event in stream, got: ${text.slice(-500)}`
+        );
       }
     );
   } finally {
@@ -2062,8 +2291,22 @@ test("chat endpoint terminates the chain with sealed event when action threshold
           const child = createMockChild();
           process.nextTick(() => {
             // 80 chars × 4 chars/token / 20 tokens capacity = ratio 4.0, well past 0.90
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-seal", text: "x".repeat(80) }) + "\n");
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "inv-seal", text: "\n@sage please continue" }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "inv-seal",
+                text: "x".repeat(80),
+              }) + "\n"
+            );
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "inv-seal",
+                text: "\n@sage please continue",
+              }) + "\n"
+            );
             child.emit("close", 0, null);
           });
           return child;
@@ -2171,7 +2414,9 @@ async function withActiveChat(fn) {
 
 test("/api/callbacks/session-search rejects without X-Callback-Token", async () => {
   await withServer({}, async (baseUrl) => {
-    const resp = await fetch(`${baseUrl}/api/callbacks/session-search?sessionId=x&invocationId=y&query=z`);
+    const resp = await fetch(
+      `${baseUrl}/api/callbacks/session-search?sessionId=x&invocationId=y&query=z`
+    );
     assert.equal(resp.status, 400);
   });
 });
@@ -2229,6 +2474,52 @@ test("/api/callbacks/session-search returns hits during active chat", async () =
   });
 });
 
+test("/api/callbacks/recall-search returns the authenticated v2 agent contract", async () => {
+  await withActiveChat(async (baseUrl, sid, captured) => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const resp = await fetch(`${baseUrl}/api/callbacks/recall-search`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN,
+      },
+      body: JSON.stringify({
+        sessionId: sid,
+        invocationId: captured.env.SHIFT_INVOCATION_ID,
+        query: "redis clustering",
+        layers: ["memory", "message", "evidence"],
+        limit: 10,
+      }),
+    });
+    assert.equal(resp.status, 200);
+    const body = await resp.json();
+    assert.equal(body.version, 2);
+    assert.equal(body.query, "redis clustering");
+    assert.ok(body.hits.length >= 1);
+    assert.ok(body.hits.every((hit) => typeof hit.finalScore === "number"));
+    assert.equal(body.availability.channels.vector.reason, "disabled");
+    assert.equal(body.stats.returnedCount, body.hits.length);
+  });
+});
+
+test("/api/callbacks/recall-search rejects an invalid callback token", async () => {
+  await withServer({}, async (baseUrl) => {
+    const resp = await fetch(`${baseUrl}/api/callbacks/recall-search`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Callback-Token": "wrong",
+      },
+      body: JSON.stringify({
+        sessionId: "x",
+        invocationId: "y",
+        query: "previous decision",
+      }),
+    });
+    assert.equal(resp.status, 401);
+  });
+});
+
 test("/api/callbacks/session-search caps limit at 200", async () => {
   await withActiveChat(async (baseUrl, sid, captured) => {
     const resp = await fetch(
@@ -2259,8 +2550,13 @@ test("/api/callbacks/list-invocations returns agent + state metadata", async () 
     const body = await resp.json();
     assert.ok(Array.isArray(body.invocations));
     // The active invocation should appear (in-flight, no end event yet)
-    const active = body.invocations.find((i) => i.invocationId === captured.env.SHIFT_INVOCATION_ID);
-    assert.ok(active, `active invocation should be listed, got: ${JSON.stringify(body.invocations)}`);
+    const active = body.invocations.find(
+      (i) => i.invocationId === captured.env.SHIFT_INVOCATION_ID
+    );
+    assert.ok(
+      active,
+      `active invocation should be listed, got: ${JSON.stringify(body.invocations)}`
+    );
     assert.equal(active.agent, "opencode");
     assert.ok(active.startedAt);
     assert.equal(active.endedAt, null);
@@ -2343,6 +2639,7 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
 
 test("buildCallbackInstructions mentions recall and memory-write commands", () => {
   const tpl = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
+  assert.match(tpl, /recall_search/);
   assert.match(tpl, /callback-client\.js list-invocations/);
   assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
@@ -2385,7 +2682,11 @@ test("summarizeUnifiedDiff counts total and untracked files", () => {
   const { summarizeUnifiedDiff } = require("../public/workspace-diff.js");
   const files = [
     { path: "public/app.js", status: "modified", patch: "@@ -1 +1,2 @@\n line 1\n+line 2" },
-    { path: "public/new-file.js", status: "untracked", patch: "new file mode 100644\n+console.log('ok');" },
+    {
+      path: "public/new-file.js",
+      status: "untracked",
+      patch: "new file mode 100644\n+console.log('ok');",
+    },
   ];
 
   assert.deepEqual(summarizeUnifiedDiff(files), {
@@ -2499,10 +2800,19 @@ test("frontend treats sealed SSE event as an expected terminal state", () => {
 
 test("frontend keeps per-session runtime status and does not abort on switch", () => {
   const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const sessionList = fs.readFileSync(path.join(__dirname, "../public", "session-list-view.js"), "utf8");
-  const controllerJs = fs.readFileSync(path.join(__dirname, "../public", "session-controller.js"), "utf8");
+  const sessionList = fs.readFileSync(
+    path.join(__dirname, "../public", "session-list-view.js"),
+    "utf8"
+  );
+  const controllerJs = fs.readFileSync(
+    path.join(__dirname, "../public", "session-controller.js"),
+    "utf8"
+  );
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
-  const runtimeJs = fs.readFileSync(path.join(__dirname, "../public", "session-runtime.js"), "utf8");
+  const runtimeJs = fs.readFileSync(
+    path.join(__dirname, "../public", "session-runtime.js"),
+    "utf8"
+  );
   const css = readFrontendCss();
   assert.match(controllerJs, /Do not abort the previous session's background run/);
   assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
@@ -2591,9 +2901,15 @@ test("frontend routes stderr SSE into a separate system stderr message", () => {
   const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
   assert.match(chatJs, /case "stderr":/);
   assert.match(messageView, /function addDebug\(agent, text\)/);
-  assert.match(messageView, /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/);
+  assert.match(
+    messageView,
+    /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/
+  );
   assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
-  assert.doesNotMatch(messageView, /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/);
+  assert.doesNotMatch(
+    messageView,
+    /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/
+  );
 });
 
 test("frontend recall expand shows events on open and shares process panel path", () => {
@@ -2603,7 +2919,10 @@ test("frontend recall expand shows events on open and shares process panel path"
     path.join(__dirname, "../public", "message-process-helpers.js"),
     "utf8"
   );
-  const messageViewJs = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
+  const messageViewJs = fs.readFileSync(
+    path.join(__dirname, "../public", "message-view.js"),
+    "utf8"
+  );
   // Pure buckets contract lives in helpers; DOM renderer is shared.
   assert.match(helpersJs, /function aggregateProcessBuckets/);
   assert.match(helpersJs, /function textDeltaSummary/);
@@ -2648,10 +2967,7 @@ test("frontend recall expand shows events on open and shares process panel path"
   // Nested <details> must not be toggled by parent row click (冒泡折叠 bug).
   assert.match(recallJs, /bindBodyInteractionGuard|stopPropagation/);
   assert.match(recallJs, /head\.addEventListener\("click"/);
-  assert.doesNotMatch(
-    recallJs,
-    /row\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/
-  );
+  assert.doesNotMatch(recallJs, /row\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/);
 });
 
 test("frontend caps recall page size and surfaces truncation state", () => {
@@ -2705,7 +3021,10 @@ test("frontend vendors Prism offline and drops jsDelivr CDN", () => {
 test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const mentionJs = fs.readFileSync(path.join(__dirname, "../public", "mention-composer.js"), "utf8");
+  const mentionJs = fs.readFileSync(
+    path.join(__dirname, "../public", "mention-composer.js"),
+    "utf8"
+  );
   assert.match(html, /aria-controls="agent-panel"/);
   assert.match(html, /role="listbox"/);
   assert.match(html, /aria-busy="false"/);
@@ -2720,7 +3039,10 @@ test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
 test("frontend uses ui-confirm for destructive actions", () => {
   const boot = require("../public/boot.js");
   const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const workspaceJs = fs.readFileSync(path.join(__dirname, "../public", "workspace-panel.js"), "utf8");
+  const workspaceJs = fs.readFileSync(
+    path.join(__dirname, "../public", "workspace-panel.js"),
+    "utf8"
+  );
   assert.ok(boot.MODULES.includes("/public/ui-confirm.js"));
   assert.match(appJs, /confirmImpl/);
   assert.match(appJs, /删除对话|确认删除/);
@@ -2793,7 +3115,8 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
     assert.match(capturedPrompt, /hello world/);
     // Order: agent identity before session identity
     assert.ok(
-      capturedPrompt.indexOf("<!-- Agent Identity:") < capturedPrompt.indexOf("<!-- Session Identity -->"),
+      capturedPrompt.indexOf("<!-- Agent Identity:") <
+        capturedPrompt.indexOf("<!-- Session Identity -->"),
       "agent identity should precede session identity"
     );
   } finally {
@@ -2814,9 +3137,23 @@ test("A2A-routed agents get persona identity + light session header, not full bo
         const child = createMockChild();
         process.nextTick(() => {
           if (args[2] === "codex") {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "codex", invocationId: "bootstrap-a2a-1", text: "@Gemini\nhandoff please\ncodex result" }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "bootstrap-a2a-1",
+                text: "@Gemini\nhandoff please\ncodex result",
+              }) + "\n"
+            );
           } else {
-            child.stdout.write(JSON.stringify({ type: "text.delta", agent: "gemini", invocationId: "bootstrap-a2a-2", text: "gemini received" }) + "\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "gemini",
+                invocationId: "bootstrap-a2a-2",
+                text: "gemini received",
+              }) + "\n"
+            );
           }
           child.emit("close", 0, null);
         });
@@ -3059,6 +3396,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
 test("buildCallbackInstructions includes SHIFT context and recall commands", () => {
   const instructions = callbacks.buildCallbackInstructions("http://example.test", "session-xyz");
   assert.match(instructions, /\$SHIFT_THREAD_ID/);
+  assert.match(instructions, /recall_search/);
   assert.match(instructions, /callback-client\.js post-message/);
   assert.match(instructions, /callback-client\.js list-invocations/);
   assert.match(instructions, /callback-client\.js session-search/);
@@ -3075,7 +3413,14 @@ test("chat records invocation events and recall routes expose them (no token = f
       spawnRunner() {
         const child = createMockChild();
         process.nextTick(() => {
-          child.stdout.write(JSON.stringify({ type: "text.delta", agent: "opencode", invocationId: "recall-1", text: "hello recall" }) + "\n");
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "recall-1",
+              text: "hello recall",
+            }) + "\n"
+          );
           child.stderr.write("a stderr line\n");
           child.emit("close", 0, null);
         });
@@ -3092,7 +3437,9 @@ test("chat records invocation events and recall routes expose them (no token = f
       const sidMatch = chatText.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
       assert.ok(sidMatch, "expected session event");
       const sid = sidMatch[1];
-      const invMatch = chatText.match(/event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/);
+      const invMatch = chatText.match(
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+      );
       assert.ok(invMatch, "expected agent-start with invocationId");
       const invId = invMatch[1];
 
@@ -3103,9 +3450,14 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.equal(list.invocations[0].invocationId, invId);
       assert.equal(list.invocations[0].agent, "opencode");
       assert.equal(list.invocations[0].state, "completed");
-      assert.ok(list.invocations[0].eventCount >= 3, "should have start + text.delta + stderr + end events");
+      assert.ok(
+        list.invocations[0].eventCount >= 3,
+        "should have start + text.delta + stderr + end events"
+      );
 
-      const readRes = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=${sid}&targetInvocationId=${invId}`);
+      const readRes = await fetch(
+        `${baseUrl}/api/callbacks/read-invocation?sessionId=${sid}&targetInvocationId=${invId}`
+      );
       const read = await readRes.json();
       assert.equal(readRes.status, 200);
       assert.equal(read.invocationId, invId);
@@ -3116,7 +3468,9 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.ok(kinds.includes("stderr"));
       assert.ok(kinds.includes("invocation-end"));
 
-      const searchRes = await fetch(`${baseUrl}/api/callbacks/session-search?sessionId=${sid}&query=hello%20recall`);
+      const searchRes = await fetch(
+        `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&query=hello%20recall`
+      );
       const search = await searchRes.json();
       assert.equal(searchRes.status, 200);
       assert.ok(search.hits.length >= 1);
@@ -3133,7 +3487,9 @@ test("chat records invocation events and recall routes expose them (no token = f
 
 test("read-invocation returns 404 for unknown invocation", async () => {
   await withServer({}, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/api/callbacks/read-invocation?sessionId=any&targetInvocationId=missing`);
+    const res = await fetch(
+      `${baseUrl}/api/callbacks/read-invocation?sessionId=any&targetInvocationId=missing`
+    );
     assert.equal(res.status, 404);
   });
 });
@@ -3154,9 +3510,12 @@ test("read-invocation requires targetInvocationId", async () => {
 
 test("recall routes reject invalid agent token when one is provided", async () => {
   await withServer({}, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/api/callbacks/list-invocations?sessionId=s&invocationId=i`, {
-      headers: { "x-callback-token": "bad" },
-    });
+    const res = await fetch(
+      `${baseUrl}/api/callbacks/list-invocations?sessionId=s&invocationId=i`,
+      {
+        headers: { "x-callback-token": "bad" },
+      }
+    );
     assert.equal(res.status, 401);
   });
 });
