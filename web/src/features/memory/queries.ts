@@ -16,6 +16,28 @@ interface MemoryResponse {
   counts?: Record<string, number>;
 }
 
+export interface MemoryInjectItem {
+  id?: string;
+  kind?: string;
+  topic?: string;
+  content?: string;
+}
+
+export interface MemoryInjectEvent {
+  sessionId?: string;
+  count?: number;
+  items?: MemoryInjectItem[];
+  availability?: {
+    state?: string;
+    reason?: string;
+  };
+}
+
+export const memoryQueryKeys = {
+  list: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
+  inject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
+};
+
 async function listMemories(sessionId: string, signal?: AbortSignal): Promise<MemoryResponse> {
   const query = new URLSearchParams({
     sessionId,
@@ -31,8 +53,17 @@ async function listMemories(sessionId: string, signal?: AbortSignal): Promise<Me
 
 export function useMemoriesQuery(sessionId: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: ["sessions", sessionId ?? "", "memories"],
+    queryKey: memoryQueryKeys.list(sessionId ?? ""),
     queryFn: ({ signal }) => listMemories(sessionId!, signal),
     enabled: enabled && Boolean(sessionId),
+  });
+}
+
+export function useMemoryInjectQuery(sessionId: string | null) {
+  return useQuery({
+    queryKey: memoryQueryKeys.inject(sessionId ?? ""),
+    queryFn: async (): Promise<MemoryInjectEvent | null> => null,
+    enabled: false,
+    initialData: null,
   });
 }

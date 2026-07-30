@@ -71,4 +71,34 @@ describe("runChatStream", () => {
       runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller)
     ).rejects.toThrow("完成事件");
   });
+
+  it("forwards memory lifecycle and run error events", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'event: memory-inject\ndata: {"sessionId":"s1","count":1}\n\n',
+            'event: memory\ndata: {"sessionId":"s1","action":"upsert"}\n\n',
+            'event: memory-metrics\ndata: {"threadId":"s1","totalWrites":1}\n\n',
+            'event: error\ndata: {"message":"provider unavailable"}\n\n',
+            "event: done\ndata: {}\n\n",
+          ])
+        )
+    );
+    const store = createSessionRunStore();
+    const controller = store.startController("s1");
+    const seen: string[] = [];
+
+    await runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller, {
+      onMemory: () => seen.push("memory"),
+      onMemoryInject: () => seen.push("inject"),
+      onMemoryMetrics: () => seen.push("metrics"),
+      onRunError: (message) => seen.push(`error:${message}`),
+    });
+
+    expect(seen).toEqual(["inject", "memory", "metrics", "error:provider unavailable"]);
+    expect(store.getSnapshot().runs.s1.status).toBe("error");
+  });
 });

@@ -7,7 +7,9 @@ interface MockState {
   worktreeAttached: boolean;
 }
 
-async function mockShiftApi(page: Page): Promise<MockState> {
+type ChatMode = "success" | "error" | "slow";
+
+async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise<MockState> {
   const state: MockState = {
     projectDir: "C:/projects/shift",
     chatCompleted: false,
@@ -92,6 +94,25 @@ async function mockShiftApi(page: Page): Promise<MockState> {
       return;
     }
 
+    if (url.pathname === "/api/memories" && method === "GET") {
+      await route.fulfill({
+        json: {
+          memories: state.chatCompleted
+            ? [
+                {
+                  id: "memory-1",
+                  kind: "decision",
+                  topic: "React 迁移",
+                  content: "工作区流程已经通过浏览器验证。",
+                  status: "active",
+                },
+              ]
+            : [],
+        },
+      });
+      return;
+    }
+
     if (url.pathname === "/api/sessions/session-1/usage" && method === "GET") {
       await route.fulfill({
         json: {
@@ -130,8 +151,34 @@ async function mockShiftApi(page: Page): Promise<MockState> {
 
     if (url.pathname === "/api/chat" && method === "POST") {
       state.chatBody = request.postDataJSON() as Record<string, unknown>;
-      state.chatCompleted = true;
       state.worktreeAttached = state.chatBody.useWorktree === true;
+
+      if (chatMode === "error") {
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: [
+            'event: session\ndata: {"sessionId":"session-1"}\n\n',
+            'event: error\ndata: {"message":"Provider unavailable"}\n\n',
+            "event: done\ndata: {}\n\n",
+          ].join(""),
+        });
+        return;
+      }
+
+      if (chatMode === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await route
+          .fulfill({
+            status: 200,
+            contentType: "text/event-stream",
+            body: "event: done\ndata: {}\n\n",
+          })
+          .catch(() => {});
+        return;
+      }
+
+      state.chatCompleted = true;
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
@@ -139,6 +186,9 @@ async function mockShiftApi(page: Page): Promise<MockState> {
           'event: session\ndata: {"sessionId":"session-1"}\n\n',
           'event: agent-start\ndata: {"agent":"gemini","invocationId":"invocation-1"}\n\n',
           'event: agent-event\ndata: {"type":"text.delta","agent":"gemini","text":"工作区改动已完成。"}\n\n',
+          'event: memory-inject\ndata: {"sessionId":"session-1","count":1,"items":[{"id":"memory-1","kind":"decision","topic":"React 迁移","content":"工作区流程已经通过浏览器验证。"}]}\n\n',
+          'event: memory\ndata: {"sessionId":"session-1","action":"upsert"}\n\n',
+          'event: memory-metrics\ndata: {"threadId":"session-1","totalWrites":1}\n\n',
           'event: agent-exit\ndata: {"agent":"gemini","code":0}\n\n',
           "event: done\ndata: {}\n\n",
         ].join(""),
@@ -180,10 +230,40 @@ test("edits the project directory and completes a worktree chat run", async ({ p
   await expect(page.getByText("shift/session-1")).toBeVisible();
   await expect(page.getByText("会话 321")).toBeVisible();
   await expect(page.getByText("上下文 10%")).toBeVisible();
+  await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
+  await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
+  await page.getByRole("tab", { name: "记忆" }).click();
+  await expect(page.getByText("本回合注入 1 条", { exact: true })).toBeVisible();
+  await expect(
+    page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
+  ).toBeVisible();
   expect(state.chatBody).toMatchObject({
     sessionId: "session-1",
     agent: "gemini",
     prompt: "@Gemini 实现工作区功能",
     useWorktree: true,
   });
+});
+
+test("surfaces a streamed provider failure as a toast and failed run", async ({ page }) => {
+  await mockShiftApi(page, "error");
+  await page.goto("./");
+
+  await page.getByRole("textbox", { name: "消息" }).fill("trigger failure");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.locator(".react-toast").getByText("Provider unavailable")).toBeVisible();
+  await expect(page.getByText("运行失败", { exact: true })).toBeVisible();
+});
+
+test("stops a connecting run and confirms the cancellation", async ({ page }) => {
+  await mockShiftApi(page, "slow");
+  await page.goto("./");
+
+  await page.getByRole("textbox", { name: "消息" }).fill("long task");
+  await page.getByRole("button", { name: "发送" }).click();
+  await page.getByRole("button", { name: "停止" }).click();
+
+  await expect(page.locator(".react-toast").getByText("已停止当前运行。")).toBeVisible();
+  await expect(page.getByText("已停止", { exact: true })).toBeVisible();
 });

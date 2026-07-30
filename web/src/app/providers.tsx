@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type PropsWithChildren, useState } from "react";
+import { ToastProvider } from "../features/notifications/ToastProvider";
 import { SessionRunProvider } from "../runtime/session-run-provider";
 
 export function AppProviders({ children }: PropsWithChildren) {
@@ -21,7 +22,9 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SessionRunProvider>{children}</SessionRunProvider>
+      <ToastProvider>
+        <SessionRunProvider>{children}</SessionRunProvider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

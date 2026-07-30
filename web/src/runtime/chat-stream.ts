@@ -16,6 +16,13 @@ export interface ChatStreamResult {
   doneReceived: boolean;
 }
 
+export interface ChatStreamEvents {
+  onMemory?(payload: Record<string, unknown>, sessionId: string): void;
+  onMemoryInject?(payload: Record<string, unknown>, sessionId: string): void;
+  onMemoryMetrics?(payload: Record<string, unknown>, sessionId: string): void;
+  onRunError?(message: string, sessionId: string): void;
+}
+
 interface CanonicalAgentEvent {
   type?: string;
   agent?: string;
@@ -42,7 +49,8 @@ function objectData(data: unknown): Record<string, unknown> {
 export async function runChatStream(
   request: ChatRequest,
   store: SessionRunStore,
-  controller: AbortController
+  controller: AbortController,
+  events: ChatStreamEvents = {}
 ): Promise<ChatStreamResult> {
   let boundSessionId = request.sessionId;
   let malformedFrames = 0;
@@ -144,11 +152,13 @@ export async function runChatStream(
             })),
           });
         } else if (agentEvent.type === "run.failed") {
+          const message = agentEvent.error || "Agent 运行失败。";
           store.dispatch({
             type: "run/failed",
             sessionId: boundSessionId,
-            error: agentEvent.error || "Agent 运行失败。",
+            error: message,
           });
+          events.onRunError?.(message, boundSessionId);
         }
         break;
       }
@@ -192,13 +202,28 @@ export async function runChatStream(
         });
         break;
 
-      case "error":
+      case "memory":
+        events.onMemory?.(payload, boundSessionId);
+        break;
+
+      case "memory-inject":
+        events.onMemoryInject?.(payload, boundSessionId);
+        break;
+
+      case "memory-metrics":
+        events.onMemoryMetrics?.(payload, boundSessionId);
+        break;
+
+      case "error": {
+        const message = typeof payload.message === "string" ? payload.message : "运行失败。";
         store.dispatch({
           type: "run/failed",
           sessionId: boundSessionId,
-          error: typeof payload.message === "string" ? payload.message : "运行失败。",
+          error: message,
         });
+        events.onRunError?.(message, boundSessionId);
         break;
+      }
 
       case "done":
         doneReceived = true;

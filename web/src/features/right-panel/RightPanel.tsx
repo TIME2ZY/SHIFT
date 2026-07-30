@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AgentSummary } from "../agents/types";
-import { useMemoriesQuery } from "../memory/queries";
+import { useMemoriesQuery, useMemoryInjectQuery } from "../memory/queries";
 import { RecallPanel } from "../recall/RecallPanel";
 import { WorkspacePanel } from "../workspace/WorkspacePanel";
 
@@ -15,6 +15,7 @@ interface RightPanelProps {
 export function RightPanel({ sessionId, agents, worktreeAttached = false }: RightPanelProps) {
   const [tab, setTab] = useState<PanelTab>("agents");
   const memories = useMemoriesQuery(sessionId, tab === "memory");
+  const memoryInject = useMemoryInjectQuery(sessionId);
 
   return (
     <aside className="react-right-panel" aria-label="对话信息">
@@ -74,6 +75,23 @@ export function RightPanel({ sessionId, agents, worktreeAttached = false }: Righ
               <p className="react-panel-empty">正在读取记忆…</p>
             ) : null}
             {memories.error ? <p className="react-panel-error">{memories.error.message}</p> : null}
+            {memoryInject.data ? (
+              <aside className="react-memory-inject" aria-label="本回合记忆注入">
+                <strong>
+                  本回合注入{" "}
+                  {Number(memoryInject.data.count || memoryInject.data.items?.length || 0)} 条
+                </strong>
+                {memoryInject.data.items?.length ? (
+                  <ul>
+                    {memoryInject.data.items.slice(0, 4).map((item, index) => (
+                      <li key={item.id || `${item.kind || "memory"}-${index}`}>
+                        {item.topic || item.content || item.kind || "记忆"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </aside>
+            ) : null}
             {memories.data?.memories.length === 0 ? (
               <p className="react-panel-empty">当前对话还没有有效记忆。</p>
             ) : null}

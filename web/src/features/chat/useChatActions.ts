@@ -1,5 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { memoryQueryKeys, type MemoryInjectEvent } from "../memory/queries";
+import { useToast } from "../notifications/ToastProvider";
 import { sessionQueryKeys } from "../sessions/queries";
 import { runChatStream } from "../../runtime/chat-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
@@ -7,6 +9,7 @@ import { useSessionRunStore } from "../../runtime/session-run-provider";
 export function useChatActions() {
   const queryClient = useQueryClient();
   const store = useSessionRunStore();
+  const toast = useToast();
 
   const send = useCallback(
     async (sessionId: string, agentId: string, prompt: string, useWorktree = false) => {
@@ -26,7 +29,36 @@ export function useChatActions() {
         const result = await runChatStream(
           { sessionId, agentId, prompt: content, useWorktree },
           store,
-          controller
+          controller,
+          {
+            onMemory(payload, eventSessionId) {
+              void queryClient.invalidateQueries({
+                queryKey: memoryQueryKeys.list(eventSessionId),
+              });
+              toast.show(
+                payload.action === "invalidate" ? "Agent 已否定一条记忆" : "Agent 已写入记忆",
+                { variant: "ok" }
+              );
+            },
+            onMemoryInject(payload, eventSessionId) {
+              const memoryInject = payload as MemoryInjectEvent;
+              queryClient.setQueryData(memoryQueryKeys.inject(eventSessionId), memoryInject);
+              const count = Number(memoryInject.count || memoryInject.items?.length || 0);
+              if (count > 0) {
+                toast.show(`本回合注入 ${count} 条记忆`, { variant: "ok" });
+              }
+            },
+            onMemoryMetrics(payload, eventSessionId) {
+              if (Number(payload.totalWrites || 0) > 0) {
+                void queryClient.invalidateQueries({
+                  queryKey: memoryQueryKeys.list(eventSessionId),
+                });
+              }
+            },
+            onRunError(message) {
+              toast.show(message, { variant: "error", ttl: 7000 });
+            },
+          }
         );
         resultSessionId = result.sessionId;
         if (result.malformedFrames > 0) {
@@ -35,14 +67,19 @@ export function useChatActions() {
             sessionId: resultSessionId,
             message: `消息流中有 ${result.malformedFrames} 个事件无法解析。`,
           });
+          toast.show(`消息流中有 ${result.malformedFrames} 个事件无法解析。`, {
+            variant: "error",
+          });
         }
       } catch (error) {
         if (!controller.signal.aborted && store.isCurrentController(resultSessionId, controller)) {
+          const message = error instanceof Error ? error.message : "连接中断。";
           store.dispatch({
             type: "run/failed",
             sessionId: resultSessionId,
-            error: error instanceof Error ? error.message : "连接中断。",
+            error: message,
           });
+          toast.show(message, { variant: "error", ttl: 7000 });
         }
       } finally {
         const owned = store.releaseController(resultSessionId, controller);
@@ -60,10 +97,17 @@ export function useChatActions() {
         }
       }
     },
-    [queryClient, store]
+    [queryClient, store, toast]
   );
 
-  const stop = useCallback((sessionId: string) => store.abort(sessionId), [store]);
+  const stop = useCallback(
+    (sessionId: string) => {
+      const stopped = store.abort(sessionId);
+      if (stopped) toast.show("已停止当前运行。");
+      return stopped;
+    },
+    [store, toast]
+  );
 
   return { send, stop };
 }
