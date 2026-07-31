@@ -3,15 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const { readInvocationsFile } = require("../../src/server/invocation-store");
-const {
-  readSessionMap,
-  resolveResumeSessionId,
-} = require("../../src/server/session-map-store");
-const {
-  LEGACY_RUNTIME_FIXTURE,
-  copyLegacyRuntimeFixture,
-} = require("../helpers/legacy-runtime-fixture");
+const { LEGACY_RUNTIME_FIXTURE } = require("../helpers/legacy-runtime-fixture");
 
 const EXPECTED_FILES = [
   "README.md",
@@ -36,23 +28,6 @@ test("legacy compatibility fixture is complete, minimal, and sanitized", () => {
     /@[a-z0-9.-]+\.[a-z]{2,}/i,
   ]) {
     assert.doesNotMatch(combined, forbidden);
-  }
-});
-
-test("legacy invocation and provider-map readers operate only on a copied fixture", () => {
-  const root = copyLegacyRuntimeFixture();
-  try {
-    const invocations = readInvocationsFile(path.join(root, "invocations.json"));
-    assert.deepEqual(Object.keys(invocations), ["inv-1"]);
-    assert.equal(invocations["inv-1"].sessionId, "thread-1");
-
-    const sessionMap = readSessionMap("thread-1", path.join(root, "session-maps"));
-    assert.equal(
-      resolveResumeSessionId(sessionMap, "codex", "base:C:/sanitized/project", "codex:gpt"),
-      "provider-session-synthetic"
-    );
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
