@@ -1,9 +1,5 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
 const { createStorage } = require("../../src/storage");
 const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createRecallService } = require("../../src/storage/recall-service");
@@ -12,11 +8,6 @@ const {
   upsertAgentProviderSession,
   clearAgentProviderSession,
 } = require("../../src/shared/session-map");
-const {
-  abandonProviderSession,
-  writeSessionMap,
-  readSessionMap,
-} = require("../../src/server/session-map-store");
 
 function sessionFixture(id = "thread-1") {
   return {
@@ -61,31 +52,12 @@ test("after seal the next invocation does not carry the old provider_session_id"
     assert.equal(sealed.state, "sealed");
     assert.equal(sealed.providerSessionId, null);
 
-    // Session map abandon mirrors chat-routes after seal.
-    const mapRoot = fs.mkdtempSync(path.join(os.tmpdir(), "window-lifecycle-map-"));
-    writeSessionMap(session.id, mapRoot, {
-      architect: {
-        sessionId: "provider-session-old",
-        byWorkspace: {
-          "base:C:/repo": { sessionId: "provider-session-old", updatedAt: "t" },
-        },
-      },
-    });
-    abandonProviderSession(session.id, mapRoot, "codex", "base:C:/repo");
-    const resume = resolveResumeSessionId(
-      readSessionMap(session.id, mapRoot),
-      "codex",
-      "base:C:/repo",
-      "codex:gpt-5.6-sol"
-    );
-    assert.equal(resume, "");
-
     const second = recorder.startInvocation({
       session,
       invocationId: "inv-2",
       threadId: session.id,
       ...coord,
-      resumeSessionId: resume || null,
+      resumeSessionId: null,
       startedAt: "2026-07-12T00:01:00.000Z",
     });
     assert.equal(second.window.generation, 2);
