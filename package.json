@@ -8,7 +8,15 @@
     "node": ">=20"
   },
   "scripts": {
+    "prestart": "npm run build:web",
     "start": "node src/server/index.js",
+    "dev:web": "node scripts/dev-web.js",
+    "dev:web:vite": "vite --config web/vite.config.ts",
+    "build:web": "vite build --config web/vite.config.ts",
+    "typecheck:web": "tsc -p web/tsconfig.json --noEmit",
+    "test:web": "vitest run --config web/vite.config.ts",
+    "test:web:watch": "vitest --config web/vite.config.ts",
+    "test:web:e2e": "playwright test --config web/playwright.config.ts",
     "test": "node scripts/run-tests.js",
     "check": "node scripts/check-syntax.js",
     "lint": "eslint .",
@@ -27,23 +35,38 @@
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",
     "execute:storage:cleanup": "node scripts/execute-legacy-cleanup.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
-    "vendor:md": "node scripts/vendor-md.js",
     "test:live:solo-grok": "node scripts/live/run-solo-grok.js",
     "test:live:multi-collab": "node scripts/live/run-multi-collab.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.62.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
-    "prettier": "^3.6.2"
+    "jsdom": "^29.1.1",
+    "prettier": "^3.6.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
     "better-sqlite3": "^12.11.1",
     "dompurify": "^3.4.12",
     "isomorphic-dompurify": "^3.19.0",
     "markdown-it": "^14.3.0",
     "markdown-it-multimd-table": "^4.2.3",
     "markdown-it-task-lists": "^2.1.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "sqlite-vec": "^0.1.9"
   }
 }

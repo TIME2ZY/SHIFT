@@ -100,6 +100,8 @@ function createServer(options = {}) {
   // Surface missing identity packs early so new agents aren't silent no-ops.
   agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const uiToken = uiSecurity.createUiToken(options.uiToken);
+  const webDistDir = options.webDistDir || path.join(ROOT, "dist", "web");
+  const webIndexPath = options.webIndexPath || path.join(webDistDir, "index.html");
   const spawnRunner = options.spawnRunner || spawn;
   const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager =
@@ -292,13 +294,18 @@ function createServer(options = {}) {
     const url = new URL(req.url, "http://127.0.0.1");
 
     if (req.method === "GET" && url.pathname === "/") {
-      serveIndex(res, { indexPath: path.join(ROOT, "index.html"), uiToken, sendJson });
+      serveIndex(res, { indexPath: webIndexPath, uiToken, sendJson });
       return;
     }
 
-    if (req.method === "GET" && url.pathname.startsWith("/public/")) {
-      const relative = url.pathname.slice("/public".length);
-      serveStatic(res, relative, path.join(ROOT, "public"), sendJson);
+    if (req.method === "GET" && ["/react", "/react/"].includes(url.pathname)) {
+      res.writeHead(308, { location: "/" });
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
+      serveStatic(res, url.pathname, webDistDir, sendJson);
       return;
     }
 

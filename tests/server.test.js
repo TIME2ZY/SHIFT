@@ -14,16 +14,6 @@ const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
 
-/** Resolve @import-based public/styles.css aggregator for contract tests. */
-function readFrontendCss() {
-  const root = path.join(__dirname, "../public");
-  const main = fs.readFileSync(path.join(root, "styles.css"), "utf8");
-  if (!main.includes("@import")) return main;
-  return main.replace(/@import url\("\.\/styles\/([^"]+)"\);/g, (_, name) =>
-    fs.readFileSync(path.join(root, "styles", name), "utf8")
-  );
-}
-
 function fetch(input, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Shift-UI-Token", TEST_UI_TOKEN);
@@ -146,17 +136,42 @@ test("server startup rejects retired online storage modes", () => {
   assert.throws(() => createServer({ storageMode: "dual" }), /only accepts sqlite/);
 });
 
-test("index injects the per-process UI token and loads the authenticated API client", async () => {
-  await withServer({}, async (baseUrl) => {
-    const response = await nativeFetch(`${baseUrl}/`);
-    const html = await response.text();
-    assert.equal(response.status, 200);
-    assert.match(html, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
-    assert.doesNotMatch(html, /__SHIFT_UI_TOKEN__/);
-    assert.match(html, /src="\/public\/boot\.js"/);
-    const boot = require("../public/boot.js");
-    assert.ok(boot.MODULES.includes("/public/api-client.js"));
-  });
+test("serves React at the root without a legacy UI fallback", async () => {
+  const webDistDir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-web-test-"));
+  const webIndexPath = path.join(webDistDir, "index.html");
+  fs.mkdirSync(path.join(webDistDir, "assets"));
+  fs.writeFileSync(
+    webIndexPath,
+    [
+      '<meta name="shift-ui-token" content="__SHIFT_UI_TOKEN__" />',
+      '<script type="module" src="/assets/app.js"></script>',
+    ].join("\n")
+  );
+  fs.writeFileSync(path.join(webDistDir, "assets", "app.js"), "export {};\n");
+
+  try {
+    await withServer({ webDistDir, webIndexPath }, async (baseUrl) => {
+      const response = await nativeFetch(`${baseUrl}/`);
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(html, new RegExp(`name="shift-ui-token" content="${TEST_UI_TOKEN}"`));
+      assert.doesNotMatch(html, /__SHIFT_UI_TOKEN__/);
+      assert.match(html, /src="\/assets\/app\.js"/);
+
+      const assetResponse = await nativeFetch(`${baseUrl}/assets/app.js`);
+      assert.equal(assetResponse.status, 200);
+      assert.match(assetResponse.headers.get("content-type"), /javascript/);
+
+      const reactRedirect = await nativeFetch(`${baseUrl}/react/`, { redirect: "manual" });
+      assert.equal(reactRedirect.status, 308);
+      assert.equal(reactRedirect.headers.get("location"), "/");
+
+      const legacyResponse = await nativeFetch(`${baseUrl}/legacy/`);
+      assert.equal(legacyResponse.status, 404);
+    });
+  } finally {
+    fs.rmSync(webDistDir, { recursive: true, force: true });
+  }
 });
 
 test("UI API rejects requests without the per-process token", async () => {
@@ -738,26 +753,6 @@ test("messages endpoint returns empty history when no sessions exist", async () 
     assert.equal(response.status, 200);
     assert.deepEqual(body.messages, []);
   });
-});
-
-test("frontend restores message spacer before showing empty state after clearing messages", () => {
-  const source = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  const lines = source.split(/\r?\n/);
-  const failures = [];
-
-  lines.forEach((line, index) => {
-    if (!line.includes("messagesEl.replaceChildren();")) return;
-
-    const nextLines = lines.slice(index + 1, index + 12);
-    const showIndex = nextLines.findIndex((candidate) => candidate.includes("showEmpty();"));
-    const ensureIndex = nextLines.findIndex((candidate) => candidate.includes("ensureSpacer();"));
-
-    if (showIndex !== -1 && (ensureIndex === -1 || showIndex < ensureIndex)) {
-      failures.push(index + 1);
-    }
-  });
-
-  assert.deepEqual(failures, []);
 });
 
 // ── Session CRUD tests ─────────────────────────────────────────
@@ -2647,415 +2642,6 @@ test("buildCallbackInstructions mentions recall and memory-write commands", () =
   assert.match(tpl, /memory_write/);
   assert.doesNotMatch(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
-});
-
-test("parseUnifiedDiff splits multi-file patches into file entries", () => {
-  const { parseUnifiedDiff } = require("../public/workspace-diff.js");
-  const diff = [
-    "diff --git a/public/app.js b/public/app.js",
-    "--- a/public/app.js",
-    "+++ b/public/app.js",
-    "@@ -1,2 +1,3 @@",
-    " line 1",
-    "+line 2",
-    "diff --git a/public/new-file.js b/public/new-file.js",
-    "new file mode 100644",
-    "--- /dev/null",
-    "+++ b/public/new-file.js",
-    "@@ -0,0 +1,2 @@",
-    "+export const ok = true;",
-    "+console.log(ok);",
-  ].join("\n");
-
-  const files = parseUnifiedDiff(diff);
-  assert.deepEqual(
-    files.map((file) => ({ path: file.path, status: file.status })),
-    [
-      { path: "public/app.js", status: "modified" },
-      { path: "public/new-file.js", status: "untracked" },
-    ]
-  );
-  assert.match(files[1].patch, /new file mode 100644/);
-});
-
-test("summarizeUnifiedDiff counts total and untracked files", () => {
-  const { summarizeUnifiedDiff } = require("../public/workspace-diff.js");
-  const files = [
-    { path: "public/app.js", status: "modified", patch: "@@ -1 +1,2 @@\n line 1\n+line 2" },
-    {
-      path: "public/new-file.js",
-      status: "untracked",
-      patch: "new file mode 100644\n+console.log('ok');",
-    },
-  ];
-
-  assert.deepEqual(summarizeUnifiedDiff(files), {
-    totalFiles: 2,
-    untrackedFiles: 1,
-    hasDiff: true,
-  });
-});
-
-test("frontend index.html exposes explicit worktree mode toggle", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  assert.match(html, /id="use-worktree"/);
-  assert.match(html, /title="为本次对话创建或复用隔离 worktree"/);
-});
-
-test("frontend exposes all right-panel tabs in a three-column layout", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  const workspaceCss = fs.readFileSync(
-    path.join(__dirname, "../public", "styles", "workspace.css"),
-    "utf8"
-  );
-  const boot = require("../public/boot.js");
-  assert.match(html, /id="panel-tab-agents"/);
-  assert.match(html, /id="panel-tab-workspace"/);
-  assert.match(html, /id="panel-tab-context"/);
-  assert.doesNotMatch(html, /id="panel-tab-recall"/);
-  assert.doesNotMatch(html, /id="panel-tab-memory"/);
-  assert.doesNotMatch(html, /id="memory-create-form"/);
-  assert.match(html, /id="context-panel-inline"/);
-  assert.match(html, /id="workspace-panel"/);
-  assert.match(workspaceCss, /grid-template-columns:\s*repeat\(3,/);
-  assert.match(html, /src="\/public\/boot\.js"/);
-  for (const src of [
-    "/public/session-api.js",
-    "/public/session-controller.js",
-    "/public/worktree-api.js",
-    "/public/recall-api.js",
-    "/public/chat-client.js",
-    "/public/workspace-diff.js",
-    "/public/display-helpers.js",
-    "/public/theme.js",
-    "/public/mention-composer.js",
-    "/public/session-list-view.js",
-    "/public/workspace-panel.js",
-    "/public/recall-panel.js",
-    "/public/message-view.js",
-    "/public/project-header.js",
-    "/public/agent-panel-view.js",
-  ]) {
-    assert.ok(boot.MODULES.includes(src), `boot MODULES missing ${src}`);
-  }
-});
-
-test("frontend keeps session-level recall entry only inside the right-side tabs", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(html, /id="panel-tab-context"/);
-  assert.match(html, /id="context-panel-inline"/);
-  assert.match(html, /context-section-title/);
-  assert.doesNotMatch(html, /id="context-segment-conclusions"/);
-  assert.doesNotMatch(html, /id="recall-toggle"/);
-  assert.doesNotMatch(js, /const recallToggleEl\s*=\s*\$\("#recall-toggle"\)/);
-  assert.doesNotMatch(js, /recallToggleEl\.addEventListener/);
-});
-
-test("frontend uses unified Chinese console copy in the main shell", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  assert.match(html, /SHIFT AGENTS · 交班台/);
-  assert.match(html, /本会话规则/);
-  assert.match(html, />\s*Agents\s*</);
-  assert.doesNotMatch(html, /agent-panel-title/);
-  // New chat lives in the sidebar only; composer keeps a single Send action.
-  assert.match(html, /btn-new-chat/);
-  assert.doesNotMatch(html, /id="btn-clear"/);
-  assert.match(html, />\s*发送\s*</);
-  assert.doesNotMatch(html, />Agent Chat</);
-  assert.doesNotMatch(html, />Rules</);
-  assert.doesNotMatch(html, />Models</);
-});
-
-test("frontend app.js sends useWorktree from the explicit toggle", () => {
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
-  assert.match(appJs, /const useWorktreeInput\s*=\s*\$\("#use-worktree"\)/);
-  assert.match(appJs, /window\.ChatClient\.createChatClient/);
-  assert.match(chatJs, /useWorktree:\s*useWorktreeInput\.checked/);
-});
-
-test("frontend app.js defines invocation-level live run state and renderer hooks", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const boot = require("../public/boot.js");
-  assert.match(js, /rt\.liveRuns\.set\(invocationId/);
-  assert.match(js, /function applyAgentEvent\(event,\s*sessionId\)/);
-  assert.match(js, /function ensureLiveRun\(event,\s*sessionId\)/);
-  assert.match(js, /progressItems/);
-  assert.match(js, /fileChanges/);
-  assert.match(appJs, /createRuntimeStore\(\{\s*bus\s*\}\)|createRuntimeStore\(\)/);
-  assert.match(appJs, /createMessageView/);
-  assert.ok(boot.MODULES.includes("/public/session-runtime.js"));
-});
-
-test("frontend treats sealed SSE event as an expected terminal state", () => {
-  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
-  assert.match(chatJs, /case "sealed":/);
-  assert.match(chatJs, /context overflow/);
-  assert.match(messageView, /rt\.doneReceived = true/);
-  assert.match(messageView, /function finishStream\(statusText,\s*sessionId\)/);
-});
-
-test("frontend keeps per-session runtime status and does not abort on switch", () => {
-  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const sessionList = fs.readFileSync(
-    path.join(__dirname, "../public", "session-list-view.js"),
-    "utf8"
-  );
-  const controllerJs = fs.readFileSync(
-    path.join(__dirname, "../public", "session-controller.js"),
-    "utf8"
-  );
-  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
-  const runtimeJs = fs.readFileSync(
-    path.join(__dirname, "../public", "session-runtime.js"),
-    "utf8"
-  );
-  const css = readFrontendCss();
-  assert.match(controllerJs, /Do not abort the previous session's background run/);
-  assert.doesNotMatch(controllerJs, /if \(state\.controller\) \{\s*state\.controller\.abort\(\)/);
-  assert.match(messageView, /function remountLiveMessages\(sessionId\)/);
-  assert.match(messageView, /function finalizeLiveAgent\(agent, sessionId/);
-  assert.match(chatJs, /finalizeLiveAgent\(data\.agent, sessionId/);
-  assert.match(chatJs, /systemNotices\.push/);
-  assert.match(runtimeJs, /systemNotices:\s*\[\]/);
-  assert.match(controllerJs, /systemNotices/);
-  assert.match(sessionList, /session-run-status/);
-  assert.match(css, /\.session-run-status\.status-running/);
-});
-
-test("frontend keeps right-side agent and workspace surfaces in a shared tab system", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  assert.match(js, /panelTabAgentsEl\.addEventListener\("click"/);
-  assert.match(js, /panelTabWorkspaceEl\.addEventListener\("click"/);
-  assert.match(js, /function setRightPanelTab\(nextTab\)/);
-  assert.match(js, /activateRightTab\("workspace"\)|loadWorkspaceState\(\)/);
-});
-
-test("frontend chunks process-trace hydrate for long histories", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  assert.match(js, /MESSAGE_VIRTUAL_THRESHOLD/);
-  assert.match(js, /scheduleHydrateProcessTrace/);
-  assert.match(js, /_hydrateQueue/);
-});
-
-test("frontend live stream paints plain text segments; markdown only on finalize", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  assert.match(js, /liveText\.className = "stream-live-text"/);
-  assert.match(js, /function paintStreamSegments/);
-  assert.match(js, /stream-live-text/);
-  assert.match(js, /function appendLiveSegment/);
-  // Live path keeps plain text; finalized path may markdown-paint each text segment.
-  assert.match(js, /paintStreamSegments\(item,\s*\{\s*live:\s*true/);
-  assert.match(js, /paintStreamSegments\(item,\s*\{\s*live:\s*false,\s*markdown:\s*true/);
-  assert.doesNotMatch(js, /function splitIntoSegments/);
-  assert.doesNotMatch(js, /stream-suffix/);
-});
-
-test("frontend surfaces thinking in a collapsed details block and keeps writing badges", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const css = readFrontendCss();
-  assert.match(js, /function showThinking\(agent,\s*sessionId\)/);
-  assert.match(js, /item\.setBadge\("thinking"\)/);
-  assert.match(js, /bubble\.classList\.add\("msg-bubble-live-pending"\)/);
-  assert.match(js, /function appendLive\(agent, text,\s*sessionId\)/);
-  assert.match(js, /item\.bubble\.classList\.remove\("msg-bubble-live-pending"\)/);
-  assert.match(js, /setBadge\(kind === "text" \? "writing" : "thinking"\)/);
-  assert.match(js, /msg-thinking/);
-  assert.match(js, /thinking\.delta/);
-  assert.match(js, /msg-progress/);
-  assert.match(js, /progress\.update/);
-  assert.match(js, /msg-process/);
-  assert.match(js, /wrapProcessDetails/);
-  // Collapsed by default; interleaved segments restore think↔text timeline.
-  assert.match(js, /open:\s*false/);
-  assert.match(js, /function buildContentSegmentsFromEvents/);
-  assert.match(js, /msg-stream-segments/);
-  assert.match(css, /\.msg-thinking/);
-  assert.match(css, /\.msg-progress/);
-  assert.match(css, /\.msg-process/);
-  assert.match(css, /\.msg-stream-segments/);
-});
-
-test("frontend app.js surfaces Codex progress before first text delta", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  assert.match(js, /function setLivePending\(agent,\s*text,\s*sessionId\)/);
-  assert.match(js, /function pendingTextForEvent\(event\)/);
-  assert.match(js, /event\.type === "file\.changed"/);
-  assert.match(js, /event\.type === "stderr"/);
-  assert.match(js, /event\.type === "tool\.started"/);
-  assert.match(js, /live-process-status/);
-  assert.match(js, /function buildProcessTraceFromRun/);
-  assert.match(js, /function buildProcessPanelFromTranscriptEvents/);
-  assert.match(js, /function hydrateProcessTrace/);
-  assert.match(js, /function upsertLiveTool/);
-  assert.match(js, /setLivePending\(event\.agent,\s*pendingTextForEvent\(event\),\s*sid\)/);
-  // Nested CLI subagents are not a live protocol surface.
-  assert.doesNotMatch(js, /function upsertLiveSubagent/);
-});
-
-test("frontend routes stderr SSE into a separate system stderr message", () => {
-  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const chatJs = fs.readFileSync(path.join(__dirname, "../public", "chat-client.js"), "utf8");
-  assert.match(chatJs, /case "stderr":/);
-  assert.match(messageView, /function addDebug\(agent, text\)/);
-  assert.match(
-    messageView,
-    /createMessage\(\{ role: "system", agent, content: text, variant: "stderr" \}\)/
-  );
-  assert.match(chatJs, /addDebug\(data\.agent, data\.text\)/);
-  assert.doesNotMatch(
-    messageView,
-    /createMessage\(\{ role: "assistant", agent: data\.agent, content: data\.text, variant: "stderr" \}\)/
-  );
-});
-
-test("frontend recall expand shows events on open and shares process panel path", () => {
-  const recallJs = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const helpersJs = fs.readFileSync(
-    path.join(__dirname, "../public", "message-process-helpers.js"),
-    "utf8"
-  );
-  const messageViewJs = fs.readFileSync(
-    path.join(__dirname, "../public", "message-view.js"),
-    "utf8"
-  );
-  // Pure buckets contract lives in helpers; DOM renderer is shared.
-  assert.match(helpersJs, /function aggregateProcessBuckets/);
-  assert.match(helpersJs, /function textDeltaSummary/);
-  assert.match(helpersJs, /function processAnchorFromEvent/);
-  assert.match(helpersJs, /function stampEventNos/);
-  assert.match(messageViewJs, /function createProcessPanelRenderer/);
-  assert.match(appJs, /createProcessPanelRenderer/);
-  assert.match(appJs, /buildProcessPanelFromEvents/);
-  // One open: event stream always visible; process panel only when tools exist.
-  assert.match(recallJs, /function renderInvocationTrace/);
-  assert.match(recallJs, /buildProcessPanelFromEvents/);
-  assert.match(recallJs, /emptyFallback:\s*false/);
-  assert.match(recallJs, /recall-events-panel/);
-  assert.match(recallJs, /eventsTitle|rawEvents/);
-  assert.doesNotMatch(recallJs, /createElement\("details"\)[\s\S]{0,120}recall-raw-events/);
-  // Conclusions attach to producing invocation (not a separate context list).
-  assert.match(recallJs, /function setMemories|setMemories\(/);
-  assert.match(recallJs, /recall-item-conclusions/);
-  assert.match(appJs, /loadContextMemories|setMemories/);
-  assert.match(appJs, /setContextSnapshot/);
-  // Wave R2: search hits grouped by memory/message/evidence layers.
-  assert.match(recallJs, /groupHitsByLayer/);
-  assert.match(recallJs, /recall-hit-section/);
-  assert.match(recallJs, /recall-hit-layer/);
-  assert.match(recallJs, /layer-\$\{layer\}/);
-  const recallCss = fs.readFileSync(path.join(__dirname, "../public/styles", "recall.css"), "utf8");
-  assert.match(recallCss, /\.recall-layer-chip/);
-  assert.match(recallCss, /\.recall-hit-layer\.layer-memory/);
-  assert.match(recallCss, /\.recall-events-panel/);
-  // Event body helper used by the always-visible stream.
-  assert.match(recallJs, /function eventBodyText/);
-  // Recall copy is locale-driven (N2).
-  assert.match(recallJs, /resolveRecallLocale|locale\.recall|R\.toggle/);
-  // Phase B: eventNo focus + message anchor navigation.
-  assert.match(recallJs, /function focusEventInTrace/);
-  assert.match(recallJs, /focusEventNo/);
-  assert.match(recallJs, /focusInlineProcess|focusProcessPanel/);
-  assert.match(messageViewJs, /function focusProcessPanel/);
-  // N1: live final panel uses aggregateProcessBuckets.
-  assert.match(messageViewJs, /function buildProcessTraceFromRun/);
-  assert.match(messageViewJs, /aggregateProcessBuckets/);
-  // Nested <details> must not be toggled by parent row click (冒泡折叠 bug).
-  assert.match(recallJs, /bindBodyInteractionGuard|stopPropagation/);
-  assert.match(recallJs, /head\.addEventListener\("click"/);
-  assert.doesNotMatch(recallJs, /row\.addEventListener\("click",\s*\(\)\s*=>\s*toggleRecallItem/);
-});
-
-test("frontend caps recall page size and surfaces truncation state", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "recall-panel.js"), "utf8");
-  const localeJs = fs.readFileSync(path.join(__dirname, "../public", "locale-zh-CN.js"), "utf8");
-  assert.match(js, /readInvocation\(sid,\s*invocationId,\s*\{\s*from:\s*0,\s*limit:\s*200\s*\}\)/);
-  // Truncation copy lives in locale.recall.pageTruncated; panel calls it.
-  assert.match(js, /pageTruncated/);
-  assert.match(localeJs, /pageTruncated:\s*\(shown,\s*total\)/);
-});
-
-test("app.js stays an orchestrator under line budget after P0 split", () => {
-  const js = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const lines = js.split(/\r?\n/).length;
-  // Budget includes memory inject/metrics SSE wiring; still no heavy feature bodies inlined.
-  assert.ok(lines <= 1100, `app.js has ${lines} lines; expected <= 1100 after memory panel wiring`);
-  assert.match(js, /createMessageView/);
-  assert.match(js, /createWorkspacePanel/);
-  assert.match(js, /createRecallPanel/);
-  assert.match(js, /createMentionComposer/);
-  assert.match(js, /createSessionListView/);
-  assert.match(js, /createThemeController/);
-  assert.match(js, /UiConfirm\.createConfirm|createConfirm\(/);
-});
-
-test("frontend styles are split into domain sheets via @import aggregator", () => {
-  const main = fs.readFileSync(path.join(__dirname, "../public/styles.css"), "utf8");
-  assert.match(main, /@import url\("\.\/styles\/tokens\.css"\)/);
-  assert.match(main, /@import url\("\.\/styles\/messages\.css"\)/);
-  assert.match(main, /@import url\("\.\/styles\/workspace\.css"\)/);
-  assert.match(main, /@import url\("\.\/styles\/a11y\.css"\)/);
-  const css = readFrontendCss();
-  assert.match(css, /--density/);
-  assert.match(css, /\.ui-confirm-dialog/);
-  // is-expanded max-height must stay inside the mobile media query; applying it
-  // globally caps desktop workspace/recall tabs at ~360px (regression).
-  assert.match(
-    css,
-    /@media\s*\(\s*max-width:\s*700px\s*\)\s*\{[^}]*\.side-panel\.is-expanded\s*\{[^}]*max-height/
-  );
-});
-
-test("frontend vendors Prism offline and drops jsDelivr CDN", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  assert.doesNotMatch(html, /cdn\.jsdelivr\.net\/npm\/prismjs/);
-  assert.match(html, /\/public\/vendor\/prism\//);
-  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism.min.js")));
-  assert.ok(fs.existsSync(path.join(__dirname, "../public/vendor/prism/prism-tomorrow.min.css")));
-});
-
-test("frontend a11y: tab controls, mention listbox, send busy wiring", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const mentionJs = fs.readFileSync(
-    path.join(__dirname, "../public", "mention-composer.js"),
-    "utf8"
-  );
-  assert.match(html, /aria-controls="agent-panel"/);
-  assert.match(html, /role="listbox"/);
-  assert.match(html, /aria-busy="false"/);
-  assert.match(appJs, /aria-busy/);
-  assert.match(appJs, /aria-label.*停止生成|停止生成/);
-  assert.match(appJs, /ArrowLeft|ArrowRight/);
-  assert.match(mentionJs, /role", "option"|role='option'|setAttribute\("role", "option"\)/);
-  assert.match(mentionJs, /aria-activedescendant/);
-  assert.match(mentionJs, /is-active/);
-});
-
-test("frontend uses ui-confirm for destructive actions", () => {
-  const boot = require("../public/boot.js");
-  const appJs = fs.readFileSync(path.join(__dirname, "../public", "app.js"), "utf8");
-  const workspaceJs = fs.readFileSync(
-    path.join(__dirname, "../public", "workspace-panel.js"),
-    "utf8"
-  );
-  assert.ok(boot.MODULES.includes("/public/ui-confirm.js"));
-  assert.match(appJs, /confirmImpl/);
-  assert.match(appJs, /删除对话|确认删除/);
-  assert.match(workspaceJs, /confirmFn|confirmImpl/);
-  assert.match(workspaceJs, /await Promise\.resolve\(confirmFn/);
-});
-
-test("frontend distinguishes copy message vs copy code labels", () => {
-  const messageView = fs.readFileSync(path.join(__dirname, "../public", "message-view.js"), "utf8");
-  const md = fs.readFileSync(path.join(__dirname, "../public", "markdown-lite.js"), "utf8");
-  assert.match(messageView, /复制消息/);
-  assert.match(messageView, /复制代码|code\.textContent/);
-  assert.match(md, /复制代码/);
 });
 
 // ── Phase 4: Session Bootstrap ──────────────────────────────────

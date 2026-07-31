@@ -1,0 +1,177 @@
+/* ═══════════════════════════════════════════════════════════
+   REACT FRONTEND DESIGN TOKENS
+   Regional materials: rail (left) · canvas (center) · instrument (right)
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── Base surfaces (modern translucent / rich surfaces) ── */
+  --surface: light-dark(#f1f3f9, #13151f);
+  --surface-raised: light-dark(#e5e8f2, #1b1e2b);
+  --surface-inset: light-dark(#e2e5f0, #0d0e16);
+
+  /* ── Regional surfaces (panel differentiation with subtle depth) ── */
+  --surface-rail: light-dark(#e9ecf5, #0f111a);
+  --surface-canvas: light-dark(#f6f8fd, #161824);
+  --surface-instrument: light-dark(#eff2fa, #181b28);
+  --surface-instrument-raised: light-dark(#ffffff, #212536);
+
+  /* Text */
+  --text-primary: light-dark(#0f172a, #f1f5f9);
+  --text-secondary: light-dark(#475569, #94a3b8);
+  --text-tertiary: light-dark(#64748b, #64748b);
+
+  /* Borders */
+  --border: light-dark(#cbd5e1, #33384a);
+  --border-subtle: light-dark(#e2e8f0, #222636);
+  --border-hard: light-dark(#94a3b8, #475569);
+
+  /* Primary CTA / focus (electric violet-indigo gradient accent) */
+  --accent: light-dark(#6366f1, #818cf8);
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --accent-hover: light-dark(#4f46e5, #a5b4fc);
+  --accent-text: light-dark(#ffffff, #0f172a);
+  --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
+
+  /* Nav selection (left rail — cooler, does not compete with CTA) */
+  --accent-nav: light-dark(#4f46e5, #818cf8);
+  --accent-nav-bg: light-dark(
+    color-mix(in srgb, #6366f1 12%, var(--surface-rail)),
+    color-mix(in srgb, #818cf8 14%, var(--surface-rail))
+  );
+
+  /* Semantic */
+  --danger: light-dark(#dc2626, #f87171);
+  --danger-hover: light-dark(#b91c1c, #fca5a5);
+  --danger-text: light-dark(#ffffff, #180505);
+  --stderr: light-dark(#d97706, #fbbf24);
+  --warning: var(--stderr);
+  --success: light-dark(#16a34a, #4ade80);
+
+  /* Message roles */
+  --user-bg: light-dark(#eef2ff, #1e2238);
+  --assistant-line: light-dark(#94a3b8, #475569);
+
+  /* Per-agent palette (identity only — refined, harmonized tones) */
+  --agent-1: light-dark(#0d9488, #2dd4bf);
+  --agent-2: light-dark(#2563eb, #60a5fa);
+  --agent-3: light-dark(#d97706, #fbbf24);
+  --agent-4: light-dark(#7c3aed, #c084fc);
+  --agent-5: light-dark(#ea580c, #fb923c);
+  --agent-6: light-dark(#0284c7, #38bdf8);
+  --agent-color: var(--agent-1);
+
+  /* Semantic badge surfaces (theme-aware) */
+  --badge-thinking-bg: light-dark(#fef3c7, color-mix(in srgb, var(--stderr) 20%, var(--surface)));
+  --badge-thinking-fg: light-dark(#b45309, var(--stderr));
+  --badge-writing-bg: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  --badge-writing-fg: var(--accent);
+  --badge-error-bg: color-mix(in srgb, var(--danger) 15%, var(--surface));
+  --badge-error-fg: var(--danger);
+
+  /* Elevation & Shadows */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 14px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+  --overlay-scrim: rgba(15, 23, 42, 0.55);
+
+  /* Focus ring */
+  --focus-ring:
+    0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent);
+  --focus-ring-danger:
+    0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 60%, transparent);
+
+  /* Typography roles */
+  --font-brand: "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-ui: "Plus Jakarta Sans", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  --font-body: var(--font-ui);
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
+
+  /* Spacing scale (8px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Sizing */
+  --sidebar-w: 268px;
+  --sidebar-w-narrow: 200px;
+  --instrument-w: 330px;
+  --instrument-w-narrow: 236px;
+
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+  --radius: var(--radius-md);
+
+  /* Density */
+  --density: 1;
+  --row-pad-y: calc(7px * var(--density));
+  --msg-gap: calc(18px * var(--density));
+  --header-pad-y: calc(10px * var(--density));
+  --composer-pad-y: calc(8px * var(--density));
+
+  /* Control sizing */
+  --btn-height: 38px;
+  --btn-height-sm: 30px;
+
+  /* Motion */
+  --duration-fast: 160ms;
+  --duration: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Explicit theme: always set via JS (light | dark) */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000 40%, transparent);
+  --shadow-md: 0 6px 22px color-mix(in srgb, #000 45%, transparent);
+  --shadow-lg: 0 14px 40px color-mix(in srgb, #000 55%, transparent);
+  --overlay-scrim: color-mix(in srgb, #000 55%, transparent);
+}
+
+:root[data-density="compact"] {
+  --density: 0.82;
+  --btn-height: 32px;
+  --btn-height-sm: 26px;
+  --sidebar-w: 220px;
+  --sidebar-w-narrow: 180px;
+  --instrument-w: 260px;
+  --instrument-w-narrow: 210px;
+}
+
+/* Agent color slots via data-agent-color="1".."6" */
+[data-agent-color="1"] {
+  --agent-color: var(--agent-1);
+}
+[data-agent-color="2"] {
+  --agent-color: var(--agent-2);
+}
+[data-agent-color="3"] {
+  --agent-color: var(--agent-3);
+}
+[data-agent-color="4"] {
+  --agent-color: var(--agent-4);
+}
+[data-agent-color="5"] {
+  --agent-color: var(--agent-5);
+}
+[data-agent-color="6"] {
+  --agent-color: var(--agent-6);
+}
