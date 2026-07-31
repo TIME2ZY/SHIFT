@@ -221,6 +221,7 @@ function createServer(options = {}) {
     validateProjectDir,
     setSessionProjectDir: updateProjectDirDurable,
     usageStorage: storageContext.storage,
+    recallService,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,

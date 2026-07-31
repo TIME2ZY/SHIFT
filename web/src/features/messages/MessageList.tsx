@@ -2,16 +2,18 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import { AgentAvatar, UserAvatar, agentColorSlot, resolveAgent } from "../agents/AgentAvatar";
 import type { AgentSummary } from "../agents/types";
-import { MarkdownContent } from "./MarkdownContent";
 import type { PersistedMessage } from "./types";
+import { MessageProcessDetails } from "./MessageProcessDetails";
 
 interface MessageListProps {
+  sessionId: string | null;
   messages: PersistedMessage[];
   agents: AgentSummary[];
   run: SessionRun | null;
   isLoading: boolean;
   error: Error | null;
   onRetry(): void;
+  onOpenWorkspace?(): void;
 }
 
 interface MessageNavigationItem {
@@ -48,7 +50,6 @@ interface MessageRowProps {
   live?: boolean;
   setMessageRef(key: string, element: HTMLElement | null): void;
   children: ReactNode;
-  footer?: ReactNode;
 }
 
 /** Avatar sits outside the bubble — classic chat row, not card-with-avatar. */
@@ -61,7 +62,6 @@ function MessageRow({
   live,
   setMessageRef,
   children,
-  footer,
 }: MessageRowProps) {
   const showAvatar = role !== "system";
   return (
@@ -89,7 +89,6 @@ function MessageRow({
         </header>
         <div className="react-message-bubble">
           <div className="react-message-content">{children}</div>
-          {footer}
         </div>
       </div>
     </article>
@@ -97,17 +96,26 @@ function MessageRow({
 }
 
 export function MessageList({
+  sessionId,
   messages,
   agents,
   run,
   isLoading,
   error,
   onRetry,
+  onOpenWorkspace,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const [activeMessageKey, setActiveMessageKey] = useState<string | null>(null);
   const liveMessages = run ? Object.values(run.liveMessages) : [];
+  const persistedInvocationIds = new Set(
+    messages.map((message) => message.invocationId).filter(Boolean)
+  );
+  const standaloneLiveMessages = liveMessages.filter(
+    (message) =>
+      !message.invocationId || !persistedInvocationIds.has(message.invocationId)
+  );
   const liveText = liveMessages
     .map((message) => `${message.text}${message.thinking || ""}`)
     .join("");
@@ -133,14 +141,14 @@ export function MessageList({
       ...(run?.optimisticUser
         ? [{ key: "optimistic:user", role: "user" as const, label: "你", agentId: undefined }]
         : []),
-      ...liveMessages.map((message) => ({
+      ...standaloneLiveMessages.map((message) => ({
         key: `live:${message.agentId}:${message.invocationId || "live"}`,
         role: "assistant" as const,
         label: resolveAgent(message.agentId, message.agentId, agents)?.label || message.agentId,
         agentId: message.agentId,
       })),
     ],
-    [messages, agents, run?.optimisticUser, liveMessages]
+    [messages, agents, run?.optimisticUser, standaloneLiveMessages]
   );
   const latestMessageKey = navigationItems.at(-1)?.key;
 
@@ -216,7 +224,8 @@ export function MessageList({
     );
   }
 
-  const empty = messages.length === 0 && !run?.optimisticUser && liveMessages.length === 0;
+  const empty =
+    messages.length === 0 && !run?.optimisticUser && standaloneLiveMessages.length === 0;
 
   return (
     <div className="react-message-region">
@@ -296,13 +305,16 @@ export function MessageList({
           const agentId = agent?.id || message.agentId || message.agent || "agent";
 
           // Match live message details for the latest assistant responses so thinking/tools persist
-          const liveData = run?.liveMessages[agentId];
           const isAssistant = message.role === "assistant";
           const isLatestAssistantMsg =
             isAssistant &&
             (index === messages.length - 1 ||
               (index === messages.length - 2 && messages[messages.length - 1].role === "user"));
-          const process = isLatestAssistantMsg && liveData ? liveData : null;
+          const liveData = message.invocationId
+            ? liveMessages.find((item) => item.invocationId === message.invocationId)
+            : isLatestAssistantMsg
+              ? run?.liveMessages[agentId]
+              : undefined;
 
           return (
             <MessageRow
@@ -313,48 +325,18 @@ export function MessageList({
               agentId={isAssistant ? agentId : undefined}
               setMessageRef={setMessageRef}
               key={key}
-              footer={
-                process &&
-                (process.thinking || process.tools?.length || process.progress?.length) ? (
-                  <details className="react-process">
-                    <summary>
-                      运行过程
-                      {process.tools?.length ? ` · ${process.tools.length} 个工具` : ""}
-                    </summary>
-                    {process.thinking ? (
-                      <div className="react-process-thinking">{process.thinking}</div>
-                    ) : null}
-                    {process.progress?.length ? (
-                      <ol className="react-progress-list">
-                        {process.progress.map((item) => (
-                          <li data-status={item.status} key={item.id}>
-                            {item.label}
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                    {process.tools?.length ? (
-                      <ul className="react-tool-list">
-                        {process.tools.map((tool) => (
-                          <li data-status={tool.status} key={tool.id}>
-                            <span>{tool.name}</span>
-                            <small>
-                              {tool.status === "running"
-                                ? "运行中"
-                                : tool.status === "error"
-                                  ? "失败"
-                                  : "完成"}
-                            </small>
-                            {tool.detail ? <code>{tool.detail}</code> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </details>
-                ) : null
-              }
             >
-              {isAssistant ? <MarkdownContent content={message.content} /> : message.content}
+              {isAssistant ? (
+                <MessageProcessDetails
+                  sessionId={sessionId}
+                  invocationId={message.invocationId}
+                  liveMessage={liveData}
+                  content={message.content}
+                  onOpenWorkspace={onOpenWorkspace}
+                />
+              ) : (
+                message.content
+              )}
             </MessageRow>
           );
         })}
@@ -378,7 +360,7 @@ export function MessageList({
           </div>
         ))}
 
-        {liveMessages.map((message) => {
+        {standaloneLiveMessages.map((message) => {
           const key = `live:${message.agentId}:${message.invocationId || "live"}`;
           const agent = resolveAgent(message.agentId, message.agentId, agents);
           const author = agent?.label || message.agentId;
@@ -392,55 +374,15 @@ export function MessageList({
               live
               setMessageRef={setMessageRef}
               key={key}
-              footer={
-                message.thinking || message.tools?.length || message.progress?.length ? (
-                  <details className="react-process">
-                    <summary>
-                      运行过程
-                      {message.tools?.length ? ` · ${message.tools.length} 个工具` : ""}
-                    </summary>
-                    {message.thinking ? (
-                      <div className="react-process-thinking">{message.thinking}</div>
-                    ) : null}
-                    {message.progress?.length ? (
-                      <ol className="react-progress-list">
-                        {message.progress.map((item) => (
-                          <li data-status={item.status} key={item.id}>
-                            {item.label}
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                    {message.tools?.length ? (
-                      <ul className="react-tool-list">
-                        {message.tools.map((tool) => (
-                          <li data-status={tool.status} key={tool.id}>
-                            <span>{tool.name}</span>
-                            <small>
-                              {tool.status === "running"
-                                ? "运行中"
-                                : tool.status === "error"
-                                  ? "失败"
-                                  : "完成"}
-                            </small>
-                            {tool.detail ? <code>{tool.detail}</code> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </details>
-                ) : null
-              }
             >
-              {message.text ? (
-                message.status === "done" ? (
-                  <MarkdownContent content={message.text} />
-                ) : (
-                  message.text
-                )
-              ) : (
-                <span className="react-thinking">正在准备回答…</span>
-              )}
+              <MessageProcessDetails
+                sessionId={sessionId}
+                invocationId={message.invocationId}
+                liveMessage={message}
+                content={message.text}
+                loadDurable={false}
+                onOpenWorkspace={onOpenWorkspace}
+              />
             </MessageRow>
           );
         })}

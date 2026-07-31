@@ -7,20 +7,46 @@ export interface LiveMessage {
   status: "thinking" | "streaming" | "done" | "error";
   thinking?: string;
   tools?: RunTool[];
+  timeline?: RunTimelineItem[];
   progress?: RunProgressItem[];
+  changedFiles?: RunChangedFile[];
 }
 
 export interface RunTool {
   id: string;
   name: string;
   status: "running" | "done" | "error";
-  detail?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
 }
 
 export interface RunProgressItem {
   id: string;
   label: string;
   status: string;
+}
+
+export type RunTimelineItem =
+  | {
+      id: string;
+      type: "thinking";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "text";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolId: string;
+    };
+
+export interface RunChangedFile {
+  path: string;
+  changeType?: string;
 }
 
 export interface SessionRun {
@@ -52,34 +78,60 @@ export type SessionRunAction =
       agentId: string;
       invocationId?: string;
     }
-  | { type: "message/delta"; sessionId: string; agentId: string; text: string }
-  | { type: "thinking/delta"; sessionId: string; agentId: string; text: string }
+  | {
+      type: "message/delta";
+      sessionId: string;
+      agentId: string;
+      invocationId?: string;
+      text: string;
+    }
+  | {
+      type: "thinking/delta";
+      sessionId: string;
+      agentId: string;
+      invocationId?: string;
+      text: string;
+    }
   | {
       type: "tool/started";
       sessionId: string;
       agentId: string;
+      invocationId?: string;
       toolId: string;
       toolName: string;
-      detail?: string;
+      input?: Record<string, unknown>;
     }
   | {
       type: "tool/finished";
       sessionId: string;
       agentId: string;
+      invocationId?: string;
       toolId: string;
+      toolName?: string;
       failed?: boolean;
-      detail?: string;
+      output?: string;
+      error?: string;
     }
   | {
       type: "progress/updated";
       sessionId: string;
       agentId: string;
+      invocationId?: string;
       items: RunProgressItem[];
+    }
+  | {
+      type: "file/changed";
+      sessionId: string;
+      agentId: string;
+      invocationId?: string;
+      path: string;
+      changeType?: string;
     }
   | {
       type: "agent/finished";
       sessionId: string;
       agentId: string;
+      invocationId?: string;
       failed?: boolean;
     }
   | { type: "notice/received"; sessionId: string; message: string }

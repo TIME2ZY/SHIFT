@@ -1,4 +1,5 @@
 const { buildUsageSummary } = require("../storage/usage-summary");
+const { projectInvocationProcess } = require("./invocation-process");
 
 function createSessionRoutes({
   rootDir,
@@ -16,6 +17,7 @@ function createSessionRoutes({
   setSessionProjectDir,
   getUsageSummary,
   usageStorage,
+  recallService,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -57,6 +59,44 @@ function createSessionRoutes({
 
     if (req.method === "GET" && url.pathname === "/api/sessions") {
       sendJson(res, 200, { sessions: listSessions(sessionsFile) });
+      return true;
+    }
+
+    const processMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/invocations\/([a-zA-Z0-9_-]+)\/process$/
+    );
+    if (processMatch && req.method === "GET") {
+      const sessionId = processMatch[1];
+      const invocationId = processMatch[2];
+      const session = getSession(sessionsFile, sessionId);
+      if (!session) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      if (!recallService || typeof recallService.readInvocationPage !== "function") {
+        sendJson(res, 503, { error: "Invocation history is unavailable." });
+        return true;
+      }
+
+      const events = [];
+      let from = 0;
+      let total = 0;
+      do {
+        const page = await recallService.readInvocationPage(sessionId, invocationId, {
+          from,
+          limit: 1000,
+        });
+        total = Number(page.total) || 0;
+        if (Array.isArray(page.events)) events.push(...page.events);
+        from += Array.isArray(page.events) ? page.events.length : 0;
+        if (!page.events?.length) break;
+      } while (from < total);
+
+      if (total === 0) {
+        sendJson(res, 404, { error: "Invocation not found." });
+        return true;
+      }
+      sendJson(res, 200, projectInvocationProcess(invocationId, events));
       return true;
     }
 

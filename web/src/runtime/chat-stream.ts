@@ -33,6 +33,9 @@ interface CanonicalAgentEvent {
   toolId?: string;
   status?: string;
   output?: string;
+  result?: unknown;
+  path?: string;
+  changeType?: string;
   args?: Record<string, unknown>;
   items?: Array<{
     id?: string;
@@ -113,6 +116,7 @@ export async function runChatStream(
             type: "message/delta",
             sessionId: boundSessionId,
             agentId,
+            invocationId: agentEvent.invocationId,
             text: agentEvent.text,
           });
         } else if (agentEvent.type === "thinking.delta" && agentEvent.text) {
@@ -120,6 +124,7 @@ export async function runChatStream(
             type: "thinking/delta",
             sessionId: boundSessionId,
             agentId,
+            invocationId: agentEvent.invocationId,
             text: agentEvent.text,
           });
         } else if (agentEvent.type === "tool.started" && agentEvent.toolId && agentEvent.toolName) {
@@ -127,24 +132,44 @@ export async function runChatStream(
             type: "tool/started",
             sessionId: boundSessionId,
             agentId,
+            invocationId: agentEvent.invocationId,
             toolId: agentEvent.toolId,
             toolName: agentEvent.toolName,
-            detail: agentEvent.args ? JSON.stringify(agentEvent.args) : undefined,
+            input: agentEvent.args,
           });
         } else if (agentEvent.type === "tool.finished" && agentEvent.toolId) {
           store.dispatch({
             type: "tool/finished",
             sessionId: boundSessionId,
             agentId,
+            invocationId: agentEvent.invocationId,
             toolId: agentEvent.toolId,
+            toolName: agentEvent.toolName,
             failed: ["error", "failed"].includes(agentEvent.status || ""),
-            detail: agentEvent.output,
+            output:
+              agentEvent.output ??
+              (agentEvent.result === undefined
+                ? undefined
+                : typeof agentEvent.result === "string"
+                  ? agentEvent.result
+                  : JSON.stringify(agentEvent.result, null, 2)),
+            error: agentEvent.error,
+          });
+        } else if (agentEvent.type === "file.changed" && agentEvent.path) {
+          store.dispatch({
+            type: "file/changed",
+            sessionId: boundSessionId,
+            agentId,
+            invocationId: agentEvent.invocationId,
+            path: agentEvent.path,
+            changeType: agentEvent.changeType,
           });
         } else if (agentEvent.type === "progress.update" && agentEvent.items) {
           store.dispatch({
             type: "progress/updated",
             sessionId: boundSessionId,
             agentId,
+            invocationId: agentEvent.invocationId,
             items: agentEvent.items.map((item, index) => ({
               id: item.id || `step-${index + 1}`,
               label: item.label || item.text || `步骤 ${index + 1}`,
@@ -179,6 +204,8 @@ export async function runChatStream(
           type: "agent/finished",
           sessionId: boundSessionId,
           agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
+          invocationId:
+            typeof payload.invocationId === "string" ? payload.invocationId : undefined,
           failed: typeof payload.code === "number" && payload.code !== 0,
         });
         break;

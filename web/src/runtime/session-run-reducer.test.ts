@@ -113,12 +113,61 @@ describe("sessionRunReducer", () => {
       agentId: "codex",
       items: [{ id: "p1", label: "读取", status: "completed" }],
     });
+    state = sessionRunReducer(state, {
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      text: "done",
+    });
 
     const message = state.runs.s1.liveMessages.codex;
     expect(message.thinking).toBe("inspect");
     expect(message.tools).toEqual([
-      { id: "t1", name: "read_file", status: "done", detail: undefined },
+      {
+        id: "t1",
+        name: "read_file",
+        status: "done",
+        input: undefined,
+        output: undefined,
+        error: undefined,
+      },
     ]);
     expect(message.progress).toEqual([{ id: "p1", label: "读取", status: "completed" }]);
+    expect(message.timeline).toEqual([
+      { id: "thinking-0", type: "thinking", text: "inspect" },
+      { id: "tool-t1", type: "tool", toolId: "t1" },
+      { id: "text-2", type: "text", text: "done" },
+    ]);
+  });
+
+  it("keeps invocation process data after persisted messages synchronize", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "thinking/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+      text: "保留",
+    });
+    state = sessionRunReducer(state, {
+      type: "file/changed",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+      path: "src/index.js",
+      changeType: "modified",
+    });
+    state = sessionRunReducer(state, { type: "run/synced", sessionId: "s1" });
+
+    expect(state.runs.s1.liveMessages.codex).toMatchObject({
+      invocationId: "i1",
+      thinking: "保留",
+      changedFiles: [{ path: "src/index.js", changeType: "modified" }],
+    });
   });
 });

@@ -945,6 +945,86 @@ body {
   user-select: none;
 }
 
+.react-process-timeline {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.react-timeline-text {
+  min-width: 0;
+}
+
+.react-thinking-step {
+  overflow: hidden;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-instrument);
+}
+
+.react-thinking-step > summary {
+  width: max-content;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  list-style-position: inside;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.react-thinking-step .react-process-thinking {
+  border-radius: 0;
+  background: var(--surface-inset);
+}
+
+.react-process > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.react-process > summary small {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.react-process-section {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.react-process-section > h3 {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.react-process-loading,
+.react-process-error {
+  margin: var(--space-2) 0;
+  color: var(--text-tertiary);
+}
+
+.react-process-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--danger);
+}
+
+.react-process-error button,
+.react-changed-files button {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .react-process-thinking {
   max-height: 180px;
   padding: var(--space-3);
@@ -1022,6 +1102,143 @@ body {
   color: var(--text-tertiary);
   font: 11px/1.5 var(--font-mono);
   white-space: pre-wrap;
+}
+
+.react-tool-calls {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.react-tool-call {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-instrument);
+}
+
+.react-tool-call > summary {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto 16px;
+  align-items: center;
+  gap: var(--space-2);
+  width: auto;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.react-tool-call > summary::-webkit-details-marker {
+  display: none;
+}
+
+.react-tool-call > summary::after {
+  grid-column: 5;
+  content: "›";
+  color: var(--text-tertiary);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.react-tool-call[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.react-tool-call > summary time {
+  color: var(--text-tertiary);
+  font: 10px/1 var(--font-mono);
+}
+
+.react-tool-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-hard);
+}
+
+.react-tool-call[data-status="done"] .react-tool-status {
+  background: var(--success);
+}
+
+.react-tool-call[data-status="error"] .react-tool-status {
+  background: var(--danger);
+}
+
+.react-tool-call[data-status="running"] .react-tool-status {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.react-tool-call-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-inset);
+}
+
+.react-tool-call-body section {
+  min-width: 0;
+}
+
+.react-tool-call-body h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.react-tool-call-body pre {
+  max-height: 260px;
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.react-tool-call-body code {
+  font: 11px/1.55 var(--font-mono);
+}
+
+.react-tool-empty {
+  margin: 0;
+  color: var(--text-tertiary);
+}
+
+.react-changed-files > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.react-changed-files > header h3 {
+  margin: 0;
+}
+
+.react-changed-files ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.react-changed-files li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.react-changed-files li span {
+  color: var(--accent);
+  font: 10px/1 var(--font-mono);
 }
 
 .react-run-notice,

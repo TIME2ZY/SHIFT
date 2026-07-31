@@ -30,9 +30,10 @@ describe("runChatStream", () => {
             'event: session\ndata: {"sessionId":"s1"}\n\n',
             'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
             'event: agent-event\ndata: {"type":"thinking.delta","agent":"codex","text":"plan"}\n\n',
-            'event: agent-event\ndata: {"type":"tool.started","agent":"codex","toolId":"t1","toolName":"read"}\n\n',
+            'event: agent-event\ndata: {"type":"tool.started","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","args":{"path":"src/index.js"}}\n\n',
             'event: agent-event\ndata: {"type":"progress.update","agent":"codex","items":[{"id":"p1","label":"Read","status":"completed"}]}\n\n',
-            'event: agent-event\ndata: {"type":"tool.finished","agent":"codex","toolId":"t1","status":"completed"}\n\n',
+            'event: agent-event\ndata: {"type":"tool.finished","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","status":"completed","result":{"ok":true}}\n\n',
+            'event: agent-event\ndata: {"type":"file.changed","agent":"codex","invocationId":"i1","path":"src/index.js","changeType":"modified"}\n\n',
             'event: agent-event\ndata: {"type":"text.delta","agent":"codex","text":"hello"}\n\n',
             'event: agent-exit\ndata: {"agent":"codex","code":0}\n\n',
             "event: done\ndata: {}\n\n",
@@ -54,8 +55,23 @@ describe("runChatStream", () => {
       text: "hello",
       status: "done",
       thinking: "plan",
-      tools: [{ id: "t1", name: "read", status: "done" }],
+      invocationId: "i1",
+      tools: [
+        {
+          id: "t1",
+          name: "read",
+          status: "done",
+          input: { path: "src/index.js" },
+          output: '{\n  "ok": true\n}',
+        },
+      ],
+      timeline: [
+        { id: "thinking-0", type: "thinking", text: "plan" },
+        { id: "tool-t1", type: "tool", toolId: "t1" },
+        { id: "text-2", type: "text", text: "hello" },
+      ],
       progress: [{ id: "p1", label: "Read", status: "completed" }],
+      changedFiles: [{ path: "src/index.js", changeType: "modified" }],
     });
   });
 

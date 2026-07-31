@@ -11,5 +11,7 @@ export const queryKeys = {
     memories: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
     memoryInject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
     workspace: (sessionId: string) => ["sessions", sessionId, "workspace"] as const,
+    invocationProcess: (sessionId: string, invocationId: string) =>
+      ["sessions", sessionId, "invocations", invocationId, "process"] as const,
   },
 } as const;
