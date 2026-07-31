@@ -277,12 +277,14 @@ export function App() {
             </header>
 
             <MessageList
+              sessionId={activeSessionId}
               messages={messages.data ?? []}
               agents={agents.data ?? []}
               run={run}
               isLoading={messages.isPending && Boolean(activeSessionId)}
               error={messages.error}
               onRetry={() => void messages.refetch()}
+              onOpenWorkspace={() => navigation.navigate("workspace")}
             />
 
             <Composer

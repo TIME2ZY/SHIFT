@@ -77,6 +77,80 @@ test("handleSessionRoutes returns per-agent usage summary", async () => {
   assert.deepEqual(res.body, summary);
 });
 
+test("handleSessionRoutes projects a persisted invocation process across pages", async () => {
+  const res = makeRes();
+  const reads = [];
+  const events = [
+    { eventNo: 0, kind: "thinking.delta", payload: { text: "分析" } },
+    {
+      eventNo: 1,
+      kind: "tool.finished",
+      payload: { toolId: "t1", toolName: "read_file", result: "完成" },
+    },
+  ];
+  const handle = sessionRoutes.createSessionRoutes({
+    rootDir: "/root",
+    sessionsFile: "/tmp/sessions.json",
+    worktreeManager: {},
+    cleanupSessionRuntime() {},
+    sendJson: makeSendJson(res),
+    readJsonBody: async () => ({}),
+    listSessions: () => [],
+    createSession: () => null,
+    getSession: (_file, id) => (id === "s1" ? { id } : null),
+    deleteSession: () => false,
+    setSessionWorktree: () => null,
+    validateProjectDir: () => "/root",
+    setSessionProjectDir: () => null,
+    recallService: {
+      readInvocationPage: async (sessionId, invocationId, options) => {
+        reads.push({ sessionId, invocationId, options });
+        const event = events[options.from];
+        return {
+          events: event ? [event] : [],
+          total: events.length,
+          from: options.from,
+          limit: options.limit,
+        };
+      },
+    },
+  });
+
+  const handled = await handle(
+    makeReq("GET"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/invocations/i1/process")
+  );
+
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.invocationId, "i1");
+  assert.equal(res.body.thinking.text, "分析");
+  assert.deepEqual(res.body.tools, [
+    {
+      toolId: "t1",
+      toolName: "read_file",
+      status: "done",
+      output: "完成",
+      changedFiles: [],
+    },
+  ]);
+  assert.deepEqual(res.body.timeline, [
+    {
+      id: "thinking-0",
+      type: "thinking",
+      eventNo: 0,
+      lastEventNo: 0,
+      text: "分析",
+    },
+    { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
+  ]);
+  assert.deepEqual(
+    reads.map((read) => read.options.from),
+    [0, 1]
+  );
+});
+
 test("handleSessionRoutes updates projectDir for an existing session", async () => {
   const res = makeRes();
   let setArgs = null;

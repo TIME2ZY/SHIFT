@@ -28,6 +28,28 @@ function updateRun(
   };
 }
 
+function appendTimelineText(
+  timeline: LiveMessage["timeline"],
+  type: "thinking" | "text",
+  text: string
+): NonNullable<LiveMessage["timeline"]> {
+  const current = timeline || [];
+  const previous = current.at(-1);
+  if (previous?.type === type) {
+    return [...current.slice(0, -1), { ...previous, text: previous.text + text }];
+  }
+  return [...current, { id: `${type}-${current.length}`, type, text }];
+}
+
+function appendTimelineTool(
+  timeline: LiveMessage["timeline"],
+  toolId: string
+): NonNullable<LiveMessage["timeline"]> {
+  const current = timeline || [];
+  if (current.some((item) => item.type === "tool" && item.toolId === toolId)) return current;
+  return [...current, { id: `tool-${toolId}`, type: "tool", toolId }];
+}
+
 export function sessionRunReducer(
   state: SessionRunState,
   action: SessionRunAction
@@ -59,6 +81,7 @@ export function sessionRunReducer(
           invocationId: action.invocationId,
           text: "",
           status: "thinking",
+          timeline: [],
         };
         return {
           ...run,
@@ -85,7 +108,9 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.agentId]: {
               ...current,
+              invocationId: action.invocationId || current.invocationId,
               text: current.text + action.text,
+              timeline: appendTimelineText(current.timeline, "text", action.text),
               status: "streaming",
             },
           },
@@ -106,7 +131,9 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.agentId]: {
               ...current,
+              invocationId: action.invocationId || current.invocationId,
               thinking: (current.thinking || "") + action.text,
+              timeline: appendTimelineText(current.timeline, "thinking", action.text),
             },
           },
         };
@@ -127,15 +154,17 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.agentId]: {
               ...current,
+              invocationId: action.invocationId || current.invocationId,
               tools: [
                 ...tools,
                 {
                   id: action.toolId,
                   name: action.toolName,
                   status: "running",
-                  detail: action.detail,
+                  input: action.input,
                 },
               ],
+              timeline: appendTimelineTool(current.timeline, action.toolId),
             },
           },
         };
@@ -143,8 +172,20 @@ export function sessionRunReducer(
 
     case "tool/finished":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId];
-        if (!current) return { ...run, updatedAt: now };
+        const current = run.liveMessages[action.agentId] ?? {
+          agentId: action.agentId,
+          text: "",
+          status: "thinking" as const,
+        };
+        const existingTools = current.tools || [];
+        const matched = existingTools.some((tool) => tool.id === action.toolId);
+        const finishedTool = {
+          id: action.toolId,
+          name: action.toolName || "tool",
+          status: action.failed ? ("error" as const) : ("done" as const),
+          output: action.output,
+          error: action.error,
+        };
         return {
           ...run,
           updatedAt: now,
@@ -152,15 +193,21 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.agentId]: {
               ...current,
-              tools: (current.tools || []).map((tool) =>
-                tool.id === action.toolId
-                  ? {
-                      ...tool,
-                      status: action.failed ? ("error" as const) : ("done" as const),
-                      detail: action.detail || tool.detail,
-                    }
-                  : tool
-              ),
+              invocationId: action.invocationId || current.invocationId,
+              tools: matched
+                ? existingTools.map((tool) =>
+                    tool.id === action.toolId
+                      ? {
+                          ...tool,
+                          name: action.toolName || tool.name,
+                          status: finishedTool.status,
+                          output: action.output,
+                          error: action.error,
+                        }
+                      : tool
+                  )
+                : [...existingTools, finishedTool],
+              timeline: appendTimelineTool(current.timeline, action.toolId),
             },
           },
         };
@@ -180,7 +227,35 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.agentId]: {
               ...current,
+              invocationId: action.invocationId || current.invocationId,
               progress: action.items,
+            },
+          },
+        };
+      });
+
+    case "file/changed":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.agentId] ?? {
+          agentId: action.agentId,
+          text: "",
+          status: "thinking" as const,
+        };
+        const changedFiles = (current.changedFiles || []).filter(
+          (file) => file.path !== action.path
+        );
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.agentId]: {
+              ...current,
+              invocationId: action.invocationId || current.invocationId,
+              changedFiles: [
+                ...changedFiles,
+                { path: action.path, changeType: action.changeType },
+              ],
             },
           },
         };
@@ -236,7 +311,6 @@ export function sessionRunReducer(
     case "run/synced":
       return updateRun(state, action.sessionId, (run) => ({
         ...run,
-        liveMessages: {},
         optimisticUser: undefined,
         updatedAt: now,
       }));
