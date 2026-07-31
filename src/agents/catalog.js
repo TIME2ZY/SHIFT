@@ -49,6 +49,7 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     model: modelId,
     ...(options.capacityTokens ? { capacityTokens: options.capacityTokens } : {}),
     reasoningEffort: options.reasoningEffort || "",
+    ...(options.transport ? { transport: options.transport } : {}),
     description,
   };
 }
@@ -79,6 +80,7 @@ const AGENTS = {
   ),
   grok: agent("grok", "Grok", "grok", "grok-4.5", "实现：写代码、改功能、跑测试。", {
     reasoningEffort: "high",
+    transport: "acp",
   }),
   opencode: agent(
     "opencode",

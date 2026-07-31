@@ -115,4 +115,39 @@ describe("MessageProcessDetails", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("keeps a running tool collapsed by default and allows manual expansion", async () => {
+    const user = userEvent.setup();
+    renderProcess({
+      version: 1,
+      invocationId: "i1",
+      status: "running",
+      thinking: { text: "", segments: [] },
+      tools: [
+        {
+          toolId: "running-tool",
+          toolName: "read_file",
+          status: "running",
+          input: { path: "package.json" },
+          changedFiles: [],
+        },
+      ],
+      timeline: [
+        {
+          id: "tool-running-tool",
+          type: "tool",
+          eventNo: 1,
+          toolId: "running-tool",
+        },
+      ],
+      progress: [],
+      changedFiles: [],
+    });
+
+    const details = screen.getByText("read_file").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    await user.click(screen.getByText("read_file"));
+    expect(details).toHaveAttribute("open");
+    expect(screen.getByText(/package\.json/)).toBeInTheDocument();
+  });
 });

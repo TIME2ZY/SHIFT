@@ -277,7 +277,15 @@ const grokProvider = {
   capabilities: {
     resume: true,
     thinking: true,
-    // streaming-json has no tool/file events; edits show via worktree git.
+    // Grok uses ACP by default; the retained streaming-json transport has no
+    // tool/file events, but ACP exposes the full tool lifecycle.
+    tools: true,
+    usage: true,
+    reasoning: "levels",
+  },
+  cliCapabilities: {
+    resume: true,
+    thinking: true,
     tools: false,
     usage: true,
     reasoning: "levels",
@@ -302,6 +310,9 @@ const grokProvider = {
    */
   buildEnvironment(_options = {}, env = process.env) {
     const patch = {};
+    if (process.platform === "win32" && !env.HOME && env.USERPROFILE) {
+      patch.HOME = env.USERPROFILE;
+    }
     for (const key of ["GROK_PROXY", "INVOKE_GROK_PROXY", "GROK_HTTP_PROXY", "GROK_HTTPS_PROXY"]) {
       if (typeof env[key] === "string" && env[key].trim()) {
         patch[key] = env[key].trim();

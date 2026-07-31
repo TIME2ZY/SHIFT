@@ -43,7 +43,7 @@ SHIFT 不是四个聊天窗口的拼盘。它把本机已有的 CLI Agent 接进
 | :-: | ------------ | ------------------------ | --------------- |
 | 🟢  | **Codex**    | 澄清问题、推理与权衡     | Codex CLI       |
 | 🔵  | **Gemini**   | 头脑风暴、扩展与交叉验证 | Antigravity CLI |
-| 🟠  | **Grok**     | 写代码、实现与跑测试     | Grok Build CLI  |
+| 🟠  | **Grok**     | 写代码、实现与跑测试     | Grok Build ACP  |
 | 🟣  | **OpenCode** | 审查、风险与质量把关     | OpenCode CLI    |
 
 > SHIFT 只做协作与界面，不打包模型或 CLI。按需安装并登录你要用的工具即可。
@@ -90,7 +90,7 @@ npm start
 ## 本地优先
 
 - 界面与 Node 服务都在本机，默认监听 `127.0.0.1:8787`
-- Agent 以本机子进程启动，沿用各自 CLI 的登录与配置
+- Agent 以本机子进程启动，沿用各自 CLI/ACP agent 的登录与配置
 - SQLite 业务数据与 canonical audit 写在 **`data/runtime/`**（已 gitignore）；legacy
   transcript 与新 `audit-transcripts/<epoch-id>/` 物理分离
 - 「改代码」走会话级 worktree；讨论模式默认不写主工作区
