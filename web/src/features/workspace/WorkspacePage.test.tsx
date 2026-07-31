@@ -36,6 +36,8 @@ function renderPage(worktreeAttached = true) {
           sessionTitle="React migration"
           worktreeAttached={worktreeAttached}
           onOpenChat={onOpenChat}
+          onOpenSessions={vi.fn()}
+          sessionTriggerRef={{ current: null }}
         />
       </ToastProvider>
     </QueryClientProvider>

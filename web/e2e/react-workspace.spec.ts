@@ -17,7 +17,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     worktreeAttached: false,
   };
 
-  await page.route("**/public/favicon.svg", async (route) => {
+  await page.route("**/favicon.svg", async (route) => {
     await route.fulfill({
       contentType: "image/svg+xml",
       body: '<svg xmlns="http://www.w3.org/2000/svg"/>',
@@ -243,10 +243,10 @@ test("edits the project directory and completes a worktree chat run", async ({ p
   await page.getByRole("textbox", { name: "消息" }).fill("@Gemini 实现工作区功能");
   await page.getByRole("button", { name: "发送" }).click();
 
-  await expect(page.getByText("工作区改动已完成。")).toBeVisible();
-  await expect(page.getByText("已完成", { exact: true })).toBeVisible();
-  await expect(page.getByText("会话 321")).toBeVisible();
-  await expect(page.getByText("上下文 10%")).toBeVisible();
+  await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
+  await expect(page.locator(".react-run-status")).toHaveText("已完成");
+  await expect(page.getByText("本会话 321 tokens")).toBeVisible();
+  await expect(page.getByText("10% · 充足")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
   await page.getByRole("tab", { name: "记忆" }).click();
@@ -293,4 +293,34 @@ test("stops a connecting run and confirms the cancellation", async ({ page }) =>
 
   await expect(page.locator(".react-toast").getByText("已停止当前运行。")).toBeVisible();
   await expect(page.getByText("已停止", { exact: true })).toBeVisible();
+});
+
+test("uses accessible drawers without shrinking the mobile conversation", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await mockShiftApi(page);
+  await page.goto("./");
+
+  const sessionDrawerButton = page.getByRole("button", { name: "打开会话列表" });
+  await expect(sessionDrawerButton).toBeVisible();
+  await sessionDrawerButton.click();
+  await expect(page.getByRole("complementary", { name: "对话列表" })).toBeVisible();
+  await page
+    .getByRole("complementary", { name: "对话列表" })
+    .getByRole("button", { name: "关闭会话列表" })
+    .click();
+
+  await page.getByRole("button", { name: "Agent 与记忆" }).click();
+  await expect(page.getByRole("dialog", { name: "对话信息" })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "对话信息" })).toBeHidden();
+  await expect(page.locator(".react-info-panel-button")).toBeFocused();
+
+  const viewport = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    chatHeight: document.querySelector(".react-chat")?.getBoundingClientRect().height || 0,
+  }));
+  expect(viewport.scrollWidth).toBe(viewport.clientWidth);
+  expect(viewport.chatHeight).toBeGreaterThan(700);
 });

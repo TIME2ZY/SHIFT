@@ -35,7 +35,6 @@
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",
     "execute:storage:cleanup": "node scripts/execute-legacy-cleanup.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
-    "vendor:md": "node scripts/vendor-md.js",
     "test:live:solo-grok": "node scripts/live/run-solo-grok.js",
     "test:live:multi-collab": "node scripts/live/run-multi-collab.js"
   },

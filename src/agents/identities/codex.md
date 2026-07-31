@@ -29,7 +29,7 @@ boundaries:
 # 搜索与读取约束
 
 - 搜索项目代码时，默认限定在 `src`、`public`、`tests`、`scripts`、`docs`
-- 默认不要递归搜索 `data/runtime`、`output`、`node_modules`、`public/vendor`、`.playwright-cli`
+- 默认不要递归搜索 `data/runtime`、`output`、`node_modules`、`.playwright-cli`
 - 搜索结果默认限制在 200 行以内；先定位文件，再按局部行范围读取
 - 只有任务明确涉及运行日志时才搜索 `data/runtime`；该目录被 `.rgignore` 排除，需显式使用 `rg --no-ignore`
 - 不要一次输出完整大文件、完整 transcript 或整个日志目录

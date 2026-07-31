@@ -309,17 +309,6 @@ function createServer(options = {}) {
       return;
     }
 
-    if (req.method === "GET" && ["/legacy", "/legacy/"].includes(url.pathname)) {
-      serveIndex(res, { indexPath: path.join(ROOT, "index.html"), uiToken, sendJson });
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname.startsWith("/public/")) {
-      const relative = url.pathname.slice("/public".length);
-      serveStatic(res, relative, path.join(ROOT, "public"), sendJson);
-      return;
-    }
-
     if (
       url.pathname.startsWith("/api/") &&
       !uiSecurity.authorizeApiRequest(req, res, url, { uiToken, sendJson })

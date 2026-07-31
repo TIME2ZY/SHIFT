@@ -3,6 +3,8 @@ export interface AgentSummary {
   label: string;
   mention?: string;
   description?: string;
+  model?: string;
+  modelVendor?: string;
 }
 
 export interface AgentsResponse {

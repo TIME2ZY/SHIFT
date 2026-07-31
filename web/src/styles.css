@@ -1,5 +1,5 @@
-@import url("../../public/styles/tokens.css");
-@import url("../../public/styles/base.css");
+@import url("./styles/tokens.css");
+@import url("./styles/base.css");
 
 :root {
   color-scheme: dark;
@@ -45,6 +45,14 @@ body {
   gap: var(--space-3);
   min-height: 52px;
   padding: 0 var(--space-2);
+}
+
+.react-sidebar-close,
+.react-mobile-drawer-button,
+.react-info-panel-button,
+.react-panel-mobile-header,
+.react-drawer-backdrop {
+  display: none;
 }
 
 .react-brand-mark {
@@ -290,25 +298,6 @@ body {
 .react-chat-actions a:hover,
 .react-chat-actions button:hover {
   color: var(--accent);
-}
-
-.react-usage-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 3px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  font: 10px/1.3 var(--font-mono);
-}
-
-.react-usage-summary small {
-  color: var(--text-tertiary);
-}
-
-.react-usage-summary[data-error] {
-  color: var(--danger);
 }
 
 .react-run-status {
@@ -786,6 +775,8 @@ body {
 }
 
 .react-right-panel {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -795,7 +786,7 @@ body {
 
 .react-panel-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   min-height: 62px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -846,18 +837,41 @@ body {
   letter-spacing: 0.1em;
 }
 
+.react-panel-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.react-panel-section-heading .react-panel-kicker {
+  margin: 0;
+}
+
+.react-panel-section-heading > span {
+  color: var(--text-tertiary);
+  font: 11px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .react-agent-cards,
 .react-memory-list {
   display: grid;
   gap: var(--space-2);
 }
 
-.react-agent-cards article,
+.react-agent-card,
 .react-memory-list article {
-  padding: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-instrument);
+}
+
+.react-agent-card[data-selected] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 .react-memory-inject {
@@ -881,7 +895,7 @@ body {
   padding-left: var(--space-4);
 }
 
-.react-agent-cards header,
+.react-agent-card > header,
 .react-memory-list header {
   display: flex;
   align-items: baseline;
@@ -889,26 +903,162 @@ body {
   gap: var(--space-2);
 }
 
-.react-agent-cards strong,
-.react-memory-list strong {
-  color: var(--text-primary);
-  font-size: 12px;
+.react-agent-card > header > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
 }
 
-.react-agent-cards code,
+.react-agent-card strong,
+.react-memory-list strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.react-agent-card code,
 .react-memory-list small,
 .react-memory-list header span {
   color: var(--text-tertiary);
   font: 10px/1.3 var(--font-mono);
 }
 
-.react-agent-cards p,
+.react-agent-card > p,
 .react-memory-list p {
   margin: var(--space-2) 0 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.react-agent-status {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font: 11px/1.3 var(--font-ui);
+}
+
+.react-agent-status[data-status="connecting"],
+.react-agent-status[data-status="thinking"],
+.react-agent-status[data-status="running"] {
+  color: var(--accent);
+}
+
+.react-agent-status[data-status="error"] {
+  color: var(--danger);
+}
+
+.react-agent-model {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+  font: 10px/1.4 var(--font-mono);
+}
+
+.react-agent-usage {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.react-agent-usage-total,
+.react-agent-context > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.react-agent-usage-total strong,
+.react-agent-context strong {
+  color: var(--text-primary);
+  font: 600 12px/1.3 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.react-agent-context {
+  display: grid;
+  gap: 6px;
+}
+
+.react-agent-context progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+  color: var(--success);
+  accent-color: var(--success);
+}
+
+.react-agent-context progress::-webkit-progress-bar {
+  border-radius: var(--radius-pill);
+  background: var(--surface-inset);
+}
+
+.react-agent-context progress::-webkit-progress-value {
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.react-agent-context[data-tone="warning"] progress {
+  color: var(--stderr);
+  accent-color: var(--stderr);
+}
+
+.react-agent-context[data-tone="danger"] progress {
+  color: var(--danger);
+  accent-color: var(--danger);
+}
+
+.react-agent-context[data-tone="warning"] strong {
+  color: var(--stderr);
+}
+
+.react-agent-context[data-tone="danger"] strong {
+  color: var(--danger);
+}
+
+.react-agent-usage-details {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.react-agent-usage-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.react-agent-usage-details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.react-agent-usage-details dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-agent-usage-details dd {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.react-agent-usage-empty {
+  margin-top: var(--space-3) !important;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary) !important;
+  font-size: 11px !important;
 }
 
 .react-memory-list article {
@@ -1018,256 +1168,6 @@ body {
 .react-project-dir-row form input:focus {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
-}
-
-.react-recall-modes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin-bottom: var(--space-3);
-  padding: 2px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
-}
-
-.react-recall-modes button {
-  min-height: 28px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.react-recall-modes button[data-active] {
-  color: var(--text-primary);
-  background: var(--surface-instrument);
-}
-
-.react-recall-search {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-
-.react-recall-search input {
-  min-width: 0;
-  height: 34px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  outline: none;
-  background: var(--surface-instrument);
-  font-size: 12px;
-}
-
-.react-recall-search input:focus {
-  border-color: var(--accent);
-  box-shadow: var(--focus-ring);
-}
-
-.react-recall-search button {
-  min-width: 52px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-md);
-  color: var(--accent-text);
-  background: var(--accent);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.react-recall-search button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.react-recall-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1);
-  margin: 0 0 var(--space-3);
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.react-recall-summary > span {
-  margin-right: auto;
-}
-
-.react-recall-summary small {
-  padding: 2px 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  color: var(--text-tertiary);
-  font: 9px/1.3 var(--font-mono);
-}
-
-.react-invocation-list,
-.react-recall-results {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.react-invocation-list > article,
-.react-recall-results > article {
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-instrument);
-}
-
-.react-invocation-list > article[data-open] {
-  border-color: var(--border-hard);
-}
-
-.react-invocation-list > article > button {
-  display: grid;
-  width: 100%;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  text-align: left;
-}
-
-.react-invocation-list > article > button:hover {
-  background: var(--surface-instrument-raised);
-}
-
-.react-invocation-list > article > button > span {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.react-invocation-list strong {
-  font-size: 12px;
-}
-
-.react-invocation-list small,
-.react-invocation-list time {
-  color: var(--text-tertiary);
-  font: 10px/1.3 var(--font-mono);
-}
-
-.react-invocation-list small[data-state="completed"] {
-  color: var(--success);
-}
-
-.react-invocation-list small[data-state="failed"],
-.react-invocation-list small[data-state="aborted"] {
-  color: var(--danger);
-}
-
-.react-invocation-list small[data-state="active"] {
-  color: var(--accent);
-}
-
-.react-invocation-events {
-  display: grid;
-  gap: 1px;
-  max-height: 420px;
-  padding: 0 var(--space-2) var(--space-2);
-  overflow: auto;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-inset);
-}
-
-.react-invocation-events article {
-  padding: var(--space-2);
-  border-left: 1px solid var(--border-hard);
-}
-
-.react-invocation-events header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.react-invocation-events code,
-.react-invocation-events time {
-  color: var(--text-tertiary);
-  font: 9px/1.3 var(--font-mono);
-}
-
-.react-invocation-events strong {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font: 10px/1.3 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.react-invocation-events pre {
-  max-height: 140px;
-  margin: var(--space-1) 0 0;
-  overflow: auto;
-  color: var(--text-tertiary);
-  font: 10px/1.45 var(--font-mono);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.react-recall-inline-state {
-  margin: var(--space-2);
-  color: var(--text-tertiary);
-  font-size: 10px;
-}
-
-.react-recall-results > article {
-  padding: var(--space-3);
-  border-left: 2px solid var(--border-hard);
-}
-
-.react-recall-results > article[data-layer="memory"] {
-  border-left-color: var(--success);
-}
-
-.react-recall-results > article[data-layer="message"] {
-  border-left-color: var(--accent);
-}
-
-.react-recall-results > article > header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.react-recall-results > article > header span {
-  color: var(--accent);
-  font: 600 9px/1.3 var(--font-mono);
-}
-
-.react-recall-results > article > header small,
-.react-recall-results > article > header time {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font: 9px/1.3 var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.react-recall-results > article > p {
-  display: -webkit-box;
-  margin: var(--space-2) 0 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-}
-
-.react-recall-results > article > button {
-  margin-top: var(--space-2);
-  color: var(--accent);
-  font-size: 10px;
-}
-
-.react-recall-results .react-invocation-events {
-  margin: var(--space-3) calc(var(--space-3) * -1) calc(var(--space-3) * -1);
 }
 
 .react-shell[data-page="workspace"] {
@@ -1800,7 +1700,79 @@ body {
   }
 
   .react-right-panel {
-    display: none;
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    right: 0;
+    width: min(400px, 92vw);
+    height: 100dvh;
+    border-left: 1px solid var(--border-hard);
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    transform: translateX(100%);
+    transition:
+      transform var(--duration) var(--ease-out),
+      visibility 0s linear var(--duration);
+  }
+
+  .react-right-panel[data-open] {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .react-panel-mobile-header {
+    display: flex;
+    min-height: 56px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .react-panel-mobile-header strong {
+    font-size: 14px;
+  }
+
+  .react-panel-mobile-header button,
+  .react-info-panel-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .react-panel-mobile-header button {
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 24px;
+  }
+
+  .react-panel-tabs {
+    min-height: 52px;
+  }
+
+  .react-panel-body {
+    height: calc(100% - 108px);
+  }
+
+  .react-info-panel-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .react-drawer-backdrop {
+    position: fixed;
+    z-index: 40;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: default;
+    background: var(--overlay-scrim);
+    -webkit-tap-highlight-color: transparent;
   }
 
   .workspace-inspector {
@@ -1859,16 +1831,108 @@ body {
 @media (max-width: 720px) {
   .react-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(180px, 36vh) 1fr;
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .react-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--border-subtle);
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    left: 0;
+    width: min(340px, 92vw);
+    height: 100dvh;
+    border-right: 1px solid var(--border-hard);
+    border-bottom: 0;
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition:
+      transform var(--duration) var(--ease-out),
+      visibility 0s linear var(--duration);
+  }
+
+  .react-sidebar[data-open] {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .react-sidebar-close {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    margin-left: auto;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 24px;
+  }
+
+  .react-mobile-drawer-button {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .react-mobile-drawer-button svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+  }
+
+  .react-session-row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .react-new-session,
+  .react-session-item,
+  .react-session-delete {
+    min-height: 44px;
+  }
+
+  .react-session-delete {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
   }
 
   .react-chat-header {
+    gap: var(--space-2);
     padding-inline: var(--space-3);
+  }
+
+  .react-chat-header > div:first-of-type {
+    flex: 1;
+  }
+
+  .react-chat-actions {
+    gap: var(--space-2);
+  }
+
+  .react-chat-actions > .react-run-status,
+  .react-chat-actions > button:not(.react-info-panel-button) {
+    display: none;
+  }
+
+  .react-info-panel-button {
+    width: 44px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+  }
+
+  .react-info-panel-button::before {
+    color: var(--text-secondary);
+    content: "AI";
+    font: 700 11px/1 var(--font-mono);
   }
 
   .react-messages,
@@ -1882,11 +1946,19 @@ body {
 
   .react-shell[data-page="workspace"] {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(180px, 36vh) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .workspace-page {
     padding: var(--space-4) var(--space-3);
+  }
+
+  .workspace-page-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .workspace-page-header > .workspace-page-actions {
+    grid-column: 1 / -1;
   }
 
   .workspace-project-path {

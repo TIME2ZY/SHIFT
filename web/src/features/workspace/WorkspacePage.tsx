@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useMemo, useState } from "react";
 import { useToast } from "../notifications/ToastProvider";
 import { parseUnifiedDiff, summarizeDiff, type WorkspaceDiffFile } from "./diff";
 import { useDiscardWorktreeMutation, useUpdateProjectDirMutation } from "./mutations";
@@ -9,6 +9,8 @@ interface WorkspacePageProps {
   sessionTitle: string;
   worktreeAttached: boolean;
   onOpenChat(): void;
+  onOpenSessions(): void;
+  sessionTriggerRef: RefObject<HTMLButtonElement | null>;
 }
 
 const STATUS_LABEL = {
@@ -76,6 +78,8 @@ export function WorkspacePage({
   sessionTitle,
   worktreeAttached,
   onOpenChat,
+  onOpenSessions,
+  sessionTriggerRef,
 }: WorkspacePageProps) {
   const workspace = useWorkspaceDetailQuery(sessionId, worktreeAttached, true);
   const updateProjectDir = useUpdateProjectDirMutation();
@@ -127,6 +131,17 @@ export function WorkspacePage({
   return (
     <main id="main-content" className="workspace-page">
       <header className="workspace-page-header">
+        <button
+          ref={sessionTriggerRef}
+          className="react-mobile-drawer-button"
+          type="button"
+          aria-label="打开会话列表"
+          onClick={onOpenSessions}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
         <div>
           <span className="workspace-page-eyebrow">WORKSPACE / {sessionTitle}</span>
           <h1>{workspace.data?.worktree?.branch || "会话工作区"}</h1>

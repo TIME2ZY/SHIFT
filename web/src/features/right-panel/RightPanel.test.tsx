@@ -15,6 +15,10 @@ function renderPanel() {
     <QueryClientProvider client={queryClient}>
       <RightPanel
         sessionId="session-1"
+        selectedAgentId="codex"
+        run={null}
+        open={false}
+        onClose={() => undefined}
         agents={[
           {
             id: "codex",
@@ -32,42 +36,70 @@ afterEach(() => {
 });
 
 describe("RightPanel", () => {
-  it("shows agents without loading inactive remote panels", () => {
-    const fetchMock = vi.fn();
+  it("shows per-agent usage without loading inactive memories", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          available: true,
+          session: { totalTokens: 2400 },
+          agents: [
+            {
+              agentId: "codex",
+              billing: { inputTokens: 1200, outputTokens: 1200, totalTokens: 2400 },
+              context: {
+                usableContextTokens: 200000,
+                contextUsedTokens: 80000,
+                budgetFillRatio: 0.4,
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     renderPanel();
 
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("负责实现与验证。")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "Agent",
-      "记忆",
-      "Recall",
-    ]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Agent", "记忆"]);
+    expect(await screen.findByText("本会话 2.4k tokens")).toBeInTheDocument();
+    expect(screen.getByText("40% · 充足")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("loads active memories on demand", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          memories: [
-            {
-              id: "memory-1",
-              kind: "decision",
-              topic: "前端架构",
-              content: "使用 React 和 TanStack Query。",
-              status: "active",
-            },
-          ],
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }
-      )
-    );
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/usage")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ available: false, session: {}, agents: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            memories: [
+              {
+                id: "memory-1",
+                kind: "decision",
+                topic: "前端架构",
+                content: "使用 React 和 TanStack Query。",
+                status: "active",
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     renderPanel();

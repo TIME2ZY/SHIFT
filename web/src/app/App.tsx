@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppNavigation } from "./navigation";
 import { useAgentsQuery } from "../features/agents/queries";
 import { findExplicitLeadingAgent } from "../features/agents/routing";
@@ -10,7 +10,6 @@ import { RightPanel } from "../features/right-panel/RightPanel";
 import { SessionList } from "../features/sessions/SessionList";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
-import { UsageSummaryBadge } from "../features/usage/UsageSummaryBadge";
 import { WorkspacePage } from "../features/workspace/WorkspacePage";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
@@ -44,6 +43,11 @@ export function App() {
   const deleteSession = useDeleteSessionMutation();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [agentBySession, setAgentBySession] = useState<Record<string, string>>({});
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const sidebarCloseRef = useRef<HTMLButtonElement>(null);
+  const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
+  const infoTriggerRef = useRef<HTMLButtonElement>(null);
 
   const activeSession =
     (selectedSessionId
@@ -60,6 +64,26 @@ export function App() {
     agents.data?.[0]?.id ||
     "";
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+    window.requestAnimationFrame(() => sidebarTriggerRef.current?.focus());
+  }, []);
+
+  const closeInfoPanel = useCallback(() => {
+    setInfoPanelOpen(false);
+    window.requestAnimationFrame(() => infoTriggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarOpen || !window.matchMedia("(max-width: 720px)").matches) return;
+    sidebarCloseRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSidebar();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeSidebar, sidebarOpen]);
 
   function selectAgent(agentId: string) {
     if (!activeSessionId) return;
@@ -99,8 +123,13 @@ export function App() {
   }
 
   return (
-    <div className="react-shell" data-page={navigation.page}>
-      <aside className="react-sidebar" aria-label="对话列表">
+    <div
+      className="react-shell"
+      data-page={navigation.page}
+      data-sidebar-open={sidebarOpen || undefined}
+      data-info-open={infoPanelOpen || undefined}
+    >
+      <aside className="react-sidebar" aria-label="对话列表" data-open={sidebarOpen || undefined}>
         <header className="react-brand">
           <span className="react-brand-mark" aria-hidden="true">
             ⇄
@@ -109,6 +138,15 @@ export function App() {
             <strong>SHIFT</strong>
             <small>多智能体交班台</small>
           </span>
+          <button
+            ref={sidebarCloseRef}
+            className="react-sidebar-close"
+            type="button"
+            aria-label="关闭会话列表"
+            onClick={closeSidebar}
+          >
+            ×
+          </button>
         </header>
 
         <nav className="react-app-nav" aria-label="主要功能">
@@ -150,7 +188,10 @@ export function App() {
           deletingSessionId={deleteSession.isPending ? deleteSession.variables : null}
           onCreate={createNewSession}
           onDelete={removeSession}
-          onSelect={setSelectedSessionId}
+          onSelect={(sessionId) => {
+            setSelectedSessionId(sessionId);
+            if (window.matchMedia("(max-width: 720px)").matches) closeSidebar();
+          }}
           onRetry={() => void sessions.refetch()}
         />
         {createSession.error || deleteSession.error ? (
@@ -164,17 +205,44 @@ export function App() {
         <>
           <main id="main-content" className="react-chat">
             <header className="react-chat-header">
+              <button
+                ref={sidebarTriggerRef}
+                className="react-mobile-drawer-button"
+                type="button"
+                aria-label="打开会话列表"
+                aria-expanded={sidebarOpen}
+                onClick={() => {
+                  setInfoPanelOpen(false);
+                  setSidebarOpen(true);
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
               <div>
                 <span className="react-chat-eyebrow">当前对话</span>
                 <strong>{activeSession?.title || activeSessionId || "未选择"}</strong>
               </div>
               <div className="react-chat-actions">
-                <UsageSummaryBadge sessionId={activeSessionId} agentId={selectedAgentId} />
                 <span className="react-run-status" data-status={run?.status || "idle"}>
                   {statusLabel(run?.status)}
                 </span>
                 <button type="button" onClick={() => navigation.navigate("workspace")}>
                   查看工作区
+                </button>
+                <button
+                  ref={infoTriggerRef}
+                  className="react-info-panel-button"
+                  type="button"
+                  aria-expanded={infoPanelOpen}
+                  aria-controls="react-right-panel"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setInfoPanelOpen(true);
+                  }}
+                >
+                  Agent 与记忆
                 </button>
               </div>
             </header>
@@ -200,7 +268,14 @@ export function App() {
             />
           </main>
 
-          <RightPanel sessionId={activeSessionId} agents={agents.data ?? []} />
+          <RightPanel
+            sessionId={activeSessionId}
+            agents={agents.data ?? []}
+            selectedAgentId={selectedAgentId}
+            run={run}
+            open={infoPanelOpen}
+            onClose={closeInfoPanel}
+          />
         </>
       ) : (
         <WorkspacePage
@@ -208,8 +283,32 @@ export function App() {
           sessionTitle={activeSession?.title || activeSessionId || "未选择"}
           worktreeAttached={Boolean(activeSession?.worktree)}
           onOpenChat={() => navigation.navigate("chat")}
+          onOpenSessions={() => {
+            setInfoPanelOpen(false);
+            setSidebarOpen(true);
+          }}
+          sessionTriggerRef={sidebarTriggerRef}
         />
       )}
+
+      {sidebarOpen ? (
+        <button
+          className="react-drawer-backdrop react-sidebar-backdrop"
+          type="button"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={closeSidebar}
+        />
+      ) : null}
+      {infoPanelOpen ? (
+        <button
+          className="react-drawer-backdrop react-info-backdrop"
+          type="button"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={closeInfoPanel}
+        />
+      ) : null}
     </div>
   );
 }

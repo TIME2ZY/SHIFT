@@ -145,7 +145,7 @@ React 是默认前端。执行 `npm start` 会先完成前端构建，再通过
 [http://127.0.0.1:8787/](http://127.0.0.1:8787/) 打开控制台。`npm run dev:web`
 会为 Node API 与 Vite 生成并共享同一个临时 UI Token，开发入口为
 [http://127.0.0.1:5173/](http://127.0.0.1:5173/)。旧界面暂时保留在
-[http://127.0.0.1:8787/legacy/](http://127.0.0.1:8787/legacy/) 作为回退入口。
+旧版静态前端已经移除，根路径只提供 React 构建产物。
 
 Storage 脚本与服务共同加载项目 `.env` / `.env.local`；`SHIFT_MEMORY_DB`、
 `SHIFT_TRANSCRIPT_DIR`、`SHIFT_AUDIT_TRANSCRIPT_DIR` 是默认路径，命令行显式参数优先。
