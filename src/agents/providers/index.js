@@ -1,6 +1,7 @@
 const { codexProvider } = require("./codex");
 const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
+const { grokAcpAdapter } = require("./grok-acp");
 const { antigravityProvider } = require("./antigravity");
 const { requireModelProfile } = require("../catalog");
 const {
@@ -15,6 +16,8 @@ const { windowsUtf8Environment } = require("../windows-runtime");
 const { limitCanonicalEvent } = require("../event-size-policy");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
+
+grokProvider.acp = grokAcpAdapter;
 
 function isTruthyEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || ""));
@@ -117,7 +120,9 @@ function validateProviderConfig(config) {
  */
 function createProviderRuntime(config, options = {}) {
   const { adapter } = validateProviderConfig(config);
-  const runtime = adapter.createRuntime(config);
+  const transportAdapter =
+    options.transport === "acp" && adapter.acp ? adapter.acp : adapter;
+  const runtime = transportAdapter.createRuntime(config);
   if (!runtime || typeof runtime.transform !== "function") {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
   }
@@ -267,6 +272,18 @@ function buildProviderInvocation(config, prompt) {
   return adapter.buildInvocation(config, prompt);
 }
 
+function getProviderTransportAdapter(config, transport = config?.transport || "cli") {
+  const { adapter } = validateProviderConfig(config);
+  if (transport === "cli") return adapter;
+  if (transport === "acp" && adapter.acp) return adapter.acp;
+  throw new Error(`Provider "${adapter.id}" does not support transport "${transport}".`);
+}
+
+function buildProviderTransportInvocation(config, prompt, transport = config?.transport || "cli") {
+  const adapter = getProviderTransportAdapter(config, transport);
+  return adapter.buildInvocation(config, prompt);
+}
+
 function resolveProviderRunOptions(config, options = {}, env = process.env) {
   const { adapter } = validateProviderConfig(config);
   const proxy =
@@ -332,6 +349,8 @@ module.exports = {
   validateProviderOptions,
   createProviderRuntime,
   buildProviderInvocation,
+  buildProviderTransportInvocation,
+  getProviderTransportAdapter,
   resolveProviderRunOptions,
   buildProviderEnvironment,
   getProviderDiagnostics,

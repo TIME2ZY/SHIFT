@@ -16,7 +16,7 @@ function statusLabel(status: InvocationTool["status"]): string {
 export function ToolCallDetails({ tool }: { tool: InvocationTool }) {
   const output = tool.error || tool.output || "";
   const input = tool.input ? JSON.stringify(tool.input, null, 2) : "";
-  const [expanded, setExpanded] = useState(tool.status === "running");
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <details

@@ -2,6 +2,7 @@ const { AGENTS } = require("./catalog");
 const {
   createProviderRuntime,
   buildProviderInvocation,
+  buildProviderTransportInvocation,
   buildProviderEnvironment,
   getProviderDiagnostics,
 } = require("./providers");
@@ -17,6 +18,7 @@ const {
 const { ENV } = require("../shared/brand");
 const { ROOT } = require("../shared/runtime-paths");
 const { loadProjectEnv } = require("../shared/load-env");
+const { invokeAcp } = require("./invoke-acp");
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -161,7 +163,8 @@ function invoke(cli, prompt, options = {}) {
   // CLI session; if absent, cold start.
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
-  const { command, args } = buildInvocation(resolvedCli, prompt);
+  const transport = resolvedCli.transport || "cli";
+  const { command, args } = buildProviderTransportInvocation(resolvedCli, prompt, transport);
   const { env: childEnv, runOptions: resolvedRun } = buildProviderEnvironment(
     config,
     runOptions,
@@ -177,6 +180,27 @@ function invoke(cli, prompt, options = {}) {
 
   for (const line of getProviderDiagnostics(config, runOptions, process.env)) {
     console.error(line);
+  }
+
+  if (transport === "acp") {
+    return invokeAcp({
+      config: { ...resolvedCli, prompt },
+      command,
+      args,
+      env: childEnv,
+      cwd: process.cwd(),
+      eventContext: {
+        agent: config.id || providerId,
+        invocationId,
+      },
+      onEvent: (event) => {
+        process.stdout.write(`${JSON.stringify(event)}\n`);
+      },
+      onRawEvent: (raw) => rawLogger.log(raw),
+      onSessionId: (sessionId) => persistSessionId(config, sessionId),
+      timeoutMs: resolvedRun.timeoutMs,
+      killGraceMs: resolvedRun.killGraceMs,
+    });
   }
 
   return superviseProviderProcess({
@@ -204,7 +228,7 @@ function invoke(cli, prompt, options = {}) {
   });
 }
 
-function main() {
+async function main() {
   let parsed;
   try {
     parsed = parseArgs(process.argv.slice(2));
@@ -221,7 +245,7 @@ function main() {
   }
 
   try {
-    invoke(parsed.cli, parsed.prompt, parsed.options);
+    await invoke(parsed.cli, parsed.prompt, parsed.options);
   } catch (error) {
     console.error(error.message);
     process.exit(1);

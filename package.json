@@ -58,6 +58,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.3.0",
     "@tanstack/react-query": "^5.101.4",
     "better-sqlite3": "^12.11.1",
     "dompurify": "^3.4.12",

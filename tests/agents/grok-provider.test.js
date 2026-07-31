@@ -43,12 +43,14 @@ test("buildInvocation for grok spawns local grok CLI headless", () => {
   assert.ok(inv.args.includes("--no-subagents"));
 });
 
-test("grok capabilities: thinking yes, tools no (streaming-json has no tool stream)", () => {
+test("grok capabilities expose ACP tools while retaining CLI transport metadata", () => {
   const { getProviderAdapter } = require("../../src/agents/providers");
-  const caps = getProviderAdapter("grok").capabilities;
+  const adapter = getProviderAdapter("grok");
+  const caps = adapter.capabilities;
   assert.equal(caps.thinking, true);
-  assert.equal(caps.tools, false);
+  assert.equal(caps.tools, true);
   assert.equal(caps.resume, true);
+  assert.equal(adapter.cliCapabilities.tools, false);
 });
 
 test("buildInvocation can re-enable subagents via providerOptions", () => {
