@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppNavigation } from "./navigation";
+import { AgentAvatar } from "../features/agents/AgentAvatar";
 import { useAgentsQuery } from "../features/agents/queries";
 import { findExplicitLeadingAgent } from "../features/agents/routing";
 import { Composer } from "../features/chat/Composer";
@@ -15,6 +16,18 @@ import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provid
 import type { RunStatus } from "../runtime/types";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running"]);
+const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
+
+function readAgentPreferences(): Record<string, string> {
+  try {
+    const value = window.localStorage.getItem(AGENT_PREFERENCES_KEY);
+    if (!value) return {};
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
 
 function statusLabel(status: RunStatus | undefined): string {
   switch (status) {
@@ -42,7 +55,8 @@ export function App() {
   const createSession = useCreateSessionMutation();
   const deleteSession = useDeleteSessionMutation();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [agentBySession, setAgentBySession] = useState<Record<string, string>>({});
+  const [agentBySession, setAgentBySession] =
+    useState<Record<string, string>>(readAgentPreferences);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
@@ -63,6 +77,7 @@ export function App() {
     activeSession?.lastAgent ||
     agents.data?.[0]?.id ||
     "";
+  const selectedAgent = agents.data?.find((agent) => agent.id === selectedAgentId);
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
 
   const closeSidebar = useCallback(() => {
@@ -85,6 +100,10 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeSidebar, sidebarOpen]);
 
+  useEffect(() => {
+    window.localStorage.setItem(AGENT_PREFERENCES_KEY, JSON.stringify(agentBySession));
+  }, [agentBySession]);
+
   function selectAgent(agentId: string) {
     if (!activeSessionId) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
@@ -95,7 +114,6 @@ export function App() {
     const explicitAgent = findExplicitLeadingAgent(prompt, agents.data ?? []);
     const targetAgentId = explicitAgent?.id || selectedAgentId;
     if (!targetAgentId) return Promise.resolve();
-    if (explicitAgent) selectAgent(explicitAgent.id);
     return chat.send(activeSessionId, targetAgentId, prompt, useWorktree);
   }
 
@@ -109,9 +127,8 @@ export function App() {
 
   function removeSession(sessionId: string) {
     const session = sessions.data?.find((item) => item.id === sessionId);
-    const label = session?.title || sessionId;
-    if (!window.confirm(`删除对话“${label}”？此操作不能撤销。`)) return;
-
+    const title = session?.title?.trim() || sessionId;
+    if (!window.confirm(`确认删除对话「${title}」？此操作不可撤销。`)) return;
     deleteSession.mutate(sessionId, {
       onSuccess() {
         runStore.dispose(sessionId);
@@ -132,7 +149,9 @@ export function App() {
       <aside className="react-sidebar" aria-label="对话列表" data-open={sidebarOpen || undefined}>
         <header className="react-brand">
           <span className="react-brand-mark" aria-hidden="true">
-            ⇄
+            <svg viewBox="0 0 24 24">
+              <path d="M5 7h12m0 0-3-3m3 3-3 3M19 17H7m0 0 3-3m-3 3 3 3" />
+            </svg>
           </span>
           <span>
             <strong>SHIFT</strong>
@@ -145,7 +164,9 @@ export function App() {
             aria-label="关闭会话列表"
             onClick={closeSidebar}
           >
-            ×
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
           </button>
         </header>
 
@@ -175,7 +196,7 @@ export function App() {
         </nav>
 
         <div className="react-sidebar-title">
-          <span>对话</span>
+          <span>最近会话</span>
           {sessions.isFetching ? <span className="react-sync-label">同步中</span> : null}
         </div>
 
@@ -220,17 +241,21 @@ export function App() {
                   <path d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
-              <div>
-                <span className="react-chat-eyebrow">当前对话</span>
-                <strong>{activeSession?.title || activeSessionId || "未选择"}</strong>
+              <div className="react-chat-title">
+                <strong title={activeSession?.title || activeSessionId || "未选择"}>
+                  {activeSession?.title || activeSessionId || "未选择"}
+                </strong>
+                {selectedAgent ? (
+                  <small className="react-chat-agent">
+                    <AgentAvatar agentId={selectedAgent.id} label={selectedAgent.label} compact />
+                    {selectedAgent.label}
+                  </small>
+                ) : null}
               </div>
               <div className="react-chat-actions">
                 <span className="react-run-status" data-status={run?.status || "idle"}>
                   {statusLabel(run?.status)}
                 </span>
-                <button type="button" onClick={() => navigation.navigate("workspace")}>
-                  查看工作区
-                </button>
                 <button
                   ref={infoTriggerRef}
                   className="react-info-panel-button"
@@ -242,13 +267,18 @@ export function App() {
                     setInfoPanelOpen(true);
                   }}
                 >
-                  Agent 与记忆
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="12" cy="8" r="3" />
+                    <path d="M6.5 19c.7-3.2 2.5-5 5.5-5s4.8 1.8 5.5 5" />
+                  </svg>
+                  <span>Agent 与记忆</span>
                 </button>
               </div>
             </header>
 
             <MessageList
               messages={messages.data ?? []}
+              agents={agents.data ?? []}
               run={run}
               isLoading={messages.isPending && Boolean(activeSessionId)}
               error={messages.error}
@@ -260,7 +290,6 @@ export function App() {
               agents={agents.data ?? []}
               selectedAgentId={selectedAgentId}
               running={running}
-              onAgentChange={selectAgent}
               onSend={sendPrompt}
               onStop={() => {
                 if (activeSessionId) chat.stop(activeSessionId);
@@ -275,13 +304,13 @@ export function App() {
             run={run}
             open={infoPanelOpen}
             onClose={closeInfoPanel}
+            onAgentChange={selectAgent}
           />
         </>
       ) : (
         <WorkspacePage
           sessionId={activeSessionId}
           sessionTitle={activeSession?.title || activeSessionId || "未选择"}
-          worktreeAttached={Boolean(activeSession?.worktree)}
           onOpenChat={() => navigation.navigate("chat")}
           onOpenSessions={() => {
             setInfoPanelOpen(false);

@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { memoryQueryKeys, type MemoryInjectEvent } from "../memory/queries";
+import { queryKeys } from "../../shared/api/queryKeys";
+import type { MemoryInjectEvent } from "../memory/queries";
 import { useToast } from "../notifications/ToastProvider";
-import { sessionQueryKeys } from "../sessions/queries";
 import { runChatStream } from "../../runtime/chat-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
 
@@ -25,16 +25,15 @@ export function useChatActions() {
       });
 
       let resultSessionId = sessionId;
+      let memoryDirty = false;
       try {
         const result = await runChatStream(
           { sessionId, agentId, prompt: content, useWorktree },
           store,
           controller,
           {
-            onMemory(payload, eventSessionId) {
-              void queryClient.invalidateQueries({
-                queryKey: memoryQueryKeys.list(eventSessionId),
-              });
+            onMemory(payload) {
+              memoryDirty = true;
               toast.show(
                 payload.action === "invalidate" ? "Agent 已否定一条记忆" : "Agent 已写入记忆",
                 { variant: "ok" }
@@ -42,17 +41,18 @@ export function useChatActions() {
             },
             onMemoryInject(payload, eventSessionId) {
               const memoryInject = payload as MemoryInjectEvent;
-              queryClient.setQueryData(memoryQueryKeys.inject(eventSessionId), memoryInject);
+              queryClient.setQueryData(
+                queryKeys.sessions.memoryInject(eventSessionId),
+                memoryInject
+              );
               const count = Number(memoryInject.count || memoryInject.items?.length || 0);
               if (count > 0) {
                 toast.show(`本回合注入 ${count} 条记忆`, { variant: "ok" });
               }
             },
-            onMemoryMetrics(payload, eventSessionId) {
+            onMemoryMetrics(payload) {
               if (Number(payload.totalWrites || 0) > 0) {
-                void queryClient.invalidateQueries({
-                  queryKey: memoryQueryKeys.list(eventSessionId),
-                });
+                memoryDirty = true;
               }
             },
             onRunError(message) {
@@ -84,15 +84,23 @@ export function useChatActions() {
       } finally {
         const owned = store.releaseController(resultSessionId, controller);
         if (owned) {
-          await Promise.all([
+          const syncs = [
             queryClient.invalidateQueries({
-              queryKey: sessionQueryKeys.messages(resultSessionId),
+              queryKey: queryKeys.sessions.messages(resultSessionId),
             }),
             queryClient.invalidateQueries({
-              queryKey: sessionQueryKeys.usage(resultSessionId),
+              queryKey: queryKeys.sessions.usage(resultSessionId),
             }),
-            queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),
-          ]);
+            queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
+          ];
+          if (memoryDirty) {
+            syncs.push(
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.sessions.memories(resultSessionId),
+              })
+            );
+          }
+          await Promise.all(syncs);
           store.dispatch({ type: "run/synced", sessionId: resultSessionId });
         }
       }

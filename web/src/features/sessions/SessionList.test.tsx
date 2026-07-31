@@ -48,4 +48,24 @@ describe("SessionList", () => {
     expect(onDelete).toHaveBeenCalledWith("s1");
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("filters sessions by title or Agent", async () => {
+    render(
+      <SessionList
+        sessions={[
+          { id: "s1", title: "前端重构", lastAgent: "codex" },
+          { id: "s2", title: "存储审计", lastAgent: "gemini" },
+        ]}
+        activeSessionId="s1"
+        isLoading={false}
+        error={null}
+        onSelect={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "搜索会话" }), "gemini");
+    expect(screen.queryByText("前端重构")).not.toBeInTheDocument();
+    expect(screen.getByText("存储审计")).toBeInTheDocument();
+  });
 });

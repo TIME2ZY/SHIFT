@@ -23,7 +23,7 @@ const DIFF = [
   "+export const beta = 2;",
 ].join("\n");
 
-function renderPage(worktreeAttached = true) {
+function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -34,7 +34,6 @@ function renderPage(worktreeAttached = true) {
         <WorkspacePage
           sessionId="session-1"
           sessionTitle="React migration"
-          worktreeAttached={worktreeAttached}
           onOpenChat={onOpenChat}
           onOpenSessions={vi.fn()}
           sessionTriggerRef={{ current: null }}
@@ -103,11 +102,14 @@ describe("WorkspacePage", () => {
       if (input.startsWith("/api/project?")) {
         return Promise.resolve(new Response(JSON.stringify({ dir: "C:/projects/shift" })));
       }
+      if (input.endsWith("/worktree/status")) {
+        return Promise.resolve(new Response(JSON.stringify({ error: "missing" }), { status: 404 }));
+      }
       throw new Error(`Unexpected request: ${input}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { onOpenChat } = renderPage(false);
+    const { onOpenChat } = renderPage();
     expect(await screen.findByText("这个会话还没有隔离工作区")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "编辑" }));
     await userEvent.clear(screen.getByRole("textbox", { name: "项目目录" }));

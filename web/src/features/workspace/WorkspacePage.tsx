@@ -7,7 +7,6 @@ import { useWorkspaceDetailQuery } from "./queries";
 interface WorkspacePageProps {
   sessionId: string | null;
   sessionTitle: string;
-  worktreeAttached: boolean;
   onOpenChat(): void;
   onOpenSessions(): void;
   sessionTriggerRef: RefObject<HTMLButtonElement | null>;
@@ -76,12 +75,11 @@ function DiffView({ file }: { file: WorkspaceDiffFile }) {
 export function WorkspacePage({
   sessionId,
   sessionTitle,
-  worktreeAttached,
   onOpenChat,
   onOpenSessions,
   sessionTriggerRef,
 }: WorkspacePageProps) {
-  const workspace = useWorkspaceDetailQuery(sessionId, worktreeAttached, true);
+  const workspace = useWorkspaceDetailQuery(sessionId, true);
   const updateProjectDir = useUpdateProjectDirMutation();
   const discardWorktree = useDiscardWorktreeMutation();
   const toast = useToast();
@@ -143,7 +141,7 @@ export function WorkspacePage({
           </svg>
         </button>
         <div>
-          <span className="workspace-page-eyebrow">WORKSPACE / {sessionTitle}</span>
+          <span className="workspace-page-eyebrow">工作区 · {sessionTitle}</span>
           <h1>{workspace.data?.worktree?.branch || "会话工作区"}</h1>
           <p>检查 Agent 在隔离分支中的改动，再决定预览、继续修改或丢弃。</p>
         </div>
@@ -246,22 +244,22 @@ export function WorkspacePage({
               data-clean={workspace.data.worktree?.clean || undefined}
             >
               <div>
-                <span>BASE</span>
+                <span>基线目录</span>
                 <strong>{workspace.data.worktree?.baseDir || workspace.data.projectDir}</strong>
               </div>
               <i aria-hidden="true" />
               <div>
-                <span>SESSION BRANCH</span>
+                <span>会话分支</span>
                 <strong>{workspace.data.worktree?.branch || "尚未创建"}</strong>
               </div>
               <i aria-hidden="true" />
               <div>
-                <span>STATE</span>
+                <span>状态</span>
                 <strong>
                   {!workspace.data.worktree
                     ? "只读"
                     : workspace.data.worktree.clean
-                      ? "Clean"
+                      ? "干净"
                       : "有改动"}
                 </strong>
               </div>
@@ -274,7 +272,7 @@ export function WorkspacePage({
                 WT
               </span>
               <strong>这个会话还没有隔离工作区</strong>
-              <p>返回对话，开启「改代码」后发送任务。首次运行会自动创建 worktree。</p>
+              <p>返回对话，开启「隔离改代码」后发送任务。首次运行会自动创建 worktree。</p>
               <button type="button" onClick={onOpenChat}>
                 返回对话
               </button>
@@ -297,20 +295,20 @@ export function WorkspacePage({
             <>
               <section className="workspace-change-summary" aria-label="改动摘要">
                 <div>
-                  <span>FILES</span>
+                  <span>文件</span>
                   <strong>{summary.files}</strong>
                 </div>
                 <div>
-                  <span>ADDITIONS</span>
+                  <span>新增</span>
                   <strong data-tone="positive">+{summary.additions}</strong>
                 </div>
                 <div>
-                  <span>DELETIONS</span>
+                  <span>删除</span>
                   <strong data-tone="negative">−{summary.deletions}</strong>
                 </div>
                 <div>
-                  <span>DIFF SIZE</span>
-                  <strong>{workspace.data.diffTotalChars.toLocaleString()} chars</strong>
+                  <span>Diff 大小</span>
+                  <strong>{workspace.data.diffTotalChars.toLocaleString()} 字符</strong>
                 </div>
                 {workspace.data.diffTruncated ? (
                   <p role="status">Diff 过大，服务仅返回了截断内容。</p>

@@ -1,13 +1,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../../shared/api/queryKeys";
 import { createSession, deleteSession } from "./api";
-import { sessionQueryKeys } from "./queries";
+import type { SessionSummary } from "./types";
 
 export function useCreateSessionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: createSession,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all });
+    onSuccess: (session) => {
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions.list, (current = []) => [
+        session,
+        ...current.filter((item) => item.id !== session.id),
+      ]);
     },
   });
 }
@@ -16,9 +20,11 @@ export function useDeleteSessionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteSession,
-    onSuccess: async (_data, sessionId) => {
-      queryClient.removeQueries({ queryKey: sessionQueryKeys.messages(sessionId) });
-      await queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all });
+    onSuccess: (_data, sessionId) => {
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions.list, (current = []) =>
+        current.filter((session) => session.id !== sessionId)
+      );
+      queryClient.removeQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
     },
   });
 }

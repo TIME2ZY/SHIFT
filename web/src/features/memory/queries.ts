@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "../../shared/api/client";
+import { queryKeys } from "../../shared/api/queryKeys";
 
 export interface MemoryItem {
   id: string;
@@ -33,11 +34,6 @@ export interface MemoryInjectEvent {
   };
 }
 
-export const memoryQueryKeys = {
-  list: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
-  inject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
-};
-
 async function listMemories(sessionId: string, signal?: AbortSignal): Promise<MemoryResponse> {
   const query = new URLSearchParams({
     sessionId,
@@ -53,7 +49,7 @@ async function listMemories(sessionId: string, signal?: AbortSignal): Promise<Me
 
 export function useMemoriesQuery(sessionId: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: memoryQueryKeys.list(sessionId ?? ""),
+    queryKey: queryKeys.sessions.memories(sessionId ?? ""),
     queryFn: ({ signal }) => listMemories(sessionId!, signal),
     enabled: enabled && Boolean(sessionId),
   });
@@ -61,7 +57,7 @@ export function useMemoriesQuery(sessionId: string | null, enabled: boolean) {
 
 export function useMemoryInjectQuery(sessionId: string | null) {
   return useQuery({
-    queryKey: memoryQueryKeys.inject(sessionId ?? ""),
+    queryKey: queryKeys.sessions.memoryInject(sessionId ?? ""),
     queryFn: async (): Promise<MemoryInjectEvent | null> => null,
     enabled: false,
     initialData: null,

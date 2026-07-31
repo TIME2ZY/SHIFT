@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, authenticatedFetch } from "../../shared/api/client";
+import { queryKeys } from "../../shared/api/queryKeys";
 
 export interface WorktreeStatus {
   branch?: string;
@@ -21,30 +22,14 @@ export interface WorkspaceDetail extends WorkspaceSnapshot {
   diffTotalChars: number;
 }
 
-export const workspaceQueryKeys = {
-  session: (sessionId: string) => ["sessions", sessionId, "workspace"] as const,
-  detail: (sessionId: string, worktreeAttached: boolean) =>
-    [...workspaceQueryKeys.session(sessionId), worktreeAttached] as const,
-};
-
-async function readWorkspace(
-  sessionId: string,
-  worktreeAttached: boolean,
-  signal?: AbortSignal
-): Promise<WorkspaceSnapshot> {
+async function readWorkspace(sessionId: string, signal?: AbortSignal): Promise<WorkspaceSnapshot> {
   const projectQuery = new URLSearchParams({ sessionId });
-  const project = await apiRequest<{ dir?: string }>(`/api/project?${projectQuery}`, {
-    signal,
-  });
-
-  if (!worktreeAttached) {
-    return { projectDir: project.dir || "", worktree: null };
-  }
-
-  const statusResponse = await authenticatedFetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/worktree/status`,
-    { signal }
-  );
+  const [project, statusResponse] = await Promise.all([
+    apiRequest<{ dir?: string }>(`/api/project?${projectQuery}`, { signal }),
+    authenticatedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/status`, {
+      signal,
+    }),
+  ]);
 
   if ([400, 404].includes(statusResponse.status)) {
     return { projectDir: project.dir || "", worktree: null };
@@ -58,15 +43,11 @@ async function readWorkspace(
   return { projectDir: project.dir || "", worktree };
 }
 
-export function useWorkspaceDetailQuery(
-  sessionId: string | null,
-  worktreeAttached: boolean,
-  enabled: boolean
-) {
+export function useWorkspaceDetailQuery(sessionId: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: workspaceQueryKeys.detail(sessionId ?? "", worktreeAttached),
+    queryKey: queryKeys.sessions.workspace(sessionId ?? ""),
     queryFn: async ({ signal }): Promise<WorkspaceDetail> => {
-      const workspace = await readWorkspace(sessionId!, worktreeAttached, signal);
+      const workspace = await readWorkspace(sessionId!, signal);
       if (!workspace.worktree) {
         return {
           ...workspace,

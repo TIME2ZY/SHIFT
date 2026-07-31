@@ -23,6 +23,7 @@ describe("AgentUsageCard", () => {
         agent={{ id: "codex", label: "Codex", description: "负责实现。" }}
         status="running"
         selected
+        onSelect={() => undefined}
         usage={{
           agentId: "codex",
           billing: { inputTokens: 1200, outputTokens: 1200, totalTokens: 2400 },

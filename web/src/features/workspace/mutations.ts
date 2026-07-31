@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../../shared/api/client";
-import { sessionQueryKeys } from "../sessions/queries";
-import { workspaceQueryKeys } from "./queries";
+import { queryKeys } from "../../shared/api/queryKeys";
 
 interface UpdateProjectDirInput {
   sessionId: string;
@@ -32,8 +31,8 @@ export function useUpdateProjectDirMutation() {
     mutationFn: updateProjectDir,
     onSuccess: async (_dir, { sessionId }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.session(sessionId) }),
-        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.workspace(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
       ]);
     },
   });
@@ -46,8 +45,8 @@ export function useDiscardWorktreeMutation() {
     mutationFn: discardWorktree,
     onSuccess: async (_data, sessionId) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.session(sessionId) }),
-        queryClient.invalidateQueries({ queryKey: sessionQueryKeys.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.workspace(sessionId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
       ]);
     },
   });

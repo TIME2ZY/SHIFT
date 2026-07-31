@@ -3,7 +3,6 @@ import type { SessionRun } from "../../runtime/types";
 import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery, useMemoryInjectQuery } from "../memory/queries";
 import { AgentUsageCard, type AgentActivityStatus } from "../usage/AgentUsageCard";
-import { compactTokens } from "../usage/format";
 import { useUsageQuery } from "../usage/queries";
 
 type PanelTab = "agents" | "memory";
@@ -15,6 +14,7 @@ interface RightPanelProps {
   run: SessionRun | null;
   open: boolean;
   onClose(): void;
+  onAgentChange(agentId: string): void;
 }
 
 const TABS: ReadonlyArray<readonly [PanelTab, string]> = [
@@ -41,15 +41,29 @@ export function RightPanel({
   run,
   open,
   onClose,
+  onAgentChange,
 }: RightPanelProps) {
   const [tab, setTab] = useState<PanelTab>("agents");
+  const [compactLayout, setCompactLayout] = useState(
+    () => window.matchMedia?.("(max-width: 1050px)").matches ?? false
+  );
   const closeRef = useRef<HTMLButtonElement>(null);
   const memories = useMemoriesQuery(sessionId, tab === "memory");
   const memoryInject = useMemoryInjectQuery(sessionId);
-  const usage = useUsageQuery(sessionId);
+  const usage = useUsageQuery(sessionId, tab === "agents" && (!compactLayout || open));
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 1050px)");
+    if (!media) return;
+    const sync = () => setCompactLayout(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!open || !window.matchMedia("(max-width: 1050px)").matches) return;
+    setTab("agents");
     closeRef.current?.focus();
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -89,7 +103,9 @@ export function RightPanel({
       <header className="react-panel-mobile-header">
         <strong>Agent 与记忆</strong>
         <button ref={closeRef} type="button" aria-label="关闭 Agent 与记忆" onClick={onClose}>
-          ×
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
         </button>
       </header>
 
@@ -120,24 +136,24 @@ export function RightPanel({
             aria-labelledby="right-panel-tab-agents"
             tabIndex={0}
           >
-            <div className="react-panel-section-heading">
-              <p className="react-panel-kicker">当前团队</p>
-              {usage.data?.available ? (
-                <span>本会话 {compactTokens(usage.data.session.totalTokens)} tokens</span>
-              ) : null}
-            </div>
+            {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
             {usage.error ? (
               <p className="react-panel-error" role="status">
                 用量暂不可用，Agent 信息不受影响。
               </p>
             ) : null}
-            <div className="react-agent-cards">
+            <div className="react-agent-cards" role="radiogroup" aria-label="当前会话 Agent">
               {agents.map((agent) => (
                 <AgentUsageCard
                   agent={agent}
                   usage={usage.data?.agents.find((item) => item.agentId === agent.id)}
                   status={activityStatus(agent.id, run)}
                   selected={selectedAgentId === agent.id}
+                  disabled={!sessionId}
+                  onSelect={(agentId) => {
+                    onAgentChange(agentId);
+                    if (compactLayout) onClose();
+                  }}
                   key={agent.id}
                 />
               ))}
@@ -152,7 +168,6 @@ export function RightPanel({
             aria-labelledby="right-panel-tab-memory"
             tabIndex={0}
           >
-            <p className="react-panel-kicker">ACTIVE MEMORY</p>
             {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
             {memories.isPending && sessionId ? (
               <p className="react-panel-empty">正在读取记忆…</p>
@@ -182,8 +197,8 @@ export function RightPanel({
               {memories.data?.memories.map((memory) => (
                 <article key={memory.id}>
                   <header>
-                    <span>{memory.kind || "memory"}</span>
-                    <small>{memory.scope || memory.status || "active"}</small>
+                    <span>{memory.kind || "记忆"}</span>
+                    <small>{memory.scope || memory.status || "有效"}</small>
                   </header>
                   {memory.topic ? <strong>{memory.topic}</strong> : null}
                   <p>{memory.content}</p>

@@ -33,7 +33,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
 }
@@ -67,9 +68,21 @@ button {
 :focus {
   outline: none;
 }
+
 :focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+/* Containers that own their own focus ring should silence child rings */
+.react-session-search input:focus,
+.react-session-search input:focus-visible,
+.react-session-item:focus,
+.react-session-item:focus-visible,
+.react-agent-picker select:focus,
+.react-agent-picker select:focus-visible {
+  box-shadow: none;
+  outline: none;
 }
 
 ::-webkit-scrollbar {
@@ -90,59 +103,117 @@ button {
   background-clip: padding-box;
 }
 
-/* Shared message identity shell (user + agent). Brand/user glyphs sit inside. */
-.msg-avatar,
+/* ── Avatars ───────────────────────────────────────────────
+   Sit outside message bubbles. Clean disk + soft identity tint. */
+
 .agent-avatar,
 .user-avatar {
   position: relative;
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 10px;
-  color: light-dark(#111318, #f5f6f8);
-  background: light-dark(#ffffff, #12141c);
-  box-shadow: 0 1px 2px color-mix(in srgb, #0f1412 7%, transparent);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
 }
 
-.msg-avatar svg,
-.agent-avatar svg,
-.user-avatar svg {
+/* Agent: soft agent-color wash + crisp brand mark */
+.agent-avatar {
+  color: var(--agent-color, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--agent-color, var(--border)) 32%, transparent);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--surface-instrument-raised)),
+    color-mix(in srgb, var(--agent-color, var(--accent)) 4%, var(--surface-instrument-raised))
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+}
+
+.agent-avatar img {
   display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.agent-avatar-initial {
+  font: 700 13px/1 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+
+.agent-avatar[data-agent-brand="gemini"] img {
   width: 19px;
   height: 19px;
 }
 
-.agent-avatar[data-agent-brand="gemini"] svg {
-  width: 21px;
-  height: 21px;
+.agent-avatar[data-agent-brand="grok"] img {
+  border-radius: 3px;
 }
 
-.agent-avatar[data-agent-brand="opencode"] {
-  border-radius: 7px;
+/* Only invert monochrome brand marks in dark mode */
+:root[data-theme="dark"] .agent-avatar[data-agent-brand="codex"] img,
+:root[data-theme="dark"] .agent-avatar[data-agent-brand="openai"] img,
+:root[data-theme="dark"] .agent-avatar[data-agent-brand="opencode"] img {
+  filter: invert(1);
 }
 
-.agent-avatar-fallback {
-  color: var(--agent-color, var(--accent));
-  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface-canvas));
-  font: 700 13px/1 var(--font-ui);
-}
-
-/* User avatar: accent-filled counterpart to agent brand marks */
+/* User: soft indigo disk + refined outline person icon */
 .user-avatar {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow:
-    0 1px 2px color-mix(in srgb, #0f1412 8%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  color: light-dark(#4f46e5, #c4b5fd);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, #fff 55%, transparent), transparent 52%),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--accent) 22%, #eef0ff),
+      color-mix(in srgb, var(--accent) 10%, #dfe4fb)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent);
+}
+
+:root[data-theme="dark"] .user-avatar {
+  background:
+    radial-gradient(circle at 32% 28%, color-mix(in srgb, #fff 12%, transparent), transparent 55%),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--accent) 28%, #1c1f2e),
+      color-mix(in srgb, var(--accent) 12%, #151822)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
 }
 
 .user-avatar svg {
-  width: 17px;
-  height: 17px;
+  display: block;
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.agent-avatar-compact,
+.user-avatar-compact {
+  width: 22px;
+  height: 22px;
+}
+
+.agent-avatar-compact img {
+  width: 12px;
+  height: 12px;
+}
+
+.agent-avatar-compact .agent-avatar-initial {
+  font-size: 10px;
+}
+
+.user-avatar-compact svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.85;
 }
 
 /* Global motion defaults — honor reduced-motion */
@@ -157,8 +228,7 @@ button {
   }
 }
 
-/* Shared command buttons (composer, confirm, workspace actions)
-   UI font — not mono. Only .primary is solid accent. */
+/* Shared command buttons */
 .btn-cmd {
   display: inline-flex;
   align-items: center;
@@ -205,7 +275,6 @@ button {
   color: var(--text-secondary);
 }
 
-/* Sole solid primary CTA in the product chrome */
 .btn-cmd.primary {
   min-height: var(--btn-height);
   padding: 8px 18px;
@@ -237,7 +306,6 @@ button {
   box-shadow: var(--focus-ring-danger);
 }
 
-/* Primary + danger (e.g. Send → Stop): solid danger CTA */
 .btn-cmd.primary.danger {
   color: var(--danger-text);
   background: var(--danger);
