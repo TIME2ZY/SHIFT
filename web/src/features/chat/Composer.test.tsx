@@ -118,6 +118,34 @@ describe("Composer", () => {
     expect(onDraftSeedApplied).toHaveBeenCalledTimes(2);
   });
 
+  it("enables worktree mode only when an external draft seed explicitly requests it", async () => {
+    const props = {
+      sessionId: "s1",
+      agents: [{ id: "codex", label: "Codex" }],
+      selectedAgentId: "codex",
+      running: false,
+      onDraftSeedApplied: vi.fn(),
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+    };
+    const { rerender } = render(
+      <Composer {...props} draftSeed={{ id: 1, text: "普通推荐提示" }} />
+    );
+    const toggle = screen.getByRole("checkbox", { name: "隔离改代码" });
+    expect(toggle).not.toBeChecked();
+
+    rerender(
+      <Composer
+        {...props}
+        draftSeed={{ id: 2, text: "重构推荐提示", useWorktree: true }}
+      />
+    );
+    expect(toggle).toBeChecked();
+
+    rerender(<Composer {...props} draftSeed={{ id: 3, text: "另一个普通推荐提示" }} />);
+    expect(toggle).toBeChecked();
+  });
+
   it("offers @Agent completion without changing the default target", async () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(

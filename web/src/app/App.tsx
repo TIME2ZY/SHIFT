@@ -318,7 +318,11 @@ export function App() {
               onOpenWorkspace={() => navigation.navigate("workspace")}
               onUsePrompt={(prompt) => {
                 draftSeedIdRef.current += 1;
-                setComposerDraftSeed({ id: draftSeedIdRef.current, text: prompt });
+                setComposerDraftSeed({
+                  id: draftSeedIdRef.current,
+                  text: prompt.prompt,
+                  useWorktree: prompt.useWorktree,
+                });
               }}
             />
 
