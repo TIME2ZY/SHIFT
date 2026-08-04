@@ -59,7 +59,10 @@ test("contextCharsFromEvent counts thinking and tool content without duplicates"
     }),
     JSON.stringify({ status: "ok", rows: [1, 2] }).length
   );
-  assert.equal(chatRoutes.contextCharsFromEvent({ type: "text.delta", text: "counted elsewhere" }), 0);
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({ type: "text.delta", text: "counted elsewhere" }),
+    0
+  );
   assert.equal(chatRoutes.contextCharsFromEvent({ type: "usage.update", outputTokens: 5 }), 0);
 });
 
@@ -104,8 +107,17 @@ function baseDeps(res, overrides = {}) {
       appendEvent() {},
       flush: async () => {},
     },
-    contextHealth: { makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }) },
-    sessionSealer: { makeSealer: () => ({ isSealed: () => false, update: () => "active", getState: () => "active", thresholds: { warn: 0.8 } }) },
+    contextHealth: {
+      makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
+    },
+    sessionSealer: {
+      makeSealer: () => ({
+        isSealed: () => false,
+        update: () => "active",
+        getState: () => "active",
+        thresholds: { warn: 0.8 },
+      }),
+    },
     sessionBootstrap: {
       buildBootstrapPacket: async () => ({ packet: "", inject: { items: [], stats: {} } }),
       buildIdentity: () => "<!-- Session Identity -->\n",
@@ -124,7 +136,13 @@ function baseDeps(res, overrides = {}) {
         hasBlock: false,
       }),
       renderHandoffTask: () => "[任务交接]\n",
-      summarizeHandoff: () => ({ hasBlock: false, ok: false, degraded: true, score: 0, missing: [] }),
+      summarizeHandoff: () => ({
+        hasBlock: false,
+        ok: false,
+        degraded: true,
+        score: 0,
+        missing: [],
+      }),
       normalizeTo: (v) => String(v || "").toLowerCase(),
     },
     worktreeManager: {},
@@ -157,9 +175,13 @@ function baseDeps(res, overrides = {}) {
 
 test("handleChatRoutes returns 400 when /api/invoke body parsing fails", async () => {
   const res = makeRes();
-  const handle = chatRoutes.createChatRoutes(baseDeps(res, {
-    readJsonBody: async () => { throw new Error("bad json"); },
-  }));
+  const handle = chatRoutes.createChatRoutes(
+    baseDeps(res, {
+      readJsonBody: async () => {
+        throw new Error("bad json");
+      },
+    })
+  );
 
   const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/invoke"));
   assert.equal(handled, true);
@@ -169,11 +191,17 @@ test("handleChatRoutes returns 400 when /api/invoke body parsing fails", async (
 
 test("handleChatRoutes rejects unsupported agents before starting chat", async () => {
   const res = makeRes();
-  const handle = chatRoutes.createChatRoutes(baseDeps(res, {
-    readJsonBody: async () => ({ agent: "unknown", prompt: "hi" }),
-  }));
+  const handle = chatRoutes.createChatRoutes(
+    baseDeps(res, {
+      readJsonBody: async () => ({ agent: "unknown", prompt: "hi" }),
+    })
+  );
 
-  const handled = await handle(makeReq("POST", { host: "127.0.0.1:8787" }), res, new URL("http://127.0.0.1/api/chat"));
+  const handled = await handle(
+    makeReq("POST", { host: "127.0.0.1:8787" }),
+    res,
+    new URL("http://127.0.0.1/api/chat")
+  );
   assert.equal(handled, true);
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { error: 'Unsupported agent "unknown".' });
@@ -220,5 +248,5 @@ test("a slower older chat request cannot abort the newer request", async () => {
   assert.equal(res1.statusCode, 409);
   assert.match(res1.body.error, /superseded/);
   assert.equal(appended.length, 1);
-  assert.equal(appended[0][2].content, "newer");
+  assert.equal(appended[0][1].content, "newer");
 });

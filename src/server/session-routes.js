@@ -3,7 +3,6 @@ const { projectInvocationProcess } = require("./invocation-process");
 
 function createSessionRoutes({
   rootDir,
-  sessionsFile,
   worktreeManager,
   cleanupSessionRuntime,
   sendJson,
@@ -39,26 +38,26 @@ function createSessionRoutes({
     if (req.method === "GET" && url.pathname === "/api/messages") {
       const sessionId = url.searchParams.get("sessionId");
       if (sessionId) {
-        const session = getSession(sessionsFile, sessionId);
+        const session = getSession(sessionId);
         if (!session) {
           sendJson(res, 404, { error: "Session not found." });
           return true;
         }
         sendJson(res, 200, { messages: session.messages });
       } else {
-        const sessions = listSessions(sessionsFile);
+        const sessions = listSessions();
         if (sessions.length === 0) {
           sendJson(res, 200, { messages: [] });
           return true;
         }
-        const session = getSession(sessionsFile, sessions[0].id);
+        const session = getSession(sessions[0].id);
         sendJson(res, 200, { messages: session ? session.messages : [] });
       }
       return true;
     }
 
     if (req.method === "GET" && url.pathname === "/api/sessions") {
-      sendJson(res, 200, { sessions: listSessions(sessionsFile) });
+      sendJson(res, 200, { sessions: listSessions() });
       return true;
     }
 
@@ -68,7 +67,7 @@ function createSessionRoutes({
     if (processMatch && req.method === "GET") {
       const sessionId = processMatch[1];
       const invocationId = processMatch[2];
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -103,7 +102,7 @@ function createSessionRoutes({
     const usageMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/usage$/);
     if (usageMatch && req.method === "GET") {
       const sessionId = usageMatch[1];
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -118,7 +117,7 @@ function createSessionRoutes({
     }
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
-      sendJson(res, 201, { session: createSession(sessionsFile) });
+      sendJson(res, 201, { session: createSession() });
       return true;
     }
 
@@ -126,7 +125,7 @@ function createSessionRoutes({
     if (sessionMatch) {
       const sessionId = sessionMatch[1];
       if (req.method === "GET") {
-        const session = getSession(sessionsFile, sessionId);
+        const session = getSession(sessionId);
         if (!session) {
           sendJson(res, 404, { error: "Session not found." });
           return true;
@@ -137,7 +136,7 @@ function createSessionRoutes({
 
       if (req.method === "DELETE") {
         await cleanupSessionRuntime(sessionId);
-        const deleted = deleteSession(sessionsFile, sessionId);
+        const deleted = deleteSession(sessionId);
         if (!deleted) {
           sendJson(res, 404, { error: "Session not found." });
           return true;
@@ -153,7 +152,7 @@ function createSessionRoutes({
     if (worktreeMatch) {
       const sessionId = worktreeMatch[1];
       const action = worktreeMatch[2];
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -174,7 +173,7 @@ function createSessionRoutes({
         }
         if (req.method === "POST" && action === "discard") {
           const result = worktreeManager.discardWorktree(sessionId);
-          setSessionWorktree(sessionsFile, sessionId, null);
+          setSessionWorktree(sessionId, null);
           sendJson(res, 200, result);
           return true;
         }
@@ -190,7 +189,7 @@ function createSessionRoutes({
         sendJson(res, 200, { dir: rootDir });
         return true;
       }
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -214,7 +213,7 @@ function createSessionRoutes({
         return true;
       }
 
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -228,7 +227,7 @@ function createSessionRoutes({
         return true;
       }
 
-      setSessionProjectDir(sessionsFile, sessionId, resolved);
+      setSessionProjectDir(sessionId, resolved);
       sendJson(res, 200, { dir: resolved });
       return true;
     }

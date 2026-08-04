@@ -89,7 +89,6 @@ function createCallbackRoutes({
   transcript,
   appendToSession,
   getSession,
-  sessionsFile,
   sendJson,
   readJsonBody,
   durableRecorder,
@@ -228,7 +227,7 @@ function createCallbackRoutes({
         return true;
       }
 
-      const session = getSession(sessionsFile, sessionId);
+      const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -453,7 +452,7 @@ function createCallbackRoutes({
         });
         return true;
       }
-      if (getSession && !getSession(sessionsFile, sessionId)) {
+      if (getSession && !getSession(sessionId)) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
       }

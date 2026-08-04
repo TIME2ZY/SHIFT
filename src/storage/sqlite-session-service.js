@@ -4,9 +4,6 @@ const { withSqliteBusyRetry } = require("./sqlite-retry");
 
 /**
  * Session API backed solely by SQLite (L1 threads + messages + recall).
- * Route-facing signatures retain the unused sessions-file slot so callers do
- * not need storage-specific argument shims.
- *
  * worktree is process-local runtime state (authoritative copy lives in the
  * worktree manager state file); it is not part of the durable thread row.
  */
@@ -63,7 +60,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     };
   }
 
-  function createSession(_sessionsFile) {
+  function createSession() {
     return attempt("create session", () => {
       const id = idFactory();
       assertValidOpaqueId(id, "sessionId");
@@ -80,12 +77,12 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     });
   }
 
-  function getSession(_sessionsFile, sessionId) {
+  function getSession(sessionId) {
     if (!isValidOpaqueId(sessionId)) return null;
     return attempt("get session", () => toSession(storage.threads.get(sessionId)));
   }
 
-  function listSessions(_sessionsFile) {
+  function listSessions() {
     return attempt("list sessions", () =>
       storage.threads.listWithMessageCounts().map((thread) => ({
         id: thread.id,
@@ -114,7 +111,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     return storage.threads.get(sessionId);
   }
 
-  function setSessionProjectDir(_sessionsFile, sessionId, projectDir) {
+  function setSessionProjectDir(sessionId, projectDir) {
     if (!isValidOpaqueId(sessionId)) return null;
     return attempt("set project dir", () => {
       const existing = storage.threads.get(sessionId);
@@ -131,19 +128,19 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     });
   }
 
-  function setSessionWorktree(_sessionsFile, sessionId, worktree) {
+  function setSessionWorktree(sessionId, worktree) {
     if (!isValidOpaqueId(sessionId)) return null;
-    const session = getSession(_sessionsFile, sessionId);
+    const session = getSession(sessionId);
     if (!session) return null;
     if (worktree) worktrees.set(sessionId, worktree);
     else worktrees.delete(sessionId);
     return { ...session, worktree: worktrees.get(sessionId) || null };
   }
 
-  function setSessionLastAgent(_sessionsFile, sessionId, lastAgent) {
+  function setSessionLastAgent(sessionId, lastAgent) {
     if (!isValidOpaqueId(sessionId)) return null;
     const agentId = typeof lastAgent === "string" ? lastAgent.trim() : "";
-    if (!agentId) return getSession(_sessionsFile, sessionId);
+    if (!agentId) return getSession(sessionId);
     return attempt("set last agent", () => {
       const existing = storage.threads.get(sessionId);
       if (!existing) return null;
@@ -159,7 +156,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     });
   }
 
-  function deleteSession(_sessionsFile, sessionId) {
+  function deleteSession(sessionId) {
     if (!isValidOpaqueId(sessionId)) return false;
     return attempt("delete session", () => {
       worktrees.delete(sessionId);
@@ -167,7 +164,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     });
   }
 
-  function appendToSession(_sessionsFile, sessionId, message, options = {}) {
+  function appendToSession(sessionId, message, options = {}) {
     if (!isValidOpaqueId(sessionId)) return null;
     return attempt("append message", () => {
       const allowCreate = options.allowCreate !== false;

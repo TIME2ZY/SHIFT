@@ -25,7 +25,6 @@ const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 //   a2aCauses,        // queue-aligned invocation causality records
 //   controller,       // AbortController for the whole chain
 //   a2aCount,         // number used as shared mutable counter
-//   sessionsFile,     // path used to persist messages
 //   tokens,           // Map<invocationId, { agentId, callbackToken, createdAt, expiresAt }>
 // }
 const activeThreads = new Map();
@@ -201,9 +200,8 @@ function postMessage(
   const record = thread.tokens && thread.tokens.get(invocationId);
   const agent = record ? record.agentId : "unknown";
 
-  if (appendToSession && thread.sessionsFile) {
+  if (appendToSession) {
     appendToSession(
-      thread.sessionsFile,
       thread.sessionId || threadId,
       {
         role: "assistant",
@@ -256,7 +254,6 @@ function postMessage(
     durableRecorder,
     sendSse: (event, payload) => sendSse(thread.res, event, payload),
     appendToSession,
-    sessionsFile: thread.sessionsFile,
     agentLabels,
     source: "callback",
     controller: thread.controller,

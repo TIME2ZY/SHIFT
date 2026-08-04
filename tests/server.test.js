@@ -1813,7 +1813,6 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
     worklist,
     controller,
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map(),
   };
 
@@ -1823,7 +1822,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   callbacks.registerThread(sessionId, threadCtx);
 
   const appended = [];
-  const appendFn = (file, sid, msg) => appended.push({ file, sid, msg });
+  const appendFn = (sid, msg) => appended.push({ sid, msg });
 
   const ok = callbacks.postMessage(sessionId, invocationId, "@Gemini 请继续实现", {
     appendToSession: appendFn,
@@ -2151,13 +2150,12 @@ test("postMessage rejects cross-thread callbacks (Thread Affinity guard)", () =>
     worklist,
     controller,
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map(),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
   const appended = [];
-  const appendFn = (file, sid, msg) => appended.push({ file, sid, msg });
+  const appendFn = (sid, msg) => appended.push({ sid, msg });
 
   // Mismatched threadId must be rejected
   const ok = callbacks.postMessage("wrong-thread", "inv-1", "hello", {
@@ -2190,13 +2188,12 @@ test("postMessage allows callbacks for the bound thread (stamped by registerThre
     worklist,
     controller,
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map(),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
   const appended = [];
-  const appendFn = (file, sid, msg) => appended.push({ file, sid, msg });
+  const appendFn = (sid, msg) => appended.push({ sid, msg });
 
   const ok = callbacks.postMessage(sessionId, "inv-1", "hello", {
     appendToSession: appendFn,

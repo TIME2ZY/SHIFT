@@ -6,8 +6,8 @@ const {
   DEFAULT_TRANSCRIPT_DIR,
 } = require("../shared/runtime-paths");
 const { CANONICAL_EVENT_TYPES } = require("../agents/event-protocol");
-const { readSessions } = require("../server/session-store");
 const { createStorage } = require("./index");
+const { readLegacySessions } = require("./legacy-session-reader");
 
 const MIRRORED_EVENT_KINDS = new Set([
   ...CANONICAL_EVENT_TYPES,
@@ -63,7 +63,7 @@ function auditDualStorage(options = {}) {
 
 function collectFileSnapshot(sessionsFile, transcriptDir, findings) {
   validateSessionsJson(sessionsFile, findings);
-  const data = readSessions(sessionsFile);
+  const data = readLegacySessions(sessionsFile);
   const threads = new Map();
   for (const [key, value] of Object.entries(data.sessions || {})) {
     const session = value && typeof value === "object" ? value : {};

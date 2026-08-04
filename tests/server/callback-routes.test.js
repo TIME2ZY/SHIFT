@@ -42,7 +42,6 @@ function makeMemoryHandle(storage, extras = {}) {
       transcript: {},
       appendToSession() {},
       getSession: () => ({ id: "s1" }),
-      sessionsFile: "sessions.json",
       sendJson: extras.sendJson,
       readJsonBody: extras.readJsonBody,
       memoryService: storage.memory,
@@ -411,7 +410,6 @@ test("handleCallbackRoutes memory-upsert validates topic and availability", asyn
       transcript: {},
       appendToSession() {},
       getSession: () => ({ id: "s1" }),
-      sessionsFile: "sessions.json",
       sendJson: makeSendJson(unavailable),
       readJsonBody: async () => ({
         sessionId: "s1",

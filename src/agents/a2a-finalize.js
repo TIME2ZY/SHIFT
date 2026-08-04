@@ -9,16 +9,10 @@ const {
   resolveCollabPhase,
   DECISIONS,
 } = require("./handoff-policy");
-const {
-  buildFinalizeMetrics,
-  logFinalizeMetrics,
-} = require("./handoff-metrics");
+const { buildFinalizeMetrics, logFinalizeMetrics } = require("./handoff-metrics");
 const handoffRouteRegistry = require("./handoff-route-registry");
 const collabTaskRegistry = require("./collab-task-registry");
-const {
-  HANDOFF_PARSE_STATUS,
-  HANDOFF_ROUTE_STATUS,
-} = require("../shared/collab-contracts");
+const { HANDOFF_PARSE_STATUS, HANDOFF_ROUTE_STATUS } = require("../shared/collab-contracts");
 
 /**
  * Unified A2A route finalization for chat turn-end and callback postMessage.
@@ -53,16 +47,14 @@ function finalizeA2ARoutes(input = {}) {
   const durableRecorder = input.durableRecorder || null;
   const eventStore = input.eventStore || durableRecorder?.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
-  const appendToSession = typeof input.appendToSession === "function" ? input.appendToSession : null;
-  const sessionsFile = input.sessionsFile;
+  const appendToSession =
+    typeof input.appendToSession === "function" ? input.appendToSession : null;
   const sessionId = input.sessionId || threadId;
   const agentLabels = input.agentLabels || {};
   const source = input.source || "chat";
   const logger = input.logger || console;
   const aborted =
-    input.controller && input.controller.signal && input.controller.signal.aborted
-      ? true
-      : false;
+    input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
   let a2aCount = Number.isFinite(Number(input.a2aCount)) ? Number(input.a2aCount) : 0;
   const mode = input.policyMode || resolveHandoffPolicyMode();
@@ -94,9 +86,7 @@ function finalizeA2ARoutes(input = {}) {
     });
     const handoff = handoffMatch.handoff;
     const contentHash = handoffRouteRegistry.hashHandoffContent(handoff, target);
-    const parseStatus = handoff
-      ? HANDOFF_PARSE_STATUS.PARSED
-      : HANDOFF_PARSE_STATUS.FAILED;
+    const parseStatus = handoff ? HANDOFF_PARSE_STATUS.PARSED : HANDOFF_PARSE_STATUS.FAILED;
     const quality = agentHandoff.evaluateHandoff(handoff, {
       routedTo: target,
       toAgentId: target,
@@ -202,7 +192,6 @@ function finalizeA2ARoutes(input = {}) {
         fromLabel,
         toLabel,
         sessionId,
-        sessionsFile,
         invocationId,
         transcript,
         durableRecorder,
@@ -235,9 +224,8 @@ function finalizeA2ARoutes(input = {}) {
           taskState: reject.taskState,
         });
         if (sendSse) sendSse("a2a-skipped", reject);
-        if (appendToSession && sessionsFile && sessionId) {
+        if (appendToSession && sessionId) {
           appendToSession(
-            sessionsFile,
             sessionId,
             {
               role: "system",
@@ -274,7 +262,6 @@ function finalizeA2ARoutes(input = {}) {
       emitRepair({
         repair,
         sessionId,
-        sessionsFile,
         invocationId,
         transcript,
         durableRecorder,
@@ -369,7 +356,6 @@ function finalizeA2ARoutes(input = {}) {
       fromLabel,
       toLabel,
       sessionId,
-      sessionsFile,
       invocationId,
       transcript,
       durableRecorder,
@@ -462,7 +448,6 @@ function emitSkip({
   fromLabel,
   toLabel,
   sessionId,
-  sessionsFile,
   invocationId,
   transcript,
   durableRecorder,
@@ -472,9 +457,8 @@ function emitSkip({
   source,
 }) {
   const skipText = `⏭ ${fromLabel} → ${toLabel}（已达 A2A 深度上限 ${skip.maxDepth}，未入队）`;
-  if (appendToSession && sessionsFile && sessionId) {
+  if (appendToSession && sessionId) {
     appendToSession(
-      sessionsFile,
       sessionId,
       {
         role: "system",
@@ -518,7 +502,6 @@ function emitSkip({
 function emitRepair({
   repair,
   sessionId,
-  sessionsFile,
   invocationId,
   transcript,
   durableRecorder,
@@ -527,9 +510,8 @@ function emitRepair({
   appendToSession,
   source,
 }) {
-  if (appendToSession && sessionsFile && sessionId) {
+  if (appendToSession && sessionId) {
     appendToSession(
-      sessionsFile,
       sessionId,
       {
         role: "system",
@@ -570,7 +552,6 @@ function emitRoute({
   fromLabel,
   toLabel,
   sessionId,
-  sessionsFile,
   invocationId,
   transcript,
   durableRecorder,
@@ -584,9 +565,8 @@ function emitRoute({
   const routeText = degraded
     ? `🔄 ${fromLabel} → ${toLabel}（交接包不完整 / ${entry.policy}）`
     : `🔄 ${fromLabel} → ${toLabel}`;
-  if (appendToSession && sessionsFile && sessionId) {
+  if (appendToSession && sessionId) {
     const updated = appendToSession(
-      sessionsFile,
       sessionId,
       {
         role: "system",

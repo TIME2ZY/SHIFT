@@ -212,7 +212,7 @@ function createChatRoutes({
 
     let session;
     if (!sessionId) {
-      session = createSession(options.sessionsFile || undefined);
+      session = createSession();
       sessionId = session.id;
     } else {
       try {
@@ -221,7 +221,7 @@ function createChatRoutes({
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      session = getSession(options.sessionsFile || undefined, sessionId);
+      session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
@@ -235,11 +235,7 @@ function createChatRoutes({
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      session = setSessionProjectDir(
-        options.sessionsFile || undefined,
-        sessionId,
-        resolvedProjectDir
-      );
+      session = setSessionProjectDir(sessionId, resolvedProjectDir);
     }
     const sessionProjectDir = session && session.projectDir ? session.projectDir : rootDir;
 
@@ -247,7 +243,7 @@ function createChatRoutes({
     if (useWorktree && !sessionWorktree) {
       try {
         sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
-        session = setSessionWorktree(options.sessionsFile || undefined, sessionId, sessionWorktree);
+        session = setSessionWorktree(sessionId, sessionWorktree);
       } catch (error) {
         sendJson(res, 400, { error: error.message });
         return true;
@@ -279,11 +275,7 @@ function createChatRoutes({
       if (targetGitRoot && targetGitRoot === selfGitRoot) {
         try {
           sessionWorktree = await worktreeManager.startPreview(sessionId);
-          session = setSessionWorktree(
-            options.sessionsFile || undefined,
-            sessionId,
-            sessionWorktree
-          );
+          session = setSessionWorktree(sessionId, sessionWorktree);
         } catch (error) {
           console.warn("Preview server failed to start:", error.message);
         }
@@ -383,7 +375,6 @@ function createChatRoutes({
     }
 
     const sessionAfterUser = appendToSession(
-      options.sessionsFile || undefined,
       sessionId,
       {
         role: "user",
@@ -440,7 +431,6 @@ function createChatRoutes({
       worklist,
       controller: invocationController,
       a2aCount: 0,
-      sessionsFile: options.sessionsFile,
       tokens: new Map(),
       currentInvocationId: null,
       windowId: null,
@@ -935,8 +925,7 @@ function createChatRoutes({
           const rotateCapacity = resolveRotateCapacity({
             agentId: agent,
             getAgentCapacity: contextHealth.getAgentCapacity,
-            previousCapacity:
-              durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
+            previousCapacity: durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
             explicitCapacity: opts.capacityTokens,
           });
           const sealReason = formatSealReason(reason, partial);
@@ -975,9 +964,8 @@ function createChatRoutes({
             workspaceKey,
             generation: durableRun?.window?.generation || null,
             nextCapacityTokens: rotateCapacity,
-            missingFields: partial && !String(assistantContent || "").trim()
-              ? ["assistantContent"]
-              : [],
+            missingFields:
+              partial && !String(assistantContent || "").trim() ? ["assistantContent"] : [],
           });
           const capture = memories.captureWindowSeal({
             threadId: sessionId,
@@ -1431,7 +1419,6 @@ function createChatRoutes({
           durableRecorder: durable,
           sendSse: (event, payload) => sendSse(res, event, payload),
           appendToSession,
-          sessionsFile: options.sessionsFile,
           agentLabels,
           source: "chat",
           parseMentions: parseA2AMentions,
