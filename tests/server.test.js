@@ -288,7 +288,10 @@ test("streams child stdout and exit events", async () => {
       assert.equal(response.status, 200);
       assert.equal(calls.length, 1);
       assert.equal(calls[0].command, process.execPath);
-      assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
+      assert.equal(
+        calls[0].args[0],
+        path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
+      );
       assert.equal(calls[0].args[1], "--agent");
       assert.equal(calls[0].args[2], "opencode");
       assert.ok(
@@ -359,7 +362,10 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       const text = await response.text();
 
       assert.equal(response.status, 200);
-      assert.equal(calls[0].args[0], "src/agents/invoke-cli.js");
+      assert.equal(
+        calls[0].args[0],
+        path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
+      );
       assert.equal(calls[0].args[1], "--agent");
       assert.equal(calls[0].args[2], "opencode");
       assert.ok(
@@ -1155,8 +1161,108 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       assert.equal(worktreeCalls[0].requestedBaseDir, baseDir);
       assert.equal(worktreeCalls[0].sessionId, sessionId);
       assert.equal(calls[0].cwd, worktreeDir);
+      assert.equal(
+        calls[0].args[0],
+        path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
+      );
       assert.equal(calls[0].env.SHIFT_WORKTREE, "1");
       assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
+    }
+  );
+});
+
+test("worktree A2A lets OpenCode review files changed by Grok in the same workspace", async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-base-"));
+  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-session-"));
+  const runs = [];
+  let reviewedContent = "";
+  const grokOut = [
+    "@OpenCode",
+    "",
+    "```handoff",
+    "to: opencode",
+    "goal: Review the implementation",
+    "what: Grok changed review-target.txt",
+    "why: Verify the worktree diff",
+    "tradeoff: none",
+    "next_action: Read and review the changed file",
+    "files:",
+    "  - review-target.txt",
+    "```",
+  ].join("\n");
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree({ sessionId }) {
+          return {
+            sessionId,
+            baseDir,
+            worktreeDir,
+            branch: `codex/session-${sessionId}`,
+            status: "active",
+            createdAt: "2026-08-04T00:00:00.000Z",
+          };
+        },
+      },
+      spawnRunner(_command, args, options) {
+        const agent = args[2];
+        runs.push({ agent, cwd: options.cwd, runnerPath: args[0] });
+        const child = createMockChild();
+        process.nextTick(() => {
+          if (agent === "grok") {
+            fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "grok",
+                invocationId: "worktree-grok",
+                text: grokOut,
+              }) + "\n"
+            );
+          } else {
+            reviewedContent = fs.readFileSync(
+              path.join(options.cwd, "review-target.txt"),
+              "utf8"
+            );
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "opencode",
+                invocationId: "worktree-opencode",
+                text: "reviewed",
+              }) + "\n"
+            );
+          }
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "grok",
+          prompt: "implement and request review",
+          projectDir: baseDir,
+          useWorktree: true,
+        }),
+      });
+      await response.text();
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(
+        runs.map(({ agent, cwd }) => ({ agent, cwd })),
+        [
+          { agent: "grok", cwd: worktreeDir },
+          { agent: "opencode", cwd: worktreeDir },
+        ]
+      );
+      assert.equal(reviewedContent, "changed by grok\n");
+      assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
+      assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
     }
   );
 });

@@ -24,6 +24,7 @@ const STDERR_BUFFER_LIMIT = 8192;
 function superviseProviderProcess({
   command,
   args,
+  cwd = process.cwd(),
   env = process.env,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   killGraceMs = DEFAULT_KILL_GRACE_MS,
@@ -59,6 +60,7 @@ function superviseProviderProcess({
     const providerRuntime = createRuntime(lifecycle, sharedRuntimeState);
 
     const child = spawnFn(command, args, {
+      cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });

@@ -151,8 +151,12 @@ function createServer(options = {}) {
     logger,
   });
   const activeInvocations = new Map();
+  const runtimeRoot = path.resolve(
+    options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT
+  );
   const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
+    runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
   });
   _previewManagers.add(worktreeManager);
 

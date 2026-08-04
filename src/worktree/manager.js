@@ -266,6 +266,7 @@ function createWorktreeManager(opts = {}) {
       ...process.env,
       PORT: String(port),
       NODE_PATH: path.join(rootDir, "node_modules"),
+      [ENV.RUNTIME_ROOT]: rootDir,
       [ENV.PREVIEW]: "1",
     };
     const child = spawn("node", ["src/server/index.js"], {

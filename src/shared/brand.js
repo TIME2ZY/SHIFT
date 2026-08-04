@@ -42,6 +42,7 @@ const ENV = Object.freeze({
   WORKTREE_DIR: "SHIFT_WORKTREE_DIR",
   BRANCH: "SHIFT_BRANCH",
   SESSION_ID: "SHIFT_SESSION_ID",
+  RUNTIME_ROOT: "SHIFT_RUNTIME_ROOT",
 });
 
 module.exports = {
