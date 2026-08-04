@@ -164,6 +164,7 @@ function invoke(cli, prompt, options = {}) {
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const transport = resolvedCli.transport || "cli";
+  const workspaceCwd = process.env[ENV.WORKTREE_DIR] || process.cwd();
   const { command, args } = buildProviderTransportInvocation(resolvedCli, prompt, transport);
   const { env: childEnv, runOptions: resolvedRun } = buildProviderEnvironment(
     config,
@@ -188,7 +189,7 @@ function invoke(cli, prompt, options = {}) {
       command,
       args,
       env: childEnv,
-      cwd: process.cwd(),
+      cwd: workspaceCwd,
       eventContext: {
         agent: config.id || providerId,
         invocationId,
@@ -206,6 +207,7 @@ function invoke(cli, prompt, options = {}) {
   return superviseProviderProcess({
     command,
     args,
+    cwd: workspaceCwd,
     env: childEnv,
     timeoutMs: resolvedRun.timeoutMs,
     killGraceMs: resolvedRun.killGraceMs,

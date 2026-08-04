@@ -18,6 +18,10 @@ function shouldLoadAcpSession(config, initialized) {
   );
 }
 
+function loadAcpSdk() {
+  return import("@agentclientprotocol/sdk");
+}
+
 async function invokeAcp({
   config,
   command,
@@ -32,7 +36,7 @@ async function invokeAcp({
   timeoutMs = 30 * 60 * 1000,
   killGraceMs = 5000,
 }) {
-  const acp = await import("@agentclientprotocol/sdk");
+  const acp = await loadAcpSdk();
   const runtime = createProviderRuntime(config, { transport: "acp" });
   const child = spawnFn(command, args, {
     cwd,
@@ -220,6 +224,7 @@ async function invokeAcp({
 
 module.exports = {
   invokeAcp,
+  loadAcpSdk,
   preferredPermission,
   shouldLoadAcpSession,
 };

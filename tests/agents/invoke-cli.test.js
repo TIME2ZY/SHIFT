@@ -78,7 +78,7 @@ childProcess.spawn = function spawn(command, args, options = {}) {
       }) + "\\n");
       child.stdout.write(JSON.stringify({
         type: "message.part.updated",
-        part: { type: "text", text: commandBase(command) + ":" + args.join(" ") + ":" + options.env.HTTP_PROXY }
+        part: { type: "text", text: commandBase(command) + ":" + args.join(" ") + ":" + options.env.HTTP_PROXY + ":cwd=" + options.cwd }
       }) + "\\n");
     } else {
       child.stdout.write(JSON.stringify({
@@ -239,6 +239,20 @@ test("uses opencode agent for qwen3.7-plus", () => {
     )
   );
   assert.equal(result.stderr, "");
+});
+
+test("opencode runs in the explicit worktree workspace", () => {
+  const workspaceDir = path.resolve(os.tmpdir(), "shift-opencode-worktree");
+  const result = runScriptWithEnv(["--agent", "opencode", "review"], {
+    SHIFT_WORKTREE_DIR: workspaceDir,
+  });
+
+  assert.equal(result.status, 0);
+  const text = parseOutputEvents(result.stdout).find(
+    (event) => event.type === "text.delta"
+  )?.text;
+  assert.ok(text);
+  assert.equal(text.split(":cwd=")[1], workspaceDir);
 });
 
 test("invoke-cli writes normalized NDJSON events instead of plain assistant text", () => {
