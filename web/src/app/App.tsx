@@ -3,7 +3,7 @@ import { useAppNavigation } from "./navigation";
 import { AgentAvatar } from "../features/agents/AgentAvatar";
 import { useAgentsQuery } from "../features/agents/queries";
 import { findExplicitLeadingAgent } from "../features/agents/routing";
-import { Composer } from "../features/chat/Composer";
+import { Composer, type ComposerDraftSeed } from "../features/chat/Composer";
 import { useChatActions } from "../features/chat/useChatActions";
 import { MessageList } from "../features/messages/MessageList";
 import { useMessagesQuery } from "../features/messages/queries";
@@ -69,9 +69,11 @@ export function App() {
     useState<Record<string, string>>(readAgentPreferences);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const [composerDraftSeed, setComposerDraftSeed] = useState<ComposerDraftSeed | null>(null);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const infoTriggerRef = useRef<HTMLButtonElement>(null);
+  const draftSeedIdRef = useRef(0);
 
   const activeSession =
     (selectedSessionId
@@ -314,6 +316,10 @@ export function App() {
               error={messages.error}
               onRetry={() => void messages.refetch()}
               onOpenWorkspace={() => navigation.navigate("workspace")}
+              onUsePrompt={(prompt) => {
+                draftSeedIdRef.current += 1;
+                setComposerDraftSeed({ id: draftSeedIdRef.current, text: prompt });
+              }}
             />
 
             <Composer
@@ -321,6 +327,8 @@ export function App() {
               agents={agents.data ?? []}
               selectedAgentId={selectedAgentId}
               running={running}
+              draftSeed={composerDraftSeed}
+              onDraftSeedApplied={() => setComposerDraftSeed(null)}
               onSend={sendPrompt}
               onStop={() => {
                 if (activeSessionId) chat.stop(activeSessionId);

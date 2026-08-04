@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MessageList } from "./MessageList";
+import { EMPTY_CHAT_QUICK_PROMPTS, MessageList } from "./MessageList";
 
 function renderMessageList(element: ReactElement) {
   const client = new QueryClient({
@@ -17,6 +17,27 @@ afterEach(() => {
 });
 
 describe("MessageList", () => {
+  it("fills the composer when a recommended starter prompt is clicked", async () => {
+    const user = userEvent.setup();
+    const onUsePrompt = vi.fn();
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={null}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onUsePrompt={onUsePrompt}
+      />
+    );
+
+    const first = EMPTY_CHAT_QUICK_PROMPTS[0];
+    await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));
+    expect(onUsePrompt).toHaveBeenCalledWith(first.prompt);
+  });
+
   it("renders persisted and live messages in the same transcript", () => {
     renderMessageList(
       <MessageList
