@@ -14,6 +14,7 @@ import type { AgentSummary } from "../agents/types";
 export interface ComposerDraftSeed {
   id: number;
   text: string;
+  useWorktree?: true;
 }
 
 interface ComposerProps {
@@ -73,6 +74,12 @@ export function Composer({
     const text = draftSeed.text.trim();
     if (!text) return;
     setDrafts((current) => ({ ...current, [sessionId]: text }));
+    if (draftSeed.useWorktree === true) {
+      setWorktreeModes((current) => ({
+        ...current,
+        [sessionId]: true,
+      }));
+    }
     setMentionDismissed(false);
     setMentionIndex(0);
     const textarea = textareaRef.current;

@@ -9,6 +9,7 @@ export interface QuickPrompt {
   title: string;
   description: string;
   prompt: string;
+  useWorktree?: true;
 }
 
 export const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
@@ -26,6 +27,7 @@ export const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
     title: "重构项目核心模块",
     description: "隔离分支创建 Worktree，全自动重构代码",
     prompt: "请重构项目核心模块：在隔离 worktree 中全自动重构代码。",
+    useWorktree: true,
   },
 ];
 
@@ -39,7 +41,7 @@ interface MessageListProps {
   onRetry(): void;
   onOpenWorkspace?(): void;
   /** Fill the composer when user clicks a recommended starter prompt. */
-  onUsePrompt?(prompt: string): void;
+  onUsePrompt?(prompt: QuickPrompt): void;
 }
 
 interface MessageNavigationItem {
@@ -331,7 +333,7 @@ export function MessageList({
                     className="react-prompt-card"
                     key={item.title}
                     disabled={!onUsePrompt}
-                    onClick={() => onUsePrompt?.(item.prompt)}
+                    onClick={() => onUsePrompt?.(item)}
                     aria-label={`使用推荐提示：${item.title}`}
                   >
                     <strong>{item.title}</strong>

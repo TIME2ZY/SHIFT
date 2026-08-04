@@ -35,7 +35,7 @@ describe("MessageList", () => {
 
     const first = EMPTY_CHAT_QUICK_PROMPTS[0];
     await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));
-    expect(onUsePrompt).toHaveBeenCalledWith(first.prompt);
+    expect(onUsePrompt).toHaveBeenCalledWith(first);
   });
 
   it("renders persisted and live messages in the same transcript", () => {
