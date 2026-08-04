@@ -204,20 +204,14 @@ export async function runChatStream(
           type: "agent/finished",
           sessionId: boundSessionId,
           agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
-          invocationId:
-            typeof payload.invocationId === "string" ? payload.invocationId : undefined,
+          invocationId: typeof payload.invocationId === "string" ? payload.invocationId : undefined,
           failed: typeof payload.code === "number" && payload.code !== 0,
         });
         break;
 
       case "a2a-route": {
-        const from = typeof payload.from === "string" ? payload.from : "Agent";
-        const to = typeof payload.to === "string" ? payload.to : "Agent";
-        store.dispatch({
-          type: "notice/received",
-          sessionId: boundSessionId,
-          message: `${from} → ${to}`,
-        });
+        // Agent handoffs are execution metadata. They remain available in the
+        // process history, but do not interrupt the user-facing transcript.
         break;
       }
 

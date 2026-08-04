@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
+import { AgentAvatar } from "../agents/AgentAvatar";
+import type { AgentSummary } from "../agents/types";
 import { sessionDisplayTitle } from "./display";
 import type { SessionSummary } from "./types";
 
 interface SessionListProps {
   sessions: SessionSummary[];
+  agents?: AgentSummary[];
   activeSessionId: string | null;
   isLoading: boolean;
   error: Error | null;
@@ -46,6 +49,7 @@ function sessionTime(session: SessionSummary): string | null {
 
 export function SessionList({
   sessions,
+  agents = [],
   activeSessionId,
   isLoading,
   error,
@@ -117,97 +121,105 @@ export function SessionList({
     </div>
   );
 
-  if (isLoading) {
-    return (
-      <>
-        {toolbar}
-        <p className="react-sidebar-message">正在加载对话…</p>
-      </>
-    );
-  }
-
-  if (error) {
-    return (
-      <>
-        {toolbar}
+  return (
+    <div className="react-session-panel">
+      {toolbar}
+      {isLoading ? <p className="react-sidebar-message">正在加载对话…</p> : null}
+      {error ? (
         <div className="react-sidebar-message" role="alert">
           <p>无法加载对话：{error.message}</p>
           <button type="button" onClick={onRetry}>
             重新加载
           </button>
         </div>
-      </>
-    );
-  }
-
-  if (sessions.length === 0) {
-    return (
-      <>
-        {toolbar}
+      ) : null}
+      {!isLoading && !error && sessions.length === 0 ? (
         <p className="react-sidebar-message">还没有对话。</p>
-      </>
-    );
-  }
-
-  return (
-    <>
-      {toolbar}
-      <nav className="react-session-list" aria-label="已有对话">
-        {groupedSessions.size === 0 ? (
-          <p className="react-sidebar-message">没有匹配的会话。</p>
-        ) : null}
-        {[...groupedSessions.entries()].map(([group, groupSessions]) => (
-          <section className="react-session-group" aria-label={group} key={group}>
-            <h2>{group}</h2>
-            {groupSessions.map((session) => {
-              const active = session.id === activeSessionId;
-              const time = sessionTime(session);
-              const label = sessionLabel(session);
-              const deleting = deletingSessionId === session.id;
-              return (
-                <div
-                  className="react-session-row"
-                  data-active={active || undefined}
-                  key={session.id}
-                >
-                  <button
-                    type="button"
-                    className="react-session-item"
-                    aria-label={label}
-                    title={label}
+      ) : null}
+      {!isLoading && !error && sessions.length > 0 ? (
+        <nav className="react-session-list" aria-label="已有对话">
+          {groupedSessions.size === 0 ? (
+            <p className="react-sidebar-message">没有匹配的会话。</p>
+          ) : null}
+          {[...groupedSessions.entries()].map(([group, groupSessions]) => (
+            <section className="react-session-group" aria-label={group} key={group}>
+              <h2>{group}</h2>
+              {groupSessions.map((session) => {
+                const active = session.id === activeSessionId;
+                const time = sessionTime(session);
+                const label = sessionLabel(session);
+                const deleting = deletingSessionId === session.id;
+                const participantIds = session.participantAgentIds?.length
+                  ? session.participantAgentIds
+                  : session.lastAgent
+                    ? [session.lastAgent]
+                    : [];
+                const participantNames = participantIds.map(
+                  (agentId) => agents.find((agent) => agent.id === agentId)?.label || agentId
+                );
+                return (
+                  <div
+                    className="react-session-row"
                     data-active={active || undefined}
-                    aria-current={active ? "page" : undefined}
-                    onClick={() => onSelect(session.id)}
+                    key={session.id}
                   >
-                    <span>{label}</span>
-                    <small>
-                      {session.lastAgent || "未分派"}
-                      {time ? ` · ${time}` : ""}
-                    </small>
-                  </button>
-                  {onDelete ? (
                     <button
-                      className="react-session-delete"
                       type="button"
-                      aria-label={`删除对话 ${label}`}
-                      disabled={deleting}
-                      onClick={() => onDelete(session.id)}
+                      className="react-session-item"
+                      aria-label={label}
+                      title={label}
+                      data-active={active || undefined}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => onSelect(session.id)}
                     >
-                      {deleting ? (
-                        <span className="react-session-delete-progress" aria-hidden="true" />
-                      ) : (
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M8 8v9m4-9v9m4-9v9M5 5h14M9 5l1-2h4l1 2m2 0-1 15H8L7 5" />
-                        </svg>
-                      )}
+                      <span className="react-session-title-text">{label}</span>
+                      {participantIds.length || time ? (
+                        <span className="react-session-meta">
+                          {participantIds.length ? (
+                            <span
+                              className="react-agent-stack"
+                              aria-label={`参与 Agent：${participantNames.join("、")}`}
+                            >
+                              {participantIds.map((agentId) => (
+                                <AgentAvatar
+                                  agentId={agentId}
+                                  label={
+                                    agents.find((agent) => agent.id === agentId)?.label || agentId
+                                  }
+                                  compact
+                                  key={agentId}
+                                />
+                              ))}
+                            </span>
+                          ) : null}
+                          {time ? <small>{time}</small> : null}
+                        </span>
+                      ) : null}
                     </button>
-                  ) : null}
-                </div>
-              );
-            })}
-          </section>
-        ))}
-      </nav>
-    </>
+                    {onDelete ? (
+                      <button
+                        className="react-session-delete"
+                        type="button"
+                        aria-label={`删除对话 ${label}`}
+                        disabled={deleting}
+                        onClick={() => onDelete(session.id)}
+                      >
+                        {deleting ? (
+                          <span className="react-session-delete-progress" aria-hidden="true" />
+                        ) : (
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M8 8v9m4-9v9m4-9v9M5 5h14M9 5l1-2h4l1 2m2 0-1 15H8L7 5" />
+                          </svg>
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
+        </nav>
+      ) : null}
+    </div>
   );
 }

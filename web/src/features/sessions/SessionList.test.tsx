@@ -84,4 +84,31 @@ describe("SessionList", () => {
     expect(screen.getByRole("button", { name: "(空对话)" })).toBeInTheDocument();
     expect(screen.queryByText("opaque-session-id")).not.toBeInTheDocument();
   });
+
+  it("shows participating Agent logos without rendering their names", () => {
+    render(
+      <SessionList
+        sessions={[
+          {
+            id: "s1",
+            title: "协作会话",
+            participantAgentIds: ["codex", "gemini"],
+          },
+        ]}
+        agents={[
+          { id: "codex", label: "Codex" },
+          { id: "gemini", label: "Gemini" },
+        ]}
+        activeSessionId="s1"
+        isLoading={false}
+        error={null}
+        onSelect={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("参与 Agent：Codex、Gemini")).toBeInTheDocument();
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gemini")).not.toBeInTheDocument();
+  });
 });

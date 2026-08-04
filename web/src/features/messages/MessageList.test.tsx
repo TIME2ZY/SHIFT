@@ -177,4 +177,58 @@ describe("MessageList", () => {
     await user.click(screen.getByText("read_file"));
     expect(screen.getByText("文件内容")).toBeInTheDocument();
   });
+
+  it("keeps handoff metadata out of the transcript", () => {
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          { id: "m1", role: "user", content: "开始协作" },
+          {
+            id: "m2",
+            role: "system",
+            kind: "a2a-route",
+            messageType: "a2a-route",
+            content: "Codex → Gemini",
+          },
+          { id: "m3", role: "assistant", agentId: "gemini", content: "已完成" },
+        ]}
+        agents={[{ id: "gemini", label: "Gemini" }]}
+        run={null}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Codex → Gemini")).not.toBeInTheDocument();
+    expect(screen.getByText("开始协作")).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+  });
+
+  it("replaces the optimistic user bubble once the persisted message arrives", () => {
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[{ id: "m1", role: "user", content: "不要重复我" }]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={{
+          sessionId: "s1",
+          status: "running",
+          updatedAt: 1,
+          doneReceived: false,
+          liveMessages: {},
+          invocations: {},
+          notices: [],
+          optimisticUser: { agentId: "codex", content: "不要重复我" },
+        }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText("不要重复我")).toHaveLength(1);
+    expect(screen.queryByText("发送中")).not.toBeInTheDocument();
+  });
 });

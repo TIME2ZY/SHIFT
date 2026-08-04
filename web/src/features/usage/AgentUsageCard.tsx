@@ -68,7 +68,7 @@ export function AgentUsageCard({
         onClick={select}
         onKeyDown={handleKeyDown}
       >
-        <AgentAvatar agentId={agent.id} label={agent.label} compact />
+        <AgentAvatar agentId={agent.id} label={agent.label} prominent />
         <span className="react-agent-identity">
           <span>
             <strong>{agent.label}</strong>

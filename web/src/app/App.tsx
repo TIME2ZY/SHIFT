@@ -30,7 +30,7 @@ function readAgentPreferences(): Record<string, string> {
   }
 }
 
-function statusLabel(status: RunStatus | undefined): string {
+function statusLabel(status: RunStatus | undefined): string | null {
   switch (status) {
     case "connecting":
       return "连接中";
@@ -43,8 +43,17 @@ function statusLabel(status: RunStatus | undefined): string {
     case "aborted":
       return "已停止";
     default:
-      return "就绪";
+      return null;
   }
+}
+
+function uniqueAgentIds(values: Array<string | undefined>): string[] {
+  const ids = new Set<string>();
+  for (const value of values) {
+    const id = value?.trim();
+    if (id && id !== "system") ids.add(id);
+  }
+  return [...ids];
 }
 
 export function App() {
@@ -78,9 +87,17 @@ export function App() {
     activeSession?.lastAgent ||
     agents.data?.[0]?.id ||
     "";
-  const selectedAgent = agents.data?.find((agent) => agent.id === selectedAgentId);
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
   const activeSessionTitle = sessionDisplayTitle(activeSession);
+  const activeParticipantIds = uniqueAgentIds([
+    ...(activeSession?.participantAgentIds ?? []),
+    ...(messages.data ?? []).map((message) => message.agentId || message.agent),
+    ...Object.keys(run?.liveMessages ?? {}),
+  ]);
+  const activeParticipantNames = activeParticipantIds.map(
+    (agentId) => agents.data?.find((agent) => agent.id === agentId)?.label || agentId
+  );
+  const activeStatusLabel = statusLabel(run?.status);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -204,6 +221,7 @@ export function App() {
 
         <SessionList
           sessions={sessions.data ?? []}
+          agents={agents.data ?? []}
           activeSessionId={activeSessionId}
           isLoading={sessions.isPending}
           error={sessions.error}
@@ -245,17 +263,28 @@ export function App() {
               </button>
               <div className="react-chat-title">
                 <strong title={activeSessionTitle}>{activeSessionTitle}</strong>
-                {selectedAgent ? (
-                  <small className="react-chat-agent">
-                    <AgentAvatar agentId={selectedAgent.id} label={selectedAgent.label} compact />
-                    {selectedAgent.label}
-                  </small>
+                {activeParticipantIds.length ? (
+                  <span
+                    className="react-chat-agent react-agent-stack"
+                    aria-label={`参与 Agent：${activeParticipantNames.join("、")}`}
+                  >
+                    {activeParticipantIds.map((agentId) => (
+                      <AgentAvatar
+                        agentId={agentId}
+                        label={agents.data?.find((agent) => agent.id === agentId)?.label || agentId}
+                        compact
+                        key={agentId}
+                      />
+                    ))}
+                  </span>
                 ) : null}
               </div>
               <div className="react-chat-actions">
-                <span className="react-run-status" data-status={run?.status || "idle"}>
-                  {statusLabel(run?.status)}
-                </span>
+                {activeStatusLabel ? (
+                  <span className="react-run-status" data-status={run?.status}>
+                    {activeStatusLabel}
+                  </span>
+                ) : null}
                 <button
                   ref={infoTriggerRef}
                   className="react-info-panel-button"

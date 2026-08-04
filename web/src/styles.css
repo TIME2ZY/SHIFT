@@ -28,9 +28,12 @@ body {
 }
 
 .react-sidebar {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
   padding: var(--space-3);
-  overflow: auto;
+  overflow: hidden;
   background: var(--surface-rail);
   border-right: 1px solid var(--border-subtle);
 }
@@ -161,10 +164,20 @@ body {
   margin-bottom: var(--space-3);
 }
 
+.react-session-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .react-session-list {
   display: grid;
+  min-height: 0;
   gap: var(--space-3);
   padding-bottom: var(--space-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .react-session-search {
@@ -373,11 +386,26 @@ body {
   }
 }
 
-.react-session-item span,
+.react-session-title-text,
 .react-session-item small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.react-session-meta {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-agent-stack {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
 }
 
 .react-session-item small {
@@ -439,9 +467,7 @@ body {
 .react-chat-agent {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   color: var(--text-tertiary);
-  font: 12px/1.2 var(--font-ui);
 }
 
 .react-chat-actions {
@@ -684,6 +710,12 @@ body {
 
 .react-message[data-role="assistant"] {
   margin-right: auto;
+}
+
+.react-message[data-role="assistant"] .react-message-main,
+.react-message[data-role="assistant"] .react-message-bubble,
+.react-message[data-role="assistant"] .react-process-timeline {
+  width: 100%;
 }
 
 .react-message + .react-message,
