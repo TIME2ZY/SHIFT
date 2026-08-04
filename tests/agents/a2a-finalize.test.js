@@ -68,8 +68,7 @@ test("finalize enqueues complete handoff under balanced", () => {
     policyMode: "balanced",
     sendSse: (kind, payload) => events.push({ kind, payload }),
     transcript: {
-      appendEvent: (threadId, inv, kind, payload) =>
-        events.push({ threadId, inv, kind, payload }),
+      appendEvent: (threadId, inv, kind, payload) => events.push({ threadId, inv, kind, payload }),
     },
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });
@@ -101,8 +100,7 @@ test("finalize request_repair on worktree empty packet under balanced", () => {
     a2aCount: 0,
     maxDepth: 15,
     policyMode: "balanced",
-    sessionsFile: "sessions.json",
-    appendToSession: (file, sid, msg) => sessions.push({ file, sid, msg }),
+    appendToSession: (sid, msg) => sessions.push({ sid, msg }),
     sendSse: (kind, payload) => events.push({ kind, payload }),
     transcript: {
       appendEvent: (_t, _i, kind, payload) => events.push({ kind, payload }),
@@ -231,7 +229,7 @@ test("A2A causality stays queue-aligned when the same agent re-enters", () => {
   const worklist = ["codex"];
   const state = { a2aCauses: [] };
   let messageNo = 0;
-  const appendToSession = (_file, _sessionId, message) => ({
+  const appendToSession = (_sessionId, message) => ({
     messages: [{ ...message, id: `route-${++messageNo}` }],
   });
 
@@ -244,7 +242,6 @@ test("A2A causality stays queue-aligned when the same agent re-enters", () => {
     worklist,
     a2aCount: 0,
     policyMode: "balanced",
-    sessionsFile: "sessions.json",
     appendToSession,
     a2aState: state,
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
@@ -258,7 +255,6 @@ test("A2A causality stays queue-aligned when the same agent re-enters", () => {
     worklist,
     a2aCount: 1,
     policyMode: "balanced",
-    sessionsFile: "sessions.json",
     appendToSession,
     a2aState: state,
     agentLabels: { codex: "Codex", opencode: "OpenCode" },

@@ -23,7 +23,6 @@ test("handleSessionRoutes lists sessions", async () => {
   const res = makeRes();
   const handle = sessionRoutes.createSessionRoutes({
     rootDir: "/root",
-    sessionsFile: "/tmp/sessions.json",
     worktreeManager: {},
     cleanupSessionRuntime() {},
     sendJson: makeSendJson(res),
@@ -50,7 +49,6 @@ test("handleSessionRoutes returns per-agent usage summary", async () => {
   const summary = { available: true, session: { totalTokens: 12 }, agents: [] };
   const handle = sessionRoutes.createSessionRoutes({
     rootDir: "/root",
-    sessionsFile: "/tmp/sessions.json",
     worktreeManager: {},
     cleanupSessionRuntime() {},
     sendJson: makeSendJson(res),
@@ -90,14 +88,13 @@ test("handleSessionRoutes projects a persisted invocation process across pages",
   ];
   const handle = sessionRoutes.createSessionRoutes({
     rootDir: "/root",
-    sessionsFile: "/tmp/sessions.json",
     worktreeManager: {},
     cleanupSessionRuntime() {},
     sendJson: makeSendJson(res),
     readJsonBody: async () => ({}),
     listSessions: () => [],
     createSession: () => null,
-    getSession: (_file, id) => (id === "s1" ? { id } : null),
+    getSession: (id) => (id === "s1" ? { id } : null),
     deleteSession: () => false,
     setSessionWorktree: () => null,
     validateProjectDir: () => "/root",
@@ -156,7 +153,6 @@ test("handleSessionRoutes updates projectDir for an existing session", async () 
   let setArgs = null;
   const handle = sessionRoutes.createSessionRoutes({
     rootDir: "/root",
-    sessionsFile: "/tmp/sessions.json",
     worktreeManager: {},
     cleanupSessionRuntime() {},
     sendJson: makeSendJson(res),
@@ -167,8 +163,8 @@ test("handleSessionRoutes updates projectDir for an existing session", async () 
     deleteSession: () => false,
     setSessionWorktree: () => null,
     validateProjectDir: (dir) => `${dir}/validated`,
-    setSessionProjectDir: (file, sessionId, dir) => {
-      setArgs = { file, sessionId, dir };
+    setSessionProjectDir: (sessionId, dir) => {
+      setArgs = { sessionId, dir };
       return { id: sessionId, projectDir: dir };
     },
   });
@@ -176,7 +172,6 @@ test("handleSessionRoutes updates projectDir for an existing session", async () 
   const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/project"));
   assert.equal(handled, true);
   assert.deepEqual(setArgs, {
-    file: "/tmp/sessions.json",
     sessionId: "s1",
     dir: "/next/validated",
   });
@@ -189,7 +184,6 @@ test("handleSessionRoutes discards a worktree and clears the session link", asyn
   let cleared = null;
   const handle = sessionRoutes.createSessionRoutes({
     rootDir: "/root",
-    sessionsFile: "/tmp/sessions.json",
     worktreeManager: {
       discardWorktree(sessionId) {
         return { ok: true, sessionId };
@@ -202,8 +196,8 @@ test("handleSessionRoutes discards a worktree and clears the session link", asyn
     createSession: () => null,
     getSession: () => ({ id: "s1" }),
     deleteSession: () => false,
-    setSessionWorktree: (file, sessionId, value) => {
-      cleared = { file, sessionId, value };
+    setSessionWorktree: (sessionId, value) => {
+      cleared = { sessionId, value };
       return { id: sessionId, worktree: value };
     },
     validateProjectDir: () => "/root",
@@ -217,7 +211,6 @@ test("handleSessionRoutes discards a worktree and clears the session link", asyn
   );
   assert.equal(handled, true);
   assert.deepEqual(cleared, {
-    file: "/tmp/sessions.json",
     sessionId: "s1",
     value: null,
   });

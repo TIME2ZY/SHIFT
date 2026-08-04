@@ -11,7 +11,6 @@ function createMemoryRoutes({
   memoryService = null,
   storage = null,
   getSession,
-  sessionsFile,
   sendJson,
   readJsonBody,
   logger = console,
@@ -36,7 +35,7 @@ function createMemoryRoutes({
         sendJson(res, 400, { error: "sessionId is required." });
         return true;
       }
-      if (getSession && !getSession(sessionsFile, sessionId)) {
+      if (getSession && !getSession(sessionId)) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
       }
@@ -63,7 +62,7 @@ function createMemoryRoutes({
         sendJson(res, 400, { error: "sessionId is required." });
         return true;
       }
-      if (getSession && !getSession(sessionsFile, sessionId)) {
+      if (getSession && !getSession(sessionId)) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
       }

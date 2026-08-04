@@ -68,4 +68,20 @@ describe("SessionList", () => {
     expect(screen.queryByText("前端重构")).not.toBeInTheDocument();
     expect(screen.getByText("存储审计")).toBeInTheDocument();
   });
+
+  it("shows one consistent label for an empty session title", () => {
+    render(
+      <SessionList
+        sessions={[{ id: "opaque-session-id", title: "" }]}
+        activeSessionId="opaque-session-id"
+        isLoading={false}
+        error={null}
+        onSelect={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "(空对话)" })).toBeInTheDocument();
+    expect(screen.queryByText("opaque-session-id")).not.toBeInTheDocument();
+  });
 });

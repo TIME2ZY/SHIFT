@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { createEventStore } = require("./event-store");
 const { isTerminalInvocationState } = require("../shared/collab-contracts");
+const { appendMessage, durableMessageMetadata } = require("./message-persistence");
 const { DurableWriteError, withSqliteBusyRetry } = require("./sqlite-retry");
 
 function createDurableRecorder({ storage, eventStore = null, logger = console } = {}) {
@@ -115,16 +116,11 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
       remainingActive: 0,
     };
     if (!storage || !threadId || deletedThreads.has(threadId)) return report;
-    const except = new Set(
-      (options.exceptIds || []).filter((id) => typeof id === "string" && id)
-    );
+    const except = new Set((options.exceptIds || []).filter((id) => typeof id === "string" && id));
     const listFn =
       typeof storage.invocations.listActiveForThread === "function"
         ? () => storage.invocations.listActiveForThread(threadId)
-        : () =>
-            storage.invocations
-              .listForThread(threadId)
-              .filter((row) => row.state === "active");
+        : () => storage.invocations.listForThread(threadId).filter((row) => row.state === "active");
     let open;
     try {
       open = listFn();
@@ -308,10 +304,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     );
     // Seal completeness: open invocations on the sealed generation must not stay active.
     if (result?.sealed?.id) {
-      const terminated = terminateInvocationsForWindow(
-        result.sealed.id,
-        `window-sealed:${reason}`
-      );
+      const terminated = terminateInvocationsForWindow(result.sealed.id, `window-sealed:${reason}`);
       if (terminated.length) {
         logger.warn?.(
           `[sqlite-durable-write] sealed window ${result.sealed.id} terminated ${terminated.length} open invocation(s)`
@@ -332,7 +325,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         const invocation = context.invocationId
           ? storage.invocations.get(context.invocationId)
           : null;
-        const stored = storage.messages.append({
+        const stored = appendMessage(storage, {
           id: message.id,
           threadId: session.id,
           windowId: context.windowId || invocation?.windowId || null,
@@ -345,7 +338,6 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           createdAt: message.createdAt,
           messageType: message.messageType,
         });
-        upsertMessageRecall(stored);
         return stored;
       })
     );
@@ -510,7 +502,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
               typeof msg.id === "string" && msg.id
                 ? msg.id
                 : crypto.randomUUID().replace(/-/g, "").slice(0, 18);
-            message = storage.messages.append({
+            message = appendMessage(storage, {
               id: messageId,
               threadId,
               windowId: input.windowId || record.windowId || null,
@@ -522,7 +514,6 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
               createdAt: msg.createdAt || record.endedAt,
               messageType: msg.messageType || "assistant-final",
             });
-            upsertMessageRecall(message);
             // lastAgent tracks the user's chosen entry agent, not the last
             // responding agent in an A2A chain — do not update it here.
             const existing = storage.threads.get(threadId);
@@ -569,36 +560,16 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     );
   }
 
-  function deleteThread(threadId) {
+  function archiveThread(threadId) {
     if (!threadId) return null;
     deletedThreads.add(threadId);
     events.markThreadDeleted(threadId);
-    return attempt("delete thread", () => storage.threads.delete(threadId));
+    return attempt("archive thread", () => storage.threads.delete(threadId));
   }
 
   function close() {
     deletedThreads.clear();
     if (eventStore !== events) events.close();
-  }
-
-  function upsertMessageRecall(message) {
-    if (!storage.recall || deletedThreads.has(message.threadId)) return null;
-    return storage.recall.upsert({
-      threadId: message.threadId,
-      windowId: message.windowId,
-      sourceKind: "message",
-      sourceId: message.id,
-      title: `${message.role}${message.agentId ? `:${message.agentId}` : ""}`,
-      content: message.content,
-      agentId: message.agentId,
-      createdAt: message.createdAt,
-      metadata: {
-        invocationId: message.invocationId,
-        sequenceNo: message.sequenceNo,
-        role: message.role,
-        messageType: message.messageType,
-      },
-    });
   }
 
   return {
@@ -621,7 +592,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     bindProviderSession,
     addWindowUsage,
     setWindowUsageSnapshot,
-    deleteThread,
+    archiveThread,
     close,
   };
 }
@@ -639,13 +610,4 @@ function resolveFinishDbState(code, signal, endPayload) {
   return "failed";
 }
 
-function durableMessageMetadata(message) {
-  const excluded = new Set(["id", "role", "agent", "content", "createdAt", "messageType"]);
-  const metadata = {};
-  for (const [key, value] of Object.entries(message)) {
-    if (!excluded.has(key)) metadata[key] = value;
-  }
-  return Object.keys(metadata).length > 0 ? metadata : null;
-}
-
-module.exports = { createDurableRecorder, durableMessageMetadata, DurableWriteError };
+module.exports = { createDurableRecorder, DurableWriteError };

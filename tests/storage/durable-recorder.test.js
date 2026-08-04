@@ -183,9 +183,7 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       ["invocation-start", "invocation-end"]
     );
     assert.deepEqual(
-      storage.invocations
-        .listEvents("invocation-atomic-success")
-        .map((event) => event.kind),
+      storage.invocations.listEvents("invocation-atomic-success").map((event) => event.kind),
       ["invocation-start", "invocation-end"]
     );
     // Assistant must not rewrite the user-chosen lastAgent.
@@ -211,7 +209,7 @@ test("durable write failures are reported and fail closed", () => {
     throw new Error("database unavailable");
   };
   assert.throws(() => recorder.mirrorThread(sessionFixture()), /database unavailable/);
-  assert.throws(() => recorder.deleteThread("thread-1"), /database unavailable/);
+  assert.throws(() => recorder.archiveThread("thread-1"), /database unavailable/);
   assert.equal(errors.length, 2);
   assert.match(errors[0], /mirror thread failed: database unavailable/);
   recorder.close();
@@ -237,7 +235,7 @@ test("deleting a thread suppresses late writes from its active invocation", () =
       capacityTokens: 200000,
     });
 
-    assert.equal(recorder.deleteThread(session.id), true);
+    assert.equal(recorder.archiveThread(session.id), true);
     assert.equal(
       recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "late" }),
       false

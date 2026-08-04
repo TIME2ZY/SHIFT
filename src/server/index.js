@@ -156,34 +156,34 @@ function createServer(options = {}) {
   });
   _previewManagers.add(worktreeManager);
 
-  function createSessionDurable(file) {
-    return sqliteSessionService.createSession(file);
+  function createSessionDurable() {
+    return sqliteSessionService.createSession();
   }
 
-  function updateProjectDirDurable(file, sessionId, projectDir) {
-    return sqliteSessionService.setSessionProjectDir(file, sessionId, projectDir);
+  function updateProjectDirDurable(sessionId, projectDir) {
+    return sqliteSessionService.setSessionProjectDir(sessionId, projectDir);
   }
 
-  function updateWorktreeDurable(file, sessionId, worktree) {
-    return sqliteSessionService.setSessionWorktree(file, sessionId, worktree);
+  function updateWorktreeDurable(sessionId, worktree) {
+    return sqliteSessionService.setSessionWorktree(sessionId, worktree);
   }
 
-  function appendToSessionDurable(file, sessionId, message, appendOptions = {}) {
-    return sqliteSessionService.appendToSession(file, sessionId, message, appendOptions);
+  function appendToSessionDurable(sessionId, message, appendOptions = {}) {
+    return sqliteSessionService.appendToSession(sessionId, message, appendOptions);
   }
 
-  function deleteSessionDurable(file, sessionId) {
-    const deleted = sqliteSessionService.deleteSession(file, sessionId);
-    durableRecorder.deleteThread(sessionId);
+  function deleteSessionDurable(sessionId) {
+    const deleted = durableRecorder.archiveThread(sessionId);
+    sqliteSessionService.releaseSession(sessionId);
     return deleted;
   }
 
-  function getSessionDurable(file, sessionId) {
-    return sqliteSessionService.getSession(file, sessionId);
+  function getSessionDurable(sessionId) {
+    return sqliteSessionService.getSession(sessionId);
   }
 
-  function listSessionsDurable(file) {
-    return sqliteSessionService.listSessions(file);
+  function listSessionsDurable() {
+    return sqliteSessionService.listSessions();
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -208,7 +208,6 @@ function createServer(options = {}) {
 
   const handleSessionRoutes = createSessionRoutes({
     rootDir: ROOT,
-    sessionsFile,
     worktreeManager,
     cleanupSessionRuntime,
     sendJson,
@@ -227,7 +226,6 @@ function createServer(options = {}) {
     memoryService,
     storage: storageContext.storage,
     getSession: getSessionDurable,
-    sessionsFile,
     sendJson,
     readJsonBody,
     logger,
@@ -242,7 +240,6 @@ function createServer(options = {}) {
     eventStore,
     appendToSession: appendToSessionDurable,
     getSession: getSessionDurable,
-    sessionsFile,
     sendJson,
     readJsonBody,
     durableRecorder,
@@ -254,7 +251,7 @@ function createServer(options = {}) {
   const handleChatRoutes = createChatRoutes({
     rootDir: ROOT,
     selfGitRoot: SELF_GIT_ROOT,
-    options: { ...options, sessionsFile },
+    options,
     AGENTS,
     callbacks,
     eventStore,
