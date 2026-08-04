@@ -1,4 +1,5 @@
-const SUBAGENT_NAME_RE = /^(spawn[_-]?agent|spawn[_-]?subagent|wait[_-]?agent|subagent|task|agent[_-]?tool)\b/i;
+const SUBAGENT_NAME_RE =
+  /^(spawn[_-]?agent|spawn[_-]?subagent|wait[_-]?agent|subagent|task|agent[_-]?tool)\b/i;
 const ANSI_COLOR_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 function asObject(value) {
@@ -22,32 +23,29 @@ function parseMaybeJson(value) {
 function toolNameFromItem(item) {
   if (!item || typeof item !== "object") return "";
   return String(
-    item.tool
-    || item.tool_name
-    || item.toolName
-    || item.name
-    || item.function
-    || ""
+    item.tool || item.tool_name || item.toolName || item.name || item.function || ""
   ).trim();
 }
 
 function toolArgsFromItem(item) {
   if (!item || typeof item !== "object") return {};
   const state = asObject(item.state);
-  const direct = asObject(item.arguments)
-    || asObject(item.args)
-    || asObject(item.input)
-    || asObject(item.params)
-    || (state && (asObject(state.input) || asObject(state.arguments) || asObject(state.args)))
-    || parseMaybeJson(item.arguments)
-    || parseMaybeJson(item.args)
-    || parseMaybeJson(item.input)
-    || (state && (parseMaybeJson(state.input) || parseMaybeJson(state.arguments)));
+  const direct =
+    asObject(item.arguments) ||
+    asObject(item.args) ||
+    asObject(item.input) ||
+    asObject(item.params) ||
+    (state && (asObject(state.input) || asObject(state.arguments) || asObject(state.args))) ||
+    parseMaybeJson(item.arguments) ||
+    parseMaybeJson(item.args) ||
+    parseMaybeJson(item.input) ||
+    (state && (parseMaybeJson(state.input) || parseMaybeJson(state.arguments)));
   return direct || {};
 }
 
 function toolResultFromItem(item) {
-  if (!item || typeof item !== "object") return item?.result ?? item?.output ?? item?.content ?? null;
+  if (!item || typeof item !== "object")
+    return item?.result ?? item?.output ?? item?.content ?? null;
   const state = asObject(item.state);
   if (item.result !== undefined) return item.result;
   if (item.output !== undefined) return item.output;
@@ -90,17 +88,145 @@ function exitCodeFromItem(item) {
   return null;
 }
 
-function shellOutputLooksFailed(item) {
-  if (!item || typeof item !== "object") return false;
+function providerFailureStatus(item) {
+  if (!item || typeof item !== "object") return "";
+  const state = asObject(item.state);
+  const candidates = [
+    item.status,
+    typeof item.state === "string" ? item.state : null,
+    state && state.status,
+    state && state.state,
+  ];
+  for (const value of candidates) {
+    const status = String(value || "")
+      .trim()
+      .toLowerCase();
+    if (["failed", "error", "errored", "cancelled", "canceled"].includes(status)) {
+      return status;
+    }
+  }
+  if (item.error || (state && state.error) || item.is_error === true || item.success === false) {
+    return "error";
+  }
+  return "";
+}
+
+function resultTextForClassification(item) {
   const result = toolResultFromItem(item);
-  const text = typeof result === "string" ? result : summarizeResult(result, 4000);
-  if (!text) return false;
+  if (typeof result === "string") return result;
+  if (result === undefined || result === null) return "";
+  const summary = summarizeResult(result, 200000);
+  try {
+    return [summary, JSON.stringify(result)].filter(Boolean).join("\n");
+  } catch {
+    return summary;
+  }
+}
+
+const SHELL_FAILURE_SIGNATURES = [
+  { label: "fatal:", pattern: /(?:^|\r?\n)\s*fatal:\s*\S/i },
+  {
+    label: "pull request create failed:",
+    pattern: /(?:^|\r?\n)\s*pull request create failed:\s*\S/i,
+  },
+  { label: "npm ERR!", pattern: /(?:^|\r?\n)\s*npm ERR!\s*\S?/i },
+  {
+    label: "PowerShell command not recognized",
+    pattern: /\bThe term\s+['"][^'"\r\n]+['"]\s+is not recognized\b/i,
+  },
+  { label: "CommandNotFoundException", pattern: /\bCommandNotFoundException\b/i },
+  { label: "FullyQualifiedErrorId", pattern: /\bFullyQualifiedErrorId\s*:/i },
+];
+
+function shellFailureSignature(item) {
+  const text = resultTextForClassification(item);
+  if (!text) return null;
   const plain = text.replace(ANSI_COLOR_RE, "");
-  return (
-    /FullyQualifiedErrorId\s*:/i.test(plain) ||
-    /CategoryInfo\s*:\s*(?:Invalid|NotSpecified|OperationStopped|ParserError)/i.test(plain) ||
-    /(?:ParserError|ParameterBindingException|CommandNotFoundException)/i.test(plain)
+  return SHELL_FAILURE_SIGNATURES.find(({ pattern }) => pattern.test(plain)) || null;
+}
+
+function isShellLikeTool(toolName, args) {
+  const name = String(toolName || "")
+    .trim()
+    .toLowerCase();
+  if (
+    [
+      "bash",
+      "shell",
+      "exec",
+      "command_execution",
+      "run_terminal_cmd",
+      "powershell",
+      "pwsh",
+    ].includes(name) ||
+    name.endsWith(".bash") ||
+    name.includes("shell") ||
+    name.includes("terminal")
+  ) {
+    return true;
+  }
+  return Boolean(
+    args &&
+    typeof args === "object" &&
+    (typeof args.command === "string" || typeof args.cmd === "string")
   );
+}
+
+/**
+ * Classify a shell/tool result without treating generic words such as "error"
+ * as proof that the command failed. Provider state and real exit codes remain
+ * authoritative; output signatures only cover providers that incorrectly
+ * report a successful/zero outcome.
+ */
+function classifyShellOutcome(item, { toolName = "", args = {} } = {}) {
+  const reportedExitCode = exitCodeFromItem(item);
+  const providerStatus = providerFailureStatus(item);
+  if (providerStatus) {
+    const result = toolResultFromItem(item);
+    const detail = summarizeResult(item?.error ?? result, 180);
+    return {
+      failed: true,
+      exitCode: reportedExitCode,
+      failureSource: "provider-status",
+      failureReason: detail || `Provider reported ${toolName || "tool"} status ${providerStatus}`,
+    };
+  }
+
+  if (reportedExitCode !== null && reportedExitCode !== 0) {
+    return {
+      failed: true,
+      exitCode: reportedExitCode,
+      failureSource: "exit-code",
+      failureReason: `${toolName || "Shell command"} exited with code ${reportedExitCode}`,
+    };
+  }
+
+  const signature = isShellLikeTool(toolName || toolNameFromItem(item), args)
+    ? shellFailureSignature(item)
+    : null;
+  if (signature) {
+    const command =
+      args && typeof args === "object" && typeof (args.command || args.cmd) === "string"
+        ? ` (${String(args.command || args.cmd).slice(0, 120)})`
+        : "";
+    return {
+      failed: true,
+      exitCode: reportedExitCode,
+      failureSource: "output-signature",
+      failureReason: `${toolName || "Shell output"}${command} matched ${signature.label}`,
+    };
+  }
+
+  return {
+    failed: false,
+    exitCode: reportedExitCode ?? 0,
+    failureSource: null,
+    failureReason: null,
+  };
+}
+
+function shellOutputLooksFailed(item) {
+  return Boolean(shellFailureSignature(item));
 }
 
 function isSubagentTool(toolName, args = {}) {
@@ -113,8 +239,10 @@ function isSubagentTool(toolName, args = {}) {
   }
   const obj = asObject(args) || {};
   if (obj.subagent_type || obj.subagentType || obj.agent_type || obj.agentType) return true;
-  if ((lower === "task" || lower.endsWith(".task") || lower.includes("task"))
-    && (obj.prompt || obj.description || obj.agent || obj.subagent_type || obj.subagentType)) {
+  if (
+    (lower === "task" || lower.endsWith(".task") || lower.includes("task")) &&
+    (obj.prompt || obj.description || obj.agent || obj.subagent_type || obj.subagentType)
+  ) {
     return true;
   }
   return false;
@@ -122,13 +250,21 @@ function isSubagentTool(toolName, args = {}) {
 
 function subagentDisplayName(toolName, args = {}) {
   const obj = asObject(args) || {};
-  const typed = obj.subagent_type || obj.subagentType || obj.agent_type || obj.agentType || obj.agent || obj.name;
+  const typed =
+    obj.subagent_type ||
+    obj.subagentType ||
+    obj.agent_type ||
+    obj.agentType ||
+    obj.agent ||
+    obj.name;
   if (typed) return String(typed);
   return String(toolName || "subagent");
 }
 
 function collapseWhitespace(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function truncateText(text, max = 180) {
@@ -238,6 +374,7 @@ module.exports = {
   toolResultFromItem,
   isFailedItem,
   exitCodeFromItem,
+  classifyShellOutcome,
   shellOutputLooksFailed,
   isSubagentTool,
   subagentDisplayName,

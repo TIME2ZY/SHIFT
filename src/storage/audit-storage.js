@@ -1,7 +1,6 @@
-const {
-  DEFAULT_MEMORY_DB_FILE,
-} = require("../shared/runtime-paths");
+const { DEFAULT_MEMORY_DB_FILE } = require("../shared/runtime-paths");
 const { eventPlainText } = require("./event-plain-text");
+const { classifyShellOutcome } = require("../agents/tool-classification");
 const {
   integrityCheck,
   rebuildThreadRecall,
@@ -24,6 +23,7 @@ function createStorage(options) {
  * - assistant-final ↔ invocation
  * - completed invocation ↔ invocation-end
  * - message agent ↔ invocation agent
+ * - successful tool status ↔ strong shell failure signatures
  */
 function auditSqliteStorage(options = {}) {
   const memoryDbFile = options.memoryDbFile || DEFAULT_MEMORY_DB_FILE;
@@ -71,6 +71,7 @@ function collectFindings(db, fullIntegrity) {
   auditAssistantFinalInvocation(db, findings);
   auditCompletedInvocationEnd(db, findings);
   auditMessageAgentMatch(db, findings);
+  auditToolOutcomeContradictions(db, findings);
 
   const integrity = integrityCheck(db, { full: fullIntegrity });
   if (!integrity.ok) {
@@ -317,7 +318,9 @@ function auditAssistantFinalInvocation(db, findings) {
       });
       continue;
     }
-    const inv = db.prepare(`SELECT id, thread_id FROM invocations WHERE id = ?`).get(row.invocation_id);
+    const inv = db
+      .prepare(`SELECT id, thread_id FROM invocations WHERE id = ?`)
+      .get(row.invocation_id);
     if (!inv) {
       findings.push({
         code: "assistant-final-orphan-invocation",
@@ -388,10 +391,50 @@ function auditMessageAgentMatch(db, findings) {
   }
 }
 
+function auditToolOutcomeContradictions(db, findings) {
+  const rows = db
+    .prepare(
+      `
+      SELECT e.id, e.invocation_id, e.sequence_no, e.payload_json, i.thread_id
+      FROM invocation_events e
+      JOIN invocations i ON i.id = e.invocation_id
+      WHERE e.kind = 'tool.finished'
+    `
+    )
+    .all();
+
+  for (const row of rows) {
+    let payload;
+    try {
+      payload = JSON.parse(row.payload_json || "{}");
+    } catch {
+      continue;
+    }
+    if (String(payload.status || "").toLowerCase() !== "ok") continue;
+    const outcome = classifyShellOutcome(payload, {
+      toolName: payload.toolName,
+      args: payload.args,
+    });
+    if (!outcome.failed || outcome.failureSource !== "output-signature") continue;
+    findings.push({
+      code: "TOOL_OUTCOME_CONTRADICTION",
+      severity: "warn",
+      threadId: row.thread_id,
+      sourceId: row.id,
+      invocationId: row.invocation_id,
+      message:
+        `tool.finished ${row.invocation_id}/${row.sequence_no} reports status=ok but ` +
+        `${outcome.failureReason}`,
+    });
+  }
+}
+
 function applyRepairs(storage, findings, repairs, logger) {
   const needsFts = findings.some((item) => item.repair === "rebuild-fts");
   const threadIds = new Set(
-    findings.filter((item) => item.repair === "rebuild-thread" && item.threadId).map((item) => item.threadId)
+    findings
+      .filter((item) => item.repair === "rebuild-thread" && item.threadId)
+      .map((item) => item.threadId)
   );
 
   for (const threadId of threadIds) {
@@ -456,4 +499,5 @@ module.exports = {
   auditAssistantFinalInvocation,
   auditCompletedInvocationEnd,
   auditMessageAgentMatch,
+  auditToolOutcomeContradictions,
 };

@@ -9,6 +9,7 @@ const {
   toolArgsFromItem,
   isFailedItem,
   exitCodeFromItem,
+  classifyShellOutcome,
   shellOutputLooksFailed,
 } = require("../src/agents/tool-classification");
 
@@ -22,10 +23,10 @@ test("isSubagentTool detects spawn/task/wait style tools", () => {
 
 test("tool helpers parse common item shapes", () => {
   assert.equal(toolNameFromItem({ type: "mcp_tool_call", tool: "task" }), "task");
-  assert.deepEqual(
-    toolArgsFromItem({ arguments: "{\"prompt\":\"hi\",\"subagent_type\":\"explore\"}" }),
-    { prompt: "hi", subagent_type: "explore" }
-  );
+  assert.deepEqual(toolArgsFromItem({ arguments: '{"prompt":"hi","subagent_type":"explore"}' }), {
+    prompt: "hi",
+    subagent_type: "explore",
+  });
   assert.equal(subagentDisplayName("task", { subagent_type: "explore" }), "explore");
   assert.match(summarizeTask({ prompt: "Find the session runtime module" }), /session runtime/);
 });
@@ -56,6 +57,59 @@ test("tool failure helpers honor exit codes and PowerShell error records", () =>
     true
   );
   assert.equal(shellOutputLooksFailed({ status: "completed", output: "build completed" }), false);
+});
+
+test("classifyShellOutcome uses authoritative state before strong output signatures", () => {
+  const providerFailure = classifyShellOutcome(
+    { status: "error", exitCode: 7, output: "fatal: provider failure" },
+    { toolName: "bash", args: { command: "git status" } }
+  );
+  assert.equal(providerFailure.failed, true);
+  assert.equal(providerFailure.exitCode, 7);
+  assert.equal(providerFailure.failureSource, "provider-status");
+
+  const exitFailure = classifyShellOutcome(
+    { status: "completed", exitCode: 7, output: "ordinary output" },
+    { toolName: "bash" }
+  );
+  assert.equal(exitFailure.failed, true);
+  assert.equal(exitFailure.failureSource, "exit-code");
+});
+
+test("classifyShellOutcome recognizes only strong shell failure signatures", () => {
+  const failures = [
+    "fatal: 'master' is already used by worktree",
+    "pull request create failed: GraphQL: Resource not accessible",
+    "npm ERR! code ERESOLVE",
+    "head : The term 'head' is not recognized as the name of a cmdlet",
+    "CategoryInfo : ObjectNotFound: (head:String) [], CommandNotFoundException",
+    "FullyQualifiedErrorId : CommandNotFoundException",
+  ];
+  for (const output of failures) {
+    const outcome = classifyShellOutcome(
+      { status: "completed", exitCode: 0, output },
+      { toolName: "bash" }
+    );
+    assert.equal(outcome.failed, true, output);
+    assert.equal(outcome.failureSource, "output-signature", output);
+  }
+
+  const normal = classifyShellOutcome(
+    { status: "completed", exitCode: 0, output: "Improved error handling in parser tests" },
+    { toolName: "bash" }
+  );
+  assert.deepEqual(normal, {
+    failed: false,
+    exitCode: 0,
+    failureSource: null,
+    failureReason: null,
+  });
+
+  const searchResult = classifyShellOutcome(
+    { status: "completed", output: "fatal: documented example" },
+    { toolName: "grep", args: { pattern: "fatal:" } }
+  );
+  assert.equal(searchResult.failed, false);
 });
 
 test("summarizeResult strips OpenCode task XML wrappers", () => {

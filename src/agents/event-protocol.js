@@ -42,6 +42,8 @@ const FIELD_TYPES = {
   // Optional documented fields
   sessionId: "string",
   status: "string",
+  failureSource: "stringOrNull",
+  failureReason: "stringOrNull",
   changeType: "string",
   output: "string",
   code: "string",
@@ -86,6 +88,8 @@ const STRING_COERCE_FIELDS = [
   "toolId",
   "sessionId",
   "status",
+  "failureSource",
+  "failureReason",
   "changeType",
   "output",
   "code",

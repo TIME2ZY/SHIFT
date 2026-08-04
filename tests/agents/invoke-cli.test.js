@@ -248,9 +248,7 @@ test("opencode runs in the explicit worktree workspace", () => {
   });
 
   assert.equal(result.status, 0);
-  const text = parseOutputEvents(result.stdout).find(
-    (event) => event.type === "text.delta"
-  )?.text;
+  const text = parseOutputEvents(result.stdout).find((event) => event.type === "text.delta")?.text;
   assert.ok(text);
   assert.equal(text.split(":cwd=")[1], workspaceDir);
 });
@@ -687,7 +685,47 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
   );
   const failedTool = powershellError.find((event) => event.type === "tool.finished");
   assert.equal(failedTool.status, "error");
-  assert.equal(failedTool.exitCode, 1);
+  assert.equal(failedTool.exitCode, null);
+  assert.equal(failedTool.failureSource, "output-signature");
+
+  const fatalError = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-fatal-error",
+        type: "tool",
+        tool: "bash",
+        status: "completed",
+        arguments: { command: "git worktree add master" },
+        output: "fatal: 'master' is already used by worktree",
+        exitCode: 0,
+      },
+    },
+    ctx
+  );
+  const fatalTool = fatalError.find((event) => event.type === "tool.finished");
+  assert.equal(fatalTool.status, "error");
+  assert.equal(fatalTool.exitCode, null);
+  assert.equal(fatalTool.failureSource, "output-signature");
+
+  const ordinaryErrorWord = runtime.transform(
+    {
+      type: "message.part.updated",
+      part: {
+        id: "t-ordinary-error-word",
+        type: "tool",
+        tool: "bash",
+        status: "completed",
+        arguments: { command: "npm test" },
+        output: "error handling tests passed",
+        exitCode: 0,
+      },
+    },
+    ctx
+  );
+  const ordinaryTool = ordinaryErrorWord.find((event) => event.type === "tool.finished");
+  assert.equal(ordinaryTool.status, "ok");
+  assert.equal(ordinaryTool.exitCode, 0);
 
   const reportedExit = runtime.transform(
     {

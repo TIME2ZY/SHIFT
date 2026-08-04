@@ -82,9 +82,7 @@ test("projectInvocationProcess restores thinking, tools, progress, and changed f
     },
   ]);
   assert.deepEqual(process.progress, [{ id: "p1", label: "测试", status: "completed" }]);
-  assert.deepEqual(process.changedFiles, [
-    { path: "web/src/App.tsx", changeType: "modified" },
-  ]);
+  assert.deepEqual(process.changedFiles, [{ path: "web/src/App.tsx", changeType: "modified" }]);
 });
 
 test("projectInvocationProcess keeps orphan finishes and truncates large output", () => {
@@ -123,4 +121,26 @@ test("projectInvocationProcess reads the durable invocation-end code", () => {
   assert.equal(completed.status, "done");
   assert.equal(failed.status, "error");
   assert.equal(failedBeforeCleanExit.status, "error");
+});
+
+test("projectInvocationProcess repairs legacy tool status without failing the agent run", () => {
+  const process = projectInvocationProcess("i6", [
+    {
+      eventNo: 1,
+      kind: "tool.finished",
+      payload: {
+        toolId: "legacy-fatal",
+        toolName: "bash",
+        status: "ok",
+        exitCode: 0,
+        output: "pull request create failed: GraphQL: Resource not accessible",
+      },
+    },
+    { eventNo: 2, kind: "run.finished", payload: { exitCode: 0 } },
+  ]);
+
+  assert.equal(process.status, "done");
+  assert.equal(process.tools[0].status, "error");
+  assert.equal(process.tools[0].failureSource, "output-signature");
+  assert.match(process.tools[0].error, /pull request create failed/);
 });
