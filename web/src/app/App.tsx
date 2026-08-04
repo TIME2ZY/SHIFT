@@ -9,6 +9,7 @@ import { MessageList } from "../features/messages/MessageList";
 import { useMessagesQuery } from "../features/messages/queries";
 import { RightPanel } from "../features/right-panel/RightPanel";
 import { SessionList } from "../features/sessions/SessionList";
+import { sessionDisplayTitle } from "../features/sessions/display";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
 import { WorkspacePage } from "../features/workspace/WorkspacePage";
@@ -79,6 +80,7 @@ export function App() {
     "";
   const selectedAgent = agents.data?.find((agent) => agent.id === selectedAgentId);
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
+  const activeSessionTitle = sessionDisplayTitle(activeSession);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -127,7 +129,7 @@ export function App() {
 
   function removeSession(sessionId: string) {
     const session = sessions.data?.find((item) => item.id === sessionId);
-    const title = session?.title?.trim() || sessionId;
+    const title = sessionDisplayTitle(session);
     if (!window.confirm(`确认删除对话「${title}」？此操作不可撤销。`)) return;
     deleteSession.mutate(sessionId, {
       onSuccess() {
@@ -242,9 +244,7 @@ export function App() {
                 </svg>
               </button>
               <div className="react-chat-title">
-                <strong title={activeSession?.title || activeSessionId || "未选择"}>
-                  {activeSession?.title || activeSessionId || "未选择"}
-                </strong>
+                <strong title={activeSessionTitle}>{activeSessionTitle}</strong>
                 {selectedAgent ? (
                   <small className="react-chat-agent">
                     <AgentAvatar agentId={selectedAgent.id} label={selectedAgent.label} compact />
@@ -312,7 +312,7 @@ export function App() {
       ) : (
         <WorkspacePage
           sessionId={activeSessionId}
-          sessionTitle={activeSession?.title || activeSessionId || "未选择"}
+          sessionTitle={activeSessionTitle}
           onOpenChat={() => navigation.navigate("chat")}
           onOpenSessions={() => {
             setInfoPanelOpen(false);

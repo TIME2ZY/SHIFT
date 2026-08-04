@@ -173,8 +173,8 @@ function createServer(options = {}) {
   }
 
   function deleteSessionDurable(sessionId) {
-    const deleted = sqliteSessionService.deleteSession(sessionId);
-    durableRecorder.deleteThread(sessionId);
+    const deleted = durableRecorder.archiveThread(sessionId);
+    sqliteSessionService.releaseSession(sessionId);
     return deleted;
   }
 

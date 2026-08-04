@@ -12,6 +12,7 @@ test("sqlite session service covers create list append update delete", () => {
     const created = sessions.createSession();
     assert.ok(created.id);
     assert.equal(created.messages.length, 0);
+    assert.equal(sessions.listSessions()[0].title, "");
 
     const afterUser = sessions.appendToSession(created.id, {
       role: "user",
@@ -49,7 +50,9 @@ test("sqlite session service covers create list append update delete", () => {
 
     assert.equal(storage.recall.search(created.id, "Remember the path").length, 1);
 
-    assert.equal(sessions.deleteSession(created.id), true);
+    assert.equal(sessions.releaseSession(created.id), true);
+    assert.equal(sessions.getSession(created.id).worktree, null);
+    assert.equal(storage.threads.delete(created.id), true);
     assert.equal(sessions.getSession(created.id), null);
     assert.equal(storage.threads.list().length, 0);
   } finally {

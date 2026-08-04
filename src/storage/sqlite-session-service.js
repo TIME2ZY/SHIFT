@@ -1,5 +1,6 @@
 const { assertValidOpaqueId, isValidOpaqueId } = require("../server/id-policy");
 const { buildSessionTitle } = require("../shared/session-title");
+const { appendMessage, durableMessageMetadata } = require("./message-persistence");
 const { withSqliteBusyRetry } = require("./sqlite-retry");
 
 /**
@@ -24,26 +25,6 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
       logger.error?.(`[sqlite-session] ${operation} failed: ${error.message}`);
       throw error;
     }
-  }
-
-  function upsertMessageRecall(message) {
-    if (!storage.recall) return null;
-    return storage.recall.upsert({
-      threadId: message.threadId,
-      windowId: message.windowId,
-      sourceKind: "message",
-      sourceId: message.id,
-      title: `${message.role}${message.agentId ? `:${message.agentId}` : ""}`,
-      content: message.content,
-      agentId: message.agentId,
-      createdAt: message.createdAt,
-      metadata: {
-        invocationId: message.invocationId,
-        sequenceNo: message.sequenceNo,
-        role: message.role,
-        messageType: message.messageType,
-      },
-    });
   }
 
   function toSession(thread) {
@@ -86,7 +67,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     return attempt("list sessions", () =>
       storage.threads.listWithMessageCounts().map((thread) => ({
         id: thread.id,
-        title: thread.title || "(空对话)",
+        title: thread.title || "",
         createdAt: thread.createdAt,
         messageCount: thread.messageCount,
         lastAgent: thread.lastAgentId || "",
@@ -156,12 +137,10 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     });
   }
 
-  function deleteSession(sessionId) {
+  function releaseSession(sessionId) {
     if (!isValidOpaqueId(sessionId)) return false;
-    return attempt("delete session", () => {
-      worktrees.delete(sessionId);
-      return storage.threads.delete(sessionId);
-    });
+    worktrees.delete(sessionId);
+    return true;
   }
 
   function appendToSession(sessionId, message, options = {}) {
@@ -202,7 +181,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
         });
 
         const metadata = durableMessageMetadata(msg);
-        const stored = storage.messages.append({
+        appendMessage(storage, {
           id: msg.id,
           threadId: sessionId,
           windowId: options.windowId || null,
@@ -214,7 +193,6 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
           createdAt: msg.createdAt,
           messageType: msg.messageType,
         });
-        upsertMessageRecall(stored);
         return toSession(storage.threads.get(sessionId));
       });
     });
@@ -232,22 +210,13 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     setSessionProjectDir,
     setSessionWorktree,
     setSessionLastAgent,
-    deleteSession,
+    releaseSession,
     close,
   };
 }
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function durableMessageMetadata(message) {
-  const excluded = new Set(["id", "role", "agent", "content", "createdAt", "messageType"]);
-  const metadata = {};
-  for (const [key, value] of Object.entries(message)) {
-    if (!excluded.has(key)) metadata[key] = value;
-  }
-  return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
 function messageFromSqlite(message) {

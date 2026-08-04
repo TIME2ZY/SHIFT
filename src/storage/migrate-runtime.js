@@ -7,7 +7,7 @@ const {
   DEFAULT_TRANSCRIPT_DIR,
   DEFAULT_MEMORY_DB_FILE,
 } = require("../shared/runtime-paths");
-const { durableMessageMetadata } = require("./durable-recorder");
+const { durableMessageMetadata } = require("./message-persistence");
 const { integrityCheck, rebuildThreadRecall } = require("./maintenance");
 
 // Lazy require avoids circular load if tooling ever re-exports migrate from index.
@@ -231,9 +231,7 @@ async function migrateThread({ storage, threadId, session, transcriptDir, dryRun
           parentInvocationId,
           triggerMessageId,
           triggerType:
-            typeof start?.payload?.triggerType === "string"
-              ? start.payload.triggerType
-              : null,
+            typeof start?.payload?.triggerType === "string" ? start.payload.triggerType : null,
         });
         report.invocationsCreated += 1;
       } catch (error) {

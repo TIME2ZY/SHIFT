@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { sessionDisplayTitle } from "./display";
 import type { SessionSummary } from "./types";
 
 interface SessionListProps {
@@ -15,7 +16,7 @@ interface SessionListProps {
 }
 
 function sessionLabel(session: SessionSummary): string {
-  return session.title?.trim() || session.id;
+  return sessionDisplayTitle(session);
 }
 
 function sessionGroup(session: SessionSummary): string {

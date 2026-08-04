@@ -320,7 +320,7 @@ test("deleting a thread archives it (soft) without destroying L0 evidence", () =
     recorder.finishInvocation("inv-del", 0, null);
 
     // Product delete = archive (soft). L0 rows remain; active list hides the thread.
-    assert.equal(recorder.deleteThread(session.id), true);
+    assert.equal(recorder.archiveThread(session.id), true);
     assert.equal(storage.threads.get(session.id), null);
     assert.ok(storage.threads.getIncludingArchived(session.id)?.deletedAt);
     assert.equal(storage.windows.listForThread(session.id).length, 1);
@@ -346,7 +346,7 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
       ...coord,
       startedAt: "2026-07-12T00:00:00.000Z",
     });
-    assert.equal(recorder.deleteThread(session.id), true);
+    assert.equal(recorder.archiveThread(session.id), true);
 
     // Late dual-write from an in-flight callback / stream is suppressed in-process.
     assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
