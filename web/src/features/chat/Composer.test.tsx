@@ -83,6 +83,41 @@ describe("Composer", () => {
     expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("session one");
   });
 
+  it("applies an external draft seed into the textarea and focuses it", async () => {
+    const onDraftSeedApplied = vi.fn();
+    const { rerender } = render(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        draftSeed={{ id: 1, text: "  请审查前端 UI  " }}
+        onDraftSeedApplied={onDraftSeedApplied}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />
+    );
+
+    const input = screen.getByRole("textbox", { name: "消息" });
+    expect(input).toHaveValue("请审查前端 UI");
+    expect(onDraftSeedApplied).toHaveBeenCalledOnce();
+
+    rerender(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        draftSeed={{ id: 2, text: "第二段推荐提示" }}
+        onDraftSeedApplied={onDraftSeedApplied}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />
+    );
+    expect(input).toHaveValue("第二段推荐提示");
+    expect(onDraftSeedApplied).toHaveBeenCalledTimes(2);
+  });
+
   it("offers @Agent completion without changing the default target", async () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(

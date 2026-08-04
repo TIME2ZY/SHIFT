@@ -1,13 +1,28 @@
-import { type FormEvent, type KeyboardEvent, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { agentMentionLabel, findExplicitLeadingAgent } from "../agents/routing";
 import type { AgentSummary } from "../agents/types";
+
+/** External draft insert request; `id` changes force re-apply even for the same text. */
+export interface ComposerDraftSeed {
+  id: number;
+  text: string;
+}
 
 interface ComposerProps {
   sessionId: string | null;
   agents: AgentSummary[];
   selectedAgentId: string;
   running: boolean;
+  draftSeed?: ComposerDraftSeed | null;
+  onDraftSeedApplied?(): void;
   onSend(prompt: string, useWorktree: boolean): Promise<void>;
   onStop(): void;
 }
@@ -17,6 +32,8 @@ export function Composer({
   agents,
   selectedAgentId,
   running,
+  draftSeed = null,
+  onDraftSeedApplied,
   onSend,
   onStop,
 }: ComposerProps) {
@@ -45,6 +62,31 @@ export function Composer({
     setMentionDismissed(false);
     setMentionIndex(0);
   }
+
+  function autoResizeTextarea(target: HTMLTextAreaElement) {
+    target.style.height = "auto";
+    target.style.height = `${Math.min(target.scrollHeight, 220)}px`;
+  }
+
+  useEffect(() => {
+    if (!draftSeed || !sessionId) return;
+    const text = draftSeed.text.trim();
+    if (!text) return;
+    setDrafts((current) => ({ ...current, [sessionId]: text }));
+    setMentionDismissed(false);
+    setMentionIndex(0);
+    const textarea = textareaRef.current;
+    if (textarea) {
+      // Apply height after value paints.
+      window.requestAnimationFrame(() => {
+        autoResizeTextarea(textarea);
+        textarea.focus();
+        const end = text.length;
+        textarea.setSelectionRange(end, end);
+      });
+    }
+    onDraftSeedApplied?.();
+  }, [draftSeed, sessionId, onDraftSeedApplied]);
 
   function selectMention(agent: AgentSummary) {
     setDraft(`@${agentMentionLabel(agent)} `);
@@ -90,11 +132,6 @@ export function Composer({
       event.preventDefault();
       void submit();
     }
-  }
-
-  function autoResizeTextarea(target: HTMLTextAreaElement) {
-    target.style.height = "auto";
-    target.style.height = `${Math.min(target.scrollHeight, 220)}px`;
   }
 
   return (

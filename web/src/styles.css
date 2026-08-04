@@ -665,6 +665,9 @@ body {
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   background: var(--surface-instrument-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition:
     transform var(--duration-fast) var(--ease-out),
@@ -672,12 +675,22 @@ body {
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.react-prompt-card:hover {
+.react-prompt-card:hover:not(:disabled) {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   box-shadow:
     var(--shadow-md),
     0 0 16px -4px var(--accent-glow);
+}
+
+.react-prompt-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.react-prompt-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .react-prompt-card strong {

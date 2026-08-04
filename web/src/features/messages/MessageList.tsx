@@ -5,6 +5,30 @@ import type { AgentSummary } from "../agents/types";
 import type { PersistedMessage } from "./types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 
+export interface QuickPrompt {
+  title: string;
+  description: string;
+  prompt: string;
+}
+
+export const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    title: "审查前端 UI 与美观性",
+    description: "分析页面配色、排版规范与动画微交互",
+    prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+  },
+  {
+    title: "检查 TypeScript 类型与 Lint",
+    description: "扫描代码库潜在类型缺陷与语法不规范",
+    prompt: "请检查 TypeScript 类型与 Lint，扫描代码库潜在类型缺陷与语法不规范。",
+  },
+  {
+    title: "重构项目核心模块",
+    description: "隔离分支创建 Worktree，全自动重构代码",
+    prompt: "请重构项目核心模块：在隔离 worktree 中全自动重构代码。",
+  },
+];
+
 interface MessageListProps {
   sessionId: string | null;
   messages: PersistedMessage[];
@@ -14,6 +38,8 @@ interface MessageListProps {
   error: Error | null;
   onRetry(): void;
   onOpenWorkspace?(): void;
+  /** Fill the composer when user clicks a recommended starter prompt. */
+  onUsePrompt?(prompt: string): void;
 }
 
 interface MessageNavigationItem {
@@ -104,6 +130,7 @@ export function MessageList({
   error,
   onRetry,
   onOpenWorkspace,
+  onUsePrompt,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
@@ -298,18 +325,19 @@ export function MessageList({
             <div className="react-chat-quick-prompts">
               <span>💡 推荐开始：</span>
               <div className="react-prompt-grid">
-                <div className="react-prompt-card">
-                  <strong>审查前端 UI 与美观性</strong>
-                  <small>分析页面配色、排版规范与动画微交互</small>
-                </div>
-                <div className="react-prompt-card">
-                  <strong>检查 TypeScript 类型与 Lint</strong>
-                  <small>扫描代码库潜在类型缺陷与语法不规范</small>
-                </div>
-                <div className="react-prompt-card">
-                  <strong>重构项目核心模块</strong>
-                  <small>隔离分支创建 Worktree，全自动重构代码</small>
-                </div>
+                {EMPTY_CHAT_QUICK_PROMPTS.map((item) => (
+                  <button
+                    type="button"
+                    className="react-prompt-card"
+                    key={item.title}
+                    disabled={!onUsePrompt}
+                    onClick={() => onUsePrompt?.(item.prompt)}
+                    aria-label={`使用推荐提示：${item.title}`}
+                  >
+                    <strong>{item.title}</strong>
+                    <small>{item.description}</small>
+                  </button>
+                ))}
               </div>
             </div>
           </section>
