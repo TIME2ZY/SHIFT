@@ -4,6 +4,7 @@ export interface SessionSummary {
   createdAt?: string;
   updatedAt?: string;
   lastAgent?: string;
+  participantAgentIds?: string[];
   projectDir?: string;
   worktree?: {
     branch?: string;

@@ -108,22 +108,38 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const [activeMessageKey, setActiveMessageKey] = useState<string | null>(null);
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (
+          message
+        ): message is PersistedMessage & { role: Exclude<PersistedMessage["role"], "system"> } =>
+          message.role !== "system"
+      ),
+    [messages]
+  );
   const liveMessages = run ? Object.values(run.liveMessages) : [];
   const persistedInvocationIds = new Set(
-    messages.map((message) => message.invocationId).filter(Boolean)
+    visibleMessages.map((message) => message.invocationId).filter(Boolean)
   );
   const standaloneLiveMessages = liveMessages.filter(
-    (message) =>
-      !message.invocationId || !persistedInvocationIds.has(message.invocationId)
+    (message) => !message.invocationId || !persistedInvocationIds.has(message.invocationId)
   );
   const liveText = liveMessages
     .map((message) => `${message.text}${message.thinking || ""}`)
     .join("");
+  const latestPersistedMessage = visibleMessages.at(-1);
+  const showOptimisticUser = Boolean(
+    run?.optimisticUser &&
+    !(
+      latestPersistedMessage?.role === "user" &&
+      latestPersistedMessage.content.trim() === run.optimisticUser.content.trim()
+    )
+  );
 
   const navigationItems = useMemo<MessageNavigationItem[]>(
     () => [
-      ...messages.flatMap((message, index) => {
-        if (message.role === "system") return [];
+      ...visibleMessages.flatMap((message, index) => {
         const agent = resolveAgent(message.agentId, message.agent, agents);
         const agentId =
           message.role === "assistant"
@@ -138,7 +154,7 @@ export function MessageList({
           },
         ];
       }),
-      ...(run?.optimisticUser
+      ...(showOptimisticUser && run?.optimisticUser
         ? [{ key: "optimistic:user", role: "user" as const, label: "你", agentId: undefined }]
         : []),
       ...standaloneLiveMessages.map((message) => ({
@@ -148,7 +164,7 @@ export function MessageList({
         agentId: message.agentId,
       })),
     ],
-    [messages, agents, run?.optimisticUser, standaloneLiveMessages]
+    [visibleMessages, agents, run?.optimisticUser, showOptimisticUser, standaloneLiveMessages]
   );
   const latestMessageKey = navigationItems.at(-1)?.key;
 
@@ -161,7 +177,7 @@ export function MessageList({
   }, [
     latestMessageKey,
     liveText,
-    messages.length,
+    visibleMessages.length,
     liveMessages.length,
     run?.optimisticUser?.content,
   ]);
@@ -190,7 +206,7 @@ export function MessageList({
     }
 
     return () => observer.disconnect();
-  }, [navigationItems, messages.length, liveMessages.length, run?.optimisticUser?.content]);
+  }, [navigationItems, visibleMessages.length, liveMessages.length, run?.optimisticUser?.content]);
 
   function setMessageRef(key: string, element: HTMLElement | null) {
     if (element) {
@@ -225,7 +241,7 @@ export function MessageList({
   }
 
   const empty =
-    messages.length === 0 && !run?.optimisticUser && standaloneLiveMessages.length === 0;
+    visibleMessages.length === 0 && !showOptimisticUser && standaloneLiveMessages.length === 0;
 
   return (
     <div className="react-message-region">
@@ -299,7 +315,7 @@ export function MessageList({
           </section>
         ) : null}
 
-        {messages.map((message, index) => {
+        {visibleMessages.map((message, index) => {
           const key = persistedMessageKey(message, index);
           const agent = resolveAgent(message.agentId, message.agent, agents);
           const agentId = agent?.id || message.agentId || message.agent || "agent";
@@ -308,8 +324,9 @@ export function MessageList({
           const isAssistant = message.role === "assistant";
           const isLatestAssistantMsg =
             isAssistant &&
-            (index === messages.length - 1 ||
-              (index === messages.length - 2 && messages[messages.length - 1].role === "user"));
+            (index === visibleMessages.length - 1 ||
+              (index === visibleMessages.length - 2 &&
+                visibleMessages[visibleMessages.length - 1].role === "user"));
           const liveData = message.invocationId
             ? liveMessages.find((item) => item.invocationId === message.invocationId)
             : isLatestAssistantMsg
@@ -341,7 +358,7 @@ export function MessageList({
           );
         })}
 
-        {run?.optimisticUser ? (
+        {showOptimisticUser && run?.optimisticUser ? (
           <MessageRow
             messageKey="optimistic:user"
             role="user"

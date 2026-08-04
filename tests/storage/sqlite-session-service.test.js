@@ -47,6 +47,7 @@ test("sqlite session service covers create list append update delete", () => {
     const listed = sessions.listSessions();
     assert.equal(listed.length, 1);
     assert.equal(listed[0].messageCount, 2);
+    assert.deepEqual(listed[0].participantAgentIds, ["codex", "gemini"]);
 
     assert.equal(storage.recall.search(created.id, "Remember the path").length, 1);
 

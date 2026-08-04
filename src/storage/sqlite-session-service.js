@@ -65,13 +65,24 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
 
   function listSessions() {
     return attempt("list sessions", () =>
-      storage.threads.listWithMessageCounts().map((thread) => ({
-        id: thread.id,
-        title: thread.title || "",
-        createdAt: thread.createdAt,
-        messageCount: thread.messageCount,
-        lastAgent: thread.lastAgentId || "",
-      }))
+      storage.threads.listWithMessageCounts().map((thread) => {
+        const participantAgentIds = [];
+        const seenAgents = new Set();
+        for (const message of storage.messages.listForThread(thread.id)) {
+          const agentId = typeof message.agentId === "string" ? message.agentId.trim() : "";
+          if (!agentId || message.role === "system" || seenAgents.has(agentId)) continue;
+          seenAgents.add(agentId);
+          participantAgentIds.push(agentId);
+        }
+        return {
+          id: thread.id,
+          title: thread.title || "",
+          createdAt: thread.createdAt,
+          messageCount: thread.messageCount,
+          lastAgent: thread.lastAgentId || "",
+          participantAgentIds,
+        };
+      })
     );
   }
 

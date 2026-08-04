@@ -104,7 +104,7 @@ button {
 }
 
 /* ── Avatars ───────────────────────────────────────────────
-   Sit outside message bubbles. Clean disk + soft identity tint. */
+   Agent brands stay as bare marks; the user keeps a person badge. */
 
 .agent-avatar,
 .user-avatar {
@@ -114,29 +114,33 @@ button {
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
-  overflow: hidden;
 }
 
-/* Agent: soft agent-color wash + crisp brand mark */
+/* Known Agent: the official mark itself is the avatar. */
 .agent-avatar {
   color: var(--agent-color, var(--accent));
-  border: 1px solid color-mix(in srgb, var(--agent-color, var(--border)) 32%, transparent);
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--surface-instrument-raised)),
-    color-mix(in srgb, var(--agent-color, var(--accent)) 4%, var(--surface-instrument-raised))
-  );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+  overflow: visible;
 }
 
 .agent-avatar img {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
   pointer-events: none;
   user-select: none;
+}
+
+/* Unknown providers retain a restrained initial fallback. */
+.agent-avatar:not([data-agent-brand]) {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--agent-color, var(--border)) 32%, transparent);
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--agent-color, var(--accent)) 10%,
+    var(--surface-instrument-raised)
+  );
 }
 
 .agent-avatar-initial {
@@ -144,13 +148,26 @@ button {
   letter-spacing: -0.02em;
 }
 
+.agent-avatar[data-agent-brand="codex"] img,
+.agent-avatar[data-agent-brand="openai"] img {
+  width: 23px;
+  height: 23px;
+}
+
 .agent-avatar[data-agent-brand="gemini"] img {
-  width: 19px;
-  height: 19px;
+  width: 24px;
+  height: 24px;
 }
 
 .agent-avatar[data-agent-brand="grok"] img {
+  width: 22px;
+  height: 22px;
   border-radius: 3px;
+}
+
+.agent-avatar[data-agent-brand="opencode"] img {
+  width: 25px;
+  height: 25px;
 }
 
 /* Only invert monochrome brand marks in dark mode */
@@ -162,6 +179,8 @@ button {
 
 /* User: soft indigo disk + refined outline person icon */
 .user-avatar {
+  overflow: hidden;
+  border-radius: 50%;
   color: light-dark(#4f46e5, #c4b5fd);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   background:
@@ -202,8 +221,29 @@ button {
 }
 
 .agent-avatar-compact img {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
+}
+
+.agent-avatar-compact[data-agent-brand="codex"] img,
+.agent-avatar-compact[data-agent-brand="openai"] img {
+  width: 17px;
+  height: 17px;
+}
+
+.agent-avatar-compact[data-agent-brand="gemini"] img {
+  width: 18px;
+  height: 18px;
+}
+
+.agent-avatar-compact[data-agent-brand="grok"] img {
+  width: 16px;
+  height: 16px;
+}
+
+.agent-avatar-compact[data-agent-brand="opencode"] img {
+  width: 19px;
+  height: 19px;
 }
 
 .agent-avatar-compact .agent-avatar-initial {
@@ -214,6 +254,64 @@ button {
   width: 12px;
   height: 12px;
   stroke-width: 1.85;
+}
+
+.react-session-item .agent-avatar-compact,
+.react-chat-header .agent-avatar-compact {
+  width: 18px;
+  height: 18px;
+}
+
+.react-session-item .agent-avatar-compact[data-agent-brand="codex"] img,
+.react-session-item .agent-avatar-compact[data-agent-brand="openai"] img,
+.react-chat-header .agent-avatar-compact[data-agent-brand="codex"] img,
+.react-chat-header .agent-avatar-compact[data-agent-brand="openai"] img {
+  width: 14px;
+  height: 14px;
+}
+
+.react-session-item .agent-avatar-compact[data-agent-brand="gemini"] img,
+.react-chat-header .agent-avatar-compact[data-agent-brand="gemini"] img {
+  width: 15px;
+  height: 15px;
+}
+
+.react-session-item .agent-avatar-compact[data-agent-brand="grok"] img,
+.react-chat-header .agent-avatar-compact[data-agent-brand="grok"] img {
+  width: 13px;
+  height: 13px;
+}
+
+.react-session-item .agent-avatar-compact[data-agent-brand="opencode"] img,
+.react-chat-header .agent-avatar-compact[data-agent-brand="opencode"] img {
+  width: 16px;
+  height: 16px;
+}
+
+.agent-avatar-prominent {
+  width: 30px;
+  height: 30px;
+}
+
+.agent-avatar-prominent[data-agent-brand="codex"] img,
+.agent-avatar-prominent[data-agent-brand="openai"] img {
+  width: 23px;
+  height: 23px;
+}
+
+.agent-avatar-prominent[data-agent-brand="gemini"] img {
+  width: 24px;
+  height: 24px;
+}
+
+.agent-avatar-prominent[data-agent-brand="grok"] img {
+  width: 22px;
+  height: 22px;
+}
+
+.agent-avatar-prominent[data-agent-brand="opencode"] img {
+  width: 25px;
+  height: 25px;
 }
 
 /* Global motion defaults — honor reduced-motion */

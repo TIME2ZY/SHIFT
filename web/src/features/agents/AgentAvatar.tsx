@@ -40,6 +40,7 @@ interface AgentAvatarProps {
   agentId: string;
   label?: string;
   compact?: boolean;
+  prominent?: boolean;
 }
 
 const BRAND_LOGOS: Record<string, { name: string; src: string }> = {
@@ -50,14 +51,16 @@ const BRAND_LOGOS: Record<string, { name: string; src: string }> = {
   opencode: { name: "OpenCode", src: opencodeLogo },
 };
 
-export function AgentAvatar({ agentId, label, compact }: AgentAvatarProps) {
+export function AgentAvatar({ agentId, label, compact, prominent }: AgentAvatarProps) {
   const normalized = agentId.toLocaleLowerCase();
   const brand = BRAND_LOGOS[normalized];
   const initial = (label || agentId || "A").trim().charAt(0).toLocaleUpperCase();
 
   return (
     <span
-      className={`agent-avatar${compact ? " agent-avatar-compact" : ""}`}
+      className={`agent-avatar${compact ? " agent-avatar-compact" : ""}${
+        prominent ? " agent-avatar-prominent" : ""
+      }`}
       data-agent-color={agentColorSlot(agentId)}
       data-agent-brand={brand ? normalized : undefined}
       title={label || agentId}
