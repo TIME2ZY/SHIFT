@@ -1,3 +1,5 @@
+const { classifyShellOutcome } = require("../agents/tool-classification");
+
 const MAX_TOOL_DETAIL_CHARS = 40 * 1024;
 
 function textValue(value) {
@@ -82,8 +84,7 @@ function projectInvocationProcess(invocationId, events = []) {
   for (const event of ordered) {
     if (!event || typeof event !== "object") continue;
     const kind = String(event.kind || event.type || "");
-    const payload =
-      event.payload && typeof event.payload === "object" ? event.payload : event;
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : event;
     const eventNo = Number.isInteger(event.eventNo) ? event.eventNo : 0;
 
     if (kind === "thinking.delta") {
@@ -127,10 +128,14 @@ function projectInvocationProcess(invocationId, events = []) {
         if (startedAt !== undefined) current.startedAt = startedAt;
         if (payload.args && typeof payload.args === "object") current.input = payload.args;
       } else {
-        const failed =
-          ["error", "failed"].includes(String(payload.status || payload.state || "").toLowerCase()) ||
-          (typeof payload.exitCode === "number" && payload.exitCode !== 0);
+        const outcome = classifyShellOutcome(payload, {
+          toolName: current.toolName,
+          args: payload.args || current.input || {},
+        });
+        const failed = outcome.failed;
         current.status = failed ? "error" : "done";
+        if (failed && outcome.failureSource) current.failureSource = outcome.failureSource;
+        if (failed && outcome.failureReason) current.failureReason = outcome.failureReason;
         const finishedAt = eventTime(event);
         if (finishedAt !== undefined) current.finishedAt = finishedAt;
         if (!current.startedAt && payload.startedAt) current.startedAt = payload.startedAt;
@@ -188,8 +193,7 @@ function projectInvocationProcess(invocationId, events = []) {
     }
     if (kind === "invocation-end") {
       const state = String(payload.state || "");
-      const exitCode =
-        typeof payload.exitCode === "number" ? payload.exitCode : payload.code;
+      const exitCode = typeof payload.exitCode === "number" ? payload.exitCode : payload.code;
       if (state === "failed" || (typeof exitCode === "number" && exitCode !== 0)) {
         runFailed = true;
         status = "error";

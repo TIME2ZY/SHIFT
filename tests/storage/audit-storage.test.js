@@ -6,7 +6,11 @@ const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
 const { auditSqliteStorage } = require("../../src/storage/audit-storage");
-const { backupDatabase, integrityCheck, rebuildThreadRecall } = require("../../src/storage/maintenance");
+const {
+  backupDatabase,
+  integrityCheck,
+  rebuildThreadRecall,
+} = require("../../src/storage/maintenance");
 
 function seedBase(storage) {
   storage.threads.create({ id: "thread-1", title: "audit", createdAt: "2026-07-12T00:00:00.000Z" });
@@ -127,9 +131,7 @@ test("audit flags completed invocation without invocation-end", () => {
   const storage = createStorage({ file: ":memory:" });
   try {
     seedBase(storage);
-    storage.db
-      .prepare(`DELETE FROM invocation_events WHERE kind = 'invocation-end'`)
-      .run();
+    storage.db.prepare(`DELETE FROM invocation_events WHERE kind = 'invocation-end'`).run();
     // Keep terminal state.
     const report = auditSqliteStorage({ storage });
     assert.equal(report.ok, false);
@@ -153,6 +155,35 @@ test("audit flags assistant-final without invocation", () => {
       .run();
     const report = auditSqliteStorage({ storage });
     assert.ok(report.findings.some((item) => item.code === "assistant-final-missing-invocation"));
+  } finally {
+    storage.close();
+  }
+});
+
+test("audit warns about successful tool events with fatal output without rewriting history", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seedBase(storage);
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      sequenceNo: 3,
+      kind: "tool.finished",
+      payload: {
+        toolId: "legacy-fatal",
+        toolName: "bash",
+        status: "ok",
+        exitCode: 0,
+        output: "fatal: 'master' is already used by worktree",
+      },
+    });
+    rebuildThreadRecall(storage, "thread-1");
+
+    const report = auditSqliteStorage({ storage });
+    assert.equal(report.ok, true, JSON.stringify(report.summary));
+    assert.equal(report.summary.byCode.TOOL_OUTCOME_CONTRADICTION, 1);
+    const event = storage.invocations.getEvent("inv-1", 3);
+    assert.equal(event.payload.status, "ok");
+    assert.equal(event.payload.exitCode, 0);
   } finally {
     storage.close();
   }
