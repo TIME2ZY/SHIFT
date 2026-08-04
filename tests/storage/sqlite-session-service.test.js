@@ -75,3 +75,26 @@ test("sqlite session service refuses append when allowCreate is false", () => {
     storage.close();
   }
 });
+
+test("sqlite session service builds a compact title from the first user message", () => {
+  const storage = createStorage({ file: ":memory:" });
+  const sessions = createSqliteSessionService({ storage });
+  try {
+    const created = sessions.createSession("sessions.json");
+    const afterUser = sessions.appendToSession("sessions.json", created.id, {
+      role: "user",
+      content: "@Grok   帮我修复登录页面的移动端布局问题",
+    });
+
+    assert.equal(afterUser.title, "修复登录页面的移动端布局问题");
+
+    const afterFollowUp = sessions.appendToSession("sessions.json", created.id, {
+      role: "user",
+      content: "请把标题改成另一件事",
+    });
+    assert.equal(afterFollowUp.title, afterUser.title);
+  } finally {
+    sessions.close();
+    storage.close();
+  }
+});

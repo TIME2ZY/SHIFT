@@ -1,4 +1,5 @@
 const { assertValidOpaqueId, isValidOpaqueId } = require("../server/id-policy");
+const { buildSessionTitle } = require("../shared/session-title");
 const { withSqliteBusyRetry } = require("./sqlite-retry");
 
 /**
@@ -184,7 +185,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
 
         let title = thread.title || "";
         if (!title && message.role === "user" && message.content) {
-          title = String(message.content).slice(0, 40).replace(/\n/g, " ");
+          title = buildSessionTitle(message.content);
         }
 
         // lastAgent means the user's chosen entry agent (matches file SessionStore).
