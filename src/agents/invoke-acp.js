@@ -2,6 +2,10 @@ const { spawn } = require("node:child_process");
 const { Readable, Writable } = require("node:stream");
 const { createProviderRuntime } = require("./providers");
 
+const ACP_READ_ONLY_TOOL_KINDS = new Set(["read", "search", "think", "fetch"]);
+const ACP_MUTATING_TOOL_NAME_RE =
+  /(?:^|[_-])(write|edit|delete|remove|move|rename|patch|bash|shell|terminal|execute|exec|run|command)(?:$|[_-])/i;
+
 function preferredPermission(options = []) {
   return (
     options.find((option) => option.kind === "allow_always") ||
@@ -9,6 +13,82 @@ function preferredPermission(options = []) {
     options.find((option) => /^allow/i.test(String(option.kind || ""))) ||
     null
   );
+}
+
+function preferredOneShotPermission(options = []) {
+  return (
+    options.find((option) => option.kind === "allow_once") ||
+    options.find((option) => /^allow_once$/i.test(String(option.kind || ""))) ||
+    null
+  );
+}
+
+function isAcpReadOnlyToolCall(toolCall = {}) {
+  const kind = String(toolCall.kind || "other").toLowerCase();
+  if (!ACP_READ_ONLY_TOOL_KINDS.has(kind)) return false;
+  const name = String(toolCall.name || toolCall.title || "");
+  if (ACP_MUTATING_TOOL_NAME_RE.test(name)) return false;
+  const input =
+    toolCall.rawInput && typeof toolCall.rawInput === "object" && !Array.isArray(toolCall.rawInput)
+      ? toolCall.rawInput
+      : {};
+  return !["command", "commandLine", "command_line", "cmd", "script"].some(
+    (field) => typeof input[field] === "string" && input[field].trim()
+  );
+}
+
+function decideAcpPermission(params = {}, config = {}) {
+  const toolCall = params.toolCall || {};
+  const toolKind = String(toolCall.kind || "other").toLowerCase();
+  const gate = config.executionGate || null;
+  if (gate && gate.allowed !== true) {
+    if (!isAcpReadOnlyToolCall(toolCall)) {
+      return {
+        allowed: false,
+        reason: "implementation_plan_not_approved",
+        toolKind,
+        response: { outcome: { outcome: "cancelled" } },
+      };
+    }
+    const selected = preferredOneShotPermission(params.options);
+    if (!selected) {
+      return {
+        allowed: false,
+        reason: "read_permission_unavailable",
+        toolKind,
+        response: { outcome: { outcome: "cancelled" } },
+      };
+    }
+    return {
+      allowed: true,
+      reason: null,
+      toolKind,
+      response: { outcome: { outcome: "selected", optionId: selected.optionId } },
+    };
+  }
+
+  if (config.providerOptions?.alwaysApprove === false) {
+    return {
+      allowed: false,
+      reason: "provider_auto_approval_disabled",
+      toolKind,
+      response: { outcome: { outcome: "cancelled" } },
+    };
+  }
+  const selected = preferredPermission(params.options);
+  return selected
+    ? {
+        allowed: true,
+        reason: null,
+        toolKind,
+        response: { outcome: { outcome: "selected", optionId: selected.optionId } },
+      }
+    : {
+        allowed: false,
+        reason: "allow_option_unavailable",
+        toolKind,
+        response: { outcome: { outcome: "cancelled" } },
+      };
 }
 
 function shouldLoadAcpSession(config, initialized) {
@@ -106,17 +186,18 @@ async function invokeAcp({
     const result = await acp
       .client({ name: "shift-console", version: "0.1.0" })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
-        if (config.providerOptions?.alwaysApprove === false) {
-          return { outcome: { outcome: "cancelled" } };
+        const decision = decideAcpPermission(params, config);
+        if (!decision.allowed) {
+          emitRaw({
+            type: "acp.permission_denied",
+            sessionId: params.sessionId,
+            toolCallId: params.toolCall?.toolCallId || null,
+            toolKind: decision.toolKind,
+            reason: decision.reason,
+            planHash: config.executionGate?.planHash || null,
+          });
         }
-        const selected = preferredPermission(params.options);
-        if (!selected) return { outcome: { outcome: "cancelled" } };
-        return {
-          outcome: {
-            outcome: "selected",
-            optionId: selected.optionId,
-          },
-        };
+        return decision.response;
       })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         // session/load replays the previous transcript. It restores provider
@@ -226,5 +307,9 @@ module.exports = {
   invokeAcp,
   loadAcpSdk,
   preferredPermission,
+  preferredOneShotPermission,
+  decideAcpPermission,
+  isAcpReadOnlyToolCall,
+  ACP_READ_ONLY_TOOL_KINDS,
   shouldLoadAcpSession,
 };

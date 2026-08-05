@@ -19,6 +19,7 @@ const { ENV } = require("../shared/brand");
 const { ROOT } = require("../shared/runtime-paths");
 const { loadProjectEnv } = require("../shared/load-env");
 const { invokeAcp } = require("./invoke-acp");
+const { resolveImplementationGateEnv } = require("./implementation-plan-gate");
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -144,6 +145,19 @@ function buildInvocation(cli, prompt) {
   return buildProviderInvocation(config, prompt);
 }
 
+function applyGrokImplementationGate(config, env = process.env) {
+  if ((config?.id || config?.providerId) !== "grok") return config;
+  const executionGate = resolveImplementationGateEnv(env);
+  return {
+    ...config,
+    executionGate,
+    providerOptions: {
+      ...(config.providerOptions || {}),
+      ...(executionGate.allowed ? {} : { alwaysApprove: false }),
+    },
+  };
+}
+
 function invoke(cli, prompt, options = {}) {
   const baseConfig = typeof cli === "string" ? { providerId: cli } : cli;
   const runOptions = normalizeRunOptions(options, {
@@ -151,13 +165,14 @@ function invoke(cli, prompt, options = {}) {
     killGraceMs: DEFAULT_KILL_GRACE_MS,
     retries: 0,
   });
-  const config = {
+  let config = {
     ...baseConfig,
     providerOptions: {
       ...(baseConfig.providerOptions || {}),
       ...runOptions.providerOptions,
     },
   };
+  config = applyGrokImplementationGate(config, process.env);
   const providerId = config.providerId;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
@@ -266,6 +281,7 @@ module.exports = {
   invoke,
   parseArgs,
   buildInvocation,
+  applyGrokImplementationGate,
   resolveProxy,
   resolveProviderProxy,
   proxyEnvVars,

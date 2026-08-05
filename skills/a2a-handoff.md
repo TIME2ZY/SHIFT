@@ -45,6 +45,15 @@ always: true
 
 平台会按 `intent` 校验目标 Agent 的 workflow capability。角色不匹配的交接在 balanced / strict 策略下拒绝，而不是只靠提示词提醒。
 
+### Grok 实现批准 Gate
+
+- Codex 首次交给 Grok 时使用 `intent: plan`，这只开放 read/search/think/fetch
+- Grok 必须输出完整 `implementation_plan`（summary / files / changes / tests；risks 可空）
+- 方案会持久化并生成 plan hash；重复提交同一方案保持幂等
+- 只有 Codex 可以用 `intent: implement` 批准当前 plan hash
+- 方案缺失、未批准或 hash 已变化时，平台拒绝 implement 路由及 ACP edit/delete/move/execute
+- Grok 修改方案会产生新 hash，并自动撤销旧批准及下游 review/delivery gate
+
 ## 全员共用 handoff 模板
 
 **只允许下列顶层字段。** 没有的内容就空着（省略该行）；**禁止** `verdict` / `nits` / `blocking` / `status` 等私有 key。

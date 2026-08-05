@@ -131,6 +131,20 @@ Grok 计划期写权限、OpenCode Git/PR 操作和 Codex 目标验收门禁由�
 本 PR 只使角色身份和交接边界可执行；Grok 计划批准前的文件写入硬门禁、OpenCode 的 Git/PR
 执行器，以及 Codex 最终目标证据门禁仍由后续 PR 实现。
 
+第三个实现 PR 交付：
+
+- `implementation_plan` 结构化 artifact，要求 summary / files / changes / tests；
+- 方案规范化 hash，以及 SQLite `implementationGate` 的 required / pending_approval / approved；
+- 仅 Codex 可通过显式 `implement` handoff 批准当前 plan hash；
+- 新方案 hash 自动撤销旧批准和下游 review / delivery / final gate；
+- Grok ACP 在未批准时移除 `--always-approve`，权限层只放行 read / search / think / fetch，
+  拒绝 edit / delete / move / execute / switch_mode / other；
+- chat 和 callback 两条方案提交路径共用同一持久化 registry；
+- `done` readiness 增加 implementation plan approval 前置条件。
+
+该 Gate 不增加新的业务 phase；它是 implement 阶段内的 artifact/gate 状态，避免把状态机扩张为
+“规划中、待批准、已批准”等长期 phase。
+
 ## 5. 后果
 
 - `changes_requested` 是 `review → implement` transition event，不是 phase。

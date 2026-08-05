@@ -107,13 +107,20 @@ function finalizeA2ARoutes(input = {}) {
         fromAgent,
         toAgent: target,
       });
-    const taskSkip = taskRegistry.shouldSkipRedundantReview({
+    const implementationSkip = taskRegistry.shouldBlockImplementationRoute({
+      threadId: sessionId,
+      fromAgent,
+      toAgent: target,
+      intent: quality.intent,
+    });
+    const reviewSkip = taskRegistry.shouldSkipRedundantReview({
       threadId: sessionId,
       toAgent: target,
       intent: quality.intent,
       contentHash,
       handoff,
     });
+    const taskSkip = implementationSkip.skip ? implementationSkip : reviewSkip;
     const policyInput = {
       quality,
       useWorktree,

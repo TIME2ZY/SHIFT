@@ -52,6 +52,19 @@ function completeHandoffText(to = "opencode") {
   ].join("\n");
 }
 
+function implementationHandoffText() {
+  return [
+    "@Grok",
+    "```handoff",
+    "to: grok",
+    "intent: implement",
+    "what: implement the approved concrete plan",
+    "why: Codex reviewed the plan",
+    "next_action: edit files and run tests",
+    "```",
+  ].join("\n");
+}
+
 test("finalize enqueues complete handoff under balanced", () => {
   const worklist = ["codex"];
   const events = [];
@@ -117,6 +130,62 @@ test("finalize rejects an explicit intent routed to the wrong workflow role", ()
   assert.deepEqual(worklist, ["codex"]);
   const rejected = events.find((event) => event.kind === "a2a-skipped");
   assert.deepEqual(rejected.payload.allowed, ["codex"]);
+});
+
+test("finalize rejects Codex implementation handoff before Grok submits a plan", () => {
+  const worklist = ["codex"];
+  const result = finalizeA2ARoutes({
+    text: implementationHandoffText(),
+    fromAgent: "codex",
+    threadId: "t-plan-missing",
+    sessionId: "t-plan-missing",
+    invocationId: "inv-plan-missing",
+    useWorktree: true,
+    worklist,
+    a2aCount: 0,
+    maxDepth: 15,
+    policyMode: "balanced",
+    agentLabels: { codex: "Codex", grok: "Grok" },
+  });
+
+  assert.equal(result.enqueued.length, 0);
+  assert.equal(result.skipped[0].reason, "implementation_plan_missing");
+  assert.deepEqual(worklist, ["codex"]);
+});
+
+test("finalize binds Codex approval to Grok's submitted plan before enqueue", () => {
+  const threadId = "t-plan-approved";
+  collabTaskRegistry.ensureImplementationPlanRequired(threadId, { requestedBy: "codex" });
+  const submitted = collabTaskRegistry.submitImplementationPlan(threadId, {
+    actorAgentId: "grok",
+    plan: {
+      summary: "Implement the approved change",
+      files: ["src/change.js"],
+      changes: ["Add the requested behavior"],
+      tests: ["node --test tests/change.test.js"],
+      risks: [],
+    },
+  });
+  const worklist = ["codex"];
+  const result = finalizeA2ARoutes({
+    text: implementationHandoffText(),
+    fromAgent: "codex",
+    threadId,
+    sessionId: threadId,
+    invocationId: "inv-plan-approved",
+    useWorktree: true,
+    worklist,
+    a2aCount: 0,
+    maxDepth: 15,
+    policyMode: "balanced",
+    agentLabels: { codex: "Codex", grok: "Grok" },
+  });
+
+  assert.equal(result.enqueued.length, 1);
+  assert.deepEqual(worklist, ["codex", "grok"]);
+  const permission = collabTaskRegistry.implementationPermission(threadId);
+  assert.equal(permission.allowed, true);
+  assert.equal(permission.planHash, submitted.planHash);
 });
 
 test("finalize request_repair on worktree empty packet under balanced", () => {

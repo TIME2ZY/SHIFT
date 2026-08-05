@@ -1,8 +1,15 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createProviderRuntime, buildProviderTransportInvocation } = require("../../src/agents/providers");
-const { preferredPermission, shouldLoadAcpSession } = require("../../src/agents/invoke-acp");
+const {
+  preferredPermission,
+  decideAcpPermission,
+  isAcpReadOnlyToolCall,
+  shouldLoadAcpSession,
+} = require("../../src/agents/invoke-acp");
 const { AGENTS } = require("../../src/agents/catalog");
+const { ENV } = require("../../src/shared/brand");
+const { applyGrokImplementationGate } = require("../../src/agents/invoke-cli");
 
 const ctx = { agent: "grok", invocationId: "inv-acp" };
 
@@ -111,6 +118,102 @@ test("ACP permission selection prefers persistent allow then one-shot allow", ()
   );
   assert.equal(preferredPermission([{ optionId: "once", kind: "allow_once" }]).optionId, "once");
   assert.equal(preferredPermission([{ optionId: "deny", kind: "reject_once" }]), null);
+});
+
+test("Grok ACP drops --always-approve until the persisted plan hash is approved", () => {
+  const locked = applyGrokImplementationGate(AGENTS.grok, {});
+  const lockedInvocation = buildProviderTransportInvocation(locked, "ignored", "acp");
+  assert.equal(locked.executionGate.allowed, false);
+  assert.ok(!lockedInvocation.args.includes("--always-approve"));
+
+  const approved = applyGrokImplementationGate(AGENTS.grok, {
+    [ENV.GROK_IMPLEMENTATION_GATE]: "approved",
+    [ENV.GROK_APPROVED_PLAN_HASH]: "plan-abc",
+  });
+  const approvedInvocation = buildProviderTransportInvocation(approved, "ignored", "acp");
+  assert.equal(approved.executionGate.allowed, true);
+  assert.ok(approvedInvocation.args.includes("--always-approve"));
+});
+
+test("Grok implementation gate allows only one-shot read tools before plan approval", () => {
+  const options = [
+    { optionId: "once", kind: "allow_once" },
+    { optionId: "always", kind: "allow_always" },
+  ];
+  const locked = { executionGate: { allowed: false }, providerOptions: {} };
+
+  const read = decideAcpPermission(
+    { toolCall: { kind: "read", toolCallId: "read-1" }, options },
+    locked
+  );
+  assert.equal(read.allowed, true);
+  assert.equal(read.response.outcome.optionId, "once");
+
+  for (const kind of ["edit", "delete", "move", "execute", "switch_mode", "other"]) {
+    const decision = decideAcpPermission(
+      { toolCall: { kind, toolCallId: `${kind}-1` }, options },
+      locked
+    );
+    assert.equal(decision.allowed, false, `${kind} must stay locked`);
+    assert.equal(decision.reason, "implementation_plan_not_approved");
+    assert.equal(decision.response.outcome.outcome, "cancelled");
+  }
+
+  assert.equal(
+    isAcpReadOnlyToolCall({
+      kind: "read",
+      name: "shell_command",
+      rawInput: { command: "Set-Content changed.txt x" },
+    }),
+    false
+  );
+  assert.equal(
+    decideAcpPermission(
+      {
+        toolCall: {
+          kind: "read",
+          name: "shell_command",
+          rawInput: { command: "Set-Content changed.txt x" },
+        },
+        options,
+      },
+      locked
+    ).allowed,
+    false
+  );
+});
+
+test("approved Grok gate restores the normal permission selection", () => {
+  const decision = decideAcpPermission(
+    {
+      toolCall: { kind: "edit", toolCallId: "edit-approved" },
+      options: [
+        { optionId: "once", kind: "allow_once" },
+        { optionId: "always", kind: "allow_always" },
+      ],
+    },
+    { executionGate: { allowed: true }, providerOptions: { alwaysApprove: true } }
+  );
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.response.outcome.optionId, "always");
+});
+
+test("ACP permission denial is emitted as an auditable canonical diagnostic", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.permission_denied",
+      sessionId: "locked-session",
+      toolCallId: "edit-locked",
+      toolKind: "edit",
+      reason: "implementation_plan_not_approved",
+    },
+    ctx
+  );
+  const diagnostic = events.find((event) => event.type === "diagnostic");
+  assert.equal(diagnostic.code, "implementation_plan_not_approved");
+  assert.equal(diagnostic.toolId, "edit-locked");
+  assert.match(diagnostic.message, /edit tool denied/);
 });
 
 test("ACP prompt result usage maps to the shared usage event", () => {
