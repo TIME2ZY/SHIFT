@@ -348,6 +348,48 @@ test("later migrations upgrade a version 2 database without losing memory rows",
   }
 });
 
+test("client turn migration preserves existing messages and enforces user turn uniqueness", () => {
+  const db = openMemoryDatabase({
+    file: ":memory:",
+    migrations: MIGRATIONS.slice(0, 18),
+  });
+  try {
+    db.prepare(
+      "INSERT INTO threads (id, created_at, updated_at) VALUES ('turn-thread', 'now', 'now')"
+    ).run();
+    db.prepare(
+      `INSERT INTO messages
+        (id, thread_id, sequence_no, role, content, created_at, message_type)
+       VALUES ('legacy-user', 'turn-thread', 0, 'user', 'hello', 'now', 'user')`
+    ).run();
+
+    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    assert.equal(
+      db.prepare("SELECT client_turn_id FROM messages WHERE id = 'legacy-user'").get()
+        .client_turn_id,
+      null
+    );
+    db.prepare(
+      `INSERT INTO messages
+        (id, thread_id, sequence_no, role, content, created_at, message_type, client_turn_id)
+       VALUES ('new-user', 'turn-thread', 1, 'user', 'hello', 'now', 'user', 'turn-1')`
+    ).run();
+    assert.throws(
+      () =>
+        db
+          .prepare(
+            `INSERT INTO messages
+              (id, thread_id, sequence_no, role, content, created_at, message_type, client_turn_id)
+             VALUES ('duplicate-user', 'turn-thread', 2, 'user', 'again', 'now', 'user', 'turn-1')`
+          )
+          .run(),
+      /UNIQUE constraint failed/
+    );
+  } finally {
+    db.close();
+  }
+});
+
 test("topic migration backfills the existing memory search projection", () => {
   const db = openMemoryDatabase({
     file: ":memory:",

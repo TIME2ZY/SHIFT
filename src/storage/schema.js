@@ -791,6 +791,17 @@ const MIGRATIONS = Object.freeze([
     name: "remove_memory_suggestions",
     up: migrateRemoveMemorySuggestions,
   },
+  {
+    version: 19,
+    name: "message_client_turn_id",
+    sql: `
+      ALTER TABLE messages ADD COLUMN client_turn_id TEXT;
+
+      CREATE UNIQUE INDEX messages_thread_client_turn
+        ON messages(thread_id, client_turn_id)
+        WHERE client_turn_id IS NOT NULL AND role = 'user';
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

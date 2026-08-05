@@ -21,11 +21,9 @@ afterEach(() => {
 
 describe("runChatStream", () => {
   it("maps canonical text events into the session run store", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
           sseResponse([
             'event: session\ndata: {"sessionId":"s1"}\n\n',
             'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
@@ -37,19 +35,27 @@ describe("runChatStream", () => {
             'event: agent-event\ndata: {"type":"text.delta","agent":"codex","text":"hello"}\n\n',
             'event: agent-exit\ndata: {"agent":"codex","code":0}\n\n',
             "event: done\ndata: {}\n\n",
-          ])
-        )
-    );
+          ]));
+    vi.stubGlobal("fetch", fetchMock);
     const store = createSessionRunStore();
     const controller = store.startController("s1");
 
     const result = await runChatStream(
-      { sessionId: "s1", agentId: "codex", prompt: "go" },
+      {
+        sessionId: "s1",
+        agentId: "codex",
+        prompt: "go",
+        clientTurnId: "turn-123",
+      },
       store,
       controller
     );
 
     expect(result.doneReceived).toBe(true);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      sessionId: "s1",
+      clientTurnId: "turn-123",
+    });
     expect(store.getSnapshot().runs.s1.status).toBe("done");
     expect(store.getSnapshot().runs.s1.liveMessages.codex).toMatchObject({
       text: "hello",

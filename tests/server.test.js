@@ -93,7 +93,7 @@ async function withServer(options, fn) {
 
   try {
     const { port } = server.address();
-    await fn(`http://127.0.0.1:${port}`);
+    await fn(`http://127.0.0.1:${port}`, { memoryDbFile });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
@@ -772,6 +772,9 @@ test("POST /api/sessions creates a new session", async () => {
     assert.ok(body.session.id, "session should have an id");
     assert.equal(body.session.title, "");
     assert.deepEqual(body.session.messages, []);
+    assert.equal(body.session.messageCount, 0);
+    assert.equal(body.session.projectDir, path.resolve(__dirname, ".."));
+    assert.ok(body.session.projectKey);
   });
 });
 
@@ -972,6 +975,70 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
   );
 });
 
+test("POST /api/chat reuses a user message for the same clientTurnId", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("ok");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const { session } = await created.json();
+
+      async function sendTurn(clientTurnId) {
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            agent: "codex",
+            prompt: "repeat exactly",
+            sessionId: session.id,
+            clientTurnId,
+          }),
+        });
+        assert.equal(response.status, 200);
+        return response.text();
+      }
+
+      const first = await sendTurn("turn-same");
+      const retry = await sendTurn("turn-same");
+      const firstTrigger = first.match(/"triggerMessageId":"([^"]+)"/)?.[1];
+      const retryTrigger = retry.match(/"triggerMessageId":"([^"]+)"/)?.[1];
+      const firstInvocation = first.match(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/)?.[1];
+      const retryInvocation = retry.match(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/)?.[1];
+      assert.ok(firstTrigger);
+      assert.equal(retryTrigger, firstTrigger);
+      assert.ok(firstInvocation);
+      assert.ok(retryInvocation);
+      assert.notEqual(retryInvocation, firstInvocation);
+
+      let detail = await fetch(`${baseUrl}/api/sessions/${session.id}`).then((response) =>
+        response.json()
+      );
+      assert.equal(
+        detail.session.messages.filter((message) => message.role === "user").length,
+        1
+      );
+      assert.equal(detail.session.messages[0].clientTurnId, "turn-same");
+
+      await sendTurn("turn-intentional-repeat");
+      detail = await fetch(`${baseUrl}/api/sessions/${session.id}`).then((response) =>
+        response.json()
+      );
+      assert.equal(
+        detail.session.messages.filter((message) => message.role === "user").length,
+        2
+      );
+    }
+  );
+});
+
 test("POST /api/chat rejects invalid projectDir", async () => {
   await withServer(
     {
@@ -999,6 +1066,47 @@ test("POST /api/chat rejects invalid projectDir", async () => {
       assert.equal(response.status, 400);
       const body = JSON.parse(text);
       assert.match(body.error, /Directory not found/);
+    }
+  );
+});
+
+test("chat binds an unassigned legacy session to the server project before execution", async () => {
+  await withServer(
+    {
+      initialSessionIds: ["legacy-empty-session"],
+      spawnRunner() {
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write("bound");
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const before = await fetch(`${baseUrl}/api/sessions/legacy-empty-session`).then((response) =>
+        response.json()
+      );
+      assert.equal(before.session.projectDir, "");
+
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "legacy-empty-session",
+          agent: "codex",
+          prompt: "bind project first",
+          clientTurnId: "legacy-bind-turn",
+        }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+
+      const after = await fetch(`${baseUrl}/api/sessions/legacy-empty-session`).then((result) =>
+        result.json()
+      );
+      assert.equal(after.session.projectDir, path.resolve(__dirname, ".."));
+      assert.ok(after.session.projectKey);
     }
   );
 });
@@ -1761,7 +1869,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
         return child;
       },
     },
-    async (baseUrl) => {
+    async (baseUrl, { memoryDbFile }) => {
       // Create a session explicitly so both chats target the same id.
       const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
       const { session } = await created.json();
@@ -1770,7 +1878,12 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       const first = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "long task", sessionId: session.id }),
+        body: JSON.stringify({
+          agent: "codex",
+          prompt: "long task",
+          sessionId: session.id,
+          clientTurnId: "turn-old",
+        }),
       });
       assert.equal(first.status, 200);
 
@@ -1778,7 +1891,12 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       const second = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "new task", sessionId: session.id }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "new task",
+          sessionId: session.id,
+          clientTurnId: "turn-new",
+        }),
       });
       assert.equal(second.status, 200);
 
@@ -1799,6 +1917,22 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.match(windowMeta, /"triggerMessageId":"[^"]+"/);
       assert.match(windowMeta, /"triggerType":"user-message"/);
       assert.equal(callCount, 2);
+
+      const firstText = await first.text();
+      const firstInvocationId = firstText.match(
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"\}/
+      )?.[1];
+      assert.ok(firstInvocationId);
+      const storage = createStorage({ file: memoryDbFile });
+      try {
+        assert.equal(storage.invocations.get(firstInvocationId).state, "aborted");
+        const ended = storage.invocations
+          .listEvents(firstInvocationId)
+          .find((event) => event.kind === "invocation-end");
+        assert.equal(ended.payload.supersededByClientTurnId, "turn-new");
+      } finally {
+        storage.close();
+      }
     }
   );
 });

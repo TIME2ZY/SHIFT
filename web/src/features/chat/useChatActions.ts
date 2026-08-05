@@ -12,7 +12,13 @@ export function useChatActions() {
   const toast = useToast();
 
   const send = useCallback(
-    async (sessionId: string, agentId: string, prompt: string, useWorktree = false) => {
+    async (
+      sessionId: string,
+      agentId: string,
+      prompt: string,
+      useWorktree: boolean,
+      clientTurnId: string
+    ) => {
       const content = prompt.trim();
       if (!content) return;
 
@@ -28,7 +34,7 @@ export function useChatActions() {
       let memoryDirty = false;
       try {
         const result = await runChatStream(
-          { sessionId, agentId, prompt: content, useWorktree },
+          { sessionId, agentId, prompt: content, useWorktree, clientTurnId },
           store,
           controller,
           {

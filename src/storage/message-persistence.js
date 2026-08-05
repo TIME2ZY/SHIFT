@@ -5,6 +5,7 @@ const MESSAGE_METADATA_FIELDS = new Set([
   "content",
   "createdAt",
   "messageType",
+  "clientTurnId",
 ]);
 
 function durableMessageMetadata(message) {

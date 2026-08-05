@@ -70,6 +70,7 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
   const [composerDraftSeed, setComposerDraftSeed] = useState<ComposerDraftSeed | null>(null);
+  const [composerFocusRequestId, setComposerFocusRequestId] = useState(0);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const infoTriggerRef = useRef<HTMLButtonElement>(null);
@@ -130,15 +131,24 @@ export function App() {
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
   }
 
-  function sendPrompt(prompt: string, useWorktree: boolean) {
+  function sendPrompt(prompt: string, useWorktree: boolean, clientTurnId: string) {
     if (!activeSessionId) return Promise.resolve();
     const explicitAgent = findExplicitLeadingAgent(prompt, agents.data ?? []);
     const targetAgentId = explicitAgent?.id || selectedAgentId;
     if (!targetAgentId) return Promise.resolve();
-    return chat.send(activeSessionId, targetAgentId, prompt, useWorktree);
+    return chat.send(activeSessionId, targetAgentId, prompt, useWorktree, clientTurnId);
   }
 
   function createNewSession() {
+    if (
+      activeSession &&
+      activeSession.messageCount === 0 &&
+      !running &&
+      !activeSession.worktree
+    ) {
+      setComposerFocusRequestId((current) => current + 1);
+      return;
+    }
     createSession.mutate(undefined, {
       onSuccess(session) {
         setSelectedSessionId(session.id);
@@ -332,6 +342,7 @@ export function App() {
               selectedAgentId={selectedAgentId}
               running={running}
               draftSeed={composerDraftSeed}
+              focusRequestId={composerFocusRequestId}
               onDraftSeedApplied={() => setComposerDraftSeed(null)}
               onSend={sendPrompt}
               onStop={() => {

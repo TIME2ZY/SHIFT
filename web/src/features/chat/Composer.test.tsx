@@ -21,7 +21,7 @@ describe("Composer", () => {
     await userEvent.type(input, "  hello  ");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith("hello", false);
+    expect(onSend).toHaveBeenCalledWith("hello", false, expect.any(String));
     expect(input).toHaveValue("");
   });
 
@@ -60,7 +60,7 @@ describe("Composer", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "消息" }), "implement this");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith("implement this", true);
+    expect(onSend).toHaveBeenCalledWith("implement this", true, expect.any(String));
   });
 
   it("keeps drafts isolated when switching sessions", async () => {
@@ -170,6 +170,35 @@ describe("Composer", () => {
     await userEvent.type(input, "review this");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith("@Gemini review this", false);
+    expect(onSend).toHaveBeenCalledWith(
+      "@Gemini review this",
+      false,
+      expect.any(String)
+    );
+  });
+
+  it("locks synchronous duplicate submissions until the active send settles", async () => {
+    let finishSend: (() => void) | undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSend = resolve;
+        })
+    );
+    render(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    );
+
+    await userEvent.type(screen.getByRole("textbox", { name: "消息" }), "run once");
+    await userEvent.dblClick(screen.getByRole("button", { name: "发送" }));
+    expect(onSend).toHaveBeenCalledOnce();
+    finishSend?.();
   });
 });

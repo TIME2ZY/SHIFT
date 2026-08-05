@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_CHAT_QUICK_PROMPTS } from "../features/messages/MessageList";
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   mutate: vi.fn(),
   refetch: vi.fn(),
+  sessions: [{ id: "s1", title: "新对话", messageCount: 0, worktree: null }],
 }));
 
 vi.mock("./navigation", () => ({
@@ -36,7 +37,7 @@ vi.mock("../features/messages/queries", () => ({
 
 vi.mock("../features/sessions/queries", () => ({
   useSessionsQuery: () => ({
-    data: [{ id: "s1", title: "新对话" }],
+    data: mocks.sessions,
     isPending: false,
     isFetching: false,
     error: null,
@@ -67,13 +68,25 @@ vi.mock("../runtime/session-run-provider", () => ({
   useSessionRunStore: () => ({ dispose: mocks.dispose }),
 }));
 
-vi.mock("../features/sessions/SessionList", () => ({ SessionList: () => null }));
+vi.mock("../features/sessions/SessionList", () => ({
+  SessionList: ({ onCreate }: { onCreate?(): void }) => (
+    <button type="button" onClick={onCreate}>
+      新建对话
+    </button>
+  ),
+}));
 vi.mock("../features/right-panel/RightPanel", () => ({ RightPanel: () => null }));
 vi.mock("../features/workspace/WorkspacePage", () => ({ WorkspacePage: () => null }));
 
 beforeEach(() => {
   window.localStorage.clear();
   vi.clearAllMocks();
+  mocks.sessions.splice(0, mocks.sessions.length, {
+    id: "s1",
+    title: "新对话",
+    messageCount: 0,
+    worktree: null,
+  });
 });
 
 describe("App recommended prompt integration", () => {
@@ -106,5 +119,26 @@ describe("App recommended prompt integration", () => {
     expect(input).toHaveValue(first.prompt);
     expect(toggle).toBeChecked();
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("focuses the existing empty session instead of creating another one", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const input = screen.getByRole("textbox", { name: "消息" });
+    expect(input).not.toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    await waitFor(() => expect(input).toHaveFocus());
+  });
+
+  it("creates a new session when the active session already has messages", async () => {
+    mocks.sessions[0].messageCount = 2;
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+    expect(mocks.mutate).toHaveBeenCalledOnce();
   });
 });

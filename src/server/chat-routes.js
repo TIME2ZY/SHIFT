@@ -137,6 +137,7 @@ function createChatRoutes({
   validateProjectDir,
   setSessionWorktree,
   appendToSession,
+  findUserMessageByClientTurnId,
   durableRecorder,
   memoryCapture,
   logger = console,
@@ -199,6 +200,7 @@ function createChatRoutes({
     const requestedAgent = typeof body.agent === "string" ? body.agent : "codex";
     const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const useWorktree = body.useWorktree === true;
+    let clientTurnId = null;
     let sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
 
     if (!AGENTS[requestedAgent]) {
@@ -208,6 +210,14 @@ function createChatRoutes({
     if (!rawPrompt) {
       sendJson(res, 400, { error: "Prompt is required." });
       return true;
+    }
+    if (body.clientTurnId !== undefined && body.clientTurnId !== null) {
+      try {
+        clientTurnId = assertValidOpaqueId(body.clientTurnId, "clientTurnId");
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
     }
 
     let session;
@@ -235,9 +245,27 @@ function createChatRoutes({
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      session = setSessionProjectDir(sessionId, resolvedProjectDir);
+      try {
+        session = setSessionProjectDir(sessionId, resolvedProjectDir);
+      } catch (error) {
+        sendJson(res, error.statusCode || 400, { error: error.message });
+        return true;
+      }
+    }
+    if (!session.projectDir) {
+      try {
+        session = setSessionProjectDir(sessionId, rootDir);
+      } catch (error) {
+        sendJson(res, error.statusCode || 400, { error: error.message });
+        return true;
+      }
     }
     const sessionProjectDir = session && session.projectDir ? session.projectDir : rootDir;
+    const existingUserMessage =
+      clientTurnId && typeof findUserMessageByClientTurnId === "function"
+        ? findUserMessageByClientTurnId(sessionId, clientTurnId)
+        : null;
+    const turnPrompt = existingUserMessage?.content || rawPrompt;
 
     let sessionWorktree = session.worktree;
     if (useWorktree && !sessionWorktree) {
@@ -253,7 +281,10 @@ function createChatRoutes({
     // Claim ownership before the first asynchronous preparation step. Otherwise
     // an older request that finishes recall/bootstrap later can abort a newer run.
     const existing = activeInvocations.get(sessionId);
-    if (existing) existing.abort();
+    if (existing) {
+      existing.supersededByClientTurnId = clientTurnId;
+      existing.abort();
+    }
     const invocationController = new AbortController();
     activeInvocations.set(sessionId, invocationController);
     res.once("close", () => {
@@ -324,7 +355,7 @@ function createChatRoutes({
       return true;
     }
 
-    const { augmentedPrompt, skillNames } = augmentPrompt(rawPrompt, useWorktree);
+    const { augmentedPrompt, skillNames } = augmentPrompt(turnPrompt, useWorktree);
     const protocol = req.headers["x-forwarded-proto"] || "http";
     const apiUrl = process.env[ENV.API_URL] || `${protocol}://${req.headers.host}`;
     const worklist = [requestedAgent];
@@ -341,7 +372,7 @@ function createChatRoutes({
         sessionId,
         agent: AGENTS[requestedAgent],
         generation: initialWindow?.generation || 1,
-        prompt: rawPrompt,
+        prompt: turnPrompt,
         invocationSource: recallService,
         digestSource: storage?.digests || null,
         retrieveSource: recallService || null,
@@ -374,41 +405,51 @@ function createChatRoutes({
       return true;
     }
 
-    const sessionAfterUser = appendToSession(
-      sessionId,
-      {
-        role: "user",
-        agent: requestedAgent,
-        content: rawPrompt,
-        augmentedPrompt,
-        activeSkills: skillNames,
-      },
-      { allowCreate: false, windowId: initialWindow?.id }
-    );
+    const sessionAfterUser = existingUserMessage
+      ? session
+      : appendToSession(
+          sessionId,
+          {
+            role: "user",
+            agent: requestedAgent,
+            content: turnPrompt,
+            augmentedPrompt,
+            activeSkills: skillNames,
+            clientTurnId,
+          },
+          { allowCreate: false, windowId: initialWindow?.id }
+        );
     // Always prefer the post-append snapshot so startInvocation/mirrorThread
     // does not clobber title / lastAgent written with the user message.
     if (sessionAfterUser) session = sessionAfterUser;
-    const userMessageId =
-      sessionAfterUser?.messages?.[sessionAfterUser.messages.length - 1]?.id || null;
-    events.append({
-      threadId: sessionId,
-      invocationId: "_user_prompt",
-      kind: "user-prompt",
-      payload: {
-        agent: requestedAgent,
-        content: rawPrompt,
-        activeSkills: skillNames,
-        messageId: userMessageId,
-      },
-    });
-    if (looksLikeDecisionLanguage(rawPrompt)) {
+    const persistedUserMessage =
+      existingUserMessage ||
+      (clientTurnId && typeof findUserMessageByClientTurnId === "function"
+        ? findUserMessageByClientTurnId(sessionId, clientTurnId)
+        : sessionAfterUser?.messages?.[sessionAfterUser.messages.length - 1]);
+    const userMessageId = persistedUserMessage?.id || null;
+    if (!existingUserMessage) {
+      events.append({
+        threadId: sessionId,
+        invocationId: "_user_prompt",
+        kind: "user-prompt",
+        payload: {
+          agent: requestedAgent,
+          content: turnPrompt,
+          activeSkills: skillNames,
+          messageId: userMessageId,
+          clientTurnId,
+        },
+      });
+    }
+    if (!existingUserMessage && looksLikeDecisionLanguage(turnPrompt)) {
       storage?.memoryEvents?.recordSafe?.({
         eventType: "decision_language_detected",
         threadId: sessionId,
         agentId: requestedAgent,
         payload: {
           messageId: userMessageId,
-          chars: rawPrompt.length,
+          chars: turnPrompt.length,
         },
       });
     }
@@ -448,6 +489,7 @@ function createChatRoutes({
       ],
     };
     callbacks.registerThread(sessionId, threadCtx);
+    let ownedInvocationSlotAtCleanup = false;
 
     try {
       for (let i = 0; i < worklist.length && threadCtx.a2aCount < maxDepth; i++) {
@@ -500,7 +542,7 @@ function createChatRoutes({
         /** @type {string[]} */
         let turnSkillNames = skillNames;
         if (i === 0) {
-          agentPrompt = rawPrompt;
+          agentPrompt = turnPrompt;
         } else {
           const prev = a2aHistory[a2aHistory.length - 1];
           const prevLabel = AGENTS[prev.agent]?.label || prev.agent;
@@ -516,7 +558,7 @@ function createChatRoutes({
           // Wave H1 Receive Bundle: memory card + policy banner + structured task + outbound card.
           const a2aMemoryPackRaw = await sessionBootstrap.buildActiveMemoryCard({
             threadId: sessionId,
-            prompt: [rawPrompt, handoff?.what, handoff?.next_action, prev.content]
+            prompt: [turnPrompt, handoff?.what, handoff?.next_action, prev.content]
               .filter(Boolean)
               .join("\n"),
             retrieveSource: recallService || null,
@@ -540,7 +582,7 @@ function createChatRoutes({
             toAgentId: agent,
             toLabel: agentConfig.label || agent,
             fromContent: prev.content,
-            userPrompt: rawPrompt,
+            userPrompt: turnPrompt,
             memoryCard: a2aMemoryCard,
             includeOutboundCard: true,
           });
@@ -1218,7 +1260,12 @@ function createChatRoutes({
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           const abortInvId = threadCtx.currentInvocationId || invocationId;
-          durable.finishInvocation(abortInvId, code, signal, endPayload);
+          durable.finishInvocation(abortInvId, code, signal, {
+            ...endPayload,
+            terminalState: "aborted",
+            supersededByClientTurnId:
+              invocationController.supersededByClientTurnId || null,
+          });
           try {
             handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
           } catch {
@@ -1471,7 +1518,9 @@ function createChatRoutes({
         }
       }
     } finally {
-      if (activeInvocations.get(sessionId) === invocationController) {
+      ownedInvocationSlotAtCleanup =
+        activeInvocations.get(sessionId) === invocationController;
+      if (ownedInvocationSlotAtCleanup) {
         activeInvocations.delete(sessionId);
       }
       if (callbacks.getThread(sessionId) === threadCtx) {
@@ -1498,7 +1547,11 @@ function createChatRoutes({
 
     // Phase 2: no open invocations may survive past stream end (orphan reconcile).
     // One chat owns the session at a time (activeInvocations), so thread-wide cleanup is safe.
-    if (durable.enabled && typeof durable.reconcileThreadActive === "function") {
+    if (
+      ownedInvocationSlotAtCleanup &&
+      durable.enabled &&
+      typeof durable.reconcileThreadActive === "function"
+    ) {
       try {
         const reconcile = durable.reconcileThreadActive(sessionId, {
           reason: aborted ? "request-aborted-orphan" : "request-done-orphan",

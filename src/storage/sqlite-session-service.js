@@ -8,12 +8,19 @@ const { withSqliteBusyRetry } = require("./sqlite-retry");
  * worktree is process-local runtime state (authoritative copy lives in the
  * worktree manager state file); it is not part of the durable thread row.
  */
-function createSqliteSessionService({ storage, logger = console, idFactory = generateId } = {}) {
+function createSqliteSessionService({
+  storage,
+  logger = console,
+  idFactory = generateId,
+  defaultProjectDir = "",
+} = {}) {
   if (!storage?.threads || !storage?.messages) {
     throw new Error("SQLite session service requires thread and message repositories.");
   }
 
   const worktrees = new Map();
+  const initialProjectDir =
+    typeof defaultProjectDir === "string" ? defaultProjectDir : "";
 
   function attempt(operation, work) {
     try {
@@ -35,13 +42,15 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
       title: thread.title || "",
       createdAt: thread.createdAt,
       messages,
+      messageCount: messages.length,
       worktree: worktrees.get(thread.id) || null,
       projectDir: thread.projectDir || "",
+      projectKey: thread.projectKey || null,
       lastAgent: thread.lastAgentId || "",
     };
   }
 
-  function createSession() {
+  function createSession({ projectDir = initialProjectDir } = {}) {
     return attempt("create session", () => {
       const id = idFactory();
       assertValidOpaqueId(id, "sessionId");
@@ -49,7 +58,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
       storage.threads.create({
         id,
         title: "",
-        projectDir: "",
+        projectDir,
         lastAgentId: null,
         createdAt,
         updatedAt: createdAt,
@@ -79,6 +88,9 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
           title: thread.title || "",
           createdAt: thread.createdAt,
           messageCount: thread.messageCount,
+          projectDir: thread.projectDir || "",
+          projectKey: thread.projectKey || null,
+          worktree: worktrees.get(thread.id) || null,
           lastAgent: thread.lastAgentId || "",
           participantAgentIds,
         };
@@ -95,7 +107,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     storage.threads.create({
       id: sessionId,
       title: "",
-      projectDir: "",
+      projectDir: initialProjectDir,
       lastAgentId: null,
       createdAt,
       updatedAt: createdAt,
@@ -203,6 +215,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
           metadata,
           createdAt: msg.createdAt,
           messageType: msg.messageType,
+          clientTurnId: msg.clientTurnId,
         });
         return toSession(storage.threads.get(sessionId));
       });
@@ -218,6 +231,11 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     getSession,
     listSessions,
     appendToSession,
+    findUserMessageByClientTurnId(sessionId, clientTurnId) {
+      if (!isValidOpaqueId(sessionId) || !clientTurnId) return null;
+      const message = storage.messages.findUserByClientTurnId(sessionId, clientTurnId);
+      return messageFromSqlite(message);
+    },
     setSessionProjectDir,
     setSessionWorktree,
     setSessionLastAgent,
@@ -231,6 +249,7 @@ function generateId() {
 }
 
 function messageFromSqlite(message) {
+  if (!message) return null;
   return {
     ...(message.metadata && typeof message.metadata === "object" ? message.metadata : {}),
     id: message.id,
@@ -239,6 +258,7 @@ function messageFromSqlite(message) {
     messageType: message.messageType,
     agent: message.agentId || undefined,
     content: message.content,
+    ...(message.clientTurnId ? { clientTurnId: message.clientTurnId } : {}),
     ...(message.invocationId ? { invocationId: message.invocationId } : {}),
   };
 }

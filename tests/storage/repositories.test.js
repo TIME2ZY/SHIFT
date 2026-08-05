@@ -166,6 +166,43 @@ test("message repository allocates durable sequences and classifies message type
   }
 });
 
+test("message repository enforces one user message per client turn id", () => {
+  const { storage } = createFixture();
+  try {
+    const first = storage.messages.append({
+      id: "turn-message-1",
+      threadId: "thread-1",
+      role: "user",
+      content: "repeat me",
+      clientTurnId: "turn-1",
+    });
+    const intentionalRepeat = storage.messages.append({
+      id: "turn-message-2",
+      threadId: "thread-1",
+      role: "user",
+      content: "repeat me",
+      clientTurnId: "turn-2",
+    });
+
+    assert.equal(first.clientTurnId, "turn-1");
+    assert.equal(intentionalRepeat.clientTurnId, "turn-2");
+    assert.equal(storage.messages.findUserByClientTurnId("thread-1", "turn-1").id, first.id);
+    assert.throws(
+      () =>
+        storage.messages.append({
+          id: "turn-message-duplicate",
+          threadId: "thread-1",
+          role: "user",
+          content: "different content",
+          clientTurnId: "turn-1",
+        }),
+      /UNIQUE constraint failed/
+    );
+  } finally {
+    storage.close();
+  }
+});
+
 test("message repository allows callbacks but enforces one final per invocation", () => {
   const { storage, window } = createFixture();
   try {

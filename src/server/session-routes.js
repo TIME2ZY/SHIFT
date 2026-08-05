@@ -227,7 +227,12 @@ function createSessionRoutes({
         return true;
       }
 
-      setSessionProjectDir(sessionId, resolved);
+      try {
+        setSessionProjectDir(sessionId, resolved);
+      } catch (error) {
+        sendJson(res, error.statusCode || 400, { error: error.message });
+        return true;
+      }
       sendJson(res, 200, { dir: resolved });
       return true;
     }

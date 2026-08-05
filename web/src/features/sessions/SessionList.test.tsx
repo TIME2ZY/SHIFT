@@ -9,8 +9,8 @@ describe("SessionList", () => {
     render(
       <SessionList
         sessions={[
-          { id: "s1", title: "第一轮", lastAgent: "codex" },
-          { id: "s2", title: "第二轮" },
+          { id: "s1", title: "第一轮", messageCount: 1, lastAgent: "codex" },
+          { id: "s2", title: "第二轮", messageCount: 1 },
         ]}
         activeSessionId="s1"
         isLoading={false}
@@ -30,7 +30,7 @@ describe("SessionList", () => {
     const onSelect = vi.fn();
     render(
       <SessionList
-        sessions={[{ id: "s1", title: "第一轮" }]}
+        sessions={[{ id: "s1", title: "第一轮", messageCount: 1 }]}
         activeSessionId="s1"
         isLoading={false}
         error={null}
@@ -53,8 +53,8 @@ describe("SessionList", () => {
     render(
       <SessionList
         sessions={[
-          { id: "s1", title: "前端重构", lastAgent: "codex" },
-          { id: "s2", title: "存储审计", lastAgent: "gemini" },
+          { id: "s1", title: "前端重构", messageCount: 1, lastAgent: "codex" },
+          { id: "s2", title: "存储审计", messageCount: 1, lastAgent: "gemini" },
         ]}
         activeSessionId="s1"
         isLoading={false}
@@ -72,7 +72,7 @@ describe("SessionList", () => {
   it("shows one consistent label for an empty session title", () => {
     render(
       <SessionList
-        sessions={[{ id: "opaque-session-id", title: "" }]}
+        sessions={[{ id: "opaque-session-id", title: "", messageCount: 0 }]}
         activeSessionId="opaque-session-id"
         isLoading={false}
         error={null}
@@ -92,6 +92,7 @@ describe("SessionList", () => {
           {
             id: "s1",
             title: "协作会话",
+            messageCount: 2,
             participantAgentIds: ["codex", "gemini"],
           },
         ]}

@@ -1,4 +1,7 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
@@ -95,6 +98,53 @@ test("sqlite session service builds a compact title from the first user message"
       content: "请把标题改成另一件事",
     });
     assert.equal(afterFollowUp.title, afterUser.title);
+  } finally {
+    sessions.close();
+    storage.close();
+  }
+});
+
+test("sqlite session service binds new sessions to the default project identity", () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-default-project-"));
+  const storage = createStorage({ file: ":memory:" });
+  const sessions = createSqliteSessionService({ storage, defaultProjectDir: projectDir });
+  try {
+    const first = sessions.createSession();
+    const second = sessions.createSession();
+
+    assert.equal(first.projectDir, projectDir);
+    assert.ok(first.projectKey);
+    assert.equal(first.projectKey, second.projectKey);
+    assert.equal(first.messageCount, 0);
+    assert.equal(sessions.listSessions()[0].projectKey, first.projectKey);
+
+    sessions.setSessionWorktree(first.id, {
+      baseDir: projectDir,
+      worktreeDir: path.join(projectDir, ".worktrees", first.id),
+    });
+    assert.equal(sessions.getSession(first.id).projectKey, first.projectKey);
+  } finally {
+    sessions.close();
+    storage.close();
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite session service exposes persisted client turn ids", () => {
+  const storage = createStorage({ file: ":memory:" });
+  const sessions = createSqliteSessionService({ storage });
+  try {
+    const created = sessions.createSession();
+    sessions.appendToSession(created.id, {
+      role: "user",
+      agent: "codex",
+      content: "same prompt",
+      clientTurnId: "turn-1",
+    });
+
+    const message = sessions.findUserMessageByClientTurnId(created.id, "turn-1");
+    assert.equal(message.content, "same prompt");
+    assert.equal(message.clientTurnId, "turn-1");
   } finally {
     sessions.close();
     storage.close();

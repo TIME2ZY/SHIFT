@@ -8,6 +8,7 @@ export interface ChatRequest {
   prompt: string;
   projectDir?: string;
   useWorktree?: boolean;
+  clientTurnId?: string;
 }
 
 export interface ChatStreamResult {
@@ -69,6 +70,7 @@ export async function runChatStream(
       sessionId: request.sessionId,
       projectDir: request.projectDir,
       useWorktree: request.useWorktree === true,
+      clientTurnId: request.clientTurnId,
     }),
     signal: controller.signal,
     timeoutMs: 0,
