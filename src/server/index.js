@@ -13,6 +13,7 @@ const contextHealth = require("../session/health");
 const sessionSealer = require("../session/sealer");
 const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
+const { createDeliveryVerifier } = require("../worktree/delivery-verifier");
 const runtimePaths = require("../shared/runtime-paths");
 const projectDirService = require("./project-dir");
 const uiSecurity = require("./ui-security");
@@ -114,6 +115,7 @@ function createServer(options = {}) {
       rootDir: ROOT,
       stateFile: DEFAULT_WORKTREE_STATE_FILE,
     });
+  const deliveryVerifier = options.deliveryVerifier || createDeliveryVerifier();
   const logger = options.logger || console;
   const auditTranscriptDir = path.resolve(
     options.auditTranscriptDir ||
@@ -300,6 +302,7 @@ function createServer(options = {}) {
     durableRecorder,
     memoryCapture,
     collabTaskRegistry,
+    deliveryVerifier,
     logger,
   });
 

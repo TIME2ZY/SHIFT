@@ -9,6 +9,8 @@ const {
   IMPLEMENTATION_GATE_STATUS,
   renderImplementationGateBlock,
 } = require("../agents/implementation-plan-gate");
+const { renderOutcomeEvidenceBlock } = require("../agents/outcome-evidence-gate");
+const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const handoffRouteRegistry = require("../agents/handoff-route-registry");
 const { createRunObservability } = require("../agents/run-observability");
@@ -145,6 +147,7 @@ function createChatRoutes({
   durableRecorder,
   memoryCapture,
   collabTaskRegistry = null,
+  deliveryVerifier = null,
   logger = console,
 }) {
   const durable = durableRecorder || NOOP_DURABLE_RECORDER;
@@ -433,6 +436,14 @@ function createChatRoutes({
         ? findUserMessageByClientTurnId(sessionId, clientTurnId)
         : sessionAfterUser?.messages?.[sessionAfterUser.messages.length - 1]);
     const userMessageId = persistedUserMessage?.id || null;
+    if (collabTaskRegistry && typeof collabTaskRegistry.captureUserGoal === "function") {
+      const currentTask = collabTaskRegistry.getTask(sessionId);
+      collabTaskRegistry.captureUserGoal(sessionId, {
+        text: turnPrompt,
+        messageId: userMessageId,
+        force: !existingUserMessage && currentTask?.phase === "done",
+      });
+    }
     if (!existingUserMessage) {
       events.append({
         threadId: sessionId,
@@ -493,6 +504,8 @@ function createChatRoutes({
         },
       ],
       collabTaskRegistry,
+      deliveryVerifier,
+      runWorkspace,
     };
     callbacks.registerThread(sessionId, threadCtx);
     let ownedInvocationSlotAtCleanup = false;
@@ -633,6 +646,11 @@ function createChatRoutes({
         const collaborationBlock = renderCollaborationRules(agent, AGENTS, {
           compact: i > 0,
         });
+        const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
+          agent,
+          collabTaskRegistry?.getTask(sessionId) || null,
+          { branch: runWorkspace.branch || "" }
+        );
         let grokImplementationPermission = null;
         if (agent === "grok") {
           if (
@@ -654,7 +672,9 @@ function createChatRoutes({
             };
           }
         }
-        const promptParts = [identityBlock, collaborationBlock];
+        const promptParts = [identityBlock, collaborationBlock, outcomeEvidenceBlock].filter(
+          Boolean
+        );
         if (i === 0) {
           promptParts.push(bootstrapPacket, augmentedPrompt);
         } else {
@@ -1496,6 +1516,23 @@ function createChatRoutes({
               planHash: submission.planHash || null,
             }
           );
+        }
+
+        const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+          agent,
+          content: assistantContent,
+          threadId: sessionId,
+          registry: collabTaskRegistry,
+          deliveryVerifier,
+          cwd: runWorkspace.worktreeDir,
+          branch: runWorkspace.branch || "",
+        });
+        for (const workflowEvent of workflowEvidenceEvents) {
+          sendSse(res, workflowEvent.event, {
+            agent,
+            invocationId: finalInvocationId,
+            ...workflowEvent.payload,
+          });
         }
 
         // Parse structured handoff once per turn (soft — never blocks routing).

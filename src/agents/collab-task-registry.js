@@ -23,6 +23,17 @@ const {
   hashImplementationPlan,
   isImplementationApproved,
 } = require("./implementation-plan-gate");
+const {
+  parseSolutionBaseline,
+  hashSolutionBaseline,
+  parseCodeReview,
+  hashCodeReview,
+  parseDeliveryReceipt,
+  validateVerifiedDelivery,
+  parseFinalAcceptance,
+  validateFinalAcceptanceAgainstTask,
+  hashUserGoal,
+} = require("./outcome-evidence-gate");
 
 const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
@@ -120,6 +131,265 @@ function createCollabTaskRegistry(options = {}) {
     return { ...task, history: task.history.slice() };
   }
 
+  function captureUserGoal(threadId, input = {}) {
+    if (!threadId) return { captured: false, reason: "missing_thread" };
+    const text = String(input.text || "").trim();
+    if (!text) return { captured: false, reason: "missing_user_goal" };
+    const task = getOrCreateTask(threadId);
+    const existing = task.artifacts?.userGoal;
+    if (existing?.hash && !input.force) {
+      return { captured: true, reused: true, goalHash: existing.hash, task };
+    }
+    if (input.force) resetOutcomeEvidence(task);
+    const goalHash = hashUserGoal(text);
+    task.goal = task.goal || text;
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      userGoal: {
+        text,
+        hash: goalHash,
+        messageId: input.messageId || null,
+        capturedAt: new Date().toISOString(),
+      },
+    };
+    const saved = persist(task, {
+      type: "user_goal_captured",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId: "user",
+      intent: "discuss",
+      goalHash,
+    });
+    return { captured: true, reused: false, goalHash, task: saved };
+  }
+
+  function submitSolutionBaseline(threadId, input = {}) {
+    if (!threadId) return { accepted: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!LEAD_AGENT_IDS.has(actorAgentId)) {
+      return { accepted: false, reason: "solution_must_be_submitted_by_lead" };
+    }
+    const baseline = input.baseline || parseSolutionBaseline(input.content);
+    if (!baseline) return { accepted: false, reason: "invalid_or_missing_solution_baseline" };
+    const task = getOrCreateTask(threadId);
+    const goalHash = String(task.artifacts?.userGoal?.hash || "");
+    if (!goalHash) return { accepted: false, reason: "user_goal_missing" };
+    if (String(baseline.user_goal_hash || "") !== goalHash) {
+      return { accepted: false, reason: "solution_user_goal_mismatch" };
+    }
+    const solutionHash = hashSolutionBaseline(baseline);
+    if (task.artifacts?.solutionBaseline?.hash === solutionHash) {
+      return { accepted: true, reused: true, solutionHash, task };
+    }
+    const previousHash = task.artifacts?.solutionBaseline?.hash || null;
+    if (previousHash && previousHash !== solutionHash) invalidateAfterSolutionRevision(task);
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      solutionBaseline: {
+        ...baseline,
+        hash: solutionHash,
+        submittedBy: actorAgentId,
+        submittedAt: new Date().toISOString(),
+      },
+    };
+    const saved = persist(task, {
+      type: "solution_baseline_submitted",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId,
+      intent: "plan",
+      goalHash,
+      solutionHash,
+    });
+    return { accepted: true, reused: false, solutionHash, task: saved };
+  }
+
+  function recordOpenCodeDelivery(threadId, input = {}) {
+    if (!threadId) return { accepted: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!isReviewer(actorAgentId) || !isDeliveryAgent(actorAgentId)) {
+      return { accepted: false, reason: "delivery_must_be_recorded_by_reviewer" };
+    }
+    const review = input.review || parseCodeReview(input.content);
+    const receipt = input.receipt || parseDeliveryReceipt(input.content);
+    if (!review) return { accepted: false, reason: "invalid_or_missing_code_review" };
+    if (review.verdict !== "approve") {
+      return { accepted: false, reason: "code_review_not_approved" };
+    }
+    if (!receipt) return { accepted: false, reason: "invalid_or_missing_delivery_receipt" };
+    const verification = input.verification || null;
+    const verified = validateVerifiedDelivery(verification, receipt);
+    if (!verified.ok) return { accepted: false, reason: verified.reason };
+
+    const task = getTask(threadId);
+    if (!task) return { accepted: false, reason: "collaboration_task_missing" };
+    if (!isTaskImplementationApproved(task)) {
+      return { accepted: false, reason: "implementation_plan_not_approved" };
+    }
+    if (!isTaskSolutionBound(task)) {
+      return { accepted: false, reason: "solution_baseline_missing" };
+    }
+    const reviewEvidenceHash = hashCodeReview(review, verification.commitSha);
+    if (
+      task.codeReviewGate?.evidenceHash === reviewEvidenceHash &&
+      task.deliveryGate?.commitSha === verification.commitSha &&
+      task.deliveryGate?.ciStatus === verification.ciStatus
+    ) {
+      return {
+        accepted: true,
+        reused: true,
+        readyForAcceptance: verification.ciStatus === "success",
+        reason: verification.ciStatus === "success" ? null : "ci_not_successful",
+        reviewEvidenceHash,
+        task,
+      };
+    }
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      codeReview: {
+        ...review,
+        hash: reviewEvidenceHash,
+        commitSha: verification.commitSha,
+        reviewedBy: actorAgentId,
+        reviewedAt: new Date().toISOString(),
+      },
+      delivery: {
+        ...receipt,
+        ...verification,
+        reviewEvidenceHash,
+      },
+    };
+    task.codeReviewGate = {
+      verdict: "approve",
+      evidenceHash: reviewEvidenceHash,
+      commitSha: verification.commitSha,
+      reviewedBy: actorAgentId,
+      reviewedAt: new Date().toISOString(),
+    };
+    task.deliveryGate = {
+      reviewEvidenceHash,
+      commitSha: verification.commitSha,
+      branch: verification.branch,
+      baseBranch: verification.baseBranch,
+      prUrl: verification.prUrl,
+      prNumber: verification.prNumber,
+      ciStatus: verification.ciStatus,
+      verifiedBy: actorAgentId,
+      verifiedAt: verification.verifiedAt || new Date().toISOString(),
+    };
+    task.finalGate = null;
+    task.approvalHash = reviewEvidenceHash;
+    const previous = task.phase;
+    task.phase = STATE.DELIVER;
+    task.state = STATE.DELIVER;
+    const saved = persist(task, {
+      type: "delivery_evidence_verified",
+      from: previous,
+      to: STATE.DELIVER,
+      actorAgentId,
+      intent: "deliver",
+      reviewEvidenceHash,
+      commitSha: verification.commitSha,
+      prUrl: verification.prUrl,
+      ciStatus: verification.ciStatus,
+    });
+    return {
+      accepted: true,
+      readyForAcceptance: verification.ciStatus === "success",
+      reason: verification.ciStatus === "success" ? null : "ci_not_successful",
+      reviewEvidenceHash,
+      task: saved,
+    };
+  }
+
+  function submitFinalAcceptance(threadId, input = {}) {
+    if (!threadId) return { accepted: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!LEAD_AGENT_IDS.has(actorAgentId)) {
+      return { accepted: false, reason: "final_acceptance_must_be_submitted_by_lead" };
+    }
+    const acceptance = input.acceptance || parseFinalAcceptance(input.content);
+    if (!acceptance) return { accepted: false, reason: "invalid_or_missing_final_acceptance" };
+    const task = getTask(threadId);
+    if (!task) return { accepted: false, reason: "collaboration_task_missing" };
+    if (!isTaskSolutionBound(task)) {
+      return { accepted: false, reason: "solution_baseline_missing" };
+    }
+    const validation = validateFinalAcceptanceAgainstTask(acceptance, task);
+    if (!validation.ok) return { accepted: false, reason: validation.reason };
+
+    const acceptanceHash = hashEvidence({
+      goal: acceptance.user_goal_hash,
+      what: JSON.stringify(acceptance.checks),
+      diffHash: acceptance.commit_sha,
+      testHash: acceptance.solution_hash,
+    });
+    if (task.artifacts?.finalAcceptance?.hash === acceptanceHash) {
+      return {
+        accepted: true,
+        reused: true,
+        verdict: acceptance.verdict,
+        acceptanceHash,
+        task,
+      };
+    }
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      finalAcceptance: {
+        ...acceptance,
+        hash: acceptanceHash,
+        acceptedBy: actorAgentId,
+        acceptedAt: new Date().toISOString(),
+      },
+    };
+    task.finalGate = {
+      verdict: acceptance.verdict,
+      evidenceHash: acceptanceHash,
+      userGoalHash: acceptance.user_goal_hash,
+      solutionHash: acceptance.solution_hash,
+      implementationPlanHash: acceptance.implementation_plan_hash,
+      acceptedCommitSha: acceptance.commit_sha,
+      acceptedBy: actorAgentId,
+      acceptedAt: new Date().toISOString(),
+    };
+    const saved = persist(task, {
+      type: "final_acceptance_submitted",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId,
+      intent: "accept",
+      verdict: acceptance.verdict,
+      acceptanceHash,
+      commitSha: acceptance.commit_sha,
+    });
+    return { accepted: true, verdict: acceptance.verdict, acceptanceHash, task: saved };
+  }
+
+  function shouldBlockEvidenceRoute(input = {}) {
+    const to = String(input.toAgent || "").toLowerCase();
+    const intent = normalizeIntent(input.intent) || "";
+    const task = getTask(input.threadId);
+    if (["plan", "implement"].includes(intent) && isImplementer(to)) {
+      if (!task?.artifacts?.userGoal?.hash) {
+        return { skip: true, reason: "user_goal_missing", state: task?.phase || STATE.DISCUSS };
+      }
+      if (!isTaskSolutionBound(task)) {
+        return {
+          skip: true,
+          reason: "solution_baseline_missing",
+          state: task?.phase || STATE.DISCUSS,
+        };
+      }
+    }
+    if (intent === "accept" && LEAD_AGENT_IDS.has(to)) {
+      const readiness = deliveryReadiness(task);
+      if (!readiness.ok) {
+        return { skip: true, reason: readiness.reason, state: task?.phase || STATE.DELIVER };
+      }
+    }
+    return { skip: false };
+  }
+
   function requireImplementationPlan(task, input = {}) {
     const requestHash = String(input.requestHash || "").trim() || null;
     const current = task.implementationGate;
@@ -145,6 +415,9 @@ function createCollabTaskRegistry(options = {}) {
     };
     task.artifacts = { ...(task.artifacts || {}) };
     delete task.artifacts.implementationPlan;
+    delete task.artifacts.codeReview;
+    delete task.artifacts.delivery;
+    delete task.artifacts.finalAcceptance;
     task.codeReviewGate = null;
     task.deliveryGate = null;
     task.finalGate = null;
@@ -200,6 +473,9 @@ function createCollabTaskRegistry(options = {}) {
         proposedAt: new Date().toISOString(),
       },
     };
+    delete task.artifacts.codeReview;
+    delete task.artifacts.delivery;
+    delete task.artifacts.finalAcceptance;
     task.implementationGate = {
       ...(task.implementationGate || {}),
       status: IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL,
@@ -378,16 +654,25 @@ function createCollabTaskRegistry(options = {}) {
       if (/request-changes|request_changes|请修|需修改|\bp0\b/.test(reviewBlob)) {
         next = STATE.IMPLEMENT;
         task.codeReviewGate = null;
+        task.artifacts = { ...(task.artifacts || {}) };
+        delete task.artifacts.codeReview;
+        delete task.artifacts.delivery;
+        delete task.artifacts.finalAcceptance;
         task.approvalHash = null;
       } else if (/approve-with-nits|approve\b|批准|可交付|可合入|lgtm/.test(reviewBlob)) {
         next = STATE.DELIVER;
-        task.approvalHash = evidenceHash;
-        task.codeReviewGate = {
-          verdict: "approve",
-          evidenceHash,
-          reviewedBy: from,
-          reviewedAt: new Date().toISOString(),
-        };
+        const deliveryBound =
+          task.codeReviewGate?.verdict === "approve" &&
+          task.deliveryGate?.reviewEvidenceHash === task.codeReviewGate.evidenceHash;
+        if (!deliveryBound) {
+          task.approvalHash = evidenceHash;
+          task.codeReviewGate = {
+            verdict: "approve",
+            evidenceHash,
+            reviewedBy: from,
+            reviewedAt: new Date().toISOString(),
+          };
+        }
       }
     }
 
@@ -416,6 +701,10 @@ function createCollabTaskRegistry(options = {}) {
   function markDone(threadId, input = {}) {
     const task = getOrCreateTask(threadId);
     if (task.phase !== STATE.DELIVER) return task;
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!LEAD_AGENT_IDS.has(actorAgentId)) {
+      return { ...task, completionBlocked: "done_must_be_marked_by_lead" };
+    }
     const readiness = completionReadiness(task);
     if (!readiness.ok) return { ...task, completionBlocked: readiness.reason };
     const previous = task.phase;
@@ -425,7 +714,7 @@ function createCollabTaskRegistry(options = {}) {
       type: "transition",
       from: previous,
       to: STATE.DONE,
-      actorAgentId: input.actorAgentId || null,
+      actorAgentId,
       intent: input.intent || "accept",
     });
   }
@@ -498,6 +787,11 @@ function createCollabTaskRegistry(options = {}) {
   return {
     getTask,
     getOrCreateTask,
+    captureUserGoal,
+    submitSolutionBaseline,
+    recordOpenCodeDelivery,
+    submitFinalAcceptance,
+    shouldBlockEvidenceRoute,
     noteAcceptedRoute,
     ensureImplementationPlanRequired,
     submitImplementationPlan,
@@ -538,7 +832,33 @@ function isTaskImplementationApproved(task) {
   return Boolean(isImplementationApproved(gate) && artifactHash === String(gate.planHash || ""));
 }
 
-function completionReadiness(task) {
+function isTaskSolutionBound(task) {
+  const userGoal = task?.artifacts?.userGoal;
+  const goalHash = String(userGoal?.hash || "");
+  const solution = task?.artifacts?.solutionBaseline;
+  if (
+    !goalHash ||
+    !userGoal?.text ||
+    !solution?.hash ||
+    String(solution.user_goal_hash || "") !== goalHash
+  ) {
+    return false;
+  }
+  try {
+    return (
+      hashUserGoal(userGoal.text) === goalHash &&
+      hashSolutionBaseline(solution) === String(solution.hash)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function deliveryReadiness(task) {
+  if (!task?.artifacts?.userGoal?.hash) return { ok: false, reason: "user_goal_missing" };
+  if (!isTaskSolutionBound(task)) {
+    return { ok: false, reason: "solution_baseline_missing" };
+  }
   if (!isTaskImplementationApproved(task)) {
     return { ok: false, reason: "implementation_plan_not_approved" };
   }
@@ -546,6 +866,10 @@ function completionReadiness(task) {
     return { ok: false, reason: "code_review_not_approved" };
   }
   const reviewEvidenceHash = String(task.codeReviewGate.evidenceHash || "");
+  const reviewArtifact = task?.artifacts?.codeReview;
+  if (!reviewArtifact?.hash || String(reviewArtifact.hash) !== reviewEvidenceHash) {
+    return { ok: false, reason: "code_review_artifact_missing" };
+  }
   if (
     !reviewEvidenceHash ||
     String(task?.deliveryGate?.reviewEvidenceHash || "") !== reviewEvidenceHash
@@ -553,30 +877,98 @@ function completionReadiness(task) {
     return { ok: false, reason: "delivery_not_bound_to_review" };
   }
   const commitSha = String(task?.deliveryGate?.commitSha || "");
-  if (!commitSha) return { ok: false, reason: "delivery_commit_missing" };
-  if (task?.deliveryGate?.ciStatus !== "success") {
-    return { ok: false, reason: "ci_not_successful" };
+  if (!/^[a-f0-9]{40}$/i.test(commitSha)) {
+    return { ok: false, reason: "delivery_commit_missing" };
   }
+  if (!task?.deliveryGate?.prUrl) return { ok: false, reason: "delivery_pr_missing" };
+  const deliveryArtifact = task?.artifacts?.delivery;
   if (
-    task?.finalGate?.verdict !== "accept" ||
-    String(task.finalGate.acceptedCommitSha || "") !== commitSha
+    !deliveryArtifact ||
+    String(deliveryArtifact.reviewEvidenceHash || "") !== reviewEvidenceHash ||
+    String(deliveryArtifact.commitSha || "") !== commitSha ||
+    String(deliveryArtifact.prUrl || "") !== String(task.deliveryGate.prUrl) ||
+    String(deliveryArtifact.ciStatus || "") !== String(task.deliveryGate.ciStatus || "")
   ) {
-    return { ok: false, reason: "final_acceptance_not_bound_to_commit" };
+    return { ok: false, reason: "delivery_artifact_missing" };
+  }
+  if (task.deliveryGate.ciStatus !== "success") {
+    return { ok: false, reason: "ci_not_successful" };
   }
   return { ok: true, reason: null };
 }
 
+function completionReadiness(task) {
+  const delivery = deliveryReadiness(task);
+  if (!delivery.ok) return delivery;
+  const commitSha = String(task.deliveryGate.commitSha);
+  const goalHash = String(task.artifacts.userGoal.hash);
+  const solutionHash = String(task.artifacts.solutionBaseline.hash);
+  const implementationPlanHash = String(task.artifacts.implementationPlan.hash);
+  const finalArtifact = task?.artifacts?.finalAcceptance;
+  if (
+    task?.finalGate?.verdict !== "accept" ||
+    !finalArtifact?.hash ||
+    String(task.finalGate.evidenceHash || "") !== String(finalArtifact.hash) ||
+    finalArtifact.verdict !== "accept" ||
+    String(finalArtifact.user_goal_hash || "") !== goalHash ||
+    String(finalArtifact.solution_hash || "") !== solutionHash ||
+    String(finalArtifact.implementation_plan_hash || "") !== implementationPlanHash ||
+    String(finalArtifact.commit_sha || "") !== commitSha ||
+    String(task.finalGate.acceptedCommitSha || "") !== commitSha ||
+    String(task.finalGate.userGoalHash || "") !== goalHash ||
+    String(task.finalGate.solutionHash || "") !== solutionHash ||
+    String(task.finalGate.implementationPlanHash || "") !== implementationPlanHash
+  ) {
+    return { ok: false, reason: "final_acceptance_not_bound_to_outcome" };
+  }
+  return { ok: true, reason: null };
+}
+
+function resetOutcomeEvidence(task) {
+  task.phase = STATE.DISCUSS;
+  task.state = STATE.DISCUSS;
+  task.goal = null;
+  task.artifacts = {};
+  task.implementationGate = null;
+  task.codeReviewGate = null;
+  task.deliveryGate = null;
+  task.finalGate = null;
+  task.approvalHash = null;
+}
+
+function invalidateAfterSolutionRevision(task) {
+  task.phase = STATE.DISCUSS;
+  task.state = STATE.DISCUSS;
+  task.artifacts = { ...(task.artifacts || {}) };
+  delete task.artifacts.implementationPlan;
+  delete task.artifacts.codeReview;
+  delete task.artifacts.delivery;
+  delete task.artifacts.finalAcceptance;
+  task.implementationGate = null;
+  task.codeReviewGate = null;
+  task.deliveryGate = null;
+  task.finalGate = null;
+  task.approvalHash = null;
+}
+
 function invalidateDownstreamGates(task, previous, next) {
+  task.artifacts = { ...(task.artifacts || {}) };
   if (next === STATE.IMPLEMENT && previous !== STATE.IMPLEMENT) {
     task.codeReviewGate = null;
     task.deliveryGate = null;
     task.finalGate = null;
+    delete task.artifacts.codeReview;
+    delete task.artifacts.delivery;
+    delete task.artifacts.finalAcceptance;
     task.approvalHash = null;
   } else if (next === STATE.REVIEW && previous !== STATE.REVIEW) {
     task.deliveryGate = null;
     task.finalGate = null;
+    delete task.artifacts.delivery;
+    delete task.artifacts.finalAcceptance;
   } else if (next === STATE.DELIVER && previous !== STATE.DELIVER) {
     task.finalGate = null;
+    delete task.artifacts.finalAcceptance;
   }
 }
 
@@ -604,6 +996,7 @@ module.exports = {
   isDiscussionAgent,
   isDeliveryAgent,
   completionReadiness,
+  deliveryReadiness,
   isTaskImplementationApproved,
   normalizePhase,
 };
