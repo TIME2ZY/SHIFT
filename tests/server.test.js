@@ -9,6 +9,11 @@ const { createServer } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
 const { createCollabTaskRegistry } = require("../src/agents/collab-task-registry");
+const {
+  hashUserGoal,
+  hashSolutionBaseline,
+} = require("../src/agents/outcome-evidence-gate");
+const { hashImplementationPlan } = require("../src/agents/implementation-plan-gate");
 const { createStorage } = require("../src/storage");
 const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
 
@@ -1318,6 +1323,17 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
     "```",
   ].join("\n");
   const codexApprovalOut = [
+    "```solution_baseline",
+    `user_goal_hash: ${hashUserGoal("implement and request review")}`,
+    "summary: Add the requested review target file",
+    "constraints:",
+    "  - Keep the change isolated",
+    "non_goals:",
+    "  - Do not modify unrelated files",
+    "acceptance_criteria:",
+    "  - OpenCode can read the implemented file",
+    "```",
+    "",
     "@Grok",
     "```handoff",
     "to: grok",
@@ -1444,6 +1460,218 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
       assert.match(runs[2].prompt, /APPROVED/);
       assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
       assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
+    }
+  );
+});
+
+test("PR4 workflow verifies OpenCode delivery before Codex accepts the original goal", async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-pr4-base-"));
+  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-pr4-worktree-"));
+  const userPrompt = "deliver with an audited pull request";
+  const goalHash = hashUserGoal(userPrompt);
+  const solution = {
+    user_goal_hash: goalHash,
+    summary: "Deliver the requested change through evidence-bound gates",
+    constraints: ["Keep the five collaboration phases"],
+    non_goals: ["Do not move code review to Codex"],
+    acceptance_criteria: [
+      "OpenCode creates a verified pull request",
+      "Codex checks the original user goal",
+    ],
+  };
+  const solutionHash = hashSolutionBaseline(solution);
+  const implementationPlan = {
+    summary: "Implement the audited delivery workflow",
+    files: ["src/audited-delivery.js"],
+    changes: ["Add the requested evidence-bound behavior"],
+    tests: ["npm run verify:pr"],
+    risks: ["Keep legacy routes compatible"],
+  };
+  const implementationPlanHash = hashImplementationPlan(implementationPlan);
+  const commitSha = "a".repeat(40);
+  const prUrl = "https://github.com/acme/repo/pull/7";
+  const branch = "codex/session-pr4";
+  const runs = [];
+  let codexRuns = 0;
+  let grokRuns = 0;
+
+  function handoff(to, intent, what) {
+    return [
+      `@${to === "grok" ? "Grok" : to === "opencode" ? "OpenCode" : "Codex"}`,
+      "```handoff",
+      `to: ${to}`,
+      `intent: ${intent}`,
+      `what: ${what}`,
+      "why: Follow the evidence-bound workflow",
+      "next_action: Continue with the assigned workflow responsibility",
+      "```",
+    ].join("\n");
+  }
+
+  const codexBaselineOut = [
+    "```solution_baseline",
+    `user_goal_hash: ${goalHash}`,
+    `summary: ${solution.summary}`,
+    "constraints:",
+    `  - ${solution.constraints[0]}`,
+    "non_goals:",
+    `  - ${solution.non_goals[0]}`,
+    "acceptance_criteria:",
+    ...solution.acceptance_criteria.map((item) => `  - ${item}`),
+    "```",
+    handoff("grok", "plan", "Inspect the code and propose a concrete plan"),
+  ].join("\n\n");
+  const grokPlanOut = [
+    "```implementation_plan",
+    `summary: ${implementationPlan.summary}`,
+    "files:",
+    `  - ${implementationPlan.files[0]}`,
+    "changes:",
+    `  - ${implementationPlan.changes[0]}`,
+    "tests:",
+    `  - ${implementationPlan.tests[0]}`,
+    "risks:",
+    `  - ${implementationPlan.risks[0]}`,
+    "```",
+    handoff("codex", "discuss", "Review the concrete implementation plan"),
+  ].join("\n\n");
+  const codexApprovalOut = handoff("grok", "implement", "Implement the approved plan");
+  const grokImplementationOut = handoff(
+    "opencode",
+    "review",
+    "Review the completed implementation and its verification"
+  );
+  const openCodeDeliveryOut = [
+    "```code_review",
+    "verdict: approve",
+    "summary: No blocking findings",
+    "findings:",
+    "  - none",
+    "tests:",
+    "  - npm run verify:pr: passed",
+    "```",
+    "```delivery_receipt",
+    `commit_sha: ${commitSha}`,
+    `pr_url: ${prUrl}`,
+    "base_branch: master",
+    "verification:",
+    "  - npm run verify:pr: passed",
+    "  - GitHub checks: passed",
+    "```",
+    handoff("codex", "accept", "Perform final goal acceptance on the verified delivery"),
+  ].join("\n\n");
+  const codexFinalOut = [
+    "```final_acceptance",
+    "verdict: accept",
+    `user_goal_hash: ${goalHash}`,
+    `solution_hash: ${solutionHash}`,
+    `implementation_plan_hash: ${implementationPlanHash}`,
+    `commit_sha: ${commitSha}`,
+    "checks:",
+    "  - OpenCode creates a verified pull request => pass: PR #7 and green CI",
+    "  - Codex checks the original user goal => pass: goal and solution hashes matched",
+    "gaps:",
+    "  - none",
+    "```",
+  ].join("\n");
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree({ sessionId }) {
+          return {
+            sessionId,
+            baseDir,
+            worktreeDir,
+            branch,
+            status: "active",
+            createdAt: "2026-08-05T00:00:00.000Z",
+          };
+        },
+      },
+      deliveryVerifier: {
+        verify({ receipt, cwd, branch: actualBranch }) {
+          assert.equal(receipt.commit_sha, commitSha);
+          assert.equal(cwd, worktreeDir);
+          assert.equal(actualBranch, branch);
+          return {
+            verified: true,
+            commitSha,
+            commitSubject: "feat(collab): verify delivery evidence",
+            commitBody: "Bind the reviewed commit to the pull request and CI evidence.",
+            branch,
+            baseBranch: "master",
+            prUrl,
+            prNumber: 7,
+            prTitle: "Verify OpenCode delivery evidence",
+            prBody: [
+              "## Summary",
+              "Goal",
+              "## Changes",
+              "Change",
+              "## Verification",
+              "Passed",
+              "## Risks",
+              "None",
+            ].join("\n\n"),
+            ciStatus: "success",
+          };
+        },
+      },
+      spawnRunner(_command, args, _options) {
+        const agent = args[2];
+        runs.push({ agent, prompt: args[3] });
+        const child = createMockChild();
+        process.nextTick(() => {
+          let output = "";
+          if (agent === "codex") {
+            output = [codexBaselineOut, codexApprovalOut, codexFinalOut][codexRuns++];
+          } else if (agent === "grok") {
+            output = [grokPlanOut, grokImplementationOut][grokRuns++];
+          } else {
+            output = openCodeDeliveryOut;
+          }
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent,
+              invocationId: `pr4-${agent}`,
+              text: output,
+            }) + "\n"
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "codex",
+          prompt: userPrompt,
+          projectDir: baseDir,
+          useWorktree: true,
+        }),
+      });
+      const text = await response.text();
+      assert.equal(response.status, 200);
+      assert.deepEqual(runs.map((run) => run.agent), [
+        "codex",
+        "grok",
+        "codex",
+        "grok",
+        "opencode",
+        "codex",
+      ]);
+      assert.match(runs[0].prompt, /solution_baseline/);
+      assert.match(runs[4].prompt, /OpenCode Review 与交付门禁/);
+      assert.match(runs[5].prompt, /final_acceptance/);
+      assert.match(runs[5].prompt, /最初用户目标/);
+      assert.match(text, /event: delivery-evidence-verified/);
+      assert.match(text, /event: final-acceptance-submitted/);
+      assert.match(text, /event: collaboration-done/);
     }
   );
 });

@@ -54,6 +54,16 @@ always: true
 - 方案缺失、未批准或 hash 已变化时，平台拒绝 implement 路由及 ACP edit/delete/move/execute
 - Grok 修改方案会产生新 hash，并自动撤销旧批准及下游 review/delivery gate
 
+### OpenCode 交付与 Codex 最终验收 Gate
+
+- Codex 在 `plan` 交接前输出 `solution_baseline`，绑定平台保存的最初用户目标 hash、约束、非目标和逐项验收标准
+- OpenCode 是唯一代码 reviewer 和 Git/PR 交付者；approve 后由其运行完整验证、规范 commit、push、创建 ready PR 并等待 CI
+- OpenCode 输出 `code_review` 与 `delivery_receipt`；平台独立读取当前 worktree、commit、PR 和 GitHub checks，拒绝纯文本伪造
+- commit subject 必须为 Conventional Commit 且不超过 72 字符，body 必须说明改动与原因
+- PR body 必须包含 Summary / Changes / Verification / Risks 四节，并以仓库默认分支为 base
+- Codex 最终输出 `final_acceptance`，逐项验证最初用户目标与收敛方案，绑定 goal / solution / implementation plan / commit hash
+- 只有 review、真实交付、CI 和目标验收全部匹配时，平台才从 `deliver` 进入 `done`
+
 ## 全员共用 handoff 模板
 
 **只允许下列顶层字段。** 没有的内容就空着（省略该行）；**禁止** `verdict` / `nits` / `blocking` / `status` 等私有 key。

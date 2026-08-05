@@ -2,6 +2,7 @@ const { getMaxA2ADepth } = require("./routing");
 const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
+const { processWorkflowEvidenceOutput } = require("./workflow-evidence");
 const { AGENTS } = require("./catalog");
 const {
   emptyWriteStats,
@@ -260,6 +261,22 @@ function postMessage(
         planHash: submission.planHash || null,
       }
     );
+  }
+  const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+    agent,
+    content,
+    threadId: callbackSessionId,
+    registry: taskRegistry,
+    deliveryVerifier: thread.deliveryVerifier,
+    cwd: thread.runWorkspace?.worktreeDir || "",
+    branch: thread.runWorkspace?.branch || "",
+  });
+  for (const workflowEvent of workflowEvidenceEvents) {
+    sendSse(thread.res, workflowEvent.event, {
+      agent,
+      invocationId: routeInvocationId,
+      ...workflowEvent.payload,
+    });
   }
   const finalized = finalizeA2ARoutes({
     text: content,

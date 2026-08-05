@@ -107,6 +107,12 @@ function finalizeA2ARoutes(input = {}) {
         fromAgent,
         toAgent: target,
       });
+    const evidenceSkip = taskRegistry.shouldBlockEvidenceRoute({
+      threadId: sessionId,
+      fromAgent,
+      toAgent: target,
+      intent: quality.intent,
+    });
     const implementationSkip = taskRegistry.shouldBlockImplementationRoute({
       threadId: sessionId,
       fromAgent,
@@ -120,7 +126,11 @@ function finalizeA2ARoutes(input = {}) {
       contentHash,
       handoff,
     });
-    const taskSkip = implementationSkip.skip ? implementationSkip : reviewSkip;
+    const taskSkip = evidenceSkip.skip
+      ? evidenceSkip
+      : implementationSkip.skip
+        ? implementationSkip
+        : reviewSkip;
     const policyInput = {
       quality,
       useWorktree,

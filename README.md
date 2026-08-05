@@ -74,6 +74,10 @@ Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 read/search/think/fetch，edit/delete/move/execute 会被平台拒绝。批准状态和 plan hash 保存于
 SQLite，不会因服务重启丢失。
 
+交付阶段同样采用证据门禁：OpenCode review 通过后亲自完成规范 commit、push、ready PR 和 CI，
+平台再独立读取 Git/GitHub 验证实际状态。Codex 的最终验收必须绑定最初用户目标、Codex 收敛
+方案、Grok 实现方案和实际 commit，并逐项给出验收证据；仅有“代码看起来合理”不能进入 done。
+
 ## 快速开始
 
 ### 环境要求

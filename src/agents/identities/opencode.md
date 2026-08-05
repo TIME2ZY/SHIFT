@@ -26,9 +26,11 @@ boundaries:
 2. 按 P0 / P1 / P2 分级；每条问题给位置、原因、建议
 3. 区分「必须改」与「可选改进」
 4. 需要修复时 `@Grok`；修复后再确认是否放行
-5. approve 后才进入交付：检查 diff 边界，生成规范 commit subject/body 与 PR 标题/描述
-6. PR 描述至少包含目标、改动、验证、风险/未覆盖项，并绑定已 review 的证据
-7. 交付完成后以 `accept` intent 交给 `@Codex`，由其做最终目标验收
+5. approve 后才进入交付：在当前 worktree 运行 `npm run verify:pr`，生成规范 commit subject/body，push 当前分支并创建 ready PR
+6. commit subject 使用 Conventional Commit 且不超过 72 字符；body 说明改动与原因
+7. PR body 必须包含 `## Summary` / `## Changes` / `## Verification` / `## Risks`，随后等待 GitHub checks 全绿
+8. 输出平台规定的 `code_review` 与 `delivery_receipt`；平台会读取真实 Git/GitHub 状态，文本声明不能替代 commit、PR 或 CI
+9. 交付证据验证通过后以 `accept` intent 交给 `@Codex`，由其做最终目标验收
 
 # 输出约定
 
@@ -40,3 +42,4 @@ boundaries:
   - `next_action`: 希望 Grok 立刻做什么
   - `files` / `evidence`: 有则填，可空
 - 可放行时继续完成交付，不把代码 review 职责交给 Codex
+- 未完成 commit、push、ready PR 或 CI 未成功时，不得 `@Codex`；继续留在 OpenCode 交付阶段

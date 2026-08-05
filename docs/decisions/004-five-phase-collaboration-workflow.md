@@ -145,6 +145,19 @@ Grok 计划期写权限、OpenCode Git/PR 操作和 Codex 目标验收门禁由�
 该 Gate 不增加新的业务 phase；它是 implement 阶段内的 artifact/gate 状态，避免把状态机扩张为
 “规划中、待批准、已批准”等长期 phase。
 
+第四个实现 PR 交付：
+
+- 平台保存不可由 Agent 静默改写的最初用户目标及其 hash；
+- Codex `solution_baseline` 绑定用户目标、收敛方案、约束、非目标和逐项验收标准；
+- OpenCode 输出结构化 `code_review` 与 `delivery_receipt`，并亲自完成 commit、push、ready PR 与 CI；
+- 平台以只读方式独立核对 clean worktree、真实 commit、仓库默认 base、PR head、PR 描述和 GitHub checks；
+- commit subject 强制 Conventional Commit / 72 字符限制，body 强制说明原因；PR body 强制四个审计章节；
+- Codex `final_acceptance` 绑定 user goal / solution / implementation plan / commit hash，并逐项提供 pass/fail 证据；
+- 只有 OpenCode review、delivery、CI 与 Codex 目标验收全部匹配，`deliver` 才能进入 `done`。
+
+PR4 仍不增加 phase。`solutionBaseline`、`codeReviewGate`、`deliveryGate` 和 `finalGate` 都是
+现有阶段内的 versioned evidence；任何上游方案修订都会撤销失效的下游证据。
+
 ## 5. 后果
 
 - `changes_requested` 是 `review → implement` transition event，不是 phase。

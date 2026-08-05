@@ -65,6 +65,22 @@ function implementationHandoffText() {
   ].join("\n");
 }
 
+function establishBaseline(threadId) {
+  const goal = collabTaskRegistry.captureUserGoal(threadId, {
+    text: "Deliver the requested workflow",
+  });
+  collabTaskRegistry.submitSolutionBaseline(threadId, {
+    actorAgentId: "codex",
+    baseline: {
+      user_goal_hash: goal.goalHash,
+      summary: "Implement the requested workflow",
+      constraints: ["Keep five phases"],
+      non_goals: ["Do not move review to Codex"],
+      acceptance_criteria: ["The workflow is delivered"],
+    },
+  });
+}
+
 test("finalize enqueues complete handoff under balanced", () => {
   const worklist = ["codex"];
   const events = [];
@@ -134,6 +150,7 @@ test("finalize rejects an explicit intent routed to the wrong workflow role", ()
 
 test("finalize rejects Codex implementation handoff before Grok submits a plan", () => {
   const worklist = ["codex"];
+  establishBaseline("t-plan-missing");
   const result = finalizeA2ARoutes({
     text: implementationHandoffText(),
     fromAgent: "codex",
@@ -155,6 +172,7 @@ test("finalize rejects Codex implementation handoff before Grok submits a plan",
 
 test("finalize binds Codex approval to Grok's submitted plan before enqueue", () => {
   const threadId = "t-plan-approved";
+  establishBaseline(threadId);
   collabTaskRegistry.ensureImplementationPlanRequired(threadId, { requestedBy: "codex" });
   const submitted = collabTaskRegistry.submitImplementationPlan(threadId, {
     actorAgentId: "grok",

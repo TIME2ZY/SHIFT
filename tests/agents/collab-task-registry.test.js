@@ -5,6 +5,25 @@ const test = require("node:test");
 
 const { STATE, createCollabTaskRegistry } = require("../../src/agents/collab-task-registry");
 
+function establishSolutionBaseline(registry) {
+  const goal = registry.captureUserGoal("thread-1", {
+    text: "Deliver the user outcome",
+    messageId: "message-1",
+  });
+  const solution = registry.submitSolutionBaseline("thread-1", {
+    actorAgentId: "codex",
+    baseline: {
+      user_goal_hash: goal.goalHash,
+      summary: "Implement and verify the agreed workflow",
+      constraints: ["Keep the five phases"],
+      non_goals: ["Do not move review to Codex"],
+      acceptance_criteria: ["The workflow is delivered"],
+    },
+  });
+  assert.equal(solution.accepted, true);
+  return { goalHash: goal.goalHash, solutionHash: solution.solutionHash };
+}
+
 function route(registry, input) {
   return registry.noteAcceptedRoute({
     threadId: "thread-1",
@@ -37,6 +56,7 @@ function submitConcretePlan(registry) {
 }
 
 function approveConcretePlan(registry) {
+  establishSolutionBaseline(registry);
   route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
   const submitted = submitConcretePlan(registry);
   assert.equal(submitted.accepted, true);
@@ -51,6 +71,7 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
     route(registry, { fromAgent: "codex", toAgent: "gemini", intent: "discuss" }).phase,
     STATE.DISCUSS
   );
+  const baseline = establishSolutionBaseline(registry);
   assert.equal(
     route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" }).phase,
     STATE.IMPLEMENT
@@ -78,15 +99,44 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
 
   const blocked = registry.markDone("thread-1", { actorAgentId: "codex" });
   assert.equal(blocked.phase, STATE.DELIVER);
-  assert.equal(blocked.completionBlocked, "delivery_not_bound_to_review");
+  assert.equal(blocked.completionBlocked, "code_review_artifact_missing");
 
+  const commitSha = "a".repeat(40);
+  const reviewEvidenceHash = delivered.codeReviewGate.evidenceHash;
+  const finalEvidenceHash = "f".repeat(16);
   registry.updateTask("thread-1", {
-    deliveryGate: {
-      commitSha: "abc123",
-      ciStatus: "success",
-      reviewEvidenceHash: delivered.codeReviewGate.evidenceHash,
+    artifacts: {
+      ...delivered.artifacts,
+      codeReview: { hash: reviewEvidenceHash, commitSha },
+      delivery: {
+        reviewEvidenceHash,
+        commitSha,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        ciStatus: "success",
+      },
+      finalAcceptance: {
+        hash: finalEvidenceHash,
+        verdict: "accept",
+        user_goal_hash: baseline.goalHash,
+        solution_hash: baseline.solutionHash,
+        implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
+        commit_sha: commitSha,
+      },
     },
-    finalGate: { verdict: "accept", acceptedCommitSha: "abc123" },
+    deliveryGate: {
+      commitSha,
+      prUrl: "https://github.com/acme/repo/pull/1",
+      ciStatus: "success",
+      reviewEvidenceHash,
+    },
+    finalGate: {
+      verdict: "accept",
+      evidenceHash: finalEvidenceHash,
+      acceptedCommitSha: commitSha,
+      userGoalHash: baseline.goalHash,
+      solutionHash: baseline.solutionHash,
+      implementationPlanHash: delivered.artifacts.implementationPlan.hash,
+    },
   });
   assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
 });
@@ -197,6 +247,149 @@ test("an approval gate without the matching persisted plan artifact stays locked
   assert.equal(permission.reason, "implementation_plan_artifact_missing");
 });
 
+test("Codex cannot route a plan until the solution baseline matches the original user goal", () => {
+  const registry = createCollabTaskRegistry();
+  assert.equal(
+    registry.shouldBlockEvidenceRoute({
+      threadId: "thread-1",
+      fromAgent: "codex",
+      toAgent: "grok",
+      intent: "plan",
+    }).reason,
+    "user_goal_missing"
+  );
+  registry.captureUserGoal("thread-1", { text: "Original user goal" });
+  assert.equal(
+    registry.shouldBlockEvidenceRoute({
+      threadId: "thread-1",
+      fromAgent: "codex",
+      toAgent: "grok",
+      intent: "plan",
+    }).reason,
+    "solution_baseline_missing"
+  );
+  establishSolutionBaseline(registry);
+  assert.equal(
+    registry.shouldBlockEvidenceRoute({
+      threadId: "thread-1",
+      fromAgent: "codex",
+      toAgent: "grok",
+      intent: "plan",
+    }).skip,
+    false
+  );
+});
+
+test("OpenCode delivery and Codex acceptance bind real PR evidence to every outcome hash", () => {
+  const registry = createCollabTaskRegistry();
+  const baseline = establishSolutionBaseline(registry);
+  route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
+  const implementation = submitConcretePlan(registry);
+  route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" });
+  route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
+  const commitSha = "a".repeat(40);
+  const prUrl = "https://github.com/acme/repo/pull/7";
+  const delivery = registry.recordOpenCodeDelivery("thread-1", {
+    actorAgentId: "opencode",
+    review: {
+      verdict: "approve",
+      summary: "No blocking findings",
+      findings: ["none"],
+      tests: ["npm run verify:pr: passed"],
+    },
+    receipt: {
+      commit_sha: commitSha,
+      pr_url: prUrl,
+      base_branch: "master",
+      verification: ["npm run verify:pr: passed", "GitHub checks: passed"],
+    },
+    verification: {
+      verified: true,
+      commitSha,
+      commitSubject: "feat(collab): verify delivery evidence",
+      commitBody: "Bind the reviewed commit to the verified pull request and CI evidence.",
+      branch: "codex/session-1",
+      baseBranch: "master",
+      prUrl,
+      prNumber: 7,
+      prTitle: "Verify OpenCode delivery evidence",
+      prBody: [
+        "## Summary",
+        "Goal",
+        "## Changes",
+        "Change",
+        "## Verification",
+        "Passed",
+        "## Risks",
+        "None",
+      ].join("\n\n"),
+      ciStatus: "success",
+    },
+  });
+  assert.equal(delivery.accepted, true);
+  assert.equal(delivery.readyForAcceptance, true);
+  assert.equal(
+    registry.shouldBlockEvidenceRoute({
+      threadId: "thread-1",
+      fromAgent: "opencode",
+      toAgent: "codex",
+      intent: "accept",
+    }).skip,
+    false
+  );
+
+  const acceptance = registry.submitFinalAcceptance("thread-1", {
+    actorAgentId: "codex",
+    acceptance: {
+      verdict: "accept",
+      user_goal_hash: baseline.goalHash,
+      solution_hash: baseline.solutionHash,
+      implementation_plan_hash: implementation.planHash,
+      commit_sha: commitSha,
+      checks: ["The workflow is delivered => pass: PR #7 and green CI"],
+      gaps: ["none"],
+    },
+  });
+  assert.equal(acceptance.accepted, true);
+  assert.equal(registry.markDone("thread-1", { actorAgentId: "opencode" }).completionBlocked, "done_must_be_marked_by_lead");
+  assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
+});
+
+test("forged delivery and final gate JSON cannot replace their persisted artifacts", () => {
+  const registry = createCollabTaskRegistry();
+  const baseline = establishSolutionBaseline(registry);
+  route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
+  const implementation = submitConcretePlan(registry);
+  route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" });
+  const commitSha = "a".repeat(40);
+  registry.updateTask("thread-1", {
+    codeReviewGate: { verdict: "approve", evidenceHash: "forged-review" },
+    deliveryGate: {
+      reviewEvidenceHash: "forged-review",
+      commitSha,
+      prUrl: "https://github.com/acme/repo/pull/7",
+      ciStatus: "success",
+    },
+    finalGate: {
+      verdict: "accept",
+      evidenceHash: "forged-final",
+      userGoalHash: baseline.goalHash,
+      solutionHash: baseline.solutionHash,
+      implementationPlanHash: implementation.planHash,
+      acceptedCommitSha: commitSha,
+    },
+  });
+  assert.equal(
+    registry.shouldBlockEvidenceRoute({
+      threadId: "thread-1",
+      fromAgent: "opencode",
+      toAgent: "codex",
+      intent: "accept",
+    }).reason,
+    "code_review_artifact_missing"
+  );
+});
+
 test("explicit discussion intent remains discuss even when the session uses a worktree", () => {
   const registry = createCollabTaskRegistry();
   const task = route(registry, {
@@ -220,9 +413,10 @@ test("persistent registry delegates state and event writes to its repository", (
     },
   };
   const first = createCollabTaskRegistry({ repository });
+  establishSolutionBaseline(first);
   route(first, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
 
   const afterRestart = createCollabTaskRegistry({ repository });
   assert.equal(afterRestart.getTask("thread-1").phase, STATE.IMPLEMENT);
-  assert.equal(afterRestart.getTask("thread-1").history.length, 1);
+  assert.equal(afterRestart.getTask("thread-1").history.length, 3);
 });
