@@ -11,12 +11,18 @@
 const crypto = require("node:crypto");
 const { COLLAB_TASK_STATES } = require("../shared/collab-contracts");
 const {
-  REVIEWER_AGENT_IDS,
-  IMPLEMENTER_AGENT_IDS,
-  DISCUSSION_AGENT_IDS,
-  DELIVERY_AGENT_IDS,
+  WORKFLOW_ROLES,
+  agentsWithCapability,
+  agentIdsForRole,
+} = require("./role-contracts");
+const {
   normalizeIntent,
 } = require("./handoff");
+
+const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
+const DISCUSSION_AGENT_IDS = new Set(agentsWithCapability("discuss"));
+const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 
 const STATE = Object.freeze({
   DISCUSS: "discuss",

@@ -1,5 +1,6 @@
 const DEFAULT_CONTEXT_TOKENS = 200_000;
 const DEFAULT_RESERVE_RATIO = 0.2;
+const { getAgentRoleContract } = require("./role-contracts");
 
 function model(providerId, modelId, vendorId, options = {}) {
   return {
@@ -42,6 +43,7 @@ const MODELS = Object.fromEntries(
 );
 
 function agent(id, label, providerId, modelId, description, options = {}) {
+  const workflow = getAgentRoleContract(id);
   return {
     id,
     label,
@@ -51,15 +53,18 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     reasoningEffort: options.reasoningEffort || "",
     ...(options.transport ? { transport: options.transport } : {}),
     description,
+    workflowRole: workflow?.role || "",
+    workflowCapabilities: workflow ? workflow.capabilities.slice() : [],
+    workflowResponsibilities: workflow ? workflow.responsibilities.slice() : [],
   };
 }
 
 /**
  * Four agents only — id equals the display name (lowercase).
- *   codex     · reasoning & discussion
- *   gemini    · ideation / brainstorm
- *   grok      · implementation
- *   opencode  · code review
+ *   codex     · initial/final guard, discussion convergence
+ *   gemini    · discussion, options, challenge and cross-validation
+ *   grok      · concrete change plan, implementation and test summary
+ *   opencode  · code review and delivery
  */
 const AGENTS = {
   codex: agent(
@@ -67,7 +72,7 @@ const AGENTS = {
     "Codex",
     "codex",
     "gpt-5.6-sol",
-    "推理与讨论：澄清问题、权衡方案，可与 Gemini 交叉验证。",
+    "开始与末尾把关：参与讨论、与 Gemini 互证并收敛方案，最终按用户目标验收。",
     { reasoningEffort: "medium" }
   ),
   gemini: agent(
@@ -75,10 +80,10 @@ const AGENTS = {
     "Gemini",
     "antigravity",
     "gemini-3.5-flash",
-    "想法与头脑风暴：发散灵感，可与 Codex 互证收敛（默认 plan，少改文件）。",
+    "讨论伙伴：提出正常可行的选项、风险与反例，与 Codex 互相验证，不为猎奇而发散。",
     { reasoningEffort: "high" }
   ),
-  grok: agent("grok", "Grok", "grok", "grok-4.5", "实现：写代码、改功能、跑测试。", {
+  grok: agent("grok", "Grok", "grok", "grok-4.5", "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。", {
     reasoningEffort: "high",
     transport: "acp",
   }),
@@ -87,7 +92,7 @@ const AGENTS = {
     "OpenCode",
     "opencode",
     "qwen3.7-plus",
-    "Review：代码评审、质量与安全把关、放行确认。"
+    "Review 与交付：代码评审、质量把关；批准后规范 commit、push 和 PR 描述。"
   ),
 };
 

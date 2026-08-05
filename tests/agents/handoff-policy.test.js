@@ -124,3 +124,32 @@ test("explicit intents resolve the five workflow phases without changing the rev
   assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "codex" }).ok, false);
   assert.equal(evaluatePhaseRoute({ intent: "accept", toAgent: "codex" }).ok, true);
 });
+
+test("intent capabilities distinguish roles that share the deliver phase", () => {
+  const wrongDelivery = evaluatePhaseRoute({ intent: "deliver", toAgent: "codex" });
+  assert.equal(wrongDelivery.ok, false);
+  assert.equal(wrongDelivery.reason, "target_lacks_intent_capability");
+  assert.deepEqual(wrongDelivery.allowed, ["opencode"]);
+
+  const wrongAcceptance = evaluatePhaseRoute({ intent: "accept", toAgent: "opencode" });
+  assert.equal(wrongAcceptance.ok, false);
+  assert.equal(wrongAcceptance.reason, "target_lacks_intent_capability");
+  assert.deepEqual(wrongAcceptance.allowed, ["codex"]);
+
+  assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "grok" }).ok, true);
+  assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "gemini" }).ok, false);
+  assert.equal(evaluatePhaseRoute({ intent: "fix", toAgent: "grok" }).ok, true);
+  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
+});
+
+test("balanced policy rejects routes whose target lacks the requested role capability", () => {
+  const decision = decidePolicy({
+    mode: "balanced",
+    fromAgent: "opencode",
+    toAgent: "opencode",
+    intent: "accept",
+    quality: { hasBlock: true, emptyPacket: false, ok: true, intent: "accept" },
+  });
+
+  assert.equal(decision, DECISIONS.REJECT);
+});

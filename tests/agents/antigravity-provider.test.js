@@ -24,13 +24,13 @@ test("provider registry includes antigravity", () => {
   assert.equal(typeof runtime.parseStdoutLine, "function");
 });
 
-test("AGENTS.gemini is catalogued as Gemini 3.5 Flash high brainstormer", () => {
+test("AGENTS.gemini is catalogued as Gemini 3.5 Flash high discussion partner", () => {
   assert.ok(AGENTS.gemini);
   assert.equal(AGENTS.gemini.label, "Gemini");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
   assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
-  assert.match(AGENTS.gemini.description, /头脑风暴|灵光/);
+  assert.match(AGENTS.gemini.description, /讨论伙伴|互相验证/);
 });
 
 test("resolveAgyModelLabel embeds effort in CLI model name", () => {
