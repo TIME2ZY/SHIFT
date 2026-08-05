@@ -20,16 +20,17 @@ triggers:
 修复 → 自己判断"改对了" → 合入 main
 
 ✅ 正确流程:
-修复 → 回给 @OpenCode 确认 → @OpenCode 放行 → 合入 main
+修复 → npm run verify:pr → 回给 @OpenCode 确认 → Reviewer 放行 + CI 绿色 → 合入 main
 ```
 
 ## 检查流程
 
 ```
 BEFORE 合入:
-  1. CHECK: @OpenCode 是否给出了明确的放行信号？
-  2. BLOCK: 如果没有放行信号，阻止合入并提示
-  3. PASS: 只有 @OpenCode 明确放行后才允许合入
+  1. CHECK REVIEW: @OpenCode/Reviewer 是否给出了明确的放行信号？
+  2. CHECK CI: PR 的 Verify pull request CI 是否全部绿色？
+  3. BLOCK: Reviewer 未放行或 CI 未通过时，阻止合入并提示
+  4. PASS: Reviewer 明确放行且 CI 绿色后才允许合入
 ```
 
 ## 有效的放行信号
@@ -46,6 +47,8 @@ BEFORE 合入:
 - 没有回复（沉默 ≠ 同意）
 - 自己判断"应该改对了"（AI 不能自己给自己放行）
 
+即使 Reviewer 已放行，CI 仍在运行、失败或被取消时也不能合入。反过来，CI 绿色也不能替代 Reviewer 的明确审批。
+
 ## 为什么必须有外部检查点
 
 AI 不会自我质疑。它会执行你的指令。
@@ -58,11 +61,16 @@ AI 不会自我质疑。它会执行你的指令。
 ❌ "我修完了 review 的 3 个 P1 和 1 个 P2 问题，应该改对了，直接合入吧"
    → BLOCK: @OpenCode 没有给出明确放行信号
    → 提示: 请将修复结果发回 @OpenCode 确认后再合入
+
+❌ "Reviewer 已经 LGTM，CI 还有一项失败，先合入再说"
+   → BLOCK: Verify pull request CI 未全部通过
+   → 提示: 修复失败项并等待 CI 绿色
 ```
 
 ## 通过场景
 
 ```
 ✅ @OpenCode: "LGTM，可以放行了"
-   → 放行信号确认，允许合入 main
+   CI: Verify pull request 全部通过
+   → Reviewer 放行和 CI 绿色同时满足，允许合入 main
 ```

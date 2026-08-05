@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   check-and-test:
-    name: Syntax, lint, test
+    name: Verify pull request
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -36,11 +36,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax check
-        run: npm run check
-
-      - name: ESLint
-        run: npm run lint
-
-      - name: Unit tests
-        run: npm test
+      - name: Verify pull request
+        run: npm run verify:pr
