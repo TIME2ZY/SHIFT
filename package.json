@@ -18,6 +18,7 @@
     "test:web:watch": "vitest --config web/vite.config.ts",
     "test:web:e2e": "playwright test --config web/playwright.config.ts",
     "test": "node scripts/run-tests.js",
+    "verify:pr": "node scripts/verify-pr.js",
     "check": "node scripts/check-syntax.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
