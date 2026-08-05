@@ -59,7 +59,9 @@ Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
     └─ 多 Agent 接力
          Codex ↔ Gemini 讨论、互证；Codex 收敛
                 ↓
-         Grok 先给具体修改方案，获批后在 worktree 实现并总结
+         Grok 只读检查并提交带 hash 的具体修改方案
+                ↓
+         Codex 显式批准同一方案后，Grok 才能在 worktree 实现并总结
                 ↓
          OpenCode review / 回修闭环，随后交付 commit 和 PR
                 ↓
@@ -67,6 +69,10 @@ Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 ```
 
 这不是固定流水线。你可以只使用一个 Agent，也可以在任何一轮通过 `@Codex`、`@Gemini`、`@Grok` 或 `@OpenCode` 指定下一位。
+
+即使已经开启 worktree，Grok 也不会在第一轮直接修改：方案批准前 ACP 只允许
+read/search/think/fetch，edit/delete/move/execute 会被平台拒绝。批准状态和 plan hash 保存于
+SQLite，不会因服务重启丢失。
 
 ## 快速开始
 

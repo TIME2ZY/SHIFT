@@ -7,6 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
+const { createCollabTaskRegistry } = require("../../src/agents/collab-task-registry");
 
 test("collaboration task repository persists phases, artifacts, gates, and events", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-collab-task-"));
@@ -97,5 +98,44 @@ test("collaboration task repository rejects unknown phases and intents", () => {
     );
   } finally {
     storage.close();
+  }
+});
+
+test("approved Grok plan hash survives a registry and database restart", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-plan-gate-"));
+  const file = path.join(dir, "shift.sqlite");
+  let storage = createStorage({ file });
+  try {
+    storage.threads.create({ id: "thread-plan", title: "Plan gate" });
+    let registry = createCollabTaskRegistry({ repository: storage.collaborationTasks });
+    registry.ensureImplementationPlanRequired("thread-plan", { requestedBy: "codex" });
+    const submitted = registry.submitImplementationPlan("thread-plan", {
+      actorAgentId: "grok",
+      plan: {
+        summary: "Persist plan approval",
+        files: ["src/plan.js"],
+        changes: ["Store a hash-bound gate"],
+        tests: ["node --test tests/plan.test.js"],
+        risks: [],
+      },
+    });
+    assert.equal(
+      registry.approveImplementationPlan("thread-plan", {
+        actorAgentId: "codex",
+        planHash: submitted.planHash,
+      }).approved,
+      true
+    );
+
+    storage.close();
+    storage = createStorage({ file });
+    registry = createCollabTaskRegistry({ repository: storage.collaborationTasks });
+    const restored = registry.implementationPermission("thread-plan");
+    assert.equal(restored.allowed, true);
+    assert.equal(restored.planHash, submitted.planHash);
+    assert.equal(restored.gate.approvedBy, "codex");
+  } finally {
+    if (storage?.db?.open) storage.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

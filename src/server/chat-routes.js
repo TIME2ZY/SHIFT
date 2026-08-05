@@ -5,6 +5,10 @@ const {
 } = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
+const {
+  IMPLEMENTATION_GATE_STATUS,
+  renderImplementationGateBlock,
+} = require("../agents/implementation-plan-gate");
 const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const handoffRouteRegistry = require("../agents/handoff-route-registry");
 const { createRunObservability } = require("../agents/run-observability");
@@ -629,6 +633,27 @@ function createChatRoutes({
         const collaborationBlock = renderCollaborationRules(agent, AGENTS, {
           compact: i > 0,
         });
+        let grokImplementationPermission = null;
+        if (agent === "grok") {
+          if (
+            collabTaskRegistry &&
+            typeof collabTaskRegistry.ensureImplementationPlanRequired === "function"
+          ) {
+            const existing = collabTaskRegistry.implementationPermission(sessionId);
+            collabTaskRegistry.ensureImplementationPlanRequired(sessionId, {
+              requestedBy: parentInvocationId ? null : "user",
+              force: triggerType === "user-message" && existing.allowed,
+            });
+            grokImplementationPermission = collabTaskRegistry.implementationPermission(sessionId);
+          } else {
+            grokImplementationPermission = {
+              allowed: false,
+              status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
+              planHash: null,
+              gate: { status: IMPLEMENTATION_GATE_STATUS.REQUIRED },
+            };
+          }
+        }
         const promptParts = [identityBlock, collaborationBlock];
         if (i === 0) {
           promptParts.push(bootstrapPacket, augmentedPrompt);
@@ -645,6 +670,19 @@ function createChatRoutes({
           if (turnSkillNames.length > 0) {
             sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
           }
+        }
+        if (grokImplementationPermission) {
+          promptParts.push(
+            renderImplementationGateBlock(
+              grokImplementationPermission.gate || {
+                status: grokImplementationPermission.status,
+                planHash: grokImplementationPermission.planHash,
+                approvedPlanHash: grokImplementationPermission.allowed
+                  ? grokImplementationPermission.planHash
+                  : null,
+              }
+            )
+          );
         }
         promptParts.push(
           callbacks.buildCallbackInstructions(apiUrl, sessionId, {
@@ -931,6 +969,16 @@ function createChatRoutes({
           [ENV.BASE_DIR]: runWorkspace.baseDir,
           [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
           [ENV.BRANCH]: runWorkspace.branch || "",
+          ...(agent === "grok"
+            ? {
+                [ENV.GROK_IMPLEMENTATION_GATE]: grokImplementationPermission?.allowed
+                  ? IMPLEMENTATION_GATE_STATUS.APPROVED
+                  : IMPLEMENTATION_GATE_STATUS.REQUIRED,
+                [ENV.GROK_APPROVED_PLAN_HASH]: grokImplementationPermission?.allowed
+                  ? grokImplementationPermission.planHash || ""
+                  : "",
+              }
+            : {}),
           INVOKE_SESSION_ID: resumeSessionId,
           INVOKE_WORKSPACE_KEY: workspaceKey,
         };
@@ -1425,6 +1473,29 @@ function createChatRoutes({
           const persistedProviderSessionId =
             observedProviderSessionId || durableRun.window.providerSessionId || "";
           durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+        }
+
+        if (
+          agent === "grok" &&
+          !grokImplementationPermission?.allowed &&
+          collabTaskRegistry &&
+          typeof collabTaskRegistry.submitImplementationPlan === "function"
+        ) {
+          const submission = collabTaskRegistry.submitImplementationPlan(sessionId, {
+            actorAgentId: agent,
+            content: assistantContent,
+          });
+          sendSse(
+            res,
+            submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
+            {
+              agent,
+              invocationId: finalInvocationId,
+              accepted: submission.accepted,
+              reason: submission.reason,
+              planHash: submission.planHash || null,
+            }
+          );
         }
 
         // Parse structured handoff once per turn (soft — never blocks routing).

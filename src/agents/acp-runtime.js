@@ -116,6 +116,16 @@ function createAcpRuntime(_config = {}) {
     transform(event, ctx) {
       if (!event || typeof event !== "object") return [];
       if (event.type === "acp.session_started") return [];
+      if (event.type === "acp.permission_denied") {
+        return [
+          makeEvent("diagnostic", {
+            ...base(ctx),
+            code: String(event.reason || "acp_permission_denied"),
+            message: `ACP ${event.toolKind || "other"} tool denied by the Grok implementation gate.`,
+            ...(event.toolCallId ? { toolId: String(event.toolCallId) } : {}),
+          }),
+        ];
+      }
       if (event.type === "acp.prompt_result") {
         const usage = event.result?.usage;
         if (!usage || typeof usage !== "object") return [];

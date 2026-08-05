@@ -8,6 +8,7 @@ const test = require("node:test");
 const { createServer } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
+const { createCollabTaskRegistry } = require("../src/agents/collab-task-registry");
 const { createStorage } = require("../src/storage");
 const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
 
@@ -1288,16 +1289,50 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
   );
 });
 
-test("worktree A2A lets OpenCode review files changed by Grok in the same workspace", async () => {
+test("worktree A2A keeps Grok read-only until Codex approves its concrete plan", async () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-base-"));
   const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-session-"));
   const runs = [];
   let reviewedContent = "";
-  const grokOut = [
+  let grokRuns = 0;
+  const grokPlanOut = [
+    "```implementation_plan",
+    "summary: Add the review target file",
+    "files:",
+    "  - review-target.txt",
+    "changes:",
+    "  - Create the file with the requested content",
+    "tests:",
+    "  - Read the file from the shared worktree",
+    "risks:",
+    "  - Keep the change isolated",
+    "```",
+    "",
+    "@Codex",
+    "```handoff",
+    "to: codex",
+    "intent: discuss",
+    "what: Concrete implementation plan is ready",
+    "why: The plan needs lead approval before writes",
+    "next_action: Review the plan and send an implement handoff if approved",
+    "```",
+  ].join("\n");
+  const codexApprovalOut = [
+    "@Grok",
+    "```handoff",
+    "to: grok",
+    "intent: implement",
+    "what: Implement the submitted concrete plan",
+    "why: The plan matches the converged solution",
+    "next_action: Apply the approved plan and run its checks",
+    "```",
+  ].join("\n");
+  const grokImplementationOut = [
     "@OpenCode",
     "",
     "```handoff",
     "to: opencode",
+    "intent: review",
     "goal: Review the implementation",
     "what: Grok changed review-target.txt",
     "why: Verify the worktree diff",
@@ -1324,17 +1359,36 @@ test("worktree A2A lets OpenCode review files changed by Grok in the same worksp
       },
       spawnRunner(_command, args, options) {
         const agent = args[2];
-        runs.push({ agent, cwd: options.cwd, runnerPath: args[0] });
+        runs.push({
+          agent,
+          cwd: options.cwd,
+          runnerPath: args[0],
+          env: options.env,
+          prompt: args[3],
+        });
         const child = createMockChild();
         process.nextTick(() => {
           if (agent === "grok") {
-            fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
+            grokRuns += 1;
+            const isApproved = options.env.SHIFT_GROK_IMPLEMENTATION_GATE === "approved";
+            if (isApproved) {
+              fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
+            }
             child.stdout.write(
               JSON.stringify({
                 type: "text.delta",
                 agent: "grok",
                 invocationId: "worktree-grok",
-                text: grokOut,
+                text: isApproved ? grokImplementationOut : grokPlanOut,
+              }) + "\n"
+            );
+          } else if (agent === "codex") {
+            child.stdout.write(
+              JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "worktree-codex",
+                text: codexApprovalOut,
               }) + "\n"
             );
           } else {
@@ -1374,10 +1428,20 @@ test("worktree A2A lets OpenCode review files changed by Grok in the same worksp
         runs.map(({ agent, cwd }) => ({ agent, cwd })),
         [
           { agent: "grok", cwd: worktreeDir },
+          { agent: "codex", cwd: worktreeDir },
+          { agent: "grok", cwd: worktreeDir },
           { agent: "opencode", cwd: worktreeDir },
         ]
       );
       assert.equal(reviewedContent, "changed by grok\n");
+      assert.equal(grokRuns, 2);
+      assert.equal(runs[0].env.SHIFT_GROK_IMPLEMENTATION_GATE, "required");
+      assert.equal(runs[0].env.SHIFT_GROK_APPROVED_PLAN_HASH, "");
+      assert.match(runs[0].prompt, /Grok 实现门禁/);
+      assert.match(runs[0].prompt, /只读/);
+      assert.equal(runs[2].env.SHIFT_GROK_IMPLEMENTATION_GATE, "approved");
+      assert.match(runs[2].env.SHIFT_GROK_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
+      assert.match(runs[2].prompt, /APPROVED/);
       assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
       assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
     }
@@ -2112,6 +2176,53 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   assert.equal(threadCtx.a2aCount, 1);
 
   callbacks.unregisterThread(sessionId);
+});
+
+test("Grok callback persists a concrete plan before routing it for Codex approval", () => {
+  const sessionId = "session-cb-grok-plan";
+  const invocationId = "invocation-cb-grok-plan";
+  const sse = [];
+  const registry = createCollabTaskRegistry();
+  registry.ensureImplementationPlanRequired(sessionId, { requestedBy: "codex" });
+  const threadCtx = {
+    res: {
+      destroyed: false,
+      writableEnded: false,
+      write(chunk) {
+        sse.push(chunk);
+        return true;
+      },
+    },
+    worklist: ["grok"],
+    controller: new AbortController(),
+    a2aCount: 0,
+    useWorktree: true,
+    collabTaskRegistry: registry,
+    tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  try {
+    const content = [
+      "```implementation_plan",
+      "summary: Implement the callback change",
+      "files:",
+      "  - src/callback-change.js",
+      "changes:",
+      "  - Add the requested callback behavior",
+      "tests:",
+      "  - node --test tests/callback-change.test.js",
+      "```",
+    ].join("\n");
+    const result = callbacks.postMessage(sessionId, invocationId, content);
+
+    assert.equal(result.ok, true);
+    assert.equal(registry.getTask(sessionId).implementationGate.status, "pending_approval");
+    assert.match(registry.getTask(sessionId).implementationGate.planHash, /^[a-f0-9]{16}$/);
+    assert.match(sse.join(""), /event: implementation-plan-submitted/);
+  } finally {
+    callbacks.unregisterThread(sessionId);
+  }
 });
 
 test("callbacks.postMessage captures structured handoff only for an enqueued target", () => {

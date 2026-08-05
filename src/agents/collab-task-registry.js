@@ -15,14 +15,20 @@ const {
   agentsWithCapability,
   agentIdsForRole,
 } = require("./role-contracts");
+const { normalizeIntent } = require("./handoff");
 const {
-  normalizeIntent,
-} = require("./handoff");
+  IMPLEMENTATION_GATE_STATUS,
+  parseImplementationPlan,
+  validateImplementationPlan,
+  hashImplementationPlan,
+  isImplementationApproved,
+} = require("./implementation-plan-gate");
 
 const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
 const DISCUSSION_AGENT_IDS = new Set(agentsWithCapability("discuss"));
 const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
+const LEAD_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.LEAD));
 
 const STATE = Object.freeze({
   DISCUSS: "discuss",
@@ -114,6 +120,199 @@ function createCollabTaskRegistry(options = {}) {
     return { ...task, history: task.history.slice() };
   }
 
+  function requireImplementationPlan(task, input = {}) {
+    const requestHash = String(input.requestHash || "").trim() || null;
+    const current = task.implementationGate;
+    if (
+      current &&
+      !input.force &&
+      (!requestHash || requestHash === current.requestHash)
+    ) {
+      return false;
+    }
+
+    task.implementationGate = {
+      status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
+      requestHash,
+      planHash: null,
+      approvedPlanHash: null,
+      requestedBy: input.requestedBy || null,
+      requestedAt: new Date().toISOString(),
+      proposedBy: null,
+      proposedAt: null,
+      approvedBy: null,
+      approvedAt: null,
+    };
+    task.artifacts = { ...(task.artifacts || {}) };
+    delete task.artifacts.implementationPlan;
+    task.codeReviewGate = null;
+    task.deliveryGate = null;
+    task.finalGate = null;
+    task.approvalHash = null;
+    return true;
+  }
+
+  function ensureImplementationPlanRequired(threadId, input = {}) {
+    if (!threadId) return null;
+    const task = getOrCreateTask(threadId);
+    const changed = requireImplementationPlan(task, input);
+    if (!changed) return task;
+    task.phase = STATE.IMPLEMENT;
+    task.state = STATE.IMPLEMENT;
+    return persist(task, {
+      type: "implementation_plan_required",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId: input.requestedBy || null,
+      intent: "plan",
+      requestHash: task.implementationGate.requestHash,
+    });
+  }
+
+  function submitImplementationPlan(threadId, input = {}) {
+    if (!threadId) return { accepted: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!isImplementer(actorAgentId)) {
+      return { accepted: false, reason: "plan_must_be_submitted_by_implementer" };
+    }
+    const plan = input.plan || parseImplementationPlan(input.content);
+    if (!plan || !validateImplementationPlan(plan).ok) {
+      return { accepted: false, reason: "invalid_or_missing_implementation_plan" };
+    }
+
+    const task = getOrCreateTask(threadId);
+    if (!task.implementationGate) requireImplementationPlan(task, { requestedBy: actorAgentId });
+    const planHash = hashImplementationPlan(plan);
+    if (
+      task.implementationGate?.planHash === planHash &&
+      task.artifacts?.implementationPlan?.hash === planHash
+    ) {
+      return { accepted: true, reused: true, reason: null, planHash, task };
+    }
+    task.phase = STATE.IMPLEMENT;
+    task.state = STATE.IMPLEMENT;
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      implementationPlan: {
+        ...plan,
+        hash: planHash,
+        proposedBy: actorAgentId,
+        proposedAt: new Date().toISOString(),
+      },
+    };
+    task.implementationGate = {
+      ...(task.implementationGate || {}),
+      status: IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL,
+      planHash,
+      approvedPlanHash: null,
+      proposedBy: actorAgentId,
+      proposedAt: new Date().toISOString(),
+      approvedBy: null,
+      approvedAt: null,
+    };
+    task.codeReviewGate = null;
+    task.deliveryGate = null;
+    task.finalGate = null;
+    task.approvalHash = null;
+    const saved = persist(task, {
+      type: "implementation_plan_submitted",
+      from: STATE.IMPLEMENT,
+      to: STATE.IMPLEMENT,
+      actorAgentId,
+      intent: "plan",
+      planHash,
+    });
+    return { accepted: true, reason: null, planHash, task: saved };
+  }
+
+  function approveImplementationPlan(threadId, input = {}) {
+    if (!threadId) return { approved: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    if (!LEAD_AGENT_IDS.has(actorAgentId)) {
+      return { approved: false, reason: "plan_must_be_approved_by_lead" };
+    }
+    const task = getTask(threadId);
+    const gate = task?.implementationGate;
+    if (!gate?.planHash || gate.status !== IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL) {
+      return { approved: false, reason: "implementation_plan_not_pending" };
+    }
+    const requestedHash = String(input.planHash || gate.planHash);
+    if (requestedHash !== gate.planHash) {
+      return { approved: false, reason: "implementation_plan_hash_mismatch" };
+    }
+
+    task.implementationGate = {
+      ...gate,
+      status: IMPLEMENTATION_GATE_STATUS.APPROVED,
+      approvedPlanHash: gate.planHash,
+      approvedBy: actorAgentId,
+      approvedAt: new Date().toISOString(),
+    };
+    task.approvalHash = gate.planHash;
+    const saved = persist(task, {
+      type: "implementation_plan_approved",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId,
+      intent: "implement",
+      planHash: gate.planHash,
+    });
+    return { approved: true, reason: null, planHash: gate.planHash, task: saved };
+  }
+
+  function implementationPermission(threadId) {
+    const task = getTask(threadId);
+    const gate = task?.implementationGate || null;
+    const artifactHash = String(task?.artifacts?.implementationPlan?.hash || "");
+    const artifactBound = Boolean(gate?.planHash && artifactHash === String(gate.planHash));
+    if (isTaskImplementationApproved(task)) {
+      return {
+        allowed: true,
+        reason: null,
+        status: gate.status,
+        planHash: gate.planHash,
+        artifactBound: true,
+        gate,
+      };
+    }
+    return {
+      allowed: false,
+      reason: !gate?.planHash
+        ? "implementation_plan_missing"
+        : !artifactBound
+          ? "implementation_plan_artifact_missing"
+          : "implementation_plan_not_approved",
+      status: gate?.status || IMPLEMENTATION_GATE_STATUS.REQUIRED,
+      planHash: gate?.planHash || null,
+      artifactBound,
+      gate,
+    };
+  }
+
+  function shouldBlockImplementationRoute(input = {}) {
+    const to = String(input.toAgent || "").toLowerCase();
+    const from = String(input.fromAgent || "").toLowerCase();
+    const intent = normalizeIntent(input.intent) || "";
+    if (!isImplementer(to) || intent !== "implement") return { skip: false };
+
+    const permission = implementationPermission(input.threadId);
+    if (permission.allowed) return { skip: false, state: STATE.IMPLEMENT };
+    if (
+      LEAD_AGENT_IDS.has(from) &&
+      permission.status === IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL &&
+      permission.planHash &&
+      permission.artifactBound
+    ) {
+      return { skip: false, state: STATE.IMPLEMENT, pendingApproval: true };
+    }
+    return {
+      skip: true,
+      reason: permission.reason,
+      state: getTask(input.threadId)?.phase || STATE.IMPLEMENT,
+      planHash: permission.planHash,
+    };
+  }
+
   /** Infer and persist the phase transition caused by one accepted A2A route. */
   function noteAcceptedRoute(input = {}) {
     const threadId = input.threadId;
@@ -137,6 +336,22 @@ function createCollabTaskRegistry(options = {}) {
     task.lastTo = to || null;
     task.contentHash = contentHash || task.contentHash;
     if (handoff.goal) task.goal = handoff.goal;
+    let implementationApproved = false;
+
+    if (intent === "plan" && isImplementer(to)) {
+      requireImplementationPlan(task, {
+        requestHash: contentHash,
+        requestedBy: from || null,
+        force: true,
+      });
+    }
+    if (intent === "implement" && isImplementer(to)) {
+      const approval = approveImplementationPlanInline(task, from);
+      if (!approval.approved && !isTaskImplementationApproved(task)) {
+        throw new Error(`Implementation route rejected: ${approval.reason}`);
+      }
+      implementationApproved = approval.approved;
+    }
 
     const previous = task.phase;
     let next = previous;
@@ -181,7 +396,11 @@ function createCollabTaskRegistry(options = {}) {
     task.state = next;
 
     const event = {
-      type: next === previous ? "route" : "transition",
+      type: implementationApproved
+        ? "implementation_plan_approved"
+        : next === previous
+          ? "route"
+          : "transition",
       from: previous,
       to: next,
       actorAgentId: from || null,
@@ -189,6 +408,7 @@ function createCollabTaskRegistry(options = {}) {
       contentHash,
       targetAgentId: to || null,
       evidenceHash,
+      planHash: implementationApproved ? task.implementationGate?.planHash || null : null,
     };
     return persist(task, event);
   }
@@ -279,6 +499,11 @@ function createCollabTaskRegistry(options = {}) {
     getTask,
     getOrCreateTask,
     noteAcceptedRoute,
+    ensureImplementationPlanRequired,
+    submitImplementationPlan,
+    approveImplementationPlan,
+    implementationPermission,
+    shouldBlockImplementationRoute,
     updateTask,
     markDone,
     markDelivered,
@@ -287,7 +512,36 @@ function createCollabTaskRegistry(options = {}) {
   };
 }
 
+function approveImplementationPlanInline(task, actorAgentId) {
+  const actor = String(actorAgentId || "").toLowerCase();
+  if (!LEAD_AGENT_IDS.has(actor)) {
+    return { approved: false, reason: "plan_must_be_approved_by_lead" };
+  }
+  const gate = task?.implementationGate;
+  if (!gate?.planHash || gate.status !== IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL) {
+    return { approved: false, reason: "implementation_plan_not_pending" };
+  }
+  task.implementationGate = {
+    ...gate,
+    status: IMPLEMENTATION_GATE_STATUS.APPROVED,
+    approvedPlanHash: gate.planHash,
+    approvedBy: actor,
+    approvedAt: new Date().toISOString(),
+  };
+  task.approvalHash = gate.planHash;
+  return { approved: true, reason: null, planHash: gate.planHash };
+}
+
+function isTaskImplementationApproved(task) {
+  const gate = task?.implementationGate;
+  const artifactHash = String(task?.artifacts?.implementationPlan?.hash || "");
+  return Boolean(isImplementationApproved(gate) && artifactHash === String(gate.planHash || ""));
+}
+
 function completionReadiness(task) {
+  if (!isTaskImplementationApproved(task)) {
+    return { ok: false, reason: "implementation_plan_not_approved" };
+  }
   if (task?.codeReviewGate?.verdict !== "approve") {
     return { ok: false, reason: "code_review_not_approved" };
   }
@@ -350,5 +604,6 @@ module.exports = {
   isDiscussionAgent,
   isDeliveryAgent,
   completionReadiness,
+  isTaskImplementationApproved,
   normalizePhase,
 };

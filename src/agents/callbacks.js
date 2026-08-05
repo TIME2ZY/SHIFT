@@ -237,6 +237,30 @@ function postMessage(
     Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
   );
   const routeInvocationId = currentInvocationId || invocationId;
+  const taskRegistry = thread.collabTaskRegistry || null;
+  if (
+    agent === "grok" &&
+    taskRegistry &&
+    typeof taskRegistry.submitImplementationPlan === "function" &&
+    !taskRegistry.implementationPermission(callbackSessionId).allowed
+  ) {
+    const submission = taskRegistry.submitImplementationPlan(callbackSessionId, {
+      actorAgentId: agent,
+      content,
+    });
+    sendSse(
+      thread.res,
+      submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
+      {
+        agent,
+        invocationId: routeInvocationId,
+        accepted: submission.accepted,
+        reused: Boolean(submission.reused),
+        reason: submission.reason,
+        planHash: submission.planHash || null,
+      }
+    );
+  }
   const finalized = finalizeA2ARoutes({
     text: content,
     fromAgent: agent,
@@ -259,7 +283,7 @@ function postMessage(
     controller: thread.controller,
     a2aState: thread,
     logger: console,
-    collabTaskRegistry: thread.collabTaskRegistry || null,
+    collabTaskRegistry: taskRegistry,
   });
 
   const writeStats = mergeWriteStats(
