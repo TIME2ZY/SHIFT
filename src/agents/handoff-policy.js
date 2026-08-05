@@ -1,6 +1,15 @@
 const { ENV } = require("../shared/brand");
 const { DEFAULT_PHASE_AGENT_ALLOWLIST } = require("../shared/collab-contracts");
-const { REVIEWER_AGENT_IDS, IMPLEMENTER_AGENT_IDS, DELIVERY_AGENT_IDS } = require("./handoff");
+const {
+  DEFAULT_INTENT_AGENT_ALLOWLIST,
+  WORKFLOW_ROLES,
+  agentsWithCapability,
+  agentIdsForRole,
+} = require("./role-contracts");
+
+const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
+const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 
 const POLICY_MODES = Object.freeze(["soft", "balanced", "strict"]);
 const DECISIONS = Object.freeze({
@@ -69,7 +78,11 @@ function resolveCollabPhase(input = {}) {
 function evaluatePhaseRoute(input = {}) {
   const phase = resolveCollabPhase(input);
   const allowlist = input.allowlist || DEFAULT_PHASE_AGENT_ALLOWLIST;
+  const intentAllowlist = input.intentAllowlist || DEFAULT_INTENT_AGENT_ALLOWLIST;
   const allowed = Array.isArray(allowlist[phase]) ? allowlist[phase] : [];
+  const intent = String(input.intent || input.quality?.intent || "")
+    .trim()
+    .toLowerCase();
   const to = String(input.toAgent || input.routedTo || "")
     .trim()
     .toLowerCase();
@@ -79,6 +92,17 @@ function evaluatePhaseRoute(input = {}) {
 
   if (!to) {
     return { ok: false, phase, reason: "missing_target", allowed: [...allowed] };
+  }
+
+  const intentAgents = Array.isArray(intentAllowlist[intent]) ? intentAllowlist[intent] : null;
+  if (intentAgents && !intentAgents.includes(to)) {
+    return {
+      ok: false,
+      phase,
+      intent,
+      reason: "target_lacks_intent_capability",
+      allowed: [...intentAgents],
+    };
   }
 
   // discuss: do not route to implementers (avoids discuss→grok implement leak)
@@ -230,7 +254,7 @@ function buildPhaseRejectPayload({ fromAgent, toAgent, phaseCheck, taskSkip, mod
   const message = [
     `⛔ 协作阶段/任务策略拒绝路由（policy=${mode || resolveHandoffPolicyMode()}）`,
     `${fromAgent || "?"} → ${toAgent || "?"} phase=${phase} reason=${reason}`,
-    allowed.length ? `本阶段允许: ${allowed.map((a) => "@" + a).join(", ")}` : "",
+    allowed.length ? `本阶段/职责允许: ${allowed.map((a) => "@" + a).join(", ")}` : "",
     taskSkip?.state ? `任务状态: ${taskSkip.state}` : "",
   ]
     .filter(Boolean)

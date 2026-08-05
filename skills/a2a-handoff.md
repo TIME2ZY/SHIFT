@@ -21,18 +21,18 @@ always: true
 
 ## 当前 Agent 阵容
 
-| Agent         | id       | 职责                                     | 何时 @ 它                   |
-| ------------- | -------- | ---------------------------------------- | --------------------------- |
-| **@Codex**    | codex    | 推理与讨论、方案权衡、与 Gemini 交叉验证 | 想清楚问题、要方案、要收敛  |
-| **@Gemini**   | gemini   | 想法发散、头脑风暴                       | 要新鲜角度、多方案灵感      |
-| **@Grok**     | grok     | 写代码、改功能、跑测试                   | 要落地实现 / 按 review 回修 |
-| **@OpenCode** | opencode | 代码评审与放行                           | 实现完成或修复后确认        |
+| Agent         | id       | 职责                                         | 可接收 intent                 |
+| ------------- | -------- | -------------------------------------------- | ----------------------------- |
+| **@Codex**    | codex    | 开始/末尾把关、参与讨论、收敛方案、最终验收 | `discuss`, `accept`, `recall` |
+| **@Gemini**   | gemini   | 正常讨论、提供选项/反例、与 Codex 互证      | `discuss`, `recall`           |
+| **@Grok**     | grok     | 先给具体修改方案，获批后实现、测试并总结     | `plan`, `implement`, `fix`    |
+| **@OpenCode** | opencode | 代码 review；通过后规范 commit、push 和 PR   | `review`, `deliver`, `recall` |
 
 > 路由写 `@名字` 或 `@id` 均可。同一 agent 可在链路中再次入队（例如 Grok → OpenCode → Grok）。
 
-推荐链路：
+推荐链路（角色职责不等于固定状态数量）：
 
-> `@Gemini` 发散 → `@Codex` 收敛 → `@Grok` 实现 → `@OpenCode` review →（需改则）`@Grok` 回修 → `@OpenCode` 再确认
+> `@Codex` ↔ `@Gemini` 讨论互证 → Codex 收敛 → `@Grok` 先给具体修改方案 → 获批后实现并总结 → `@OpenCode` review / 回修闭环 → OpenCode 交付 PR → `@Codex` 按用户目标与收敛方案最终验收
 
 ## 出口检查
 
@@ -41,7 +41,9 @@ always: true
 ```
 
 - **还需要下一个 Agent 行动** → 行首 `@` + 完整 handoff 块
-- **不需要别人行动**（例如 approve 可合入）→ 不要 @
+- **不需要别人行动** → 不要 @；OpenCode review 通过后仍需完成交付并以 `accept` 交给 Codex
+
+平台会按 `intent` 校验目标 Agent 的 workflow capability。角色不匹配的交接在 balanced / strict 策略下拒绝，而不是只靠提示词提醒。
 
 ## 全员共用 handoff 模板
 

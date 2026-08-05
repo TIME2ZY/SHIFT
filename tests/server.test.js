@@ -127,6 +127,15 @@ test("serves fixed agent list", async () => {
         `Agent ${agent.id} missing duties`
       );
       assert.ok(Array.isArray(agent.boundaries), `Agent ${agent.id} missing boundaries array`);
+      assert.ok(agent.workflowRole, `Agent ${agent.id} missing workflow role`);
+      assert.ok(
+        Array.isArray(agent.workflowCapabilities) && agent.workflowCapabilities.length > 0,
+        `Agent ${agent.id} missing workflow capabilities`
+      );
+      assert.ok(
+        Array.isArray(agent.workflowResponsibilities) && agent.workflowResponsibilities.length > 0,
+        `Agent ${agent.id} missing workflow responsibilities`
+      );
     }
   });
 });

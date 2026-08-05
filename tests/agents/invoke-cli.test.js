@@ -299,6 +299,10 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.opencode.model, "qwen3.7-plus");
   assert.equal(AGENTS.opencode.label, "OpenCode");
   assert.equal(AGENTS.opencode.providerId, "opencode");
+  assert.equal(AGENTS.codex.workflowRole, "lead");
+  assert.deepEqual(AGENTS.gemini.workflowCapabilities, ["discuss", "recall"]);
+  assert.ok(AGENTS.grok.workflowResponsibilities.includes("concrete_change_plan"));
+  assert.ok(AGENTS.opencode.workflowResponsibilities.includes("pull_request"));
 });
 
 test("codex runtime maps agent_message and todo_list into normalized events", () => {

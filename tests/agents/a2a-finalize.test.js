@@ -85,6 +85,40 @@ test("finalize enqueues complete handoff under balanced", () => {
   assert.equal(route.payload.parentInvocationId, "inv1");
 });
 
+test("finalize rejects an explicit intent routed to the wrong workflow role", () => {
+  const worklist = ["codex"];
+  const events = [];
+  const result = finalizeA2ARoutes({
+    text: [
+      "@OpenCode",
+      "```handoff",
+      "to: opencode",
+      "intent: accept",
+      "what: perform final acceptance",
+      "why: delivery is ready",
+      "next_action: accept the outcome",
+      "```",
+    ].join("\n"),
+    fromAgent: "codex",
+    threadId: "t-role-reject",
+    sessionId: "t-role-reject",
+    invocationId: "inv-role-reject",
+    worklist,
+    a2aCount: 0,
+    maxDepth: 15,
+    policyMode: "balanced",
+    sendSse: (kind, payload) => events.push({ kind, payload }),
+    agentLabels: { codex: "Codex", opencode: "OpenCode" },
+  });
+
+  assert.equal(result.enqueued.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].reason, "target_lacks_intent_capability");
+  assert.deepEqual(worklist, ["codex"]);
+  const rejected = events.find((event) => event.kind === "a2a-skipped");
+  assert.deepEqual(rejected.payload.allowed, ["codex"]);
+});
+
 test("finalize request_repair on worktree empty packet under balanced", () => {
   const worklist = ["codex"];
   const events = [];

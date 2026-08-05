@@ -12,6 +12,11 @@ const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
 const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
+const {
+  WORKFLOW_ROLES,
+  agentsWithCapability,
+  agentIdsForRole,
+} = require("./role-contracts");
 
 /** Structured pack: keep more of the prior narrative (reviews are often long). */
 const DEFAULT_APPENDIX_CHARS = 5000;
@@ -41,11 +46,11 @@ const APPENDIX_ANCHORS = [
   "### P1",
 ];
 
-const IMPLEMENTER_AGENT_IDS = new Set(["grok"]);
-const REVIEWER_AGENT_IDS = new Set(["opencode"]);
-const LEAD_AGENT_IDS = new Set(["codex"]);
-const DISCUSSION_AGENT_IDS = new Set(["codex", "gemini"]);
-const DELIVERY_AGENT_IDS = new Set(["opencode"]);
+const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
+const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const LEAD_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.LEAD));
+const DISCUSSION_AGENT_IDS = new Set(agentsWithCapability("discuss"));
+const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 
 /**
  * @typedef {object} Handoff

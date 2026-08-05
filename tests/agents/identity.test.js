@@ -42,11 +42,29 @@ test("renderIdentityBlock includes markers, role meta, and body", () => {
   const block = renderIdentityBlock("opencode");
   assert.match(block, /<!-- Agent Identity: opencode \/ OpenCode -->/);
   assert.match(block, /<!-- \/Agent Identity -->/);
-  assert.match(block, /Role: reviewer/);
+  assert.match(block, /Role: reviewer_deliverer/);
+  assert.match(block, /Workflow role: reviewer_deliverer/);
+  assert.match(block, /Workflow capabilities: review, deliver, recall/);
   assert.match(block, /Duties:/);
   assert.match(block, /Boundaries:/);
   assert.match(block, /你是 \*\*OpenCode/);
   assert.ok(!block.includes("你是 **Grok"), "must not leak other agent bodies");
+});
+
+test("identity packs encode the agreed four-agent responsibility split", () => {
+  const codex = renderIdentityBlock("codex");
+  const gemini = renderIdentityBlock("gemini");
+  const grok = renderIdentityBlock("grok");
+  const opencode = renderIdentityBlock("opencode");
+
+  assert.match(codex, /开始与末尾把关/);
+  assert.match(codex, /用户最初目标.*收敛方案/);
+  assert.match(gemini, /正常可行/);
+  assert.match(gemini, /不为新奇而新奇/);
+  assert.match(grok, /第一轮只读检查/);
+  assert.match(grok, /尚未修改/);
+  assert.match(opencode, /commit、push 和 PR/);
+  assert.match(opencode, /不替代 Codex/);
 });
 
 test("Codex identity instructs bounded searches and explicit runtime log access", () => {
@@ -128,6 +146,9 @@ test("publicIdentities returns metadata without body", () => {
   assert.ok(coder);
   assert.equal(coder.label, "Grok");
   assert.ok(Array.isArray(coder.duties));
+  assert.equal(coder.workflowRole, "implementer");
+  assert.deepEqual(coder.workflowCapabilities, ["plan", "implement", "fix", "recall"]);
+  assert.ok(coder.workflowResponsibilities.includes("change_summary"));
   assert.equal("body" in coder, false);
 });
 

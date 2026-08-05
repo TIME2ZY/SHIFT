@@ -40,12 +40,12 @@ SHIFT 让原本分散在多个终端里的 Agent 共享任务上下文，把一�
 
 Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 
-| Agent        | 默认模型           | 运行方式        | 默认职责                     |
-| ------------ | ------------------ | --------------- | ---------------------------- |
-| **Codex**    | `gpt-5.6-sol`      | Codex CLI       | 澄清问题、推理、方案权衡     |
-| **Gemini**   | `gemini-3.5-flash` | Antigravity CLI | 发散思考、头脑风暴、交叉验证 |
-| **Grok**     | `grok-4.5`         | Grok Build ACP  | 实现代码、修改功能、执行测试 |
-| **OpenCode** | `qwen3.7-plus`     | OpenCode CLI    | 代码审查、质量与安全把关     |
+| Agent        | 默认模型           | 运行方式        | 默认职责                                       |
+| ------------ | ------------------ | --------------- | ---------------------------------------------- |
+| **Codex**    | `gpt-5.6-sol`      | Codex CLI       | 开始/末尾把关、参与讨论、收敛方案、最终目标验收 |
+| **Gemini**   | `gemini-3.5-flash` | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
+| **Grok**     | `grok-4.5`         | Grok Build ACP  | 先给具体修改方案，获批后实现、测试并总结         |
+| **OpenCode** | `qwen3.7-plus`     | OpenCode CLI    | 代码 review；通过后规范 commit、push 和 PR       |
 
 模型、容量和职责目前是固定配置。SHIFT 不打包这些 CLI，也不管理它们的账号；使用前需要在本机分别安装并完成认证。
 
@@ -57,13 +57,13 @@ Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
     ├─ 选择一个 Agent 直接处理
     │
     └─ 多 Agent 接力
-         Codex / Gemini 讨论与收敛
+         Codex ↔ Gemini 讨论、互证；Codex 收敛
                 ↓
-         Grok 在可选 worktree 中实现
+         Grok 先给具体修改方案，获批后在 worktree 实现并总结
                 ↓
-         OpenCode 审查与把关
+         OpenCode review / 回修闭环，随后交付 commit 和 PR
                 ↓
-         用户查看结果、过程和 diff
+         Codex 按用户最初目标与收敛方案最终验收
 ```
 
 这不是固定流水线。你可以只使用一个 Agent，也可以在任何一轮通过 `@Codex`、`@Gemini`、`@Grok` 或 `@OpenCode` 指定下一位。
