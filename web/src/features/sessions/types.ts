@@ -3,9 +3,11 @@ export interface SessionSummary {
   title?: string;
   createdAt?: string;
   updatedAt?: string;
+  messageCount: number;
   lastAgent?: string;
   participantAgentIds?: string[];
   projectDir?: string;
+  projectKey?: string | null;
   worktree?: {
     branch?: string;
     worktreeDir?: string;

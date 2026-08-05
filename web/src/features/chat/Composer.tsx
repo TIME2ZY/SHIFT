@@ -23,8 +23,9 @@ interface ComposerProps {
   selectedAgentId: string;
   running: boolean;
   draftSeed?: ComposerDraftSeed | null;
+  focusRequestId?: number;
   onDraftSeedApplied?(): void;
-  onSend(prompt: string, useWorktree: boolean): Promise<void>;
+  onSend(prompt: string, useWorktree: boolean, clientTurnId: string): Promise<void>;
   onStop(): void;
 }
 
@@ -34,6 +35,7 @@ export function Composer({
   selectedAgentId,
   running,
   draftSeed = null,
+  focusRequestId = 0,
   onDraftSeedApplied,
   onSend,
   onStop,
@@ -43,6 +45,7 @@ export function Composer({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const submittingRef = useRef(false);
   const draft = sessionId ? (drafts[sessionId] ?? "") : "";
   const useWorktree = sessionId ? (worktreeModes[sessionId] ?? false) : false;
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
@@ -95,6 +98,11 @@ export function Composer({
     onDraftSeedApplied?.();
   }, [draftSeed, sessionId, onDraftSeedApplied]);
 
+  useEffect(() => {
+    if (!sessionId || focusRequestId <= 0) return;
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [focusRequestId, sessionId]);
+
   function selectMention(agent: AgentSummary) {
     setDraft(`@${agentMentionLabel(agent)} `);
   }
@@ -102,12 +110,18 @@ export function Composer({
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     const prompt = draft.trim();
-    if (!sessionId || running || !prompt) return;
+    if (!sessionId || running || !prompt || submittingRef.current) return;
+    submittingRef.current = true;
+    const clientTurnId = crypto.randomUUID();
     setDrafts((current) => ({ ...current, [sessionId]: "" }));
     if (textareaRef.current) {
       textareaRef.current.style.height = "";
     }
-    await onSend(prompt, useWorktree);
+    try {
+      await onSend(prompt, useWorktree, clientTurnId);
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {

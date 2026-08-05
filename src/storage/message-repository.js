@@ -15,10 +15,10 @@ function createMessageRepository(db) {
   const insert = db.prepare(`
     INSERT INTO messages
       (id, thread_id, window_id, invocation_id, sequence_no, role,
-       agent_id, content, metadata_json, created_at, message_type)
+       agent_id, content, metadata_json, created_at, message_type, client_turn_id)
     VALUES
       (@id, @threadId, @windowId, @invocationId, @sequenceNo, @role,
-       @agentId, @content, @metadataJson, @createdAt, @messageType)
+       @agentId, @content, @metadataJson, @createdAt, @messageType, @clientTurnId)
     ON CONFLICT(id) DO UPDATE SET
       thread_id = excluded.thread_id,
       window_id = excluded.window_id,
@@ -29,9 +29,14 @@ function createMessageRepository(db) {
       content = excluded.content,
       metadata_json = excluded.metadata_json,
       created_at = excluded.created_at,
-      message_type = excluded.message_type
+      message_type = excluded.message_type,
+      client_turn_id = excluded.client_turn_id
   `);
   const findById = db.prepare("SELECT * FROM messages WHERE id = ?");
+  const findUserByClientTurnId = db.prepare(`
+    SELECT * FROM messages
+    WHERE thread_id = ? AND client_turn_id = ? AND role = 'user'
+  `);
   const listByThread = db.prepare(`
     SELECT * FROM messages WHERE thread_id = ? ORDER BY sequence_no ASC
   `);
@@ -62,6 +67,7 @@ function createMessageRepository(db) {
       metadataJson,
       createdAt: input.createdAt || new Date().toISOString(),
       messageType: normalizeMessageType(input.messageType, role, input.metadata),
+      clientTurnId: role === "user" ? nullableString(input.clientTurnId) : null,
     });
     return mapMessage(findById.get(id));
   });
@@ -73,6 +79,11 @@ function createMessageRepository(db) {
 
     get(id) {
       return mapMessage(findById.get(id));
+    },
+
+    findUserByClientTurnId(threadId, clientTurnId) {
+      if (!threadId || !clientTurnId) return null;
+      return mapMessage(findUserByClientTurnId.get(threadId, clientTurnId));
     },
 
     listForThread(threadId) {
@@ -95,6 +106,7 @@ function mapMessage(row) {
     content: row.content,
     metadata: parseJson(row.metadata_json),
     createdAt: row.created_at,
+    clientTurnId: row.client_turn_id || null,
   };
 }
 

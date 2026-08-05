@@ -128,7 +128,7 @@ function createServer(options = {}) {
     );
   }
   const storageContext = createServerStorage(
-    { ...options, auditTranscriptDir },
+    { ...options, auditTranscriptDir, defaultProjectDir: ROOT },
     sessionsFile,
     logger
   );
@@ -174,6 +174,10 @@ function createServer(options = {}) {
 
   function appendToSessionDurable(sessionId, message, appendOptions = {}) {
     return sqliteSessionService.appendToSession(sessionId, message, appendOptions);
+  }
+
+  function findUserMessageByClientTurnIdDurable(sessionId, clientTurnId) {
+    return sqliteSessionService.findUserMessageByClientTurnId(sessionId, clientTurnId);
   }
 
   function deleteSessionDurable(sessionId) {
@@ -287,6 +291,7 @@ function createServer(options = {}) {
     validateProjectDir,
     setSessionWorktree: updateWorktreeDurable,
     appendToSession: appendToSessionDurable,
+    findUserMessageByClientTurnId: findUserMessageByClientTurnIdDurable,
     durableRecorder,
     memoryCapture,
     logger,

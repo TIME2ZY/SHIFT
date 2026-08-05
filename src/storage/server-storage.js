@@ -71,7 +71,13 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     logger,
   });
   const recorder = createDurableRecorder({ storage, eventStore, logger });
-  const sessionService = storage ? createSqliteSessionService({ storage, logger }) : null;
+  const sessionService = storage
+    ? createSqliteSessionService({
+        storage,
+        logger,
+        defaultProjectDir: options.defaultProjectDir,
+      })
+    : null;
   const pendingOutboxAtStart = Number(storage?.outbox?.health?.().pending || 0);
   const auditTranscriptSink =
     options.auditTranscriptSink ||
