@@ -7,10 +7,11 @@
  */
 
 const REQUIRED_FIELDS = ["what", "why", "next_action"];
-const RECOMMENDED_FIELDS = ["to", "goal", "tradeoff", "open_questions"];
+const RECOMMENDED_FIELDS = ["to", "intent", "goal", "tradeoff", "open_questions"];
 const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
-const SCALAR_FIELDS = new Set(["to", "goal", "what", "why", "tradeoff", "next_action"]);
+const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
+const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
 
 /** Structured pack: keep more of the prior narrative (reviews are often long). */
 const DEFAULT_APPENDIX_CHARS = 5000;
@@ -42,10 +43,14 @@ const APPENDIX_ANCHORS = [
 
 const IMPLEMENTER_AGENT_IDS = new Set(["grok"]);
 const REVIEWER_AGENT_IDS = new Set(["opencode"]);
+const LEAD_AGENT_IDS = new Set(["codex"]);
+const DISCUSSION_AGENT_IDS = new Set(["codex", "gemini"]);
+const DELIVERY_AGENT_IDS = new Set(["opencode"]);
 
 /**
  * @typedef {object} Handoff
  * @property {string} [to]
+ * @property {string} [intent]
  * @property {string} [goal]
  * @property {string} [what]
  * @property {string} [why]
@@ -175,6 +180,10 @@ function parseHandoffBody(body) {
   if (typeof handoff.to === "string") {
     handoff.to = handoff.to.split(/\r?\n/)[0].trim();
     if (!handoff.to) delete handoff.to;
+  }
+  if (typeof handoff.intent === "string") {
+    handoff.intent = handoff.intent.split(/\r?\n/)[0].trim().toLowerCase();
+    if (!handoff.intent) delete handoff.intent;
   }
 
   // Normalize empty arrays away
@@ -314,9 +323,7 @@ function evaluateHandoff(handoff, opts = {}) {
       hasBlock: false,
       emptyPacket: true,
       toMismatch: false,
-      repairHints: [
-        "缺少 ```handoff 块。请补充 to/what/why/next_action 后再用行首 @ 交接。",
-      ],
+      repairHints: ["缺少 ```handoff 块。请补充 to/what/why/next_action 后再用行首 @ 交接。"],
       riskFlags,
       intent: inferIntent(null, opts),
       policy: opts.policy || null,
@@ -325,6 +332,11 @@ function evaluateHandoff(handoff, opts = {}) {
 
   const missing = REQUIRED_FIELDS.filter((k) => !hasValue(handoff[k]));
   const missingRecommended = RECOMMENDED_FIELDS.filter((k) => !hasValue(handoff[k]));
+  const invalidIntent = Boolean(handoff.intent && !normalizeIntent(handoff.intent));
+  if (invalidIntent && !missingRecommended.includes("intent")) {
+    missingRecommended.push("intent");
+    riskFlags.push("invalid_intent");
+  }
   const requiredScore = (REQUIRED_FIELDS.length - missing.length) / REQUIRED_FIELDS.length;
   const recommendedScore =
     (RECOMMENDED_FIELDS.length - missingRecommended.length) / RECOMMENDED_FIELDS.length;
@@ -341,6 +353,9 @@ function evaluateHandoff(handoff, opts = {}) {
   }
   if (missingRecommended.includes("to")) {
     repairHints.push("建议填写 to: 与行首 @ 目标一致。");
+  }
+  if (invalidIntent) {
+    repairHints.push(`intent 必须是以下值之一: ${HANDOFF_INTENTS.join(", ")}。`);
   }
 
   return {
@@ -379,7 +394,8 @@ function computeToMismatch(handoff, routedTo) {
  * @returns {string|null}
  */
 function inferIntent(handoff, opts = {}) {
-  if (opts.intent) return String(opts.intent);
+  if (opts.intent) return normalizeIntent(opts.intent);
+  if (handoff?.intent) return normalizeIntent(handoff.intent);
   const from = String(opts.fromAgentId || "")
     .trim()
     .toLowerCase();
@@ -394,6 +410,13 @@ function inferIntent(handoff, opts = {}) {
     if (/request-changes|approve-with-nits|\bp0\b|评审|review/.test(what)) return "review";
   }
   return null;
+}
+
+function normalizeIntent(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return HANDOFF_INTENTS.includes(normalized) ? normalized : null;
 }
 
 function normalizeRiskFlags(value) {
@@ -419,6 +442,7 @@ function renderA2AHandoffCard() {
 
 \`\`\`handoff
 to: <agent>
+intent: <discuss|plan|implement|review|fix|deliver|accept|recall>
 goal: <可空>
 what: <尽量填：交什么 / 审什么 / 结论: approve|approve-with-nits|request-changes + 分级列表>
 why: <尽量填>
@@ -677,12 +701,17 @@ function renderHandoffTask(opts) {
   const lines = [`[任务交接：由 ${label} 转交给你]`, "", "<!-- Structured Handoff -->"];
 
   if (routed) {
-    lines.push(`to_routed: ${routed}${routedLabel && routedLabel !== routed ? ` (${routedLabel})` : ""}`);
+    lines.push(
+      `to_routed: ${routed}${routedLabel && routedLabel !== routed ? ` (${routedLabel})` : ""}`
+    );
   }
   if (hasValue(handoff.to)) {
     lines.push(`to_packet: ${handoff.to}`);
   }
-  if (quality.toMismatch || (routed && hasValue(handoff.to) && computeToMismatch(handoff, routed))) {
+  if (
+    quality.toMismatch ||
+    (routed && hasValue(handoff.to) && computeToMismatch(handoff, routed))
+  ) {
     lines.push("⚠ 路由目标以行首 @ 为准；packet.to 与路由不一致时，以 to_routed 为准。");
   }
 
@@ -830,6 +859,10 @@ module.exports = {
   USER_PROMPT_MAX_CHARS,
   IMPLEMENTER_AGENT_IDS,
   REVIEWER_AGENT_IDS,
+  LEAD_AGENT_IDS,
+  DISCUSSION_AGENT_IDS,
+  DELIVERY_AGENT_IDS,
+  normalizeIntent,
   parseHandoffBlocks,
   parseHandoffBody,
   extractPrimaryHandoff,

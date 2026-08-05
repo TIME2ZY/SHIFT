@@ -259,6 +259,7 @@ function postMessage(
     controller: thread.controller,
     a2aState: thread,
     logger: console,
+    collabTaskRegistry: thread.collabTaskRegistry || null,
   });
 
   const writeStats = mergeWriteStats(

@@ -802,6 +802,50 @@ const MIGRATIONS = Object.freeze([
         WHERE client_turn_id IS NOT NULL AND role = 'user';
     `,
   },
+  {
+    version: 20,
+    name: "collaboration_workflow",
+    sql: `
+      CREATE TABLE collaboration_tasks (
+        thread_id TEXT PRIMARY KEY,
+        phase TEXT NOT NULL
+          CHECK (phase IN ('discuss', 'implement', 'review', 'deliver', 'done')),
+        goal TEXT,
+        content_hash TEXT,
+        approval_hash TEXT,
+        last_from_agent_id TEXT,
+        last_to_agent_id TEXT,
+        artifacts_json TEXT NOT NULL DEFAULT '{}',
+        implementation_gate_json TEXT,
+        code_review_gate_json TEXT,
+        delivery_gate_json TEXT,
+        final_gate_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX collaboration_tasks_phase_updated
+        ON collaboration_tasks(phase, updated_at);
+
+      CREATE TABLE collaboration_task_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        from_phase TEXT,
+        to_phase TEXT,
+        actor_agent_id TEXT,
+        intent TEXT,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES collaboration_tasks(thread_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX collaboration_task_events_thread_created
+        ON collaboration_task_events(thread_id, created_at, id);
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {
@@ -852,8 +896,7 @@ function migrateActiveMemoryLifecycle(db) {
             OR kind NOT IN ('decision', 'constraint', 'fact')`
       )
       .all()) {
-      const category =
-        row.status === "invalidated" ? "invalidated-memory" : "non-product-memory";
+      const category = row.status === "invalidated" ? "invalidated-memory" : "non-product-memory";
       archive.run(category, row.id, JSON.stringify(row), archivedAt);
     }
 

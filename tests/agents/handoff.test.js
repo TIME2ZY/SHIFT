@@ -20,6 +20,7 @@ const FULL_BLOCK = `
 
 \`\`\`handoff
 to: opencode
+intent: review
 goal: review auth
 what: 新增 POST /api/login
 why: 多实例不能用 session
@@ -39,6 +40,7 @@ test("parseHandoffBlocks extracts a full handoff", () => {
   assert.equal(blocks.length, 1);
   const h = blocks[0];
   assert.equal(h.to, "opencode");
+  assert.equal(h.intent, "review");
   assert.equal(h.goal, "review auth");
   assert.equal(h.what, "新增 POST /api/login");
   assert.equal(h.why, "多实例不能用 session");
@@ -71,6 +73,22 @@ test("parseHandoffBody supports multi-line scalar fields", () => {
 test("parseHandoffBody supports comma-separated list on one line", () => {
   const h = parseHandoffBody("files: a.js, b.js\nwhat: x\nwhy: y\nnext_action: z");
   assert.deepEqual(h.files, ["a.js", "b.js"]);
+});
+
+test("explicit handoff intent is normalized and invalid values are reported", () => {
+  const valid = parseHandoffBody(
+    "to: grok\nintent: PLAN\nwhat: inspect\nwhy: prepare\nnext_action: propose"
+  );
+  assert.equal(valid.intent, "plan");
+  assert.equal(evaluateHandoff(valid).intent, "plan");
+
+  const invalid = parseHandoffBody(
+    "to: grok\nintent: ship-it\nwhat: inspect\nwhy: prepare\nnext_action: propose"
+  );
+  const quality = evaluateHandoff(invalid);
+  assert.equal(quality.intent, null);
+  assert.ok(quality.riskFlags.includes("invalid_intent"));
+  assert.ok(quality.missingRecommended.includes("intent"));
 });
 
 test("extractPrimaryHandoff prefers last block", () => {
@@ -245,9 +263,7 @@ test("renderHandoffTask uses structured fields for complete handoff", () => {
 });
 
 test("renderHandoffTask surfaces route authority when packet.to mismatches @", () => {
-  const h = parseHandoffBody(
-    "to: gemini\nwhat: work\nwhy: mismatch demo\nnext_action: continue"
-  );
+  const h = parseHandoffBody("to: gemini\nwhat: work\nwhy: mismatch demo\nnext_action: continue");
   const text = renderHandoffTask({
     handoff: h,
     fromAgent: "codex",
@@ -437,9 +453,7 @@ test("resolveAppendixChars shrinks when memory card is present", () => {
 });
 
 test("renderReceiveBundle orders memory, policy banner, task, and outbound card", () => {
-  const h = parseHandoffBody(
-    "to: gemini\nwhat: do work\nwhy: because\nnext_action: ship"
-  );
+  const h = parseHandoffBody("to: gemini\nwhat: do work\nwhy: because\nnext_action: ship");
   const q = evaluateHandoff(h, { routedTo: "opencode" });
   const bundle = handoff.renderReceiveBundle({
     handoff: h,

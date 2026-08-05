@@ -21,12 +21,12 @@ always: true
 
 ## 当前 Agent 阵容
 
-| Agent | id | 职责 | 何时 @ 它 |
-|-------|----|------|-----------|
-| **@Codex** | codex | 推理与讨论、方案权衡、与 Gemini 交叉验证 | 想清楚问题、要方案、要收敛 |
-| **@Gemini** | gemini | 想法发散、头脑风暴 | 要新鲜角度、多方案灵感 |
-| **@Grok** | grok | 写代码、改功能、跑测试 | 要落地实现 / 按 review 回修 |
-| **@OpenCode** | opencode | 代码评审与放行 | 实现完成或修复后确认 |
+| Agent         | id       | 职责                                     | 何时 @ 它                   |
+| ------------- | -------- | ---------------------------------------- | --------------------------- |
+| **@Codex**    | codex    | 推理与讨论、方案权衡、与 Gemini 交叉验证 | 想清楚问题、要方案、要收敛  |
+| **@Gemini**   | gemini   | 想法发散、头脑风暴                       | 要新鲜角度、多方案灵感      |
+| **@Grok**     | grok     | 写代码、改功能、跑测试                   | 要落地实现 / 按 review 回修 |
+| **@OpenCode** | opencode | 代码评审与放行                           | 实现完成或修复后确认        |
 
 > 路由写 `@名字` 或 `@id` 均可。同一 agent 可在链路中再次入队（例如 Grok → OpenCode → Grok）。
 
@@ -47,17 +47,19 @@ always: true
 
 **只允许下列顶层字段。** 没有的内容就空着（省略该行）；**禁止** `verdict` / `nits` / `blocking` / `status` 等私有 key。
 
-| 字段 | 策略 |
-|------|------|
-| `to` | 推荐，与行首 @ 一致 |
-| `what` | 尽量填：交了什么 / 审了什么 / 结论 |
-| `why` | 尽量填：为什么交 / 为何要改 / 为何阻塞 |
-| `next_action` | 尽量填：希望对方立刻做什么 |
-| `goal` / `tradeoff` / `open_questions` / `files` / `evidence` | 可选，可空 |
+| 字段                                                          | 策略                                                                   |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `to`                                                          | 推荐，与行首 @ 一致                                                    |
+| `intent`                                                      | 推荐：`discuss, plan, implement, review, fix, deliver, accept, recall` |
+| `what`                                                        | 尽量填：交了什么 / 审了什么 / 结论                                     |
+| `why`                                                         | 尽量填：为什么交 / 为何要改 / 为何阻塞                                 |
+| `next_action`                                                 | 尽量填：希望对方立刻做什么                                             |
+| `goal` / `tradeoff` / `open_questions` / `files` / `evidence` | 可选，可空                                                             |
 
 ````markdown
 ```handoff
 to: opencode
+intent: review
 goal: 请 review 登录 API 的鉴权与错误处理
 what: 新增 POST /api/login，JWT 签发，bcrypt 哈希
 why: 需求要求无状态鉴权；现有 session 方案与多实例部署冲突
@@ -80,6 +82,7 @@ evidence:
 ````markdown
 ```handoff
 to: grok
+intent: fix
 goal: 按 review 修完再回审
 what: |
   结论: request-changes

@@ -1,8 +1,6 @@
 const { ENV } = require("../shared/brand");
-const {
-  DEFAULT_PHASE_AGENT_ALLOWLIST,
-} = require("../shared/collab-contracts");
-const { REVIEWER_AGENT_IDS, IMPLEMENTER_AGENT_IDS } = require("./handoff");
+const { DEFAULT_PHASE_AGENT_ALLOWLIST } = require("../shared/collab-contracts");
+const { REVIEWER_AGENT_IDS, IMPLEMENTER_AGENT_IDS, DELIVERY_AGENT_IDS } = require("./handoff");
 
 const POLICY_MODES = Object.freeze(["soft", "balanced", "strict"]);
 const DECISIONS = Object.freeze({
@@ -12,7 +10,7 @@ const DECISIONS = Object.freeze({
   REJECT: "reject",
 });
 
-const PHASES = Object.freeze(["discuss", "implement", "review", "recall"]);
+const PHASES = Object.freeze(["discuss", "implement", "review", "deliver", "recall"]);
 
 /**
  * Resolve SHIFT_HANDOFF_POLICY. Default balanced (Wave H2).
@@ -47,17 +45,20 @@ function resolveCollabPhase(input = {}) {
     .trim()
     .toLowerCase();
 
-  if (intent === "review" || REVIEWER_AGENT_IDS.has(to)) return "review";
-  if (intent === "fix" || (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to))) {
+  if (intent === "accept" || intent === "deliver") return "deliver";
+  if (intent === "review") return "review";
+  if (intent === "discuss") return "discuss";
+  if (intent === "recall") return "recall";
+  if (intent === "fix") return "implement";
+  if (intent === "plan" || intent === "implement") return "implement";
+  if (REVIEWER_AGENT_IDS.has(to)) return "review";
+  if (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to)) {
     return "implement";
   }
   // Worktree / explicit implement intent → implement phase.
   // Merely targeting an implementer without worktree stays "discuss" so
   // discuss_blocks_implementer can fire (prevents discuss→grok implement leak).
-  if (input.useWorktree || intent === "implement") {
-    return "implement";
-  }
-  if (intent === "recall") return "recall";
+  if (input.useWorktree) return "implement";
   return "discuss";
 }
 
@@ -86,6 +87,15 @@ function evaluatePhaseRoute(input = {}) {
       ok: false,
       phase,
       reason: "discuss_blocks_implementer",
+      allowed: [...allowed],
+    };
+  }
+
+  if (phase === "discuss" && DELIVERY_AGENT_IDS.has(to)) {
+    return {
+      ok: false,
+      phase,
+      reason: "discuss_blocks_delivery",
       allowed: [...allowed],
     };
   }
@@ -173,7 +183,10 @@ function decidePolicy(input = {}) {
         if (phaseCheck.reason === "implement_requires_worktree") {
           return DECISIONS.REJECT;
         }
-        if (phaseCheck.reason === "discuss_blocks_implementer") {
+        if (
+          phaseCheck.reason === "discuss_blocks_implementer" ||
+          phaseCheck.reason === "discuss_blocks_delivery"
+        ) {
           return DECISIONS.ALLOW_DEGRADED;
         }
         // not in allowlist: soft still degrades rather than hard reject
@@ -252,6 +265,7 @@ function buildRepairPayload({ fromAgent, toAgent, quality, mode } = {}) {
   const example = [
     "```handoff",
     `to: ${toAgent || "<agent>"}`,
+    "intent: <discuss|plan|implement|review|fix|deliver|accept|recall>",
     "goal: <可空>",
     "what: <尽量填>",
     "why: <尽量填>",
@@ -261,9 +275,7 @@ function buildRepairPayload({ fromAgent, toAgent, quality, mode } = {}) {
     "```",
   ].join("\n");
 
-  const reason = empty
-    ? "缺少标准 ```handoff 块"
-    : `handoff 不完整（缺失: ${missing}）`;
+  const reason = empty ? "缺少标准 ```handoff 块" : `handoff 不完整（缺失: ${missing}）`;
 
   const message = [
     `⛔ 交接需补全后再 @（policy=${mode || resolveHandoffPolicyMode()}）`,

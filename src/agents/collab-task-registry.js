@@ -1,25 +1,29 @@
 /**
- * Process-local collaboration task state (phase 5).
- * Tracks review/implement progress so routes can skip redundant reviewer spins.
+ * Collaboration workflow registry.
+ *
+ * The default export remains an in-memory singleton for isolated callers and
+ * tests. Server requests create a registry backed by SQLite so phase/gate
+ * decisions survive process restarts.
  */
 
 "use strict";
 
 const crypto = require("node:crypto");
 const { COLLAB_TASK_STATES } = require("../shared/collab-contracts");
-const { REVIEWER_AGENT_IDS, IMPLEMENTER_AGENT_IDS } = require("./handoff");
-
-/** @type {Map<string, object>} threadId → task */
-const tasksByThread = new Map();
+const {
+  REVIEWER_AGENT_IDS,
+  IMPLEMENTER_AGENT_IDS,
+  DISCUSSION_AGENT_IDS,
+  DELIVERY_AGENT_IDS,
+  normalizeIntent,
+} = require("./handoff");
 
 const STATE = Object.freeze({
-  PLANNED: "planned",
-  IMPLEMENTING: "implementing",
-  AWAITING_REVIEW: "awaiting_review",
-  CHANGES_REQUESTED: "changes_requested",
-  FIXED: "fixed",
-  APPROVED: "approved",
-  DELIVERED: "delivered",
+  DISCUSS: "discuss",
+  IMPLEMENT: "implement",
+  REVIEW: "review",
+  DELIVER: "deliver",
+  DONE: "done",
 });
 
 function isReviewer(agentId) {
@@ -30,38 +34,38 @@ function isImplementer(agentId) {
   return IMPLEMENTER_AGENT_IDS.has(String(agentId || "").toLowerCase());
 }
 
+function isDiscussionAgent(agentId) {
+  return DISCUSSION_AGENT_IDS.has(String(agentId || "").toLowerCase());
+}
+
+function isDeliveryAgent(agentId) {
+  return DELIVERY_AGENT_IDS.has(String(agentId || "").toLowerCase());
+}
+
 function emptyTask(threadId) {
+  const now = new Date().toISOString();
   return {
     threadId,
-    state: STATE.PLANNED,
+    phase: STATE.DISCUSS,
+    state: STATE.DISCUSS,
     goal: null,
     contentHash: null,
     approvalHash: null,
     lastFrom: null,
     lastTo: null,
-    updatedAt: new Date().toISOString(),
+    artifacts: {},
+    implementationGate: null,
+    codeReviewGate: null,
+    deliveryGate: null,
+    finalGate: null,
+    createdAt: now,
+    updatedAt: now,
+    version: 0,
     history: [],
   };
 }
 
-function getTask(threadId) {
-  if (!threadId) return null;
-  return tasksByThread.get(threadId) || null;
-}
-
-function getOrCreateTask(threadId) {
-  if (!threadId) return emptyTask("");
-  let task = tasksByThread.get(threadId);
-  if (!task) {
-    task = emptyTask(threadId);
-    tasksByThread.set(threadId, task);
-  }
-  return task;
-}
-
-/**
- * Hash a handoff / review evidence blob for approval binding.
- */
+/** Hash a handoff / review evidence blob for approval binding. */
 function hashEvidence(parts = {}) {
   const payload = [
     String(parts.contentHash || ""),
@@ -73,142 +77,272 @@ function hashEvidence(parts = {}) {
   return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }
 
-function pushHistory(task, event) {
-  task.history.push({ ...event, at: new Date().toISOString() });
-  if (task.history.length > 40) task.history.shift();
-  task.updatedAt = new Date().toISOString();
-}
+function createCollabTaskRegistry(options = {}) {
+  const repository = options.repository || null;
+  const tasksByThread = new Map();
 
-/**
- * Infer task transition from a successful A2A route.
- */
-function noteAcceptedRoute(input = {}) {
-  const threadId = input.threadId;
-  if (!threadId) return null;
-  const task = getOrCreateTask(threadId);
-  const from = String(input.fromAgent || "");
-  const to = String(input.toAgent || "");
-  const intent = String(input.intent || "");
-  const contentHash = input.contentHash || null;
-  const useWorktree = Boolean(input.useWorktree);
-  const handoff = input.handoff || {};
-  const evidenceHash = hashEvidence({
-    contentHash,
-    goal: handoff.goal,
-    what: handoff.what,
-    diffHash: input.diffHash,
-    testHash: input.testHash,
-  });
+  function getTask(threadId) {
+    if (!threadId) return null;
+    if (repository) return repository.get(String(threadId));
+    return tasksByThread.get(String(threadId)) || null;
+  }
 
-  task.lastFrom = from;
-  task.lastTo = to;
-  task.contentHash = contentHash || task.contentHash;
-  if (handoff.goal) task.goal = handoff.goal;
+  function getOrCreateTask(threadId) {
+    if (!threadId) return emptyTask("");
+    return getTask(threadId) || emptyTask(String(threadId));
+  }
 
-  let next = task.state;
-  if (useWorktree || intent === "implement" || isImplementer(to)) {
-    if (task.state === STATE.CHANGES_REQUESTED || task.state === STATE.FIXED) {
-      next = STATE.FIXED;
-    } else if (task.state === STATE.APPROVED || task.state === STATE.DELIVERED) {
-      // new work after approval
-      next = STATE.IMPLEMENTING;
-      task.approvalHash = null;
-    } else {
-      next = STATE.IMPLEMENTING;
+  function persist(task, event = null) {
+    task.phase = normalizePhase(task.phase || task.state);
+    task.state = task.phase;
+    task.updatedAt = new Date().toISOString();
+    if (repository) return repository.save(task, event);
+
+    if (event) {
+      task.history = Array.isArray(task.history) ? task.history : [];
+      task.history.push({ ...event, at: event.at || new Date().toISOString() });
+      if (task.history.length > 40) task.history.shift();
     }
-  }
-  if (intent === "review" || isReviewer(to)) {
-    next = STATE.AWAITING_REVIEW;
-  }
-  if (intent === "fix" || (isImplementer(to) && task.state === STATE.CHANGES_REQUESTED)) {
-    next = STATE.FIXED;
+    task.version = Number(task.version || 0) + 1;
+    tasksByThread.set(task.threadId, task);
+    return { ...task, history: task.history.slice() };
   }
 
-  // Detect approve / request-changes language on outbound handoff from reviewer
-  if (isReviewer(from)) {
-    const blob = [handoff.what, handoff.next_action, handoff.goal, input.text]
+  /** Infer and persist the phase transition caused by one accepted A2A route. */
+  function noteAcceptedRoute(input = {}) {
+    const threadId = input.threadId;
+    if (!threadId) return null;
+    const task = getOrCreateTask(threadId);
+    const from = String(input.fromAgent || "").toLowerCase();
+    const to = String(input.toAgent || "").toLowerCase();
+    const intent = normalizeIntent(input.intent) || "";
+    const contentHash = input.contentHash || null;
+    const useWorktree = Boolean(input.useWorktree);
+    const handoff = input.handoff || {};
+    const evidenceHash = hashEvidence({
+      contentHash,
+      goal: handoff.goal,
+      what: handoff.what,
+      diffHash: input.diffHash,
+      testHash: input.testHash,
+    });
+
+    task.lastFrom = from || null;
+    task.lastTo = to || null;
+    task.contentHash = contentHash || task.contentHash;
+    if (handoff.goal) task.goal = handoff.goal;
+
+    const previous = task.phase;
+    let next = previous;
+
+    if (intent === "discuss") {
+      next = STATE.DISCUSS;
+    } else if (["plan", "implement", "fix"].includes(intent)) {
+      next = STATE.IMPLEMENT;
+    } else if (intent === "review") {
+      next = STATE.REVIEW;
+    } else if (intent === "deliver" || intent === "accept") {
+      next = STATE.DELIVER;
+    } else if (!intent && isReviewer(to)) {
+      next = STATE.REVIEW;
+    } else if (!intent && (useWorktree || isImplementer(to))) {
+      next = STATE.IMPLEMENT;
+    }
+
+    const reviewBlob = [handoff.what, handoff.next_action, handoff.goal, input.text]
       .filter(Boolean)
       .join("\n")
       .toLowerCase();
-    if (/request-changes|request_changes|请修|需修改|\bp0\b/.test(blob)) {
-      next = STATE.CHANGES_REQUESTED;
-      task.approvalHash = null;
-    } else if (/approve-with-nits|approve\b|批准|可合入|lgtm/.test(blob)) {
-      next = STATE.APPROVED;
-      task.approvalHash = evidenceHash;
+    if (isReviewer(from)) {
+      if (/request-changes|request_changes|请修|需修改|\bp0\b/.test(reviewBlob)) {
+        next = STATE.IMPLEMENT;
+        task.codeReviewGate = null;
+        task.approvalHash = null;
+      } else if (/approve-with-nits|approve\b|批准|可交付|可合入|lgtm/.test(reviewBlob)) {
+        next = STATE.DELIVER;
+        task.approvalHash = evidenceHash;
+        task.codeReviewGate = {
+          verdict: "approve",
+          evidenceHash,
+          reviewedBy: from,
+          reviewedAt: new Date().toISOString(),
+        };
+      }
     }
-  }
 
-  if (next !== task.state) {
-    pushHistory(task, { type: "transition", from: task.state, to: next, intent, contentHash });
+    invalidateDownstreamGates(task, previous, next);
+    task.phase = next;
     task.state = next;
-  } else {
-    pushHistory(task, { type: "route", state: task.state, intent, contentHash });
-  }
-  return { ...task };
-}
 
-/**
- * Mark delivered (optional end of collab).
- */
-function markDelivered(threadId) {
-  const task = getOrCreateTask(threadId);
-  if (task.state === STATE.APPROVED || task.state === STATE.AWAITING_REVIEW) {
-    pushHistory(task, { type: "transition", from: task.state, to: STATE.DELIVERED });
-    task.state = STATE.DELIVERED;
-  }
-  return task;
-}
-
-/**
- * Skip re-review when already approved for the same evidence hash.
- */
-function shouldSkipRedundantReview(input = {}) {
-  const task = getTask(input.threadId);
-  if (!task) return { skip: false };
-  const to = String(input.toAgent || "");
-  if (!isReviewer(to) && String(input.intent || "") !== "review") {
-    return { skip: false };
-  }
-  if (task.state !== STATE.APPROVED && task.state !== STATE.DELIVERED) {
-    return { skip: false };
-  }
-  const evidenceHash = hashEvidence({
-    contentHash: input.contentHash,
-    goal: input.handoff?.goal,
-    what: input.handoff?.what,
-    diffHash: input.diffHash,
-    testHash: input.testHash,
-  });
-  if (task.approvalHash && task.approvalHash === evidenceHash) {
-    return {
-      skip: true,
-      reason: "already_approved_same_evidence",
-      state: task.state,
-      approvalHash: task.approvalHash,
+    const event = {
+      type: next === previous ? "route" : "transition",
+      from: previous,
+      to: next,
+      actorAgentId: from || null,
+      intent: intent || null,
+      contentHash,
+      targetAgentId: to || null,
+      evidenceHash,
     };
+    return persist(task, event);
   }
-  // Approved but evidence changed → allow re-review
-  if (task.state === STATE.DELIVERED && !input.force) {
-    return { skip: true, reason: "task_delivered", state: task.state };
+
+  function markDone(threadId, input = {}) {
+    const task = getOrCreateTask(threadId);
+    if (task.phase !== STATE.DELIVER) return task;
+    const readiness = completionReadiness(task);
+    if (!readiness.ok) return { ...task, completionBlocked: readiness.reason };
+    const previous = task.phase;
+    task.phase = STATE.DONE;
+    task.state = STATE.DONE;
+    return persist(task, {
+      type: "transition",
+      from: previous,
+      to: STATE.DONE,
+      actorAgentId: input.actorAgentId || null,
+      intent: input.intent || "accept",
+    });
   }
-  return { skip: false, state: task.state };
+
+  /** Backward-compatible name; completion now means the terminal done phase. */
+  function markDelivered(threadId, input = {}) {
+    return markDone(threadId, input);
+  }
+
+  function updateTask(threadId, patch = {}, event = {}) {
+    const task = getOrCreateTask(threadId);
+    for (const key of [
+      "goal",
+      "contentHash",
+      "artifacts",
+      "implementationGate",
+      "codeReviewGate",
+      "deliveryGate",
+      "finalGate",
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) task[key] = patch[key];
+    }
+    return persist(task, {
+      type: event.type || "gate_update",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId: event.actorAgentId || null,
+      intent: normalizeIntent(event.intent) || null,
+      fields: Object.keys(patch),
+    });
+  }
+
+  /** Skip re-review only when the exact evidence was already approved. */
+  function shouldSkipRedundantReview(input = {}) {
+    const task = getTask(input.threadId);
+    if (!task) return { skip: false };
+    const to = String(input.toAgent || "").toLowerCase();
+    const intent = normalizeIntent(input.intent) || "";
+    if (!isReviewer(to) && intent !== "review") return { skip: false };
+
+    if (task.phase === STATE.DONE && !input.force) {
+      return { skip: true, reason: "task_done", state: task.phase };
+    }
+    if (!task.codeReviewGate || task.codeReviewGate.verdict !== "approve") {
+      return { skip: false, state: task.phase };
+    }
+
+    const evidenceHash = hashEvidence({
+      contentHash: input.contentHash,
+      goal: input.handoff?.goal,
+      what: input.handoff?.what,
+      diffHash: input.diffHash,
+      testHash: input.testHash,
+    });
+    if (task.codeReviewGate.evidenceHash === evidenceHash) {
+      return {
+        skip: true,
+        reason: "already_approved_same_evidence",
+        state: task.phase,
+        approvalHash: evidenceHash,
+      };
+    }
+    return { skip: false, state: task.phase };
+  }
+
+  function resetForTests() {
+    tasksByThread.clear();
+  }
+
+  return {
+    getTask,
+    getOrCreateTask,
+    noteAcceptedRoute,
+    updateTask,
+    markDone,
+    markDelivered,
+    shouldSkipRedundantReview,
+    resetForTests,
+  };
 }
 
-function resetForTests() {
-  tasksByThread.clear();
+function completionReadiness(task) {
+  if (task?.codeReviewGate?.verdict !== "approve") {
+    return { ok: false, reason: "code_review_not_approved" };
+  }
+  const reviewEvidenceHash = String(task.codeReviewGate.evidenceHash || "");
+  if (
+    !reviewEvidenceHash ||
+    String(task?.deliveryGate?.reviewEvidenceHash || "") !== reviewEvidenceHash
+  ) {
+    return { ok: false, reason: "delivery_not_bound_to_review" };
+  }
+  const commitSha = String(task?.deliveryGate?.commitSha || "");
+  if (!commitSha) return { ok: false, reason: "delivery_commit_missing" };
+  if (task?.deliveryGate?.ciStatus !== "success") {
+    return { ok: false, reason: "ci_not_successful" };
+  }
+  if (
+    task?.finalGate?.verdict !== "accept" ||
+    String(task.finalGate.acceptedCommitSha || "") !== commitSha
+  ) {
+    return { ok: false, reason: "final_acceptance_not_bound_to_commit" };
+  }
+  return { ok: true, reason: null };
 }
+
+function invalidateDownstreamGates(task, previous, next) {
+  if (next === STATE.IMPLEMENT && previous !== STATE.IMPLEMENT) {
+    task.codeReviewGate = null;
+    task.deliveryGate = null;
+    task.finalGate = null;
+    task.approvalHash = null;
+  } else if (next === STATE.REVIEW && previous !== STATE.REVIEW) {
+    task.deliveryGate = null;
+    task.finalGate = null;
+  } else if (next === STATE.DELIVER && previous !== STATE.DELIVER) {
+    task.finalGate = null;
+  }
+}
+
+function normalizePhase(value) {
+  const phase = String(value || STATE.DISCUSS)
+    .trim()
+    .toLowerCase();
+  if (!COLLAB_TASK_STATES.includes(phase)) {
+    throw new Error(`Unsupported collaboration phase: ${phase || "(missing)"}`);
+  }
+  return phase;
+}
+
+const defaultRegistry = createCollabTaskRegistry();
 
 module.exports = {
+  ...defaultRegistry,
   STATE,
   COLLAB_TASK_STATES,
-  getTask,
-  getOrCreateTask,
-  noteAcceptedRoute,
-  markDelivered,
-  shouldSkipRedundantReview,
+  createCollabTaskRegistry,
+  emptyTask,
   hashEvidence,
   isReviewer,
   isImplementer,
-  resetForTests,
+  isDiscussionAgent,
+  isDeliveryAgent,
+  completionReadiness,
+  normalizePhase,
 };

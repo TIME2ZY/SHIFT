@@ -53,6 +53,7 @@ function finalizeA2ARoutes(input = {}) {
   const agentLabels = input.agentLabels || {};
   const source = input.source || "chat";
   const logger = input.logger || console;
+  const taskRegistry = input.collabTaskRegistry || collabTaskRegistry;
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
@@ -106,7 +107,7 @@ function finalizeA2ARoutes(input = {}) {
         fromAgent,
         toAgent: target,
       });
-    const taskSkip = collabTaskRegistry.shouldSkipRedundantReview({
+    const taskSkip = taskRegistry.shouldSkipRedundantReview({
       threadId: sessionId,
       toAgent: target,
       intent: quality.intent,
@@ -144,7 +145,7 @@ function finalizeA2ARoutes(input = {}) {
       blockCount: handoffMatch.blockCount,
       canonical: handoffMatch.canonical,
       phase: quality.phase,
-      taskState: collabTaskRegistry.getTask(sessionId)?.state || null,
+      taskState: taskRegistry.getTask(sessionId)?.phase || null,
     };
 
     emitHandoffParsed({
@@ -366,7 +367,7 @@ function finalizeA2ARoutes(input = {}) {
     });
     // Advance collab task state after successful enqueue.
     try {
-      collabTaskRegistry.noteAcceptedRoute({
+      taskRegistry.noteAcceptedRoute({
         threadId: sessionId,
         fromAgent,
         toAgent: target,

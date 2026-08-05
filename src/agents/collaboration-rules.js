@@ -97,6 +97,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS, options = {})
 
     \`\`\`handoff
     to: ${example.label}
+    intent: <discuss|plan|implement|review|fix|deliver|accept|recall>
     goal: <可空>
     what: <交什么 / 审什么 — 尽量填>
     why: <为什么 — 尽量填>

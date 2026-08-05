@@ -16,6 +16,7 @@ const { createRecallRepository } = require("./recall-repository");
 const { createStorageMetadataRepository } = require("./storage-metadata-repository");
 const { createThreadRepository } = require("./thread-repository");
 const { createWindowRepository } = require("./window-repository");
+const { createCollaborationTaskRepository } = require("./collaboration-task-repository");
 
 function createStorage(options = {}) {
   const db = options.db || openMemoryDatabase(options);
@@ -33,6 +34,7 @@ function createStorage(options = {}) {
     windows: createWindowRepository(db),
     messages: createMessageRepository(db),
     invocations: createInvocationRepository(db),
+    collaborationTasks: createCollaborationTaskRepository(db),
     memories: createMemoryRepository(db, recall),
     digests: createMemoryDigestRepository(db),
     projectEvidence: createProjectEvidenceRepository(db, {

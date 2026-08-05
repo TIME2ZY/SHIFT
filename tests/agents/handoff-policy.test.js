@@ -6,6 +6,8 @@ const {
   canEnqueue,
   resolveHandoffPolicyMode,
   buildRepairPayload,
+  evaluatePhaseRoute,
+  resolveCollabPhase,
   DECISIONS,
 } = require("../../src/agents/handoff-policy");
 
@@ -104,4 +106,21 @@ test("buildRepairPayload includes example fence", () => {
   assert.match(payload.message, /未入队/);
   assert.match(payload.example, /```handoff/);
   assert.match(payload.example, /to: opencode/);
+  assert.match(payload.example, /intent:/);
+});
+
+test("explicit intents resolve the five workflow phases without changing the reviewer", () => {
+  assert.equal(resolveCollabPhase({ intent: "discuss", toAgent: "codex" }), "discuss");
+  assert.equal(resolveCollabPhase({ intent: "plan", toAgent: "grok" }), "implement");
+  assert.equal(resolveCollabPhase({ intent: "review", toAgent: "opencode" }), "review");
+  assert.equal(resolveCollabPhase({ intent: "deliver", toAgent: "opencode" }), "deliver");
+  assert.equal(resolveCollabPhase({ intent: "accept", toAgent: "codex" }), "deliver");
+  assert.equal(
+    resolveCollabPhase({ intent: "discuss", toAgent: "gemini", useWorktree: true }),
+    "discuss"
+  );
+
+  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
+  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "codex" }).ok, false);
+  assert.equal(evaluatePhaseRoute({ intent: "accept", toAgent: "codex" }).ok, true);
 });
