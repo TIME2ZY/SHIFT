@@ -21,6 +21,7 @@ const { createMemoryRoutes } = require("./memory-routes");
 const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
+const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
 const skills = require("./skills");
 const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
 const { serveIndex, serveStatic } = require("./static-assets");
@@ -150,10 +151,11 @@ function createServer(options = {}) {
     allowTranscriptReplay: false,
     logger,
   });
+  const collabTaskRegistry = createCollabTaskRegistry({
+    repository: storageContext.storage?.collaborationTasks || null,
+  });
   const activeInvocations = new Map();
-  const runtimeRoot = path.resolve(
-    options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT
-  );
+  const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
   const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
     runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
@@ -294,6 +296,7 @@ function createServer(options = {}) {
     findUserMessageByClientTurnId: findUserMessageByClientTurnIdDurable,
     durableRecorder,
     memoryCapture,
+    collabTaskRegistry,
     logger,
   });
 

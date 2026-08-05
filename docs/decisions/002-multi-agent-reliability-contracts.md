@@ -7,6 +7,7 @@ scope: invocation lifecycle, A2A handoff hops, memory funnel metrics, collab tas
 supersedes: []
 related:
   - ./001-storage-truth-boundary.md
+  - ./004-five-phase-collaboration-workflow.md
   - ../../src/shared/collab-contracts.js
 ---
 
@@ -42,11 +43,11 @@ Live 多 Agent 协作证明「能跑」，但暴露：
    每个 `agent-start` 必须有唯一终态；`done` 前不得残留无终态 invocation。
 
 2. **与现 SQLite 的映射（阶段 0 不改 CHECK）**  
-   当前 DB：`active | completed | failed | aborted`。  
-   - `created|started|streaming` → DB `active`  
-   - `cancelled` → DB `aborted`  
+   当前 DB：`active | completed | failed | aborted`。
+   - `created|started|streaming` → DB `active`
+   - `cancelled` → DB `aborted`
    - `sealed` → DB `completed` + `terminalReason: "sealed"`（不扩独立 sealed 列作必选）  
-   迁移与强制转移在 phase 1–2 实现。
+     迁移与强制转移在 phase 1–2 实现。
 
 3. **有效 A2A hop**  
    不是 `starts - 1`。一条 hop 是可追踪闭环：  
@@ -61,13 +62,13 @@ Live 多 Agent 协作证明「能跑」，但暴露：
    `retrieved → ranked → selected → rendered → delivered → used → correct`。  
    禁止用单一 `memory-inject` 条数冒充全链路成功。截断须带 `dropped` / `dropReason`。
 
-6. **协作任务状态（phase 5  enforce）**  
-   `planned → implementing → awaiting_review → changes_requested → fixed → approved → delivered`。  
-   Approval 应绑定 diff/证据 hash（实现阶段）。
+6. **协作任务状态（phase 5 enforce）**
+   `planned → implementing → awaiting_review → changes_requested → fixed → approved → delivered`。
+   Approval 应绑定 diff/证据 hash（实现阶段）。此状态集合已由 ADR-004 的五阶段模型取代。
 
-7. **Phase agent allowlist（默认）**  
-   discuss: gemini, codex；implement: grok, opencode；review: opencode。  
-   跨 phase 路由须显式策略，不能仅靠 prompt。
+7. **Phase agent allowlist（默认）**
+   discuss: gemini, codex；implement: grok, opencode；review: opencode。
+   跨 phase 路由须显式策略，不能仅靠 prompt。当前 allowlist 以 ADR-004 为准。
 
 8. **报告 schema**  
    `common` / `multiAgent` / `memory` / `worktree` / `performance` 必填键见  

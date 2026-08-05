@@ -140,6 +140,7 @@ function createChatRoutes({
   findUserMessageByClientTurnId,
   durableRecorder,
   memoryCapture,
+  collabTaskRegistry = null,
   logger = console,
 }) {
   const durable = durableRecorder || NOOP_DURABLE_RECORDER;
@@ -487,6 +488,7 @@ function createChatRoutes({
           triggerType: "user-message",
         },
       ],
+      collabTaskRegistry,
     };
     callbacks.registerThread(sessionId, threadCtx);
     let ownedInvocationSlotAtCleanup = false;
@@ -1263,8 +1265,7 @@ function createChatRoutes({
           durable.finishInvocation(abortInvId, code, signal, {
             ...endPayload,
             terminalState: "aborted",
-            supersededByClientTurnId:
-              invocationController.supersededByClientTurnId || null,
+            supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
           });
           try {
             handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
@@ -1472,6 +1473,7 @@ function createChatRoutes({
           controller: invocationController,
           a2aState: threadCtx,
           logger: log,
+          collabTaskRegistry,
         });
         Object.assign(handoffByTarget, finalized.handoffByTarget);
         Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
@@ -1518,8 +1520,7 @@ function createChatRoutes({
         }
       }
     } finally {
-      ownedInvocationSlotAtCleanup =
-        activeInvocations.get(sessionId) === invocationController;
+      ownedInvocationSlotAtCleanup = activeInvocations.get(sessionId) === invocationController;
       if (ownedInvocationSlotAtCleanup) {
         activeInvocations.delete(sessionId);
       }

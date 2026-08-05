@@ -40,12 +40,7 @@ const TERMINAL_INVOCATION_STATES = Object.freeze([
  * Current SQLite CHECK on invocations.state (schema v1).
  * Do not expand here in phase 0 — migration belongs with phase 1–2.
  */
-const LEGACY_DB_INVOCATION_STATES = Object.freeze([
-  "active",
-  "completed",
-  "failed",
-  "aborted",
-]);
+const LEGACY_DB_INVOCATION_STATES = Object.freeze(["active", "completed", "failed", "aborted"]);
 
 /** Allowed canonical transitions (from → to[]). Missing from = any create. */
 const INVOCATION_TRANSITIONS = Object.freeze({
@@ -252,14 +247,18 @@ const MEMORY_FUNNEL_STATS_KEYS = Object.freeze([
 
 // ── Collab task + phase allowlist ───────────────────────────────────────────
 
-const COLLAB_TASK_STATES = Object.freeze([
-  "planned",
-  "implementing",
-  "awaiting_review",
-  "changes_requested",
-  "fixed",
-  "approved",
-  "delivered",
+const COLLAB_TASK_STATES = Object.freeze(["discuss", "implement", "review", "deliver", "done"]);
+
+/** Machine-readable A2A intents. Phase and intent are deliberately separate. */
+const HANDOFF_INTENTS = Object.freeze([
+  "discuss",
+  "plan",
+  "implement",
+  "review",
+  "fix",
+  "deliver",
+  "accept",
+  "recall",
 ]);
 
 /**
@@ -268,8 +267,10 @@ const COLLAB_TASK_STATES = Object.freeze([
  */
 const DEFAULT_PHASE_AGENT_ALLOWLIST = Object.freeze({
   discuss: Object.freeze(["gemini", "codex"]),
-  implement: Object.freeze(["grok", "opencode"]),
+  implement: Object.freeze(["grok"]),
   review: Object.freeze(["opencode"]),
+  // OpenCode packages an approved diff; Codex performs outcome acceptance.
+  deliver: Object.freeze(["opencode", "codex"]),
   recall: Object.freeze(["codex", "gemini", "grok", "opencode"]),
 });
 
@@ -306,12 +307,7 @@ const REPORT_SCHEMAS = Object.freeze({
     "searchFallbackRate",
     "writeSuccessRate",
   ]),
-  worktree: Object.freeze([
-    "requested",
-    "workspaceKey",
-    "worktreePath",
-    "verified",
-  ]),
+  worktree: Object.freeze(["requested", "workspaceKey", "worktreePath", "verified"]),
   performance: Object.freeze([
     "durationMs",
     "phaseDurations",
@@ -376,6 +372,7 @@ module.exports = {
   MEMORY_DROP_REASONS,
   MEMORY_FUNNEL_STATS_KEYS,
   COLLAB_TASK_STATES,
+  HANDOFF_INTENTS,
   DEFAULT_PHASE_AGENT_ALLOWLIST,
   REPORT_SCHEMAS,
   validateReport,

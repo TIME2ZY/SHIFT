@@ -17,13 +17,13 @@ triggers:
 
 ## 全员共用字段（与 a2a-handoff 一致）
 
-| 字段 | 说明 | 可空？ |
-|------|------|--------|
-| **what** | 具体交了什么 / 审了什么 | 尽量不空 |
-| **why** | 为什么这样做 / 为何阻塞 | 尽量不空（最重要） |
-| **next_action** | 希望对方做什么 | 尽量不空 |
-| to / goal / tradeoff | 目标与取舍 | 可空 |
-| open_questions / files / evidence | 列表补充 | 可空 |
+| 字段                              | 说明                    | 可空？                  |
+| --------------------------------- | ----------------------- | ----------------------- |
+| **what**                          | 具体交了什么 / 审了什么 | 尽量不空                |
+| **why**                           | 为什么这样做 / 为何阻塞 | 尽量不空（最重要）      |
+| **next_action**                   | 希望对方做什么          | 尽量不空                |
+| to / intent / goal / tradeoff     | 目标、机器意图与取舍    | `intent` 推荐，其余可空 |
+| open_questions / files / evidence | 列表补充                | 可空                    |
 
 **禁止**私有顶层字段：`verdict`、`nits`、`blocking`、`status`、`action`。  
 Review 结论写进 `what`（如 `结论: request-changes` + P0 列表）。
@@ -33,6 +33,7 @@ Review 结论写进 `what`（如 `结论: request-changes` + P0 列表）。
 ````markdown
 ```handoff
 to: opencode
+intent: review
 goal: review CAS 乐观锁
 what: 给用户模块加了 CAS 乐观锁
 why: 高并发下出现数据覆写，需要防竞态

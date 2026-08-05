@@ -48,6 +48,8 @@ test("memory database applies schema and safety pragmas", () => {
       "storage_outbox",
       "embedding_indexes",
       "embedding_items",
+      "collaboration_tasks",
+      "collaboration_task_events",
       "recall_items",
       "recall_fts",
     ]) {
@@ -96,9 +98,7 @@ test("memory database applies schema and safety pragmas", () => {
     assert.ok(memorySearchIndexes.has("memory_search_thread_topic"));
     assert.ok(memorySearchIndexes.has("memory_search_project_topic"));
     const memoryFtsSql = db
-      .prepare(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_search_fts'"
-      )
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_search_fts'")
       .get().sql;
     assert.match(memoryFtsSql, /tokenize='trigram'/);
     const embeddingColumns = new Set(
@@ -426,9 +426,7 @@ test("topic migration backfills the existing memory search projection", () => {
 
     assert.equal(applyMigrations(db), MIGRATIONS.length);
     assert.equal(
-      db
-        .prepare("SELECT topic FROM memory_search WHERE memory_id = 'memory-topic'")
-        .get().topic,
+      db.prepare("SELECT topic FROM memory_search WHERE memory_id = 'memory-topic'").get().topic,
       "storage.authoritative"
     );
     assert.equal(
