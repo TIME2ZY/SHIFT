@@ -9,8 +9,11 @@
  * Usage:
  *   node scripts/retire-project-memories.js --dry-run
  *   node scripts/retire-project-memories.js --apply
- *   node scripts/retire-project-memories.js --apply --export docs/decisions/legacy-from-memory.md
+ *   node scripts/retire-project-memories.js --apply --export archive/memory-exports/legacy-from-memory.md
  *   node scripts/retire-project-memories.js --db path/to/shift.sqlite --dry-run
+ *
+ * Export path should stay outside project-doc allowlist (docs/**). Prefer
+ * archive/memory-exports/ which is excluded from project evidence indexing.
  */
 
 const fs = require("node:fs");
@@ -21,6 +24,7 @@ const { DEFAULT_MEMORY_DB_FILE, ROOT } = require("../src/shared/runtime-paths");
 
 const PRODUCT_KINDS = new Set(["decision", "constraint", "fact"]);
 const BATCH_ID = `memory-thread-only-${new Date().toISOString().slice(0, 10)}`;
+const DEFAULT_EXPORT_PATH = path.join(ROOT, "archive", "memory-exports", "legacy-from-memory-auth.md");
 
 function parseArgs(argv) {
   const options = {
@@ -40,8 +44,14 @@ function parseArgs(argv) {
     } else if (arg === "--apply") {
       options.apply = true;
       options.dryRun = false;
-    } else if (arg === "--export") options.exportPath = path.resolve(argv[++i] || "");
-    else if (arg === "--no-backup") options.noBackup = true;
+    } else if (arg === "--export") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("-")) {
+        options.exportPath = path.resolve(argv[++i]);
+      } else {
+        options.exportPath = DEFAULT_EXPORT_PATH;
+      }
+    } else if (arg === "--no-backup") options.noBackup = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -54,9 +64,9 @@ function printHelp() {
 Options:
   --dry-run          List candidates only (default)
   --apply            Supersede active project product memories
-  --export <path>    Write a markdown summary of retired rows
+  --export [path]    Write a markdown summary (default: archive/memory-exports/...)
   --db <path>        SQLite path (default: data/runtime/shift.sqlite)
-  --no-backup        Skip automatic .bak copy before --apply
+  --no-backup        Skip automatic SQLite online backup before --apply
   --help             Show this help
 `);
 }
@@ -91,10 +101,19 @@ function mergeMetadata(rawJson, patch) {
   return { ...base, ...patch };
 }
 
-function backupDatabase(file) {
+/**
+ * Online backup via better-sqlite3 so WAL pages are included (not a bare file copy).
+ * @returns {Promise<string>} destination path
+ */
+async function backupDatabase(file) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const dest = `${file}.bak-${stamp}`;
-  fs.copyFileSync(file, dest);
+  const src = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    await src.backup(dest);
+  } finally {
+    src.close();
+  }
   return dest;
 }
 
@@ -174,7 +193,7 @@ function applyRetirement(db, rows) {
   return tx();
 }
 
-function main() {
+async function main() {
   loadProjectEnv(ROOT);
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -217,8 +236,8 @@ function main() {
     }
 
     if (!options.noBackup) {
-      const bak = backupDatabase(dbFile);
-      console.log(`Backup: ${bak}`);
+      const bak = await backupDatabase(dbFile);
+      console.log(`Backup (sqlite online): ${bak}`);
     }
 
     const changed = applyRetirement(db, rows);
@@ -234,9 +253,7 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(error.message || error);
   process.exitCode = 1;
-}
+});

@@ -121,8 +121,12 @@ status = active
 scope = thread 且 owner 为当前 thread
 ```
 
+`searchForAgent` / `searchSession` 对 product Memory 固定 `memoryScope=thread`；
+即便调用方传入 `project` 或 `all`，也不得检索 project-scoped `memory_entries`。
+
 跨会话项目知识使用 `project-doc` 层（`docs/**` 等仓库文件），不进入 Active Memory
-被动注入。
+被动注入。退役 Memory 导出不得放在 `docs/**` 可索引路径（使用
+`archive/memory-exports/`，且 basename `legacy-from-memory*` 被 project-evidence 排除）。
 
 召回流程：
 

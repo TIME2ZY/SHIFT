@@ -29,6 +29,10 @@ related:
 4. 跨会话项目结论必须 **主动写入仓库文档**（优先 `docs/decisions/`），经 project
    evidence 索引后用 `recall_search` 的 `project-doc` 检索；不自动注入 prompt。
 5. 存量 active project 产品记忆用脚本 supersede 退役（`scripts/retire-project-memories.js`）。
+6. Agent / session 检索的 product Memory 固定 `memoryScope=thread`，不得再通过
+   `project`/`all` 跨 thread 命中 project 行。
+7. 退役导出写到 `archive/memory-exports/`（不进 `docs/**` project-doc 索引）；
+   basename `legacy-from-memory*` 在 project-evidence 中硬排除。
 
 ## 后果
 

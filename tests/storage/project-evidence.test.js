@@ -76,6 +76,36 @@ test("collectAllowlistedFiles skips secrets and node_modules", () => {
   }
 });
 
+test("collectAllowlistedFiles excludes retired memory export dumps", () => {
+  const root = writeProjectFixture();
+  try {
+    fs.mkdirSync(path.join(root, "docs", "decisions"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "docs", "decisions", "legacy-from-memory-auth.md"),
+      ["# Legacy", "", "## auth-token-ttl", "TTL 24h Bearer"].join("\n"),
+      "utf8"
+    );
+    fs.mkdirSync(path.join(root, "archive", "memory-exports"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "archive", "memory-exports", "legacy-from-memory-auth.md"),
+      "# should skip archive dump\n",
+      "utf8"
+    );
+    const files = collectAllowlistedFiles(root, {
+      maxFiles: 50,
+      maxFileBytes: 1024 * 1024,
+      allowGlobs: DEFAULT_ALLOW_GLOBS,
+      excludeDirNames: DEFAULT_EXCLUDE_DIR_NAMES,
+    });
+    const paths = files.map((f) => f.relativePath.replace(/\\/g, "/"));
+    assert.ok(!paths.some((p) => p.includes("legacy-from-memory")));
+    assert.ok(!paths.some((p) => p.startsWith("archive/")));
+    assert.ok(paths.some((p) => p.includes("docs/design.md")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("reindex + search returns untrusted project-doc passages", () => {
   const root = writeProjectFixture();
   const storage = createStorage({ file: ":memory:" });

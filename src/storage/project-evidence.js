@@ -43,6 +43,17 @@ const DEFAULT_EXCLUDE_DIR_NAMES = Object.freeze([
   "temp",
   "vendor",
   ".shift",
+  // Retired memory dumps / local archives must not re-enter project-doc.
+  "archive",
+]);
+
+/** Basename / path patterns excluded even when under an allowlisted tree (e.g. docs/**). */
+const DEFAULT_EXCLUDE_FILE_GLOBS = Object.freeze([
+  "**/legacy-from-memory*.md",
+  "legacy-from-memory*.md",
+  "docs/**/legacy-from-memory*.md",
+  "docs/decisions/legacy-from-memory*.md",
+  "archive/**",
 ]);
 
 const SECRET_NAME_PATTERNS = [
@@ -182,6 +193,7 @@ function createProjectEvidenceRepository(db, options = {}) {
       maxFileBytes: input.maxFileBytes || DEFAULT_MAX_FILE_BYTES,
       allowGlobs: input.allowGlobs || DEFAULT_ALLOW_GLOBS,
       excludeDirNames: input.excludeDirNames || DEFAULT_EXCLUDE_DIR_NAMES,
+      excludeFileGlobs: input.excludeFileGlobs || DEFAULT_EXCLUDE_FILE_GLOBS,
     });
 
     const indexedPaths = [];
@@ -316,6 +328,7 @@ function collectAllowlistedFiles(rootReal, options) {
   const maxFileBytes = options.maxFileBytes;
   const allowGlobs = options.allowGlobs;
   const excludeDirNames = new Set(options.excludeDirNames);
+  const excludeFileGlobs = options.excludeFileGlobs || DEFAULT_EXCLUDE_FILE_GLOBS;
   const out = [];
 
   function walk(absDir) {
@@ -349,6 +362,7 @@ function collectAllowlistedFiles(rootReal, options) {
       const relativePath = toPosix(path.relative(rootReal, abs));
       if (relativePath.startsWith("..")) continue;
       if (!isAllowlisted(relativePath, allowGlobs)) continue;
+      if (isExcludedFile(relativePath, entry.name, excludeFileGlobs)) continue;
       if (!isTextish(relativePath)) continue;
 
       let text;
@@ -379,6 +393,18 @@ function collectAllowlistedFiles(rootReal, options) {
 
 function isAllowlisted(relativePath, globs) {
   return globs.some((glob) => matchGlob(relativePath, glob));
+}
+
+function isExcludedFile(relativePath, baseName, excludeGlobs) {
+  const list = Array.isArray(excludeGlobs) ? excludeGlobs : [];
+  const normalized = String(relativePath || "").replace(/\\/g, "/");
+  const base = String(baseName || path.posix.basename(normalized));
+  for (const glob of list) {
+    if (matchGlob(normalized, glob) || matchGlob(base, glob)) return true;
+  }
+  // Hard exclude retired memory dumps by basename regardless of caller globs.
+  if (/^legacy-from-memory/i.test(base)) return true;
+  return false;
 }
 
 function matchGlob(value, glob) {
@@ -591,6 +617,7 @@ function reindexThreadProject(storage, threadId, options = {}) {
 module.exports = {
   DEFAULT_ALLOW_GLOBS,
   DEFAULT_EXCLUDE_DIR_NAMES,
+  DEFAULT_EXCLUDE_FILE_GLOBS,
   DEFAULT_MAX_FILE_BYTES,
   DEFAULT_MAX_FILES,
   DEFAULT_MAX_PASSAGE_CHARS,
@@ -600,4 +627,5 @@ module.exports = {
   matchGlob,
   reindexThreadProject,
   isAllowlisted,
+  isExcludedFile,
 };

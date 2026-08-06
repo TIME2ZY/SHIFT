@@ -120,6 +120,56 @@ test("createProduct rejects project scope", () => {
   }
 });
 
+test("legacy active project memory is not durable-searchable from sibling thread", async () => {
+  const { storage, dir } = createProjectFixture();
+  try {
+    const threadA = storage.threads.get("thread-a");
+    // Simulate a pre-retirement project row still active in SQLite.
+    storage.memories.create({
+      id: "legacy-project-mem",
+      scope: "project",
+      projectKey: threadA.projectKey,
+      originThreadId: "thread-a",
+      kind: "decision",
+      status: "active",
+      topic: "storage-primary",
+      content: "在线读写以 SQLite 为准 legacy project row",
+      captureKey: "legacy:storage-primary",
+      supersessionKey: "decision:storage-primary",
+      createdBy: "user",
+      authority: "user",
+      activation: "query",
+    });
+
+    const service = createRecallService({ storage, transcript: emptyTranscript() });
+    const agentB = await service.searchForAgent(
+      { threadId: "thread-b", invocationId: "inv-b", caller: "mcp" },
+      { query: "SQLite 存储", layers: ["memory"], memoryScope: "all" }
+    );
+    assert.equal(
+      agentB.hits.some((hit) => hit.source.memoryId === "legacy-project-mem"),
+      false,
+      "sibling must not retrieve legacy project product memory"
+    );
+    assert.equal(
+      agentB.hits.some((hit) => hit.metadata?.trust === "durable-memory" && hit.metadata?.scope === "project"),
+      false
+    );
+
+    const sessionB = await service.searchSession("thread-b", "SQLite 存储", {
+      layers: ["memory"],
+      memoryScope: "all",
+    });
+    assert.equal(
+      sessionB.hits.some((hit) => hit.memoryId === "legacy-project-mem" || hit.sourceId === "legacy-project-mem"),
+      false
+    );
+  } finally {
+    storage.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("purge origin thread removes thread memory with the thread", async () => {
   const { storage, dir } = createProjectFixture();
   try {

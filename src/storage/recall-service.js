@@ -94,7 +94,8 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
       limit,
       includeRetired: false,
       includeThinking: false,
-      memoryScope: "all",
+      // Product Memory is thread-only (ADR-005); never expand to project entries.
+      memoryScope: "thread",
     });
     return toAgentRecallResult(result, { threadId });
   }
@@ -112,13 +113,8 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         ? resolveSearchIncludeThinking()
         : Boolean(options.includeThinking);
     const layers = normalizeLayers(options.layers);
-    // memoryScope: thread | project | all (default all — PR-2 cross-thread product memory)
-    const memoryScope =
-      options.memoryScope === "thread" || options.memoryScope === "project"
-        ? options.memoryScope
-        : options.scope === "thread" || options.scope === "project"
-          ? options.scope
-          : "all";
+    // Product Memory is thread-only. project/all no longer search project-scoped entries.
+    const memoryScope = resolveProductMemoryScope(options);
     const rawQuery = typeof query === "string" ? query : "";
     const terms = extractSearchTerms(rawQuery, { maxChars: 200, maxTerms: 8 });
     const searchQuery = clampSearchQuery(rawQuery, 200);
@@ -350,7 +346,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     else if (typeof logger.log === "function") logger.log(line);
   }
 
-  function listRecencyHits(threadId, { limit, layers, includeRetired, memoryScope = "all" }) {
+  function listRecencyHits(threadId, { limit, layers, includeRetired, memoryScope = "thread" }) {
     const hits = [];
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
@@ -410,7 +406,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     memoryQuota,
     messageQuota,
     projectDocQuota,
-    memoryScope = "all",
+    memoryScope = "thread",
     deferQuotas = false,
   }) {
     const byLayer = {
@@ -518,7 +514,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     limit,
     includeRetired,
     includeThinking,
-    memoryScope = "all",
+    memoryScope = "thread",
   }) {
     const seen = new Set();
     const out = [];
@@ -530,6 +526,14 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         if (
           (row.sourceKind === "memory-entry" || row.memoryId) &&
           !isRetrievableMemory(row, { includeRetired })
+        ) {
+          continue;
+        }
+        // Defense in depth: product Memory is thread-only even if a legacy project row remains.
+        if (
+          (row.sourceKind === "memory-entry" || row.memoryId) &&
+          memoryScope === "thread" &&
+          row.scope === "project"
         ) {
           continue;
         }
@@ -549,23 +553,14 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
 
     let searchFn;
     if (onlyMemory && storage.memories && typeof storage.memories.searchMemory === "function") {
-      const projectKey = resolveThreadProjectKey(threadId);
       searchFn = (q, opts) => {
-        const merged = [];
-        const pushUnique = (rows) => {
-          for (const row of rows || []) {
-            if (!merged.some((item) => (item.memoryId || item.id) === (row.memoryId || row.id))) {
-              merged.push(row);
-            }
-          }
-        };
-        if (memoryScope === "thread" || memoryScope === "all") {
-          pushUnique(storage.memories.searchMemory(q, { ...opts, threadId }));
-        }
-        if ((memoryScope === "project" || memoryScope === "all") && projectKey) {
-          pushUnique(storage.memories.searchMemory(q, { ...opts, projectKey }));
-        }
-        return merged.slice(0, opts.limit || limit);
+        // Product Memory is thread-only (ADR-005): never query project-scoped entries.
+        return storage.memories.searchMemory(q, {
+          ...opts,
+          threadId,
+          // Explicitly omit projectKey so repository does not expand to project scope.
+          projectKey: undefined,
+        });
       };
     } else {
       searchFn = (q, opts) =>
@@ -1354,6 +1349,14 @@ function recencyBoost(createdAt) {
   if (ageHours <= 24 * 7) return 3;
   if (ageHours <= 24 * 30) return 1;
   return 0;
+}
+
+/**
+ * Product Memory is thread-only (ADR-005).
+ * Ignore legacy memoryScope/project/all so agents cannot cross-thread project rows.
+ */
+function resolveProductMemoryScope(_options = {}) {
+  return "thread";
 }
 
 function compareHits(a, b) {
