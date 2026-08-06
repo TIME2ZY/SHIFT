@@ -666,7 +666,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     let recencyOk = true;
     let relatedOk = true;
 
-    // Channel A — recency over thread ∪ project (PR-2).
+    // Channel A — recency over this thread only (project truth is docs/project-doc).
     if (layers.includes(LAYER_MEMORY) && storage?.memory?.listActive) {
       try {
         const recentPool = Math.max(recentLimit * 3, 12);
@@ -674,7 +674,11 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
           typeof storage.memory.listActiveForTurn === "function"
             ? storage.memory.listActiveForTurn.bind(storage.memory)
             : storage.memory.listActive.bind(storage.memory);
-        const recent = listFn(threadId, { limit: recentPool, scope: "all", forInject: true });
+        const recent = listFn(threadId, {
+          limit: recentPool,
+          scope: "thread",
+          forInject: true,
+        });
         for (let index = 0; index < recent.length; index++) {
           noteChannel(recent[index], "recency", Math.max(0, 6 - index));
         }
@@ -684,7 +688,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
       }
     }
 
-    // Channel B — related active memories via memory_search (thread + project).
+    // Channel B — related active thread memories via memory_search.
     if (!weak && layers.includes(LAYER_MEMORY) && storage?.memories?.searchMemory) {
       try {
         const relatedRows = collectLayerCandidates({
@@ -695,7 +699,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
           limit: Math.max(relatedLimit * 4, 20),
           includeRetired: false,
           includeThinking: true,
-          memoryScope: "all",
+          memoryScope: "thread",
         });
         for (const row of relatedRows.slice(0, relatedLimit * 3)) {
           const memory = memoryFromRecallItem(row, storage);
@@ -715,7 +719,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         limit: Math.max(relatedLimit * 4, 20),
         includeRetired: false,
         includeThinking: false,
-        memoryScope: "all",
+        memoryScope: "thread",
       });
       for (const row of vector.hits.slice(0, relatedLimit * 3)) {
         const memory = memoryFromRecallItem(row, storage);

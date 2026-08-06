@@ -1,0 +1,37 @@
+---
+title: "ADR-005: Product Memory is thread-only; project truth in docs"
+status: accepted
+decision_id: ADR-005
+created: 2026-08-06
+scope: memory write, inject, recall memory layer, project knowledge
+supersedes:
+  - "Default decision/constraint → project scope in memory-data-contract"
+related:
+  - ../memory-data-contract.md
+---
+
+# ADR-005：产品 Memory 仅会话级；项目真相进 docs
+
+## 状态
+
+**Accepted — implementing on `feat/model-defaults-and-memory-scope`**
+
+## 背景
+
+`decision` / `constraint` 曾默认写入 `scope=project`，未改代码的方案讨论也会变成
+跨会话「项目事实」，并在弱 query 下被 bootstrap 注入（例如「你是谁」带入鉴权结论）。
+
+## 决策
+
+1. 产品 Memory（`memory_entries` 的 decision/constraint/fact）**只允许 thread**。
+2. `memory_write` / `createProduct` 传入 `scope=project` **拒绝**。
+3. Active Memory 注入与 `listActiveForTurn` **只读当前 thread**。
+4. 跨会话项目结论必须 **主动写入仓库文档**（优先 `docs/decisions/`），经 project
+   evidence 索引后用 `recall_search` 的 `project-doc` 检索；不自动注入 prompt。
+5. 存量 active project 产品记忆用脚本 supersede 退役（`scripts/retire-project-memories.js`）。
+
+## 后果
+
+- 未落地的功能讨论不再污染其它会话。
+- 项目级知识可 git 审查；代价是 Agent 需显式写 docs，不能靠 project Memory 偷懒。
+- Schema 可暂时保留 project 列以承载历史 superseded 行。

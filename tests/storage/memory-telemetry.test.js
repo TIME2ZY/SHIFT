@@ -181,7 +181,7 @@ test("renderActiveMemoryCard respects always_on vs thread buckets", () => {
       kind: "constraint",
       status: "active",
       activation: "always_on",
-      scope: "project",
+      scope: "thread",
       content: "SYSTEM:" + "A".repeat(800),
       createdBy: "system",
     },

@@ -23,29 +23,25 @@ Memory，由写入事务把旧值标记为 `superseded`。
 
 ## 2. 槽位与作用域
 
+产品 Memory **仅会话级（thread）**。
+
 唯一槽位定义为：
 
 ```text
 slot = scopeKey + topic
+scopeKey = thread:<ownerThreadId>
 ```
 
-其中：
+- 所有 `decision` / `constraint` / `fact` 写入固定为 `scope = thread`。
+- `memory_write` 若传入 `scope: "project"` 必须 **rejected**（project Memory 已废除）。
+- 替代只发生在同一 thread 的 `scopeKey + topic` 内，且不受 `kind` 变化影响。
 
-```text
-thread scope  → scopeKey = thread:<ownerThreadId>
-project scope → scopeKey = project:<projectKey>
-```
+**跨会话的项目真相**不写入 `memory_entries`，而写入仓库文档（优先
+`docs/decisions/`），经 project evidence 索引后通过 `recall_search` 的
+`project-doc` 层检索。Active Memory Card **不**自动注入项目文档。
 
-同一 `topic` 可以在 thread 和 project 各有一个 active 值；两者不能互相替代。
-替代只发生在完全相同的 `scopeKey + topic` 内，且不受 `kind` 变化影响。
-
-默认作用域：
-
-- `decision`、`constraint` → project；没有项目身份时降级为 thread。
-- `fact` → thread。
-
-调用方可以显式选择 thread/project，但 project 必须来自受信任 thread 的持久化项目
-身份，不能由 MCP 参数伪造。
+历史数据中可能仍存在 `scope = project` 的已 supersede 行，仅供审计；不得再作为
+active 产品记忆写入或注入。
 
 ## 3. 写入协议
 
@@ -57,7 +53,7 @@ project scope → scopeKey = project:<projectKey>
   "kind": "decision",
   "topic": "storage.authoritative",
   "content": "在线读写以 SQLite 为权威存储。",
-  "scope": "project",
+  "scope": "thread",
   "evidence": [{ "type": "message", "id": "message-id" }]
 }
 ```
@@ -67,8 +63,9 @@ project scope → scopeKey = project:<projectKey>
 - `kind` 只能是 decision/constraint/fact。
 - `topic` 必须规范化为稳定、可复用的键。
 - `content` 必须是单一、明确、可独立理解的陈述。
+- `scope` 只能是 `thread`（省略时亦为 thread）；`project` 一律拒绝。
 - evidence 必须属于当前受信任 invocation/thread。
-- authority、activation、createdBy、projectKey 和 ownerThreadId 由服务端派生。
+- authority、activation、createdBy 和 ownerThreadId 由服务端派生。
 
 返回结果：
 
@@ -107,22 +104,25 @@ metadata_json
 - `kind IN ('decision', 'constraint', 'fact')`
 - `status IN ('active', 'superseded')`
 - thread scope 必须有 `owner_thread_id`
-- project scope 必须有 `project_key`
+- 产品写入路径只创建 thread 行（`owner_thread_id` 非空，`project_key` 为空）
 - 每个 thread `scopeKey + topic` 最多一个 active 值
-- 每个 project `scopeKey + topic` 最多一个 active 值
+- 历史 project 行可保留为 superseded 审计数据；schema 仍可能允许 project 列
 
 旧的 captured/confirmed 数据迁移为 active；invalidated 和非产品 kind 进入
 `legacy_memory_archive`，不再参与产品检索。
 
 ## 5. 检索与注入
 
-普通检索和 Active Memory Card 默认只返回：
+普通检索（memory 层）和 Active Memory Card 默认只返回：
 
 ```text
 kind ∈ {decision, constraint, fact}
 status = active
-scope 对当前 thread 可见
+scope = thread 且 owner 为当前 thread
 ```
+
+跨会话项目知识使用 `project-doc` 层（`docs/**` 等仓库文件），不进入 Active Memory
+被动注入。
 
 召回流程：
 

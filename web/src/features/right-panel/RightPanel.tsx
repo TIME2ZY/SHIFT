@@ -191,7 +191,10 @@ export function RightPanel({
               </aside>
             ) : null}
             {memories.data?.memories.length === 0 ? (
-              <p className="react-panel-empty">当前对话还没有有效记忆。</p>
+              <p className="react-panel-empty">
+                当前对话还没有有效记忆。跨会话项目结论请写入 docs/（可用 recall 检索
+                project-doc）。
+              </p>
             ) : null}
             <div className="react-memory-list">
               {memories.data?.memories.map((memory) => (

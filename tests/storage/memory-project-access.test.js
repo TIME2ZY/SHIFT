@@ -1,5 +1,5 @@
 /**
- * Project-scoped memory: access, topic canon, and scope-local replacement.
+ * Topic canon and thread-only product memory access after project scope retirement.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -31,7 +31,7 @@ test("canonicalizeTopic maps auth aliases", () => {
   assert.equal(canonicalizeTopic("storage-primary"), "storage-primary");
 });
 
-test("canAccessFromThread allows project memory from sibling thread", () => {
+test("canAccessFromThread allows thread memory only on owner thread", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const written = storage.memory.createProduct({
@@ -42,16 +42,17 @@ test("canAccessFromThread allows project memory from sibling thread", () => {
       createdBy: "agent",
       writeChannel: "agent",
     });
-    assert.equal(written.scope, "project");
-    assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-b"), true);
+    assert.equal(written.scope, "thread");
     assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-a"), true);
+    assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-b"), false);
     assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-other"), false);
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-test("sibling thread replaces project memory by writing the same topic", () => {
+
+test("same thread replaces memory by writing the same topic", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const written = storage.memory.createProduct({
@@ -62,9 +63,8 @@ test("sibling thread replaces project memory by writing the same topic", () => {
       createdBy: "agent",
       writeChannel: "agent",
     });
-    assert.equal(storage.memory.canAccessFromThread(written.memory, "thread-b"), true);
     const replacement = storage.memory.createProduct({
-      threadId: "thread-b",
+      threadId: "thread-a",
       kind: "decision",
       topic: "auth-token-ttl",
       content: "TTL 7 days",
@@ -73,13 +73,14 @@ test("sibling thread replaces project memory by writing the same topic", () => {
     });
     assert.equal(storage.memories.get(written.memory.id).status, "superseded");
     assert.equal(storage.memories.get(written.memory.id).supersededBy, replacement.memory.id);
+    assert.equal(replacement.memory.scope, "thread");
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("topic alias supersedes prior active product memory", () => {
+test("topic alias supersedes prior active product memory on same thread", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const first = storage.memory.createProduct({
@@ -93,7 +94,7 @@ test("topic alias supersedes prior active product memory", () => {
     assert.equal(first.topic, "auth-token-ttl");
 
     const second = storage.memory.createProduct({
-      threadId: "thread-b",
+      threadId: "thread-a",
       kind: "decision",
       topic: "auth-token-ttl",
       content: "TTL 7 days / 604800",
@@ -104,7 +105,7 @@ test("topic alias supersedes prior active product memory", () => {
     assert.equal(storage.memories.get(first.memory.id).status, "superseded");
     assert.equal(storage.memories.get(second.memory.id).status, "active");
 
-    const active = storage.memory.listActiveForTurn("thread-b", { limit: 50 });
+    const active = storage.memory.listActiveForTurn("thread-a", { limit: 50 });
     const ttlActive = active.filter(
       (m) => (m.topic || m.metadata?.topic) === "auth-token-ttl" && m.status !== "superseded"
     );
@@ -116,7 +117,7 @@ test("topic alias supersedes prior active product memory", () => {
   }
 });
 
-test("same canon topic can coexist in project and thread scopes", () => {
+test("same topic supersedes across kinds on the same thread", () => {
   const { storage, dir } = createProjectFixture();
   try {
     const decision = storage.memory.createProduct({
@@ -136,13 +137,14 @@ test("same canon topic can coexist in project and thread scopes", () => {
       writeChannel: "agent",
     });
     assert.equal(fact.topic, "local-dev-port");
-    assert.equal(storage.memories.get(decision.memory.id).status, "active");
+    // Cross-kind same topic: one active product topic only.
+    assert.equal(storage.memories.get(decision.memory.id).status, "superseded");
     assert.equal(storage.memories.get(fact.memory.id).status, "active");
 
     const active = storage.memory.listActiveForTurn("thread-a", { limit: 50 });
     const ports = active.filter((m) => (m.topic || m.metadata?.topic) === "local-dev-port");
-    assert.equal(ports.length, 2);
-    assert.deepEqual(new Set(ports.map((memory) => memory.scope)), new Set(["project", "thread"]));
+    assert.equal(ports.length, 1);
+    assert.equal(ports[0].scope, "thread");
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
