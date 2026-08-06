@@ -22,16 +22,17 @@ const MODEL_PROFILES = [
     capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
-  model("opencode", "qwen3.7-plus", "alibaba", {
+  model("opencode", "deepseek-v4-flash", "deepseek", {
     contextTokens: 1_000_000,
     capacitySource: "manual",
+    reasoning: { supported: true, levels: ["low", "high", "max"] },
   }),
   model("grok", "grok-4.5", "xai", {
     contextTokens: 500_000,
     capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
-  model("antigravity", "gemini-3.5-flash", "google", {
+  model("antigravity", "gemini-3.6-flash", "google", {
     contextTokens: 1_000_000,
     capacitySource: "manual",
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
@@ -79,7 +80,7 @@ const AGENTS = {
     "gemini",
     "Gemini",
     "antigravity",
-    "gemini-3.5-flash",
+    "gemini-3.6-flash",
     "讨论伙伴：提出正常可行的选项、风险与反例，与 Codex 互相验证，不为猎奇而发散。",
     { reasoningEffort: "high" }
   ),
@@ -91,8 +92,9 @@ const AGENTS = {
     "opencode",
     "OpenCode",
     "opencode",
-    "qwen3.7-plus",
-    "Review 与交付：代码评审、质量把关；批准后规范 commit、push 和 PR 描述。"
+    "deepseek-v4-flash",
+    "Review 与交付：代码评审、质量把关；批准后规范 commit、push 和 PR 描述。",
+    { reasoningEffort: "max" }
   ),
 };
 

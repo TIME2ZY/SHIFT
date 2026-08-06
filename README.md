@@ -43,9 +43,9 @@ Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 | Agent        | 默认模型           | 运行方式        | 默认职责                                       |
 | ------------ | ------------------ | --------------- | ---------------------------------------------- |
 | **Codex**    | `gpt-5.6-sol`      | Codex CLI       | 开始/末尾把关、参与讨论、收敛方案、最终目标验收 |
-| **Gemini**   | `gemini-3.5-flash` | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
+| **Gemini**   | `gemini-3.6-flash` | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
 | **Grok**     | `grok-4.5`         | Grok Build ACP  | 先给具体修改方案，获批后实现、测试并总结         |
-| **OpenCode** | `qwen3.7-plus`     | OpenCode CLI    | 代码 review；通过后规范 commit、push 和 PR       |
+| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI | 代码 review；通过后规范 commit、push 和 PR       |
 
 模型、容量和职责目前是固定配置。SHIFT 不打包这些 CLI，也不管理它们的账号；使用前需要在本机分别安装并完成认证。
 
