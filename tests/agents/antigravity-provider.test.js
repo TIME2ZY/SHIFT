@@ -17,29 +17,30 @@ test("provider registry includes antigravity", () => {
   assert.ok(listSupportedProviders().includes("antigravity"));
   const runtime = createProviderRuntime({
     providerId: "antigravity",
-    model: "gemini-3.5-flash",
+    model: "gemini-3.6-flash",
     reasoningEffort: "high",
   });
   assert.equal(typeof runtime.transform, "function");
   assert.equal(typeof runtime.parseStdoutLine, "function");
 });
 
-test("AGENTS.gemini is catalogued as Gemini 3.5 Flash high discussion partner", () => {
+test("AGENTS.gemini is catalogued as Gemini 3.6 Flash high discussion partner", () => {
   assert.ok(AGENTS.gemini);
   assert.equal(AGENTS.gemini.label, "Gemini");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
-  assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
+  assert.equal(AGENTS.gemini.model, "gemini-3.6-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.match(AGENTS.gemini.description, /讨论伙伴|互相验证/);
 });
 
 test("resolveAgyModelLabel embeds effort in CLI model name", () => {
+  assert.equal(resolveAgyModelLabel("gemini-3.6-flash", "high"), "Gemini 3.6 Flash (High)");
+  assert.equal(resolveAgyModelLabel("gemini-3.6-flash", "medium"), "Gemini 3.6 Flash (Medium)");
   assert.equal(resolveAgyModelLabel("gemini-3.5-flash", "high"), "Gemini 3.5 Flash (High)");
-  assert.equal(resolveAgyModelLabel("gemini-3.5-flash", "medium"), "Gemini 3.5 Flash (Medium)");
   assert.equal(resolveAgyModelLabel("gemini-3.1-pro", "low"), "Gemini 3.1 Pro (Low)");
   assert.equal(
-    resolveAgyModelLabel("Gemini 3.5 Flash (High)", "medium"),
-    "Gemini 3.5 Flash (High)"
+    resolveAgyModelLabel("Gemini 3.6 Flash (High)", "medium"),
+    "Gemini 3.6 Flash (High)"
   );
 });
 
@@ -49,7 +50,7 @@ test("buildInvocation for gemini uses the platform-safe print mode", () => {
   assert.ok(inv.args.includes("-p"));
   assert.ok(inv.args.includes("brainstorm names"));
   assert.ok(inv.args.includes("--model"));
-  assert.ok(inv.args.includes("Gemini 3.5 Flash (High)"));
+  assert.ok(inv.args.includes("Gemini 3.6 Flash (High)"));
   assert.ok(inv.args.includes("--dangerously-skip-permissions"));
   assert.ok(inv.args.includes("--mode"));
   assert.ok(inv.args.includes("plan"));
@@ -86,7 +87,7 @@ test("buildInvocation rejects unsupported effort", () => {
   assert.throws(
     () =>
       buildInvocation(
-        { providerId: "antigravity", model: "gemini-3.5-flash", reasoningEffort: "ultra" },
+        { providerId: "antigravity", model: "gemini-3.6-flash", reasoningEffort: "ultra" },
         "x"
       ),
     /Unsupported reasoning effort "ultra"/
@@ -140,7 +141,7 @@ test("createAntigravityRuntime maps plain stdout lines to text.delta", () => {
   const events = runtime.transform(synthetic, ctx);
   assert.equal(events[0].type, "run.started");
   assert.equal(events[0].provider, "antigravity");
-  assert.equal(events[0].model, "Gemini 3.5 Flash (High)");
+  assert.equal(events[0].model, "Gemini 3.6 Flash (High)");
   assert.equal(events[1].type, "text.delta");
   assert.equal(events[1].text, "fresh idea one\n");
 
@@ -162,7 +163,7 @@ test("stream-json init + text + tool + result maps to canonical events", () => {
       event: "init",
       conversation_id: conv,
       init: {
-        model: "Gemini 3.5 Flash (High)",
+        model: "Gemini 3.6 Flash (High)",
         cwd: "D:\\HW\\Muti-Agent",
         tools: ["list_dir"],
         permission_mode: "always-proceed",
@@ -173,7 +174,7 @@ test("stream-json init + text + tool + result maps to canonical events", () => {
   assert.equal(started.length, 1);
   assert.equal(started[0].type, "run.started");
   assert.equal(started[0].sessionId, conv);
-  assert.equal(started[0].model, "Gemini 3.5 Flash (High)");
+  assert.equal(started[0].model, "Gemini 3.6 Flash (High)");
   assert.equal(runtime.extractSessionId({ event: "init", conversation_id: conv }), conv);
 
   const text1 = runtime.transform(
@@ -322,7 +323,7 @@ test("result emits text when no agent_response deltas were seen", () => {
 test("step and result usage expose delta and cumulative scopes", () => {
   const runtime = createProviderRuntime({
     providerId: "antigravity",
-    model: "gemini-3.5-flash",
+    model: "gemini-3.6-flash",
   });
   const ctx = { agent: "gemini", invocationId: "inv-agy-usage" };
   const step = runtime.transform(

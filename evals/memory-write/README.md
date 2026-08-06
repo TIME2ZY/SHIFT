@@ -5,7 +5,7 @@
 Each prediction must be one JSON object per line:
 
 ```json
-{"id":"decision-storage-authority","shouldWrite":true,"kind":"decision","topic":"storage.authoritative","scope":"project","atomic":true}
+{"id":"decision-storage-authority","shouldWrite":true,"kind":"decision","topic":"storage.authoritative","scope":"thread","atomic":true}
 ```
 
 Validate the gold set:

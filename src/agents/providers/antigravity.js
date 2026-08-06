@@ -10,7 +10,7 @@ const { resolveProxy } = require("../proxy");
  * Local binary (Windows): `%LOCALAPPDATA%\agy\bin\agy.exe` (also on PATH as `agy`).
  *
  * Headless (verified agy 1.1.3):
- *   agy -p "..." --model "Gemini 3.5 Flash (High)" \
+ *   agy -p "..." --model "Gemini 3.6 Flash (High)" \
  *     --dangerously-skip-permissions --mode plan \
  *     --output-format stream-json
  *
@@ -28,6 +28,7 @@ const { resolveProxy } = require("../proxy");
  * capabilities.thinking stays false until a real reasoning text stream exists.
  *
  * Available models (agy models):
+ *   Gemini 3.6 Flash (Low|Medium|High)
  *   Gemini 3.5 Flash (Low|Medium|High)
  *   Gemini 3.1 Pro (Low|High)
  *   Claude Sonnet 4.6 (Thinking) / Claude Opus 4.6 (Thinking)
@@ -40,6 +41,7 @@ const SUPPORTED_OUTPUT_FORMATS = new Set(["text", "json", "stream-json"]);
 
 /** Catalog model id → CLI family label prefix. */
 const MODEL_FAMILY = {
+  "gemini-3.6-flash": "Gemini 3.6 Flash",
   "gemini-3.5-flash": "Gemini 3.5 Flash",
   "gemini-3.1-pro": "Gemini 3.1 Pro",
 };
@@ -50,8 +52,8 @@ const MODEL_FAMILY = {
  */
 function resolveAgyModelLabel(modelId, reasoningEffort = "high") {
   const raw = String(modelId || "").trim();
-  if (!raw) return "Gemini 3.5 Flash (High)";
-  // Already a full CLI label, e.g. "Gemini 3.5 Flash (High)"
+  if (!raw) return "Gemini 3.6 Flash (High)";
+  // Already a full CLI label, e.g. "Gemini 3.6 Flash (High)"
   if (/\(.*\)\s*$/.test(raw)) return raw;
 
   const family = MODEL_FAMILY[raw] || raw;

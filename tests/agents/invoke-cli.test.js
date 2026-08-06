@@ -222,7 +222,7 @@ test("uses codex agent by default", () => {
   assert.equal(result.stderr, "");
 });
 
-test("uses opencode agent for qwen3.7-plus", () => {
+test("uses opencode agent for deepseek-v4-flash", () => {
   const result = runScript(["--agent", "opencode", "hello"]);
 
   assert.equal(result.status, 0);
@@ -235,7 +235,7 @@ test("uses opencode agent for qwen3.7-plus", () => {
   assert.match(
     parseOutputEvents(result.stdout)[1].text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus hello`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/deepseek-v4-flash --variant max hello`
     )
   );
   assert.equal(result.stderr, "");
@@ -290,13 +290,14 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.codex.model, "gpt-5.6-sol");
   assert.equal(AGENTS.codex.reasoningEffort, "medium");
   assert.equal(AGENTS.codex.label, "Codex");
-  assert.equal(AGENTS.gemini.model, "gemini-3.5-flash");
+  assert.equal(AGENTS.gemini.model, "gemini-3.6-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
   assert.equal(AGENTS.grok.model, "grok-4.5");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
   assert.equal(AGENTS.grok.providerId, "grok");
-  assert.equal(AGENTS.opencode.model, "qwen3.7-plus");
+  assert.equal(AGENTS.opencode.model, "deepseek-v4-flash");
+  assert.equal(AGENTS.opencode.reasoningEffort, "max");
   assert.equal(AGENTS.opencode.label, "OpenCode");
   assert.equal(AGENTS.opencode.providerId, "opencode");
   assert.equal(AGENTS.codex.workflowRole, "lead");
@@ -501,7 +502,7 @@ test("opencode runtime maps tool/task parts into tool events only", () => {
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-oc", agent: "opencode" };
 
@@ -557,7 +558,7 @@ test("opencode runtime maps real tool_use events from current CLI schema", () =>
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-oc-tool-use", agent: "opencode" };
 
@@ -616,7 +617,7 @@ test("opencode runtime maps read/bash tools and nests state.input", () => {
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-oc-tools", agent: "opencode" };
 
@@ -756,7 +757,7 @@ test("opencode runtime emits a single run.started and step progress updates", ()
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-oc-steps", agent: "opencode" };
 
@@ -965,7 +966,7 @@ test("opencode runtime emits incremental text deltas from repeated parts", () =>
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-2", agent: "opencode" };
 
@@ -1000,7 +1001,7 @@ test("opencode runtime reads text deltas from properties.part fallback", () => {
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-3", agent: "opencode" };
 
@@ -1025,7 +1026,7 @@ test("opencode runtime extracts sessionID and text events from current cli schem
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-3b", agent: "opencode" };
 
@@ -1062,7 +1063,7 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   const runtime = createProviderRuntime({
     providerId: "opencode",
     id: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { invocationId: "inv-think", agent: "opencode" };
 
@@ -1126,7 +1127,7 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
   assert.ok(
     createProviderRuntime({
       providerId: "antigravity",
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       reasoningEffort: "high",
     })
   );
@@ -1209,7 +1210,7 @@ test("resumes remembered opencode session", () => {
   assert.match(
     text.text,
     new RegExp(
-      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/qwen3.7-plus --session opencode-session-previous hello again`
+      `${OPENCODE_BIN_RE}:run --format json --thinking --auto --model opencode-go\\/deepseek-v4-flash --variant max --session opencode-session-previous hello again`
     )
   );
   assert.equal(result.stderr, "");

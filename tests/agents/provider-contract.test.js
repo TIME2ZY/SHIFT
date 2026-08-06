@@ -22,11 +22,11 @@ const path = require("node:path");
 
 const CONFIGS = {
   codex: { providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
-  opencode: { providerId: "opencode", model: "qwen3.7-plus" },
+  opencode: { providerId: "opencode", model: "deepseek-v4-flash", reasoningEffort: "max" },
   grok: { providerId: "grok", model: "grok-4.5", reasoningEffort: "high" },
   antigravity: {
     providerId: "antigravity",
-    model: "gemini-3.5-flash",
+    model: "gemini-3.6-flash",
     reasoningEffort: "high",
   },
 };
@@ -70,9 +70,10 @@ test("unknown providers fail fast instead of falling through to Codex", () => {
 });
 
 test("model catalog separates execution provider from model vendor", () => {
-  const qwen = getModelProfile("opencode", "qwen3.7-plus");
-  assert.equal(qwen.providerId, "opencode");
-  assert.equal(qwen.vendorId, "alibaba");
+  const deepseek = getModelProfile("opencode", "deepseek-v4-flash");
+  assert.equal(deepseek.providerId, "opencode");
+  assert.equal(deepseek.vendorId, "deepseek");
+  assert.deepEqual(deepseek.reasoning.levels, ["low", "high", "max"]);
   const codex = getModelProfile("codex", "gpt-5.6-sol");
   assert.equal(codex.providerId, "codex");
   assert.equal(codex.vendorId, "openai");
@@ -124,7 +125,9 @@ test("provider options configure adapters without central provider branches", ()
     "hello"
   );
   assert.equal(opencode.args.includes("--thinking"), false);
-  assert.ok(opencode.args.includes("custom/qwen3.7-plus"));
+  assert.ok(opencode.args.includes("custom/deepseek-v4-flash"));
+  assert.ok(opencode.args.includes("--variant"));
+  assert.ok(opencode.args.includes("max"));
 
   const grok = buildProviderInvocation(
     {

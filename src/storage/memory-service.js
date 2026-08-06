@@ -22,7 +22,10 @@ const { enqueueMemoryEmbedding } = require("./embedding-projection");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
-const MEMORY_WRITE_SCOPES = Object.freeze(["thread", "project"]);
+/** Product Memory is thread-only. Project truth lives in docs/ (project-doc recall). */
+const MEMORY_WRITE_SCOPES = Object.freeze(["thread"]);
+const PROJECT_SCOPE_RETIRED_MESSAGE =
+  "Project-scoped memory is retired. Write durable project decisions to docs/ (e.g. docs/decisions/) and use recall_search with layer project-doc.";
 const MEMORY_WRITE_INPUT_FIELDS = new Set([
   "kind",
   "topic",
@@ -208,10 +211,6 @@ function createMemoryService({
     const thread = storage.threads?.get?.(threadId) || null;
     const scope = resolveProductScope(kind, input.scope, thread);
 
-    if (scope === "project" && !thread?.projectKey) {
-      throw new Error("Cannot write project-scoped memory without a resolved project identity.");
-    }
-
     const requestedSupersessionKey =
       typeof input.supersessionKey === "string" && input.supersessionKey.trim()
         ? input.supersessionKey.trim()
@@ -345,12 +344,9 @@ function createMemoryService({
     const thread = storage.threads?.get?.(threadId) || null;
     if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
     const scope = resolveProductScope(kind, candidate.scope, thread);
-    if (candidate.scope === "project" && scope !== "project") {
-      throw new Error("Cannot write project-scoped memory without a resolved project identity.");
-    }
 
     const ownerThreadId = scope === "thread" ? threadId : null;
-    const projectKey = scope === "project" ? thread.projectKey : null;
+    const projectKey = null;
     const existing = storage.memories.listActiveProductByTopic({
       scope,
       ownerThreadId,
@@ -506,13 +502,14 @@ function createMemoryService({
   }
 
   function listActiveForTurn(threadId, options = {}) {
-    return listActive(threadId, { ...options, scope: "all", forInject: true });
+    // Product Memory inject is thread-only; project truth is docs/project-doc.
+    return listActive(threadId, { ...options, scope: "thread", forInject: true });
   }
 
   function listRetrievableForTurn(threadId, options = {}) {
     return listActive(threadId, {
       ...options,
-      scope: "all",
+      scope: "thread",
       forInject: false,
     }).filter((item) => isRetrievableMemory(item));
   }
@@ -654,10 +651,10 @@ function assertMemoryWriteCandidateShape(candidate) {
   if (typeof candidate.content !== "string" || !candidate.content.trim()) {
     throw new Error("Memory content is required.");
   }
-  if (
-    candidate.scope !== undefined &&
-    !MEMORY_WRITE_SCOPES.includes(candidate.scope)
-  ) {
+  if (candidate.scope === "project") {
+    throw new Error(PROJECT_SCOPE_RETIRED_MESSAGE);
+  }
+  if (candidate.scope !== undefined && !MEMORY_WRITE_SCOPES.includes(candidate.scope)) {
     throw new Error(`Memory scope must be one of: ${MEMORY_WRITE_SCOPES.join(", ")}.`);
   }
   if (
@@ -835,17 +832,15 @@ function inferWriteChannel(input = {}) {
   return "agent";
 }
 
-function resolveProductScope(kind, requested, thread) {
-  if (requested === "thread" || requested === "project") {
-    if (requested === "project" && !thread?.projectKey) {
-      return "thread";
-    }
-    return requested;
+/**
+ * Product Memory is always thread-scoped.
+ * Cross-session project truth must be written to docs/ and retrieved as project-doc.
+ */
+function resolveProductScope(_kind, requested, _thread) {
+  if (requested === "project") {
+    throw new Error(PROJECT_SCOPE_RETIRED_MESSAGE);
   }
-  // Defaults from contract §8
-  if (!thread?.projectKey) return "thread";
-  if (kind === "decision" || kind === "constraint") return "project";
-  return "thread"; // fact
+  return "thread";
 }
 
 function nowIso(clock) {
@@ -948,4 +943,6 @@ module.exports = {
   resolveProductScope,
   recordMemoryLifecycleEvents,
   MAX_SUPERSESSION_RETRIES,
+  MEMORY_WRITE_SCOPES,
+  PROJECT_SCOPE_RETIRED_MESSAGE,
 };

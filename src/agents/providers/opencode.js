@@ -17,15 +17,17 @@ const {
  * OpenCode CLI provider — one runtime for all models.
  *
  * Headless (verified opencode 1.17.x):
- *   opencode run --format json --thinking --auto --model provider/model "prompt"
+ *   opencode run --format json --thinking --auto \
+ *     --model provider/model --variant max "prompt"
  *
- * Event shapes (model-agnostic; only -m changes which model runs):
+ * Event shapes (model-agnostic; only -m / --variant change which model runs):
  *   step_start / step_finish  → progress.update + usage.update
  *   reasoning                 → thinking.delta  (needs --thinking)
  *   text                      → text.delta      (often full part text, not micro-tokens)
  *   tool_use                  → tool.started + tool.finished (often already completed)
  *   sessionID on each line    → resume / run.started.sessionId
  *
+ * Reasoning effort maps to OpenCode `--variant` (provider-specific, e.g. max/high/low).
  * Usage comes from part.tokens / part.cost on step_finish.
  */
 
@@ -509,8 +511,8 @@ const opencodeProvider = {
     usage: true,
     reasoning: "toggle",
   },
-  // All OpenCode-backed models share this adapter; only --model changes.
-  allowedProviderOptions: ["thinking", "modelPrefix", "autoApprove"],
+  // All OpenCode-backed models share this adapter; --model / --variant change.
+  allowedProviderOptions: ["thinking", "modelPrefix", "autoApprove", "variant"],
   createRuntime: createOpencodeRuntime,
   resolveProxy,
   buildInvocation(config, prompt) {
@@ -527,6 +529,12 @@ const opencodeProvider = {
         : `${modelPrefix}${config.model}`;
       args.push("--model", fullModel);
     }
+    // Provider-specific reasoning effort (DeepSeek: low|high|max).
+    const variant =
+      (providerOptions.variant && String(providerOptions.variant).trim()) ||
+      (config.reasoningEffort && String(config.reasoningEffort).trim()) ||
+      "";
+    if (variant) args.push("--variant", variant);
     if (config.resumeSessionId) args.push("--session", config.resumeSessionId);
     args.push(prompt);
     return { command: resolveOpencodeCommand(), args };

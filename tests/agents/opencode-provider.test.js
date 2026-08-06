@@ -24,7 +24,7 @@ test("sessionIdFromEvent reads sessionID on lines", () => {
 test("opencode maps real tool_use with filePath to tool.* with path", () => {
   const runtime = createProviderRuntime({
     providerId: "opencode",
-    model: "qwen3.7-plus",
+    model: "deepseek-v4-flash",
   });
   const ctx = { agent: "opencode", invocationId: "inv-fp" };
   const events = runtime.transform(
@@ -55,7 +55,7 @@ test("opencode maps real tool_use with filePath to tool.* with path", () => {
 });
 
 test("opencode maps reasoning + text sample shapes", () => {
-  const runtime = createOpencodeRuntime({ providerId: "opencode", model: "qwen3.7-plus" });
+  const runtime = createOpencodeRuntime({ providerId: "opencode", model: "deepseek-v4-flash" });
   const ctx = { agent: "opencode", invocationId: "inv-rt" };
   const think = runtime.transform(
     {
@@ -77,7 +77,7 @@ test("opencode maps reasoning + text sample shapes", () => {
   assert.ok(text.some((e) => e.type === "text.delta" && e.text === "hello from opencode"));
 });
 
-test("buildInvocation for opencode uses format json, thinking, and auto", () => {
+test("buildInvocation for opencode uses format json, thinking, auto, and max variant", () => {
   const inv = buildInvocation(AGENTS.opencode, "review please");
   assert.match(String(inv.command), /opencode/i);
   assert.ok(inv.args.includes("run"));
@@ -86,7 +86,11 @@ test("buildInvocation for opencode uses format json, thinking, and auto", () => 
   assert.ok(inv.args.includes("--thinking"));
   assert.ok(inv.args.includes("--auto"));
   assert.ok(inv.args.includes("--model"));
-  assert.ok(inv.args.some((a) => String(a).includes("qwen3.7-plus")));
+  assert.ok(inv.args.some((a) => String(a).includes("deepseek-v4-flash")));
+  assert.ok(inv.args.includes("--variant"));
+  assert.ok(inv.args.includes("max"));
+  assert.equal(AGENTS.opencode.model, "deepseek-v4-flash");
+  assert.equal(AGENTS.opencode.reasoningEffort, "max");
 });
 
 test("buildInvocation can disable autoApprove", () => {
@@ -100,7 +104,7 @@ test("opencode capabilities remain tools+thinking", () => {
 });
 
 test("opencode step_finish maps tokens and cost to usage.update", () => {
-  const runtime = createProviderRuntime({ providerId: "opencode", model: "qwen3.7-plus" });
+  const runtime = createProviderRuntime({ providerId: "opencode", model: "deepseek-v4-flash" });
   const events = runtime.transform(
     {
       type: "step_finish",

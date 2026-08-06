@@ -26,6 +26,7 @@
     "format:check": "prettier --check .",
     "audit:storage": "node scripts/audit-sqlite-storage.js",
     "audit:memory:stabilization": "node scripts/audit-memory-stabilization.js",
+    "memory:retire-project": "node scripts/retire-project-memories.js",
     "eval:memory-write": "node scripts/eval-memory-write.js",
     "eval:recall-fts": "node scripts/eval-recall-fts.js",
     "eval:recall-hybrid": "node scripts/eval-recall-hybrid.js",

@@ -29,7 +29,7 @@ test("persistSessionId reads INVOKE_* env without server imports", () => {
   const file = path.join(dir, "sessions.json");
 
   persistSessionId(
-    { id: "opencode", providerId: "opencode", model: "qwen3.7-plus" },
+    { id: "opencode", providerId: "opencode", model: "deepseek-v4-flash" },
     "oc-1",
     {
       INVOKE_SESSION_FILE: file,
@@ -39,7 +39,7 @@ test("persistSessionId reads INVOKE_* env without server imports", () => {
 
   const saved = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(saved.opencode.sessionId, "oc-1");
-  assert.equal(saved.opencode.providerKey, "opencode:qwen3.7-plus");
+  assert.equal(saved.opencode.providerKey, "opencode:deepseek-v4-flash");
   assert.equal(saved.opencode.workspaceKey, "base:ws");
 });
 

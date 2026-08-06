@@ -57,7 +57,7 @@ test("migration rebuilds memory_entries with owner columns and capture backfill"
   }
 });
 
-test("project memory survives thread purge and remains searchable", () => {
+test("product memory is thread-scoped and searchable before purge", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-mem-proj-"));
   const storage = createFixture({ projectDir: dir });
   try {
@@ -71,37 +71,36 @@ test("project memory survives thread purge and remains searchable", () => {
       content: "Use SQLite as online source of truth.",
       createdBy: "user",
       writeChannel: "user",
-      scope: "project",
     });
-    assert.equal(written.memory.scope, "project");
-    assert.equal(written.memory.ownerThreadId, null);
-    assert.equal(written.memory.projectKey, thread.projectKey);
+    assert.equal(written.memory.scope, "thread");
+    assert.equal(written.memory.ownerThreadId, "thread-1");
+    assert.equal(written.memory.projectKey, null);
     assert.equal(written.memory.originThreadId, "thread-1");
 
-    // Searchable before purge
     const hitsBefore = storage.memories.searchMemory("SQLite", {
-      projectKey: thread.projectKey,
+      threadId: "thread-1",
       limit: 10,
     });
     assert.ok(hitsBefore.some((h) => h.memoryId === written.memory.id));
 
-    // Purge origin thread
+    assert.throws(
+      () =>
+        storage.memory.createProduct({
+          threadId: "thread-1",
+          kind: "decision",
+          topic: "should-fail",
+          content: "Project scope is retired for product memory.",
+          createdBy: "user",
+          scope: "project",
+        }),
+      /Project-scoped memory is retired/
+    );
+
+    // source_deleted via purge ledger still works for anchors
     assert.equal(storage.threads.purge("thread-1", { purgedBy: "test" }), true);
     assert.equal(storage.threads.get("thread-1"), null);
     assert.ok(storage.threads.isPurged("thread-1"));
 
-    const survived = storage.memories.get(written.memory.id);
-    assert.ok(survived);
-    assert.equal(survived.scope, "project");
-    assert.equal(survived.originThreadId, null);
-
-    const hitsAfter = storage.memories.searchMemory("SQLite", {
-      projectKey: thread.projectKey,
-      limit: 10,
-    });
-    assert.ok(hitsAfter.some((h) => h.memoryId === written.memory.id));
-
-    // source_deleted via purge ledger
     const resolution = resolveAnchor(
       {
         type: "invocation",
@@ -123,21 +122,21 @@ test("project memory survives thread purge and remains searchable", () => {
   }
 });
 
-test("thread and project memories with the same topic occupy independent slots", () => {
+test("same topic supersedes prior product memory on the same thread", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-mem-scope-slot-"));
   const storage = createFixture({ projectDir: dir });
   try {
-    const projectMemory = storage.memory.createProduct({
-      id: "project-storage",
+    const first = storage.memory.createProduct({
+      id: "first-storage",
       threadId: "thread-1",
       kind: "decision",
       topic: "storage.authoritative",
       content: "The project source of truth is SQLite.",
       createdBy: "user",
-      scope: "project",
+      scope: "thread",
     });
-    const threadMemory = storage.memory.createProduct({
-      id: "thread-storage",
+    const second = storage.memory.createProduct({
+      id: "second-storage",
       threadId: "thread-1",
       kind: "fact",
       topic: "storage.authoritative",
@@ -146,10 +145,9 @@ test("thread and project memories with the same topic occupy independent slots",
       scope: "thread",
     });
 
-    assert.deepEqual(projectMemory.superseded, []);
-    assert.deepEqual(threadMemory.superseded, []);
-    assert.equal(storage.memories.get(projectMemory.memory.id).status, "active");
-    assert.equal(storage.memories.get(threadMemory.memory.id).status, "active");
+    assert.equal(storage.memories.get(first.memory.id).status, "superseded");
+    assert.equal(storage.memories.get(second.memory.id).status, "active");
+    assert.equal(second.memory.scope, "thread");
   } finally {
     storage.close();
   }
@@ -309,7 +307,7 @@ test("archive hides thread without destroying project memory", () => {
       createdBy: "user",
       writeChannel: "user",
     });
-    assert.equal(product.memory.scope, "project");
+    assert.equal(product.memory.scope, "thread");
     assert.equal(storage.threads.archive("thread-1"), true);
     assert.equal(storage.threads.get("thread-1"), null);
     assert.ok(storage.memories.get(product.memory.id));
