@@ -93,13 +93,20 @@ function buildHeuristicDigest(input = {}) {
 
   const topics = [];
 
-  const active =
-    storage.memory?.listActive?.(threadId, {
-      scope: "all",
-      forInject: false,
-      limit: 8,
-    }) || [];
+  // Product Memory is thread-only (ADR-005): never pull project-scoped rows into digests.
+  const listActiveForTurn =
+    typeof storage.memory?.listActiveForTurn === "function"
+      ? storage.memory.listActiveForTurn.bind(storage.memory)
+      : null;
+  const active = listActiveForTurn
+    ? listActiveForTurn(threadId, { limit: 8, forInject: false })
+    : storage.memory?.listActive?.(threadId, {
+        scope: "thread",
+        forInject: false,
+        limit: 8,
+      }) || [];
   for (const item of active) {
+    if (item?.scope === "project") continue;
     const topic = item.topic || item.metadata?.topic;
     if (topic && !topics.includes(topic)) topics.push(topic);
   }
