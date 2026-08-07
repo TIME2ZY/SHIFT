@@ -8,7 +8,7 @@ const test = require("node:test");
 
 const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 
 const UI_TOKEN = "sqlite-storage-test-token";
 

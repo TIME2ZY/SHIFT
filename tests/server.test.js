@@ -15,7 +15,7 @@ const {
 } = require("../src/agents/outcome-evidence-gate");
 const { hashImplementationPlan } = require("../src/agents/implementation-plan-gate");
 const { createStorage } = require("../src/storage");
-const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);

@@ -5,7 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
-const { auditSqliteStorage } = require("../../src/storage/audit-storage");
+const { auditSqliteStorage } = require("../../src/storage/offline/audit-storage");
 const {
   backupDatabase,
   integrityCheck,

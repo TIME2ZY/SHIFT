@@ -5,7 +5,7 @@ const path = require("node:path");
 const {
   validateDeliveryReceipt,
   validateVerifiedDelivery,
-} = require("../agents/outcome-evidence-gate");
+} = require("../agents/workflow-gates");
 
 const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 

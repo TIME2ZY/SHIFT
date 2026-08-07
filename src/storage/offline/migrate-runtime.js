@@ -1,18 +1,18 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { isValidOpaqueId } = require("../server/id-policy");
+const { isValidOpaqueId } = require("../../server/id-policy");
 const {
   DEFAULT_SESSIONS_FILE,
   DEFAULT_TRANSCRIPT_DIR,
   DEFAULT_MEMORY_DB_FILE,
-} = require("../shared/runtime-paths");
-const { durableMessageMetadata } = require("./message-persistence");
-const { integrityCheck, rebuildThreadRecall } = require("./maintenance");
+} = require("../../shared/runtime-paths");
+const { durableMessageMetadata } = require("../message-persistence");
+const { integrityCheck, rebuildThreadRecall } = require("../maintenance");
 
 // Lazy require avoids circular load if tooling ever re-exports migrate from index.
 function createStorage(options) {
-  return require("./index").createStorage(options);
+  return require("../index").createStorage(options);
 }
 
 const DEFAULT_CAPACITY = 200_000;

@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   analyzeMemoryStabilization,
   memorySlot,
-} = require("../../src/storage/memory-stabilization");
+} = require("../../src/storage/offline/memory-stabilization");
 
 function product(overrides = {}) {
   return {

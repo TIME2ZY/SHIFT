@@ -5,7 +5,7 @@ const path = require("node:path");
 const {
   evaluateMemoryWriteGate,
   evaluateMemoryWritePredictions,
-} = require("../src/storage/memory-write-eval");
+} = require("../src/storage/offline/memory-write-eval");
 
 const DEFAULT_CASES = path.resolve(
   __dirname,

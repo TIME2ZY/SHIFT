@@ -22,8 +22,6 @@ const {
   validateImplementationPlan,
   hashImplementationPlan,
   isImplementationApproved,
-} = require("./implementation-plan-gate");
-const {
   parseSolutionBaseline,
   hashSolutionBaseline,
   parseCodeReview,
@@ -33,7 +31,7 @@ const {
   parseFinalAcceptance,
   validateFinalAcceptanceAgainstTask,
   hashUserGoal,
-} = require("./outcome-evidence-gate");
+} = require("./workflow-gates");
 
 const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));

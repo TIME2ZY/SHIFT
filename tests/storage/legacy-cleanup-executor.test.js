@@ -4,10 +4,10 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 const { createStorage } = require("../../src/storage");
-const { buildLegacyCleanupManifest } = require("../../src/storage/legacy-cleanup-manifest");
-const { executeLegacyCleanup } = require("../../src/storage/legacy-cleanup-executor");
+const { buildLegacyCleanupManifest } = require("../../src/storage/offline/legacy-cleanup-manifest");
+const { executeLegacyCleanup } = require("../../src/storage/offline/legacy-cleanup-executor");
 
 test("legacy cleanup validates exact fingerprints and deletes only allowlisted targets", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-executor-"));

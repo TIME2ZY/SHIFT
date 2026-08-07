@@ -51,10 +51,30 @@ const {
   requiredString,
 } = require("./recall-ranking");
 
-function createRecallService({ storage, embeddingRuntime = null, logger = console } = {}) {
+/**
+ * Online default recall mode is FTS/keyword (Phase D-3).
+ * Hybrid (FTS + vector) only when service option, call option, or SHIFT_RECALL_MODE=hybrid.
+ */
+function resolveRecallMode(options = {}, serviceDefault = null) {
+  const candidate =
+    (typeof options.recallMode === "string" && options.recallMode) ||
+    (typeof serviceDefault === "string" && serviceDefault) ||
+    process.env.SHIFT_RECALL_MODE ||
+    "fts";
+  const mode = String(candidate).trim().toLowerCase();
+  return mode === "hybrid" ? "hybrid" : "fts";
+}
+
+function createRecallService({
+  storage,
+  embeddingRuntime = null,
+  logger = console,
+  recallMode = null,
+} = {}) {
   if (!storage) {
     throw new Error("SQLite recall requires durable storage.");
   }
+  const serviceRecallMode = resolveRecallMode({}, recallMode);
 
   function logSqliteFailure(operation, error) {
     logger.error?.(`[sqlite-recall] ${operation} failed: ${error.message}`);
@@ -138,6 +158,8 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
     const layers = normalizeLayers(options.layers);
     // Product Memory is thread-only. project/all no longer search project-scoped entries.
     const memoryScope = resolveProductMemoryScope(options);
+    const recallMode = resolveRecallMode(options, serviceRecallMode);
+    const wantHybrid = recallMode === "hybrid";
     const rawQuery = typeof query === "string" ? query : "";
     const terms = extractSearchTerms(rawQuery, { maxChars: 200, maxTerms: 8 });
     const searchQuery = clampSearchQuery(rawQuery, 200);
@@ -186,21 +208,30 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
           memoryQuota: options.memoryQuota,
           messageQuota: options.messageQuota,
           memoryScope,
-          deferQuotas: Boolean(embeddingRuntime?.available),
+          deferQuotas: wantHybrid && Boolean(embeddingRuntime?.available),
         });
       });
 
       if (sqliteHits !== undefined) {
-        const hybrid = await collectVectorHits({
-          threadId,
-          query: searchQuery,
-          terms,
-          layers,
-          limit,
-          includeRetired,
-          includeThinking,
-          memoryScope,
-        });
+        let hybrid = {
+          attempted: false,
+          available: false,
+          hits: [],
+          // Keep legacy "disabled" reason when default FTS mode skips vector.
+          reason: wantHybrid ? undefined : "disabled",
+        };
+        if (wantHybrid) {
+          hybrid = await collectVectorHits({
+            threadId,
+            query: searchQuery,
+            terms,
+            layers,
+            limit,
+            includeRetired,
+            includeThinking,
+            memoryScope,
+          });
+        }
         if (hybrid.attempted) {
           result = null;
           sqliteHits = fuseRecallChannels(sqliteHits, hybrid.hits, {
@@ -210,7 +241,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
             messageQuota: options.messageQuota,
             projectDocQuota: options.projectDocQuota,
           });
-        } else if (embeddingRuntime?.available) {
+        } else if (wantHybrid && embeddingRuntime?.available) {
           sqliteHits = allocateFlatHitsByLayer(sqliteHits, {
             limit,
             layers,
@@ -233,6 +264,7 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
             ...(hybrid.reason ? { reason: hybrid.reason } : {}),
           },
         };
+        result.recallMode = recallMode;
       } else {
         source = "sqlite-error";
         result = finalizeSearchResult([], {
@@ -728,7 +760,11 @@ function createRecallService({ storage, embeddingRuntime = null, logger = consol
         logger.error?.(`[retrieveForTurn] related search failed: ${error.message}`);
       }
     }
-    if (!weak && layers.includes(LAYER_MEMORY)) {
+    if (
+      !weak &&
+      layers.includes(LAYER_MEMORY) &&
+      resolveRecallMode(input, serviceRecallMode) === "hybrid"
+    ) {
       const vector = await collectVectorHits({
         threadId,
         query: clampSearchQuery(prompt, 200) || terms.join(" "),

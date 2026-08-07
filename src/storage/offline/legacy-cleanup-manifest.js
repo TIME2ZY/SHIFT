@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
-const { pathsOverlap } = require("../shared/runtime-paths");
+const { pathsOverlap } = require("../../shared/runtime-paths");
 
 function buildLegacyCleanupManifest({
   paths = {},

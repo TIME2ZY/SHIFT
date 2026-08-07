@@ -399,6 +399,7 @@ test("hybrid fusion ranks by RRF score instead of preserving keyword order", asy
   const bySource = new Map(keywordRows.map((row) => [row.sourceId, row]));
   const service = createRecallService({
     mode: "sqlite",
+    recallMode: "hybrid",
     storage: {
       recall: {
         search() {

@@ -4,8 +4,8 @@ const path = require("node:path");
 const {
   buildLegacyCleanupManifest,
   readEpochMetadata,
-} = require("../src/storage/legacy-cleanup-manifest");
-const { inspectCanonicalCoverage } = require("../src/storage/mixed-transcript-retirement");
+} = require("../src/storage/offline/legacy-cleanup-manifest");
+const { inspectCanonicalCoverage } = require("../src/storage/offline/mixed-transcript-retirement");
 const { resolveEpochAuditDirectory } = require("../src/storage/server-storage");
 const { ENV } = require("../src/shared/brand");
 const { loadProjectEnv } = require("../src/shared/load-env");

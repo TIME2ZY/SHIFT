@@ -1,9 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
-const { createCanonicalTranscriptSink } = require("../session/transcript");
-const { resolveEpochAuditDirectory } = require("./server-storage");
-const { pathsOverlap } = require("../shared/runtime-paths");
+const { createCanonicalTranscriptSink } = require("../../session/transcript");
+const { resolveEpochAuditDirectory } = require("../server-storage");
+const { pathsOverlap } = require("../../shared/runtime-paths");
 const { readEpochMetadata } = require("./legacy-cleanup-manifest");
 
 async function archiveMixedCanonicalEvents({

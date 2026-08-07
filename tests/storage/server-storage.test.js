@@ -5,7 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage, openMemoryDatabase } = require("../../src/storage");
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 const { MIGRATIONS } = require("../../src/storage/schema");
 const {
   createServerStorage,

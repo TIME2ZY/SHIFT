@@ -9,7 +9,7 @@ const { ENV } = require("../src/shared/brand");
 const {
   analyzeMemoryStabilization,
   mapMemoryAuditRow,
-} = require("../src/storage/memory-stabilization");
+} = require("../src/storage/offline/memory-stabilization");
 
 function parseArgs(argv) {
   const options = { db: null, json: false, help: false };

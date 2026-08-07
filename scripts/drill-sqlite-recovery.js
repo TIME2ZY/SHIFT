@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE } = require("../src/shared/runtime-paths");
-const { runSqliteRecoveryDrill } = require("../src/storage/recovery-drill");
+const { runSqliteRecoveryDrill } = require("../src/storage/offline/recovery-drill");
 const { verifyRestoredSqliteApi } = require("../src/server/recovery-verification");
 
 function parseArgs(argv) {

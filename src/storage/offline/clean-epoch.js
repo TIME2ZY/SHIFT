@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { createStorage } = require("./index");
-const { integrityCheck } = require("./maintenance");
+const { createStorage } = require("../index");
+const { integrityCheck } = require("../maintenance");
 
 function prepareCleanEpoch({ file, cutoverTime } = {}) {
   if (typeof file !== "string" || !file.trim()) {

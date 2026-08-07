@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const path = require("node:path");
-const { prepareCleanEpoch } = require("../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 
 function parseArgs(argv) {
   const options = { file: "", cutoverTime: undefined, json: false };

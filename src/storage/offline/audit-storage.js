@@ -1,15 +1,15 @@
-const { DEFAULT_MEMORY_DB_FILE } = require("../shared/runtime-paths");
-const { eventPlainText } = require("./event-plain-text");
-const { classifyShellOutcome } = require("../agents/tool-classification");
+const { DEFAULT_MEMORY_DB_FILE } = require("../../shared/runtime-paths");
+const { eventPlainText } = require("../event-plain-text");
+const { classifyShellOutcome } = require("../../agents/tool-classification");
 const {
   integrityCheck,
   rebuildThreadRecall,
   rebuildFts,
   rebuildAllRecall,
-} = require("./maintenance");
+} = require("../maintenance");
 
 function createStorage(options) {
-  return require("./index").createStorage(options);
+  return require("../index").createStorage(options);
 }
 
 /**

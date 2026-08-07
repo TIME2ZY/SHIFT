@@ -4,12 +4,12 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 const { createStorage } = require("../../src/storage");
 const {
   archiveMixedCanonicalEvents,
   inspectCanonicalCoverage,
-} = require("../../src/storage/mixed-transcript-retirement");
+} = require("../../src/storage/offline/mixed-transcript-retirement");
 
 test("mixed canonical events are archived from verified outbox rows idempotently", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-mixed-retirement-"));

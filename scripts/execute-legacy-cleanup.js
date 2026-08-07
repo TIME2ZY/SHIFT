@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const { executeLegacyCleanup } = require("../src/storage/legacy-cleanup-executor");
+const { executeLegacyCleanup } = require("../src/storage/offline/legacy-cleanup-executor");
 
 function parseArgs(argv) {
   const options = { manifestFile: "", confirmation: "", apply: false, receipt: "" };

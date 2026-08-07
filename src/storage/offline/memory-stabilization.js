@@ -2,7 +2,7 @@ const {
   ACTIVE_MEMORY_STATUSES,
   MEMORY_RETRIEVAL_CONTRACT_VERSION,
   isRetrievableMemory,
-} = require("./memory-retrieval-contract");
+} = require("../memory-retrieval-contract");
 
 function analyzeMemoryStabilization(memories = []) {
   const rows = Array.isArray(memories) ? memories.filter(Boolean) : [];

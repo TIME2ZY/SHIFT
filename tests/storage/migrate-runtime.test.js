@@ -5,8 +5,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
-const { migrateRuntimeToSqlite } = require("../../src/storage/migrate-runtime");
-const { auditSqliteStorage } = require("../../src/storage/audit-storage");
+const { migrateRuntimeToSqlite } = require("../../src/storage/offline/migrate-runtime");
+const { auditSqliteStorage } = require("../../src/storage/offline/audit-storage");
 const { copyLegacyRuntimeFixture } = require("../helpers/legacy-runtime-fixture");
 
 function writeJson(file, value) {

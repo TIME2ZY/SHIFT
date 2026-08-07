@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   evaluateMemoryWriteGate,
   evaluateMemoryWritePredictions,
-} = require("../../src/storage/memory-write-eval");
+} = require("../../src/storage/offline/memory-write-eval");
 
 const CASES = [
   {
