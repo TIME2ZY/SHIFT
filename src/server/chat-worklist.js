@@ -100,7 +100,7 @@ async function runChatWorklist(ctx) {
     spawnRunner,
     buildChatArgs,
     options,
-    rootDir,
+    augmentPrompt,
   } = ctx;
 
   let session = ctx.session;

@@ -476,7 +476,7 @@ function createChatRoutes({
       spawnRunner,
       buildChatArgs,
       options,
-      rootDir,
+      augmentPrompt,
     };
 
     const workResult = await runChatWorklist(workCtx);
