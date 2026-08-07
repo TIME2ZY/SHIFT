@@ -456,6 +456,8 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
   /**
    * Finish an invocation and append the assistant-final message in one SQLite
    * transaction (plus EventStore sinks for invocation-end).
+   *
+   * Private: atomic finish + assistant-final. Callers must use completeInvocation.
    */
   function finishWithAssistantMessage(input = {}) {
     if (!storage) return null;
@@ -539,6 +541,59 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     }
   }
 
+  /**
+   * Single scheduler-facing write entry for invocation terminal states (Phase B-1).
+   *
+   * - With `message`: atomic finish + assistant-final (success path).
+   * - Without `message`: finish only (abort, empty emergency, seal pressure, etc.).
+   *
+   * Orphan cleanup still uses {@link forceTerminalInvocation} /
+   * {@link reconcileThreadActive} — those are not alternate product success paths.
+   *
+   * @param {object} input
+   * @param {string} input.invocationId
+   * @param {number|null|undefined} [input.code]
+   * @param {string|null|undefined} [input.signal]
+   * @param {object|null} [input.endPayload]
+   * @param {object} [input.message] assistant-final payload when completing with text
+   * @param {object} [input.session]
+   * @param {string|null} [input.windowId]
+   * @param {string} [input.reason] caller label for logs/metrics (not written unless
+   *   already present in endPayload)
+   * @returns {{ invocation: object, message: object|null, reason: string }|null}
+   */
+  function completeInvocation(input = {}) {
+    const invocationId =
+      typeof input.invocationId === "string" && input.invocationId ? input.invocationId : null;
+    if (!invocationId) return null;
+
+    const reason =
+      typeof input.reason === "string" && input.reason.trim()
+        ? input.reason.trim().slice(0, 80)
+        : input.message
+          ? "assistant-final"
+          : "finish";
+
+    if (input.message) {
+      const result = finishWithAssistantMessage({
+        invocationId,
+        code: input.code,
+        signal: input.signal,
+        endPayload: input.endPayload,
+        session: input.session,
+        windowId: input.windowId,
+        message: input.message,
+        endedAt: input.endedAt,
+      });
+      if (!result) return null;
+      return { invocation: result.invocation, message: result.message || null, reason };
+    }
+
+    const record = finishInvocation(invocationId, input.code, input.signal, input.endPayload);
+    if (!record) return null;
+    return { invocation: record, message: null, reason };
+  }
+
   function bindProviderSession(windowId, providerSessionId) {
     if (!providerSessionId || !windowId) return false;
     return (
@@ -582,8 +637,8 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     mirrorLastMessage,
     startInvocation,
     appendInvocationEvent,
-    finishInvocation,
-    finishWithAssistantMessage,
+    // finishInvocation / finishWithAssistantMessage are private — only completeInvocation is public.
+    completeInvocation,
     forceTerminalInvocation,
     forceFailInvocation,
     reconcileThreadActive,

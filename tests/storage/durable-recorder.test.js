@@ -51,17 +51,24 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       triggerType: "user-message",
     });
     recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "Stored" });
-    session.messages.push({
-      id: "message-assistant",
-      role: "assistant",
-      agent: "codex",
-      content: "Stored",
+    // Assistant-final goes only through completeInvocation (not mirror + finish*).
+    const finished = recorder.completeInvocation({
       invocationId: "invocation-1",
-      createdAt: "2026-07-12T00:00:03.000Z",
+      code: 0,
+      signal: null,
+      reason: "assistant-final",
+      session,
+      windowId: window.id,
+      message: {
+        id: "message-assistant",
+        role: "assistant",
+        agent: "codex",
+        content: "Stored",
+        createdAt: "2026-07-12T00:00:03.000Z",
+      },
     });
-    recorder.mirrorLastMessage(session, { invocationId: "invocation-1" });
-    recorder.finishInvocation("invocation-1", 0, null);
 
+    assert.equal(finished.message.id, "message-assistant");
     assert.equal(storage.invocations.get("invocation-1").triggerMessageId, "message-user");
     assert.equal(storage.invocations.get("invocation-1").triggerType, "user-message");
 
@@ -90,11 +97,19 @@ test("durable recorder writes thread, window, message, and invocation data", () 
   }
 });
 
-test("finishWithAssistantMessage writes finish event and final message atomically", () => {
+/**
+ * Single suite for the public terminal API (completeInvocation only).
+ * Old finishInvocation / finishWithAssistantMessage tests were deleted, not renamed+kept.
+ */
+test("completeInvocation covers abort, final, atomic rollback, and rejects missing ids", () => {
   const storage = createStorage({ file: ":memory:" });
   const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
   try {
+    assert.equal(typeof recorder.completeInvocation, "function");
+    assert.equal(recorder.finishInvocation, undefined);
+    assert.equal(recorder.finishWithAssistantMessage, undefined);
+
     session.messages.push({
       id: "message-user",
       role: "user",
@@ -103,9 +118,10 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       createdAt: "2026-07-12T00:00:01.000Z",
     });
     recorder.mirrorLastMessage(session);
+
     recorder.startInvocation({
       session,
-      invocationId: "invocation-atomic",
+      invocationId: "inv-abort",
       threadId: session.id,
       agentId: "codex",
       providerKey: "codex:gpt-5.6-sol",
@@ -115,7 +131,30 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       triggerMessageId: "message-user",
       triggerType: "user-message",
     });
+    const aborted = recorder.completeInvocation({
+      invocationId: "inv-abort",
+      code: null,
+      signal: "SIGTERM",
+      reason: "aborted",
+      endPayload: { terminalState: "aborted", agent: "codex" },
+    });
+    assert.equal(aborted.reason, "aborted");
+    assert.equal(aborted.message, null);
+    assert.equal(aborted.invocation.state, "aborted");
+    assert.equal(storage.messages.listForThread("thread-1").length, 1);
 
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-atomic-fail",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+      startedAt: "2026-07-12T00:00:03.000Z",
+      triggerMessageId: "message-user",
+      triggerType: "user-message",
+    });
     const originalUpsert = storage.recall.upsert.bind(storage.recall);
     let messageRecallCalls = 0;
     storage.recall.upsert = (item) => {
@@ -125,69 +164,68 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       }
       return originalUpsert(item);
     };
-
     assert.throws(
       () =>
-        recorder.finishWithAssistantMessage({
-          invocationId: "invocation-atomic",
+        recorder.completeInvocation({
+          invocationId: "inv-atomic-fail",
           code: 0,
           signal: null,
           session,
           message: {
-            id: "message-assistant",
+            id: "message-assistant-fail",
             role: "assistant",
             agent: "codex",
             content: "done",
-            createdAt: "2026-07-12T00:00:03.000Z",
+            createdAt: "2026-07-12T00:00:04.000Z",
           },
         }),
       /message recall failed/
     );
-    assert.equal(storage.invocations.get("invocation-atomic").state, "failed");
-    assert.equal(storage.messages.get("message-assistant"), null);
+    assert.equal(storage.invocations.get("inv-atomic-fail").state, "failed");
+    assert.equal(storage.messages.get("message-assistant-fail"), null);
     assert.deepEqual(
-      storage.invocations.listEvents("invocation-atomic").map((event) => event.kind),
+      storage.invocations.listEvents("inv-atomic-fail").map((event) => event.kind),
       ["invocation-start", "invocation-end"]
     );
 
     storage.recall.upsert = originalUpsert;
     recorder.startInvocation({
       session,
-      invocationId: "invocation-atomic-success",
+      invocationId: "inv-final",
       threadId: session.id,
       agentId: "codex",
       providerKey: "codex:gpt-5.6-sol",
       workspaceKey: "base:C:/repo",
       capacityTokens: 200000,
-      startedAt: "2026-07-12T00:00:04.000Z",
+      startedAt: "2026-07-12T00:00:05.000Z",
       triggerMessageId: "message-user",
       triggerType: "user-message",
     });
-    const completed = recorder.finishWithAssistantMessage({
-      invocationId: "invocation-atomic-success",
+    const completed = recorder.completeInvocation({
+      invocationId: "inv-final",
       code: 0,
       signal: null,
+      reason: "assistant-final",
       session,
       message: {
-        id: "message-assistant",
+        id: "message-assistant-ok",
         role: "assistant",
         agent: "codex",
         content: "done",
-        createdAt: "2026-07-12T00:00:05.000Z",
+        createdAt: "2026-07-12T00:00:06.000Z",
       },
     });
+    assert.equal(completed.reason, "assistant-final");
     assert.equal(completed.invocation.state, "completed");
-    assert.equal(completed.message.id, "message-assistant");
+    assert.equal(completed.message.id, "message-assistant-ok");
     assert.deepEqual(
-      storage.invocations.listEvents("invocation-atomic").map((event) => event.kind),
+      storage.invocations.listEvents("inv-final").map((event) => event.kind),
       ["invocation-start", "invocation-end"]
     );
-    assert.deepEqual(
-      storage.invocations.listEvents("invocation-atomic-success").map((event) => event.kind),
-      ["invocation-start", "invocation-end"]
-    );
-    // Assistant must not rewrite the user-chosen lastAgent.
     assert.equal(storage.threads.get("thread-1").lastAgentId, "codex");
+
+    assert.equal(recorder.completeInvocation({}), null);
+    assert.equal(recorder.completeInvocation({ invocationId: "missing" }), null);
   } finally {
     recorder.close();
     storage.close();
@@ -240,7 +278,7 @@ test("deleting a thread suppresses late writes from its active invocation", () =
       recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "late" }),
       false
     );
-    assert.equal(recorder.finishInvocation("invocation-1", 0, null), null);
+    assert.equal(recorder.completeInvocation({ invocationId: "invocation-1", code: 0, signal: null }), null);
     assert.equal(errors.length, 0);
   } finally {
     recorder.close();

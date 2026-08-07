@@ -1,6 +1,11 @@
 /**
  * Process-local A2A handoff route registry: identity, idempotency, hop lifecycle.
- * Phase 3 — not durable across restarts; enough to stop double-route within a process.
+ *
+ * Durability (architecture-map D4): maps are **not** durable across restarts.
+ * They stop double-route within one Node process. Chat schedulers must bind/complete
+ * through `a2a-finalize` wrappers (`bindHandoffTargetInvocation` /
+ * `completeHandoffByTargetInvocation`), not by inventing a second hop store.
+ * Promoting hops to SQLite is a separate ADR/PR — do not silently dual-write here.
  */
 
 "use strict";

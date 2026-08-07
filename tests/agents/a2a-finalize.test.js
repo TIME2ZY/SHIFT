@@ -96,9 +96,7 @@ test("finalize enqueues complete handoff under balanced", () => {
     maxDepth: 15,
     policyMode: "balanced",
     sendSse: (kind, payload) => events.push({ kind, payload }),
-    transcript: {
-      appendEvent: (threadId, inv, kind, payload) => events.push({ threadId, inv, kind, payload }),
-    },
+
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });
 
@@ -223,9 +221,7 @@ test("finalize request_repair on worktree empty packet under balanced", () => {
     policyMode: "balanced",
     appendToSession: (sid, msg) => sessions.push({ sid, msg }),
     sendSse: (kind, payload) => events.push({ kind, payload }),
-    transcript: {
-      appendEvent: (_t, _i, kind, payload) => events.push({ kind, payload }),
-    },
+
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });
 

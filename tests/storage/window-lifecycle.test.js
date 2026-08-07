@@ -46,7 +46,7 @@ test("after seal the next invocation does not carry the old provider_session_id"
     });
     assert.equal(first.window.providerSessionId, "provider-session-old");
     assert.equal(first.window.generation, 1);
-    recorder.finishInvocation("inv-1", 0, null);
+    recorder.completeInvocation({ invocationId: "inv-1", code: 0, signal: null });
 
     const sealed = recorder.sealWindow(first.window.id, "context overflow");
     assert.equal(sealed.state, "sealed");
@@ -244,7 +244,7 @@ test("across 10 sealed windows original messages remain searchable and invocatio
         invocationId,
       });
       recorder.appendInvocationEvent(invocationId, "text.delta", { text: content });
-      recorder.finishInvocation(invocationId, 0, null);
+      recorder.completeInvocation({ invocationId: invocationId, code: 0, signal: null });
       if (generation === 7) targetInvocationId = invocationId;
       if (generation < 10) {
         recorder.sealWindow(run.window.id, "context overflow");
@@ -317,7 +317,7 @@ test("deleting a thread archives it (soft) without destroying L0 evidence", () =
     });
     recorder.mirrorLastMessage(session, { windowId: run.window.id });
     recorder.appendInvocationEvent("inv-del", "text.delta", { text: "payload" });
-    recorder.finishInvocation("inv-del", 0, null);
+    recorder.completeInvocation({ invocationId: "inv-del", code: 0, signal: null });
 
     // Product delete = archive (soft). L0 rows remain; active list hides the thread.
     assert.equal(recorder.archiveThread(session.id), true);
@@ -350,7 +350,7 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
 
     // Late dual-write from an in-flight callback / stream is suppressed in-process.
     assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
-    assert.equal(recorder.finishInvocation("inv-race", 0, null), null);
+    assert.equal(recorder.completeInvocation({ invocationId: "inv-race", code: 0, signal: null }), null);
     assert.equal(
       recorder.mirrorLastMessage(
         {

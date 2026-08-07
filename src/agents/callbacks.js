@@ -1,5 +1,4 @@
 const { getMaxA2ADepth } = require("./routing");
-const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { processWorkflowEvidenceOutput } = require("./workflow-evidence");
@@ -148,9 +147,12 @@ function summarizeHandoffOutcome(finalized) {
   };
 }
 
+/**
+ * Callback diagnostic events use the same sink priority as A2A route events (B-2):
+ * EventStore first, then durableRecorder — no transcript dual-write on the hot path.
+ */
 function appendCallbackEvent({
   eventStore,
-  transcript,
   durableRecorder,
   sessionId,
   invocationId,
@@ -161,9 +163,6 @@ function appendCallbackEvent({
   if (eventStore && typeof eventStore.append === "function") {
     eventStore.append({ threadId: sessionId, invocationId, kind, payload });
     return;
-  }
-  if (transcript && typeof transcript.appendEvent === "function") {
-    transcript.appendEvent(sessionId, invocationId, kind, payload);
   }
   if (durableRecorder && typeof durableRecorder.appendInvocationEvent === "function") {
     durableRecorder.appendInvocationEvent(invocationId, kind, payload);
@@ -202,6 +201,7 @@ function postMessage(
   const agent = record ? record.agentId : "unknown";
 
   if (appendToSession) {
+    // Explicit messageType (Phase B-3): mid-run callback is never assistant-final.
     appendToSession(
       thread.sessionId || threadId,
       {
@@ -209,6 +209,7 @@ function postMessage(
         agent,
         content,
         source: "callback",
+        messageType: "assistant-callback",
         invocationId,
       },
       { allowCreate: false }
@@ -222,7 +223,6 @@ function postMessage(
   if (currentInvocationId) {
     appendCallbackEvent({
       eventStore,
-      transcript,
       durableRecorder,
       sessionId: callbackSessionId,
       invocationId: currentInvocationId,
@@ -290,7 +290,6 @@ function postMessage(
     a2aCount: thread.a2aCount || 0,
     maxDepth: getMaxA2ADepth(),
     memoryCapture,
-    transcript,
     eventStore,
     durableRecorder,
     sendSse: (event, payload) => sendSse(thread.res, event, payload),
@@ -326,7 +325,6 @@ function postMessage(
   if (currentInvocationId) {
     appendCallbackEvent({
       eventStore,
-      transcript,
       durableRecorder,
       sessionId: callbackSessionId,
       invocationId: currentInvocationId,

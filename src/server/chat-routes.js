@@ -11,8 +11,12 @@ const {
 } = require("../agents/implementation-plan-gate");
 const { renderOutcomeEvidenceBlock } = require("../agents/outcome-evidence-gate");
 const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
-const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
-const handoffRouteRegistry = require("../agents/handoff-route-registry");
+const {
+  finalizeA2ARoutes,
+  bindHandoffTargetInvocation,
+  completeHandoffByTargetInvocation,
+  isEffectiveHandoffHop,
+} = require("../agents/a2a-finalize");
 const { createRunObservability } = require("../agents/run-observability");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 const { scanReplacementChars } = require("../shared/encoding-guard");
@@ -91,8 +95,7 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   sealAndRotateWindow: () => null,
   startInvocation: () => null,
   appendInvocationEvent: () => false,
-  finishInvocation: () => null,
-  finishWithAssistantMessage: () => null,
+  completeInvocation: () => null,
   bindProviderSession: () => false,
   addWindowUsage: () => false,
   setWindowUsageSnapshot: () => false,
@@ -838,7 +841,7 @@ function createChatRoutes({
         // Bind A2A hop → target invocation when this agent was started by a handoff.
         if (parentInvocationId && triggerType === "a2a-handoff") {
           try {
-            handoffRouteRegistry.bindTargetInvocation({
+            bindHandoffTargetInvocation({
               threadId: sessionId,
               sourceInvocationId: parentInvocationId,
               targetAgent: agent,
@@ -1295,13 +1298,19 @@ function createChatRoutes({
             if (!contextSealHandled) {
               sealContextWindow(ratio, "physical-ceiling-empty");
             }
-            durable.finishInvocation(activeInvocationId, code, signal, {
-              agent,
-              contentBytes: 0,
-              usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
-              fillRatioAtEnd: ratio,
-              sealerState: "sealed",
-              emptyEmergency: true,
+            durable.completeInvocation({
+              invocationId: activeInvocationId,
+              code,
+              signal,
+              reason: "empty-emergency",
+              endPayload: {
+                agent,
+                contentBytes: 0,
+                usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
+                fillRatioAtEnd: ratio,
+                sealerState: "sealed",
+                emptyEmergency: true,
+              },
             });
             const nextWin = storage?.windows?.getOpen?.({
               threadId: sessionId,
@@ -1338,13 +1347,20 @@ function createChatRoutes({
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           const abortInvId = threadCtx.currentInvocationId || invocationId;
-          durable.finishInvocation(abortInvId, code, signal, {
-            ...endPayload,
-            terminalState: "aborted",
-            supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
+          // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
+          durable.completeInvocation({
+            invocationId: abortInvId,
+            code,
+            signal,
+            reason: "aborted",
+            endPayload: {
+              ...endPayload,
+              terminalState: "aborted",
+              supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
+            },
           });
           try {
-            handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
+            completeHandoffByTargetInvocation(abortInvId, { ok: false });
           } catch {
             /* ignore */
           }
@@ -1360,9 +1376,15 @@ function createChatRoutes({
         // Clean zero-output exits (legacy mocks / silent success) may still persist "".
         const sealPressure = emergencyStop || sealPending || preCallRotated || contextSealedSseSent;
         if (!hasAssistantText && sealPressure) {
-          durable.finishInvocation(finalInvocationId, code, signal, {
-            ...endPayload,
-            emptyAssistant: true,
+          durable.completeInvocation({
+            invocationId: finalInvocationId,
+            code,
+            signal,
+            reason: "empty-under-seal",
+            endPayload: {
+              ...endPayload,
+              emptyAssistant: true,
+            },
           });
           sendSse(res, "error", {
             message: "Assistant produced no content after context pressure; request not completed.",
@@ -1396,11 +1418,12 @@ function createChatRoutes({
         };
 
         const completed =
-          durable.enabled && typeof durable.finishWithAssistantMessage === "function"
-            ? durable.finishWithAssistantMessage({
+          durable.enabled && typeof durable.completeInvocation === "function"
+            ? durable.completeInvocation({
                 invocationId: finalInvocationId,
                 code,
                 signal,
+                reason: "assistant-final",
                 endPayload,
                 session,
                 windowId: durableRun?.window?.id || null,
@@ -1452,9 +1475,9 @@ function createChatRoutes({
           usage: invocationUsage,
         });
 
-        // Close A2A hop when this agent was the handoff target.
+        // Close A2A hop when this agent was the handoff target (same module boundary as finalize).
         try {
-          const hop = handoffRouteRegistry.completeByTargetInvocation(finalInvocationId, {
+          const hop = completeHandoffByTargetInvocation(finalInvocationId, {
             ok: code === 0,
           });
           if (hop && !res.writableEnded && !res.destroyed) {
@@ -1464,7 +1487,7 @@ function createChatRoutes({
               targetInvocationId: hop.targetInvocationId,
               completeStatus: hop.completeStatus,
               routeStatus: hop.routeStatus,
-              effective: handoffRouteRegistry.isEffectiveA2aHop(hop),
+              effective: isEffectiveHandoffHop(hop),
             });
           }
         } catch (error) {

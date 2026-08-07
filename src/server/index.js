@@ -150,8 +150,8 @@ function createServer(options = {}) {
     embeddingRuntime: storageContext.embeddingRuntime,
     logger,
   });
+  // Collaboration events only — product memory uses memoryService.writeMemoryCandidate.
   const memoryCapture = createMemoryCapture({
-    memoryService,
     eventStore,
     allowTranscriptReplay: false,
     logger,

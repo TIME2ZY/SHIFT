@@ -43,7 +43,6 @@ function finalizeA2ARoutes(input = {}) {
       ? Math.floor(Number(input.maxDepth))
       : getMaxA2ADepth();
   const memoryCapture = input.memoryCapture || null;
-  const transcript = input.transcript || null;
   const durableRecorder = input.durableRecorder || null;
   const eventStore = input.eventStore || durableRecorder?.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
@@ -169,12 +168,11 @@ function finalizeA2ARoutes(input = {}) {
       summary,
       threadId: sessionId,
       invocationId,
-      transcript,
       eventStore,
       sendSse,
     });
 
-    // Memory capture: only when hasBlock (Wave M rules). Policy does not change capture.
+    // Collaboration event capture (handoff-captured) — not product memory rows (B-4).
     if (memoryCapture && typeof memoryCapture.captureHandoff === "function") {
       const capture = memoryCapture.captureHandoff({
         threadId: sessionId,
@@ -211,7 +209,6 @@ function finalizeA2ARoutes(input = {}) {
         toLabel,
         sessionId,
         invocationId,
-        transcript,
         durableRecorder,
         eventStore,
         sendSse,
@@ -261,7 +258,6 @@ function finalizeA2ARoutes(input = {}) {
         }
         appendRouteEvent({
           eventStore,
-          transcript,
           durableRecorder,
           sessionId,
           invocationId,
@@ -281,7 +277,6 @@ function finalizeA2ARoutes(input = {}) {
         repair,
         sessionId,
         invocationId,
-        transcript,
         durableRecorder,
         eventStore,
         sendSse,
@@ -336,7 +331,6 @@ function finalizeA2ARoutes(input = {}) {
       }
       appendRouteEvent({
         eventStore,
-        transcript,
         durableRecorder,
         sessionId,
         invocationId,
@@ -375,7 +369,6 @@ function finalizeA2ARoutes(input = {}) {
       toLabel,
       sessionId,
       invocationId,
-      transcript,
       durableRecorder,
       eventStore,
       sendSse,
@@ -448,10 +441,9 @@ function finalizeA2ARoutes(input = {}) {
   };
 }
 
-function emitHandoffParsed({ summary, threadId, invocationId, transcript, eventStore, sendSse }) {
+function emitHandoffParsed({ summary, threadId, invocationId, eventStore, sendSse }) {
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder: null,
     sessionId: threadId,
     invocationId,
@@ -467,7 +459,6 @@ function emitSkip({
   toLabel,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -503,7 +494,6 @@ function emitSkip({
   }
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,
@@ -521,7 +511,6 @@ function emitRepair({
   repair,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -549,7 +538,6 @@ function emitRepair({
   if (sendSse) sendSse("handoff-repair-needed", repair);
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,
@@ -571,7 +559,6 @@ function emitRoute({
   toLabel,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -628,7 +615,6 @@ function emitRoute({
   }
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,
@@ -652,9 +638,13 @@ function emitRoute({
   });
 }
 
+/**
+ * Single sink for A2A route diagnostics on the durable event path (Phase B-2).
+ * Prefer EventStore; fall back only to durableRecorder.appendInvocationEvent.
+ * Transcript dual-write is intentionally removed from the hot path.
+ */
 function appendRouteEvent({
   eventStore,
-  transcript,
   durableRecorder,
   sessionId,
   invocationId,
@@ -671,17 +661,36 @@ function appendRouteEvent({
     });
     return;
   }
-  // Legacy fallback when EventStore is not wired (unit tests).
-  if (transcript && typeof transcript.appendEvent === "function") {
-    transcript.appendEvent(sessionId, invocationId, kind, payload);
-  }
   if (durableRecorder && typeof durableRecorder.appendInvocationEvent === "function") {
     durableRecorder.appendInvocationEvent(invocationId, kind, payload);
   }
+  // No transcript fallback: unit tests assert via sendSse / return value; production
+  // always wires eventStore through createServer → durable recorder.
+}
+
+/**
+ * Scheduler-facing hop lifecycle (Phase B-2). Chat routes bind/complete through
+ * these wrappers so hop identity stays on the same module boundary as finalize.
+ * Registry remains process-local until a durable hop store is adopted (map D4).
+ */
+function bindHandoffTargetInvocation(input) {
+  return handoffRouteRegistry.bindTargetInvocation(input);
+}
+
+function completeHandoffByTargetInvocation(targetInvocationId, options) {
+  return handoffRouteRegistry.completeByTargetInvocation(targetInvocationId, options);
+}
+
+function isEffectiveHandoffHop(record) {
+  return handoffRouteRegistry.isEffectiveA2aHop(record);
 }
 
 module.exports = {
   finalizeA2ARoutes,
+  bindHandoffTargetInvocation,
+  completeHandoffByTargetInvocation,
+  isEffectiveHandoffHop,
   handoffRouteRegistry,
   collabTaskRegistry,
+  // appendRouteEvent stays module-private (not a second public event API).
 };
