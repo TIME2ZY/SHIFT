@@ -1,3 +1,12 @@
+/**
+ * A2A route finalization (Phase C-3 boundary).
+ *
+ * Owns: extract (via handoff-parse) → evaluate → policy → capture → enqueue / repair / skip
+ *        + hop bind/complete wrappers for chat schedulers.
+ * Does not own: fence parsing implementation (handoff-parse), receive-bundle render (handoff),
+ *               HTTP chat orchestration (chat-routes / chat-worklist).
+ */
+
 const agentHandoff = require("./handoff");
 const { parseA2AMentions, getMaxA2ADepth } = require("./routing");
 const {

@@ -1,9 +1,9 @@
 # Architecture Map — Phase A（写路径与双路径清单）
 
-> **状态：** Phase A + Phase B（B-1…B-4）完成（2026-08-07）  
-> **范围：** 写路径收口；产品能力面不变。  
-> **依据：** `AGENTS.md` §1 主链路、§7 阶段 A/B。  
-> **下一步：** 阶段 C — 拆 `chat-routes` / `recall-service`（零行为）。
+> **状态：** Phase A + B + C 完成  
+> **范围：** 写路径收口 + 按用例拆肥文件；产品能力面不变。  
+> **依据：** `AGENTS.md` §1 主链路、§7 阶段 A/B/C。  
+> **下一步：** 阶段 D — 子系统收敛（memory 微文件、legacy 出热路径等）。
 
 ---
 
@@ -145,7 +145,7 @@ HTTP createServer (src/server/index.js)
 | D7 | Memory 双语义 | event capture ≠ product write；禁半接线 | **已降** | B-4 ✅ |
 | D8 | Collab 任务 vs hop 注册表 | tasks 可 SQLite；hop 进程内（同 D4） | 中 | 随 D4 |
 | D9 | worktree 双地图 | session Map vs manager 文件（已注释） | 低 | 维持 |
-| D10 | 巨型编排文件 | `chat-routes.js` 过大 | 高（可维护性） | **阶段 C** |
+| D10 | 巨型编排文件 | ~~单文件 chat-routes~~ → routes + worklist + usage；recall-ranking 抽出；handoff-parse 抽出 | **已降** | C ✅ |
 
 **已收敛（保护，勿回退）：**
 
@@ -218,7 +218,7 @@ HTTP createServer (src/server/index.js)
 2. **B-2 Handoff 生命周期** ✅（D4 文档冻结，不升 SQLite）  
 3. **B-3 Message 契约** ✅  
 4. **B-4 Memory 语义** ✅  
-5. **阶段 C** 拆 `chat-routes`（下一步，非 B 范围）
+5. **阶段 C** 拆肥文件 ✅ — chat-worklist / recall-ranking / handoff-parse
 
 ---
 

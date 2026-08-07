@@ -269,18 +269,13 @@ AI 不得在未确认时启动 XL。
 3. **Message 持久化** ✅ — `appendMessage` 唯一物理写；callback 显式 `assistant-callback`  
 4. **Memory 写入** ✅ — 产品 `writeMemoryCandidate`；协作事件 `memoryCapture`（拒 `memoryService` 半接线）
 
-下一阶段：**C 拆肥文件**（`chat-routes` / `recall-service`），零行为优先。
+### 阶段 C — 拆肥文件 ✅（零行为优先）
 
-### 阶段 C — 拆肥文件（无行为变更优先）
+1. **chat** ✅ — `chat-routes.js`（HTTP 组装）+ `chat-worklist.js`（agent 轮次）+ `chat-usage.js`（计费/字数）  
+2. **recall** ✅ — `recall-service.js`（编排）+ `recall-ranking.js`（打分/融合/hit 映射）  
+3. **handoff** ✅ — `handoff-parse.js`（parse/evaluate）+ `handoff.js`（render/receive-bundle）；`a2a-finalize` 文档化边界  
 
-优先顺序：
-
-1. `src/server/chat-routes.js` → 按 attach-stream / send-message / seal / handoff-trigger 拆到同目录模块，routes 只组装。
-2. `src/storage/recall-service.js` → query 规划 / FTS / hybrid merge / 截断策略分离。
-3. `src/agents/handoff.js` + `a2a-finalize.js` → parse / route / finalize 边界清晰。
-
-完成标准：按用例边界拆清、routes 变薄、测试仍绿、**行为不变**；  
-单文件行数下降是**伴随结果**，不是本阶段 KPI。禁止借拆分加入新行为。
+完成标准：按用例边界拆清、测试仍绿、**行为不变**；行数下降是伴随结果。
 
 ### 阶段 D — 子系统收敛（能力保留，模块变少）
 
