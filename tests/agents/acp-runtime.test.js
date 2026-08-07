@@ -67,12 +67,91 @@ test("ACP runtime maps message, thought, and tool lifecycle to canonical events"
   assert.ok(seen.some((event) => event.type === "thinking.delta"));
   const started = seen.find((event) => event.type === "tool.started");
   assert.deepEqual(started.args, { target_file: "package.json" });
+  assert.equal(started.title, "Read package.json");
   const finished = seen.find((event) => event.type === "tool.finished");
   assert.equal(finished.toolName, "read_file");
+  assert.equal(finished.title, "Read `package.json`");
   assert.equal(finished.status, "ok");
   assert.deepEqual(finished.result, { name: "shift-console" });
   assert.ok(seen.some((event) => event.type === "text.delta" && event.text === "done"));
   assert.ok(!seen.some((event) => event.type === "file.changed"));
+});
+
+test("ACP spawn_subagent maps meta name/label and human title on finish", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const seen = [];
+  const push = (update) => {
+    seen.push(
+      ...runtime.transform({ type: "acp.session_update", sessionId: "s-sub", update }, ctx)
+    );
+  };
+
+  push({
+    sessionUpdate: "tool_call",
+    toolCallId: "call-spawn",
+    title: "spawn_subagent",
+    rawInput: {
+      description: "List top-level dir entries",
+      prompt: "list root",
+      subagent_type: "explore",
+      capability_mode: "read-only",
+    },
+    _meta: {
+      "x.ai/tool": {
+        name: "spawn_subagent",
+        kind: "task",
+        label: "Subagent",
+        read_only: false,
+      },
+      subagentBackground: true,
+    },
+  });
+  push({
+    sessionUpdate: "tool_call_update",
+    toolCallId: "call-spawn",
+    title: "List top-level dir entries",
+    kind: "other",
+    rawInput: {
+      variant: "Task",
+      description: "List top-level dir entries",
+      prompt: "list root",
+      subagent_type: "explore",
+      run_in_background: true,
+    },
+    _meta: {
+      "x.ai/tool": {
+        name: "spawn_subagent",
+        kind: "task",
+        label: "Subagent",
+      },
+    },
+  });
+  push({
+    sessionUpdate: "tool_call_update",
+    toolCallId: "call-spawn",
+    status: "completed",
+    rawOutput: {
+      type: "Text",
+      text: "Subagent started in background.\nsubagent_id: abc",
+    },
+  });
+
+  const started = seen.find((event) => event.type === "tool.started");
+  assert.equal(started.toolName, "spawn_subagent");
+  assert.equal(started.label, "Subagent");
+  assert.equal(started.toolKind, "task");
+  assert.equal(started.args.subagent_type, "explore");
+
+  const finished = seen.find((event) => event.type === "tool.finished");
+  assert.equal(finished.toolName, "spawn_subagent");
+  assert.equal(finished.title, "List top-level dir entries");
+  assert.equal(finished.label, "Subagent");
+  assert.equal(finished.toolKind, "task");
+  assert.equal(finished.status, "ok");
+  assert.equal(finished.args.subagent_type, "explore");
+  assert.equal(finished.args.run_in_background, true);
+  assert.equal(finished.args.description, "List top-level dir entries");
+  assert.match(String(finished.result?.text || ""), /subagent_id/);
 });
 
 test("ACP edit locations map to file.changed and plans map to progress", () => {

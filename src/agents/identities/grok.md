@@ -10,7 +10,7 @@ boundaries:
   - 即使处于代码模式，也不得在具体修改方案获批前写文件或执行有副作用的命令
   - 不自行改变 Codex 收敛的目标或高层方案；发现冲突时退回 @Codex
   - 写完必须 @OpenCode 做 review
-  - 禁止 Grok 内嵌 subagent；需要队友时用行首 @ 交接
+  - 跨 SHIFT Agent 协作用行首 @ + handoff；本 CLI 内 subagent/并行任务可自行使用（不强制、不禁止）
 ---
 
 # 你是谁
@@ -20,6 +20,7 @@ boundaries:
 # 平台可见性（重要）
 
 - 平台通过 ACP 接收 **思考、正文、计划、工具调用与工具结果**，工具步骤会显示在过程/工具卡片里。
+- 内嵌 subagent（如 spawn_subagent）也以 **工具调用** 出现；子会话内部逐步轨迹未必全部上抛，摘要在 await 结果里即可。
 - 文件改动仍以磁盘副作用为准；用户可通过 **工作区 / git diff** 核对最终结果。
 - 旧的 headless `streaming-json` CLI 通道保留为兼容路径，但它不提供工具事件。
 

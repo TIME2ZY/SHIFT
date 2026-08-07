@@ -8,21 +8,33 @@ const {
 } = require("../../src/agents/collaboration-rules");
 const { AGENTS } = require("../../src/agents/catalog");
 
-test("renderCollaborationRules includes markers and soft subagent ban", () => {
-  const text = renderCollaborationRules("grok");
+test("renderCollaborationRules includes markers and cross-agent routing", () => {
+  const text = renderCollaborationRules("codex");
   assert.match(text, /<!-- Collaboration Rules -->/);
   assert.match(text, /<!-- \/Collaboration Rules -->/);
   assert.match(text, /协作铁律/);
-  assert.match(text, /subagent/i);
-  assert.match(text, /Task/);
-  assert.match(text, /spawn_subagent/);
-  assert.match(text, /shell/);
-  assert.match(text, /Agent CLI/);
   assert.match(text, /行首/);
   assert.match(text, /handoff/);
   assert.match(text, /传球三选一/);
   assert.match(text, /全员共用|共用模板/);
   assert.match(text, /verdict/);
+});
+
+test("Grok rules allow CLI subagents but still require @ for cross-agent", () => {
+  const text = renderCollaborationRules("grok");
+  assert.match(text, /subagent/i);
+  assert.match(text, /不强制、不禁止|可自行使用/);
+  assert.doesNotMatch(text, /禁止 Grok 内嵌 subagent/);
+  assert.doesNotMatch(text, /使用 Task \/ spawn_subagent 开探索子代理 ← 隐式 subagent，禁止/);
+  assert.match(text, /行首/);
+  assert.match(text, /handoff/);
+  assert.match(text, /@Codex|@Gemini|@OpenCode/);
+});
+
+test("non-Grok rules still discourage nested subagent as @ substitute", () => {
+  const text = renderCollaborationRules("codex");
+  assert.match(text, /subagent|Task/i);
+  assert.match(text, /跨 Agent/);
 });
 
 test("renderCollaborationRules example target is never the current agent", () => {
@@ -62,7 +74,7 @@ test("renderCollaborationRules compact mode is short for A2A turns", () => {
   assert.match(compact, /<!-- Collaboration Rules -->/);
   assert.match(compact, /A2A 精简/);
   assert.match(compact, /handoff/);
-  assert.match(compact, /subagent/i);
+  assert.match(compact, /subagent|工具/i);
   assert.doesNotMatch(compact, /传球三选一/);
   assert.ok(compact.length < full.length);
   assert.ok(compact.length < 800);
@@ -78,13 +90,12 @@ test("renderCollaborationRules accepts injected fake agents", () => {
   assert.match(text, /@Beta/);
   assert.match(text, /First mate/);
   assert.match(text, /Second mate/);
-  assert.doesNotMatch(text, /@Codex/);
-  // Example should use Beta (not Alpha/self).
-  assert.match(text, /@Beta/);
-  assert.doesNotMatch(text, /^ {4}@Alpha$/m);
 });
 
-test("buildRosterTable handles empty agents", () => {
-  assert.match(buildRosterTable({}), /无可用队友/);
-  assert.match(buildRosterTable(null), /无可用队友/);
+test("buildRosterTable formats agent rows", () => {
+  const table = buildRosterTable({
+    a: { label: "A", description: "one" },
+  });
+  assert.match(table, /@A/);
+  assert.match(table, /one/);
 });

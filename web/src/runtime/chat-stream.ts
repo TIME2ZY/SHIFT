@@ -31,6 +31,9 @@ interface CanonicalAgentEvent {
   text?: string;
   error?: string;
   toolName?: string;
+  title?: string;
+  label?: string;
+  toolKind?: string;
   toolId?: string;
   status?: string;
   output?: string;
@@ -44,6 +47,39 @@ interface CanonicalAgentEvent {
     text?: string;
     status?: string;
   }>;
+}
+
+/** Prefer human text for TaskOutput / Text tool results over raw JSON dumps. */
+export function formatToolResultForDisplay(result: unknown): string {
+  if (result == null) return "";
+  if (typeof result === "string") return result;
+  if (typeof result !== "object") return String(result);
+  const obj = result as Record<string, unknown>;
+  if (typeof obj.text === "string" && obj.text.trim()) return obj.text;
+  const nested = obj.Result ?? obj.result;
+  if (nested && typeof nested === "object") {
+    const r = nested as Record<string, unknown>;
+    if (typeof r.output === "string" && r.output.trim()) {
+      const meta: string[] = [];
+      if (typeof r.status === "string") meta.push(r.status);
+      if (typeof r.exit_code === "number") meta.push(`exit ${r.exit_code}`);
+      if (typeof r.duration_secs === "number") meta.push(`${r.duration_secs}s`);
+      const head = meta.length ? `${meta.join(" · ")}\n` : "";
+      return `${head}${r.output}`;
+    }
+    if (typeof r.command === "string" && r.command.trim()) {
+      return r.command;
+    }
+  }
+  if (obj.Content && typeof obj.Content === "object") {
+    const c = obj.Content as Record<string, unknown>;
+    if (typeof c.content === "string") return c.content;
+  }
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
 }
 
 function objectData(data: unknown): Record<string, unknown> {
@@ -138,6 +174,9 @@ export async function runChatStream(
             toolId: agentEvent.toolId,
             toolName: agentEvent.toolName,
             input: agentEvent.args,
+            title: agentEvent.title,
+            label: agentEvent.label,
+            toolKind: agentEvent.toolKind,
           });
         } else if (agentEvent.type === "tool.finished" && agentEvent.toolId) {
           store.dispatch({
@@ -148,14 +187,18 @@ export async function runChatStream(
             toolId: agentEvent.toolId,
             toolName: agentEvent.toolName,
             failed: ["error", "failed"].includes(agentEvent.status || ""),
+            input: agentEvent.args,
             output:
               agentEvent.output ??
               (agentEvent.result === undefined
                 ? undefined
                 : typeof agentEvent.result === "string"
                   ? agentEvent.result
-                  : JSON.stringify(agentEvent.result, null, 2)),
+                  : formatToolResultForDisplay(agentEvent.result)),
             error: agentEvent.error,
+            title: agentEvent.title,
+            label: agentEvent.label,
+            toolKind: agentEvent.toolKind,
           });
         } else if (agentEvent.type === "file.changed" && agentEvent.path) {
           store.dispatch({

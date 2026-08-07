@@ -1,5 +1,12 @@
 import { useState } from "react";
 import type { InvocationTool } from "./invocation-types";
+import {
+  formatToolArgsForDisplay,
+  formatToolPrimaryTitle,
+  formatToolSecondaryId,
+  isSubagentTool,
+  subagentTypeLabel,
+} from "./tool-display";
 
 function durationLabel(durationMs?: number): string {
   if (durationMs === undefined) return "";
@@ -13,30 +20,51 @@ function statusLabel(status: InvocationTool["status"]): string {
   return "完成";
 }
 
+function looksLikeBackgroundStart(output?: string): boolean {
+  if (!output) return false;
+  return /subagent started in background|subagent_id:/i.test(output);
+}
+
 export function ToolCallDetails({ tool }: { tool: InvocationTool }) {
   const output = tool.error || tool.output || "";
-  const input = tool.input ? JSON.stringify(tool.input, null, 2) : "";
+  const inputText = formatToolArgsForDisplay(tool.toolName, tool.input, tool.toolKind);
   const [expanded, setExpanded] = useState(false);
+  const primary = formatToolPrimaryTitle(tool);
+  const secondaryId = formatToolSecondaryId(tool);
+  const subagent = isSubagentTool(tool.toolName, tool.input, tool.toolKind);
+  const subType = subagentTypeLabel(tool.input);
+  const backgroundStarted =
+    subagent && tool.status === "done" && looksLikeBackgroundStart(tool.output);
 
   return (
     <details
       className="react-tool-call"
       data-status={tool.status}
+      data-subagent={subagent ? "true" : undefined}
       open={expanded}
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
       <summary>
         <span className="react-tool-status" aria-hidden="true" />
-        <strong>{tool.toolName}</strong>
+        <strong>{primary}</strong>
+        {subagent ? (
+          <span className="react-tool-badge">
+            子代理{subType ? ` · ${subType}` : tool.label ? ` · ${tool.label}` : ""}
+          </span>
+        ) : tool.label && tool.label !== primary ? (
+          <span className="react-tool-badge">{tool.label}</span>
+        ) : null}
+        {backgroundStarted ? <span className="react-tool-badge">已启动</span> : null}
         <small>{statusLabel(tool.status)}</small>
         {tool.durationMs !== undefined ? <time>{durationLabel(tool.durationMs)}</time> : null}
+        {secondaryId ? <code className="react-tool-id">{secondaryId}</code> : null}
       </summary>
       <div className="react-tool-call-body">
-        {input ? (
+        {inputText ? (
           <section>
             <h4>调用参数</h4>
             <pre>
-              <code>{input}</code>
+              <code>{inputText}</code>
             </pre>
           </section>
         ) : null}
@@ -61,7 +89,7 @@ export function ToolCallDetails({ tool }: { tool: InvocationTool }) {
             </ul>
           </section>
         ) : null}
-        {!input && !output && !tool.changedFiles.length ? (
+        {!inputText && !output && !tool.changedFiles.length ? (
           <p className="react-tool-empty">该工具没有返回可展示的详情。</p>
         ) : null}
       </div>

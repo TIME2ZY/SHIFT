@@ -40,7 +40,7 @@ test("buildInvocation for grok spawns local grok CLI headless", () => {
   assert.ok(inv.args.includes("--reasoning-effort"));
   assert.ok(inv.args.includes("high"));
   assert.ok(inv.args.includes("--always-approve"));
-  assert.ok(inv.args.includes("--no-subagents"));
+  assert.ok(!inv.args.includes("--no-subagents"), "subagents allowed by default");
 });
 
 test("grok capabilities expose ACP tools while retaining CLI transport metadata", () => {
@@ -53,15 +53,15 @@ test("grok capabilities expose ACP tools while retaining CLI transport metadata"
   assert.equal(adapter.cliCapabilities.tools, false);
 });
 
-test("buildInvocation can re-enable subagents via providerOptions", () => {
+test("buildInvocation can disable subagents via providerOptions.noSubagents=true", () => {
   const inv = buildInvocation(
     {
       ...AGENTS.grok,
-      providerOptions: { noSubagents: false },
+      providerOptions: { noSubagents: true },
     },
     "x"
   );
-  assert.ok(!inv.args.includes("--no-subagents"));
+  assert.ok(inv.args.includes("--no-subagents"));
 });
 
 test("buildInvocation for grok resumes with -r session id", () => {

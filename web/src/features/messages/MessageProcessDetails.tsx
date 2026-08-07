@@ -18,6 +18,9 @@ function liveTools(message?: LiveMessage): InvocationTool[] {
     input: tool.input,
     output: tool.output,
     error: tool.error,
+    title: tool.title,
+    label: tool.label,
+    toolKind: tool.toolKind,
     changedFiles: [],
   }));
 }

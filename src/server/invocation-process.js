@@ -1,14 +1,43 @@
 const { classifyShellOutcome } = require("../agents/tool-classification");
+const { formatToolResultForDisplay } = require("../agents/tool-result-format");
 
 const MAX_TOOL_DETAIL_CHARS = 40 * 1024;
 
 function textValue(value) {
   if (typeof value === "string") return value;
   if (value === undefined || value === null) return "";
+  // Prefer human-friendly tool result formatting before JSON dump.
+  if (typeof value === "object") {
+    const formatted = formatToolResultForDisplay(value);
+    if (formatted) return formatted;
+  }
   try {
     return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
+  }
+}
+
+function assignToolDisplayFields(current, payload) {
+  if (typeof payload.title === "string" && payload.title.trim()) {
+    current.title = payload.title.trim();
+  }
+  if (typeof payload.label === "string" && payload.label.trim()) {
+    current.label = payload.label.trim();
+  }
+  if (typeof payload.toolKind === "string" && payload.toolKind.trim()) {
+    current.toolKind = payload.toolKind.trim();
+  }
+}
+
+function mergeToolInput(current, payload) {
+  if (!payload.args || typeof payload.args !== "object" || Array.isArray(payload.args)) {
+    return;
+  }
+  if (current.input && typeof current.input === "object" && !Array.isArray(current.input)) {
+    current.input = { ...current.input, ...payload.args };
+  } else {
+    current.input = { ...payload.args };
   }
 }
 
@@ -121,12 +150,13 @@ function projectInvocationProcess(invocationId, events = []) {
         });
       }
       current.toolName = String(payload.toolName || current.toolName || "tool");
+      assignToolDisplayFields(current, payload);
+      mergeToolInput(current, payload);
 
       if (kind === "tool.started") {
         current.status = "running";
         const startedAt = eventTime(event);
         if (startedAt !== undefined) current.startedAt = startedAt;
-        if (payload.args && typeof payload.args === "object") current.input = payload.args;
       } else {
         const outcome = classifyShellOutcome(payload, {
           toolName: current.toolName,
@@ -139,9 +169,6 @@ function projectInvocationProcess(invocationId, events = []) {
         const finishedAt = eventTime(event);
         if (finishedAt !== undefined) current.finishedAt = finishedAt;
         if (!current.startedAt && payload.startedAt) current.startedAt = payload.startedAt;
-        if (payload.args && typeof payload.args === "object" && !current.input) {
-          current.input = payload.args;
-        }
         const outputValue = toolOutputValue(payload, failed);
         const output = limitedText(outputValue);
         if (output.text) {
