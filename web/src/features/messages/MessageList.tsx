@@ -1,5 +1,9 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
+import {
+  isAssistantCallbackMessage,
+  isAssistantFinalMessage,
+} from "../../shared/contracts/messages";
 import { AgentAvatar, UserAvatar, agentColorSlot, resolveAgent } from "../agents/AgentAvatar";
 import type { AgentSummary } from "../agents/types";
 import type { PersistedMessage } from "./types";
@@ -74,11 +78,11 @@ function messageIdentity(message: PersistedMessage, index: number): string {
 }
 
 function isAssistantCallback(message: PersistedMessage): boolean {
-  return message.messageType === "assistant-callback";
+  return isAssistantCallbackMessage(message);
 }
 
 function isAssistantFinal(message: PersistedMessage): boolean {
-  return message.messageType === "assistant-final";
+  return isAssistantFinalMessage(message);
 }
 
 /**
