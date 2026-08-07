@@ -846,6 +846,18 @@ const MIGRATIONS = Object.freeze([
         ON collaboration_task_events(thread_id, created_at, id);
     `,
   },
+  {
+    version: 21,
+    name: "codex_context_capacity_272k",
+    sql: `
+      -- Align open Codex windows with catalog contextTokens (272k, native compact @ 90%).
+      UPDATE context_windows
+      SET capacity_tokens = 272000
+      WHERE agent_id = 'codex'
+        AND state IN ('active', 'sealing')
+        AND capacity_tokens = 258000;
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

@@ -4,6 +4,7 @@ const {
   DEFAULT_RESERVE_RATIO,
   getAgentModelProfile,
 } = require("../agents/catalog");
+const { resolveSealThresholds } = require("./context-budget");
 const { ENV } = require("../shared/brand");
 
 const CHARS_PER_TOKEN = 4;
@@ -24,6 +25,28 @@ function getAgentReserveRatio(agentId) {
   return modelProfile && typeof modelProfile.reserveRatio === "number"
     ? modelProfile.reserveRatio
     : DEFAULT_RESERVE_RATIO;
+}
+
+/**
+ * Native-compact-aware seal budget for an agent (usable + physical thresholds).
+ * @param {string} agentId
+ * @param {{ capacityTokens?: number, reserveRatio?: number }} [opts]
+ */
+function getAgentSealThresholds(agentId, opts = {}) {
+  const modelProfile = getAgentModelProfile(agentId) || {};
+  const capacityTokens =
+    typeof opts.capacityTokens === "number" && opts.capacityTokens > 0
+      ? opts.capacityTokens
+      : getAgentCapacity(agentId);
+  const reserveRatio =
+    typeof opts.reserveRatio === "number"
+      ? opts.reserveRatio
+      : getAgentReserveRatio(agentId);
+  return resolveSealThresholds({
+    ...modelProfile,
+    contextTokens: capacityTokens,
+    reserveRatio,
+  });
 }
 
 function makeTracker(agentId, opts = {}) {
@@ -167,6 +190,7 @@ module.exports = {
   makeTracker,
   getAgentCapacity,
   getAgentReserveRatio,
+  getAgentSealThresholds,
   CHARS_PER_TOKEN,
   DEFAULT_CAPACITY_TOKENS,
   DEFAULT_RESERVE_RATIO,
