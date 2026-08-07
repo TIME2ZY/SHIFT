@@ -85,6 +85,91 @@ test("projectInvocationProcess restores thinking, tools, progress, and changed f
   assert.deepEqual(process.changedFiles, [{ path: "web/src/App.tsx", changeType: "modified" }]);
 });
 
+test("projectInvocationProcess keeps title/label/toolKind and merges finish args", () => {
+  const process = projectInvocationProcess("i-sub", [
+    {
+      eventNo: 1,
+      kind: "tool.started",
+      ts: "2026-08-07T00:00:00.000Z",
+      payload: {
+        toolId: "sp1",
+        toolName: "spawn_subagent",
+        title: "spawn_subagent",
+        label: "Subagent",
+        toolKind: "task",
+        args: { description: "List dirs" },
+      },
+    },
+    {
+      eventNo: 2,
+      kind: "tool.finished",
+      ts: "2026-08-07T00:00:05.000Z",
+      payload: {
+        toolId: "sp1",
+        toolName: "spawn_subagent",
+        title: "List top-level dir entries",
+        label: "Subagent",
+        toolKind: "task",
+        args: {
+          description: "List dirs",
+          subagent_type: "explore",
+          run_in_background: true,
+        },
+        result: {
+          type: "Text",
+          text: "Subagent started in background.\nsubagent_id: abc",
+        },
+      },
+    },
+    { eventNo: 3, kind: "run.finished", payload: { exitCode: 0 } },
+  ]);
+
+  assert.equal(process.tools[0].toolName, "spawn_subagent");
+  assert.equal(process.tools[0].title, "List top-level dir entries");
+  assert.equal(process.tools[0].label, "Subagent");
+  assert.equal(process.tools[0].toolKind, "task");
+  assert.deepEqual(process.tools[0].input, {
+    description: "List dirs",
+    subagent_type: "explore",
+    run_in_background: true,
+  });
+  assert.match(process.tools[0].output, /subagent_id: abc/);
+  assert.doesNotMatch(process.tools[0].output, /^\{/);
+});
+
+test("projectInvocationProcess formats TaskOutput results for display", () => {
+  const process = projectInvocationProcess("i-await", [
+    {
+      eventNo: 1,
+      kind: "tool.finished",
+      payload: {
+        toolId: "await1",
+        toolName: "get_command_or_subagent_output",
+        title: "[subagent:explore] done",
+        label: "Background Task",
+        toolKind: "background_task_action",
+        args: { task_ids: ["abc"], timeout_ms: 60000 },
+        result: {
+          type: "TaskOutput",
+          Result: {
+            status: "completed",
+            exit_code: 0,
+            duration_secs: 5.3,
+            output: "18 top-level entries",
+          },
+        },
+      },
+    },
+    { eventNo: 2, kind: "run.finished", payload: { exitCode: 0 } },
+  ]);
+
+  assert.equal(process.tools[0].title, "[subagent:explore] done");
+  assert.equal(process.tools[0].label, "Background Task");
+  assert.deepEqual(process.tools[0].input.task_ids, ["abc"]);
+  assert.match(process.tools[0].output, /completed/);
+  assert.match(process.tools[0].output, /18 top-level entries/);
+});
+
 test("projectInvocationProcess keeps orphan finishes and truncates large output", () => {
   const process = projectInvocationProcess("i2", [
     {

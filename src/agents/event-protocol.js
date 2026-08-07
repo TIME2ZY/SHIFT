@@ -1,7 +1,8 @@
 /** Canonical agent event protocol (provider adapters → server → frontend).
  *
- * Platform contract only. CLI-native nested subagents are NOT part of this
- * protocol — cross-agent work uses platform @ / handoff (see collaboration-rules).
+ * Platform contract only. Nested subagents are not first-class events; they
+ * surface as tool.* (e.g. spawn_subagent / get_command_or_subagent_output).
+ * Cross-agent work uses platform @ / handoff (see collaboration-rules).
  * Shell/command executions map to tool.* (toolName often "command_execution" / "bash").
  */
 const PROTOCOL_VERSION = 2;
@@ -36,6 +37,9 @@ const FIELD_TYPES = {
   path: "string",
   toolName: "string",
   toolId: "string",
+  title: "string",
+  label: "string",
+  toolKind: "string",
   items: "array",
   exitCode: "numberOrNull",
   signal: "stringOrNull",
@@ -86,6 +90,9 @@ const STRING_COERCE_FIELDS = [
   "path",
   "toolName",
   "toolId",
+  "title",
+  "label",
+  "toolKind",
   "sessionId",
   "status",
   "failureSource",

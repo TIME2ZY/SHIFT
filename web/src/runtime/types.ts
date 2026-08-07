@@ -19,6 +19,12 @@ export interface RunTool {
   input?: Record<string, unknown>;
   output?: string;
   error?: string;
+  /** Human-readable title from provider (may differ from stable name). */
+  title?: string;
+  /** Vendor label e.g. "Subagent". */
+  label?: string;
+  /** Vendor kind e.g. "task" | "background_task_action". */
+  toolKind?: string;
 }
 
 export interface RunProgressItem {
@@ -100,6 +106,9 @@ export type SessionRunAction =
       toolId: string;
       toolName: string;
       input?: Record<string, unknown>;
+      title?: string;
+      label?: string;
+      toolKind?: string;
     }
   | {
       type: "tool/finished";
@@ -109,8 +118,12 @@ export type SessionRunAction =
       toolId: string;
       toolName?: string;
       failed?: boolean;
+      input?: Record<string, unknown>;
       output?: string;
       error?: string;
+      title?: string;
+      label?: string;
+      toolKind?: string;
     }
   | {
       type: "progress/updated";

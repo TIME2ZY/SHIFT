@@ -9,7 +9,8 @@ const { firstNonEmpty, resolveProxy } = require("../proxy");
  *
  * Child process is the local `grok` binary (same pattern as codex / opencode):
  *   grok -p "..." --output-format streaming-json -m grok-4.5 \
- *     --reasoning-effort high --always-approve --no-subagents ...
+ *     --reasoning-effort high --always-approve ...
+ *   (--no-subagents only when providerOptions.noSubagents === true)
  *
  * Official / observed streaming-json (headless projector) event types:
  *   { "type": "thought", "data": "..." }   // often 1 word / few chars each
@@ -342,8 +343,9 @@ const grokProvider = {
     const args = ["-p", prompt, "--output-format", "streaming-json"];
     if (providerOptions.alwaysApprove !== false) args.push("--always-approve");
     if (providerOptions.autoUpdate !== true) args.push("--no-auto-update");
-    // Platform collaboration is @/handoff — block CLI-native nested agents.
-    if (providerOptions.noSubagents !== false) args.push("--no-subagents");
+    // Nested subagents are allowed by default (Grok strength). Opt out only when
+    // providerOptions.noSubagents === true. Cross-agent work still uses @/handoff.
+    if (providerOptions.noSubagents === true) args.push("--no-subagents");
     if (config.model) args.push("-m", config.model);
     if (effort) args.push("--reasoning-effort", effort);
     if (config.resumeSessionId) args.push("-r", config.resumeSessionId);

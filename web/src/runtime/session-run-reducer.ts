@@ -160,8 +160,11 @@ export function sessionRunReducer(
                 {
                   id: action.toolId,
                   name: action.toolName,
-                  status: "running",
+                  status: "running" as const,
                   input: action.input,
+                  title: action.title,
+                  label: action.label,
+                  toolKind: action.toolKind,
                 },
               ],
               timeline: appendTimelineTool(current.timeline, action.toolId),
@@ -179,12 +182,26 @@ export function sessionRunReducer(
         };
         const existingTools = current.tools || [];
         const matched = existingTools.some((tool) => tool.id === action.toolId);
+        const mergeInput = (
+          previous?: Record<string, unknown>,
+          next?: Record<string, unknown>
+        ): Record<string, unknown> | undefined => {
+          if (next && typeof next === "object") {
+            if (previous && typeof previous === "object") return { ...previous, ...next };
+            return { ...next };
+          }
+          return previous;
+        };
         const finishedTool = {
           id: action.toolId,
           name: action.toolName || "tool",
           status: action.failed ? ("error" as const) : ("done" as const),
+          input: mergeInput(undefined, action.input),
           output: action.output,
           error: action.error,
+          title: action.title,
+          label: action.label,
+          toolKind: action.toolKind,
         };
         return {
           ...run,
@@ -201,8 +218,12 @@ export function sessionRunReducer(
                           ...tool,
                           name: action.toolName || tool.name,
                           status: finishedTool.status,
+                          input: mergeInput(tool.input, action.input),
                           output: action.output,
                           error: action.error,
+                          title: action.title ?? tool.title,
+                          label: action.label ?? tool.label,
+                          toolKind: action.toolKind ?? tool.toolKind,
                         }
                       : tool
                   )

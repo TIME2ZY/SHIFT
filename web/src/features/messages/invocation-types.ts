@@ -20,6 +20,9 @@ export interface InvocationTool {
   durationMs?: number;
   changedFiles: InvocationChangedFile[];
   outputTruncated?: boolean;
+  title?: string;
+  label?: string;
+  toolKind?: string;
 }
 
 export interface InvocationProgressItem {

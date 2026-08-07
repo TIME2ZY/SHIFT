@@ -378,7 +378,8 @@ node scripts/callback-client.js post-message --content "你的消息"
 \`--content-file <路径>\`，不要手工拼 JSON。
 
 用法示例：
-- 发现需要别人处理的问题 → 发消息/回复，行首 @ 对方（不要 spawn 子代理）
+- 发现需要 **其它 SHIFT Agent** 处理的问题 → 发消息/回复，行首 @ 对方 + handoff
+- 本 CLI 内并行/探索（含 Grok subagent）→ 用工具即可，不必为了平台而禁用
 - 想主动汇报进度 → 直接发消息
 - 需要更多上下文 → 发消息询问
 - 想"回忆"之前做过的决策 → **先读 prompt 顶部 Active Memories**，不足优先调用 \`recall_search\`
@@ -386,7 +387,7 @@ node scripts/callback-client.js post-message --content "你的消息"
 注意：
 - @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
 - 代码块内的 @mention 不会被路由
-- 跨 Agent 协作只用行首 @mention；禁止使用 CLI 内嵌 subagent / Task / Agent / spawn_subagent
+- 跨 Agent 协作只用行首 @mention + handoff；CLI 内嵌 subagent 不能代替 @ 路由
 - 需要别人做事：另起一行写 @对方，并尽量附 \`\`\`handoff 块
 - 不要 @ 自己
 - \`sessionId\` 必须使用 \`$SHIFT_THREAD_ID\`，不要伪造

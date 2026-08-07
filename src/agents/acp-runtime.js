@@ -24,6 +24,71 @@ function toolResult(update) {
   return values.length === 1 ? values[0] : values;
 }
 
+/**
+ * Grok ACP attaches vendor metadata under update._meta["x.ai/tool"].
+ * @param {object} update
+ * @returns {{ name?: string, label?: string, kind?: string, readOnly?: boolean }}
+ */
+function acpToolMeta(update) {
+  const meta = update && update._meta && typeof update._meta === "object" ? update._meta : null;
+  const tool = meta && meta["x.ai/tool"] && typeof meta["x.ai/tool"] === "object" ? meta["x.ai/tool"] : null;
+  if (!tool) return {};
+  return {
+    name: typeof tool.name === "string" && tool.name.trim() ? tool.name.trim() : undefined,
+    label: typeof tool.label === "string" && tool.label.trim() ? tool.label.trim() : undefined,
+    kind: typeof tool.kind === "string" && tool.kind.trim() ? tool.kind.trim() : undefined,
+    readOnly: typeof tool.read_only === "boolean" ? tool.read_only : undefined,
+  };
+}
+
+/**
+ * Stable tool id for protocol (prefer meta.name over human title).
+ * First update often has title=spawn_subagent and no name field.
+ */
+function resolveToolName(update, previous) {
+  const meta = acpToolMeta(update);
+  if (meta.name) return meta.name;
+  if (typeof update.name === "string" && update.name.trim()) return update.name.trim();
+  if (previous?.toolName) return previous.toolName;
+  // First packet may use title as the tool id (spawn_subagent, list_dir).
+  if (typeof update.title === "string" && update.title.trim() && !previous) {
+    return update.title.trim();
+  }
+  if (typeof update.kind === "string" && update.kind.trim() && update.kind !== "other") {
+    return update.kind.trim();
+  }
+  return previous?.toolName || "tool";
+}
+
+/**
+ * Human-readable title: prefer non-id titles over the stable toolName.
+ */
+function resolveToolTitle(update, previous, toolName) {
+  const title = typeof update.title === "string" ? update.title.trim() : "";
+  if (title && title !== toolName) return title;
+  if (previous?.title && previous.title !== toolName) return previous.title;
+  if (title) return title;
+  return previous?.title || undefined;
+}
+
+function mergeToolArgs(update, previous) {
+  const next =
+    update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)
+      ? update.rawInput
+      : null;
+  if (!next) return previous?.args || {};
+  if (!previous?.args || typeof previous.args !== "object") return { ...next };
+  return { ...previous.args, ...next };
+}
+
+function optionalToolDisplayFields(current) {
+  const fields = {};
+  if (current.title) fields.title = current.title;
+  if (current.label) fields.label = current.label;
+  if (current.toolKind) fields.toolKind = current.toolKind;
+  return fields;
+}
+
 function createAcpRuntime(_config = {}) {
   const tools = new Map();
   let thinkingBuffer = "";
@@ -34,10 +99,6 @@ function createAcpRuntime(_config = {}) {
       agent: ctx.agent,
       invocationId: ctx.invocationId,
     };
-  }
-
-  function toolName(update, previous) {
-    return String(update.name || previous?.toolName || update.title || update.kind || "tool");
   }
 
   function flushBuffers(ctx, force = false) {
@@ -59,13 +120,18 @@ function createAcpRuntime(_config = {}) {
     if (!toolId) return out;
 
     const previous = tools.get(toolId);
+    const meta = acpToolMeta(update);
+    const toolName = resolveToolName(update, previous);
+    const title = resolveToolTitle(update, previous, toolName);
+    const label = meta.label || previous?.label;
+    const toolKind = meta.kind || previous?.toolKind;
     const current = {
       toolId,
-      toolName: toolName(update, previous),
-      args:
-        update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)
-          ? update.rawInput
-          : previous?.args || {},
+      toolName,
+      title,
+      label,
+      toolKind,
+      args: mergeToolArgs(update, previous),
       status: update.status || previous?.status || "pending",
       finished: previous?.finished || false,
     };
@@ -78,6 +144,7 @@ function createAcpRuntime(_config = {}) {
           toolName: current.toolName,
           toolId,
           args: current.args,
+          ...optionalToolDisplayFields(current),
         })
       );
     }
@@ -90,7 +157,10 @@ function createAcpRuntime(_config = {}) {
           toolName: current.toolName,
           toolId,
           status: current.status === "failed" ? "error" : "ok",
+          // Final merged args (ACP often completes rawInput only on tool_call_update).
+          args: current.args && Object.keys(current.args).length ? current.args : undefined,
           result: toolResult(update),
+          ...optionalToolDisplayFields(current),
         })
       );
     }
@@ -236,4 +306,7 @@ module.exports = {
   contentText,
   createAcpRuntime,
   toolResult,
+  acpToolMeta,
+  resolveToolName,
+  resolveToolTitle,
 };

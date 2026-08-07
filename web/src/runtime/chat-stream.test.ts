@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runChatStream } from "./chat-stream";
+import { formatToolResultForDisplay, runChatStream } from "./chat-stream";
 import { createSessionRunStore } from "./session-run-store";
 
 function sseResponse(frames: string[]): Response {
@@ -19,7 +19,81 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("formatToolResultForDisplay", () => {
+  it("prefers TaskOutput.Result.output text", () => {
+    const text = formatToolResultForDisplay({
+      type: "TaskOutput",
+      Result: {
+        status: "completed",
+        exit_code: 0,
+        duration_secs: 5.3,
+        output: "18 top-level entries",
+      },
+    });
+    expect(text).toContain("completed");
+    expect(text).toContain("18 top-level entries");
+  });
+});
+
 describe("runChatStream", () => {
+  it("maps subagent tool display fields into the session run store", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        'event: session\ndata: {"sessionId":"s2"}\n\n',
+        'event: agent-start\ndata: {"agent":"grok","invocationId":"i2"}\n\n',
+        'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","args":{"description":"List top-level","subagent_type":"explore"}}\n\n',
+        'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","status":"ok","args":{"description":"List top-level","subagent_type":"explore","run_in_background":true},"result":{"type":"Text","text":"Subagent started in background.\\nsubagent_id: abc"}}\n\n',
+        'event: agent-exit\ndata: {"agent":"grok","code":0}\n\n',
+        "event: done\ndata: {}\n\n",
+      ])
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createSessionRunStore();
+    const controller = store.startController("s2");
+    await runChatStream({ sessionId: "s2", agentId: "grok", prompt: "go" }, store, controller);
+    expect(store.getSnapshot().runs.s2.liveMessages.grok.tools).toMatchObject([
+      {
+        id: "sp1",
+        name: "spawn_subagent",
+        title: "List top-level",
+        label: "Subagent",
+        toolKind: "task",
+        status: "done",
+        input: {
+          description: "List top-level",
+          subagent_type: "explore",
+          run_in_background: true,
+        },
+      },
+    ]);
+    expect(store.getSnapshot().runs.s2.liveMessages.grok.tools?.[0]?.output).toMatch(
+      /subagent_id/
+    );
+  });
+
+  it("merges tool.finished args when start had empty args", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        'event: session\ndata: {"sessionId":"s3"}\n\n',
+        'event: agent-start\ndata: {"agent":"grok","invocationId":"i3"}\n\n',
+        'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","args":{}}\n\n',
+        'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","title":"Explore","label":"Subagent","toolKind":"task","status":"ok","args":{"subagent_type":"explore","description":"Explore"},"result":{"type":"Text","text":"ok"}}\n\n',
+        'event: done\ndata: {}\n\n',
+      ])
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createSessionRunStore();
+    const controller = store.startController("s3");
+    await runChatStream({ sessionId: "s3", agentId: "grok", prompt: "go" }, store, controller);
+    expect(store.getSnapshot().runs.s3.liveMessages.grok.tools?.[0]).toMatchObject({
+      id: "t9",
+      title: "Explore",
+      label: "Subagent",
+      input: { subagent_type: "explore", description: "Explore" },
+      output: "ok",
+    });
+  });
+
   it("maps canonical text events into the session run store", async () => {
     const fetchMock = vi
       .fn()
