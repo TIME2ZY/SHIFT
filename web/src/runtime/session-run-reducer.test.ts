@@ -81,6 +81,31 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.doneReceived).toBe(true);
   });
 
+  it("seals still-streaming live messages when server done arrives", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    state = sessionRunReducer(state, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      text: "partial",
+    });
+    expect(state.runs.s1.liveMessages.codex.status).toBe("streaming");
+    state = sessionRunReducer(state, { type: "run/done", sessionId: "s1" });
+    expect(state.runs.s1.status).toBe("done");
+    expect(state.runs.s1.liveMessages.codex.status).toBe("done");
+    expect(state.runs.s1.liveMessages.codex.text).toBe("partial");
+  });
+
   it("tracks thinking, progress, and tool lifecycle per agent", () => {
     let state = sessionRunReducer(initialSessionRunState, {
       type: "agent/started",

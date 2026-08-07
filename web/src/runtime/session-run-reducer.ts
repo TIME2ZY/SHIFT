@@ -1,3 +1,4 @@
+import { sealLiveMessageStatus } from "../shared/contracts/run-status";
 import type { LiveMessage, SessionRun, SessionRunAction, SessionRunState } from "./types";
 
 export const initialSessionRunState: SessionRunState = { runs: {} };
@@ -307,12 +308,23 @@ export function sessionRunReducer(
       }));
 
     case "run/done":
-      return updateRun(state, action.sessionId, (run) => ({
-        ...run,
-        status: run.status === "error" ? "error" : "done",
-        doneReceived: true,
-        updatedAt: now,
-      }));
+      // Server SSE `done` is authoritative: seal any still-open live agent bubbles.
+      return updateRun(state, action.sessionId, (run) => {
+        const liveMessages: SessionRun["liveMessages"] = {};
+        for (const [agentId, message] of Object.entries(run.liveMessages)) {
+          liveMessages[agentId] = {
+            ...message,
+            status: sealLiveMessageStatus(message.status),
+          };
+        }
+        return {
+          ...run,
+          status: run.status === "error" ? "error" : "done",
+          doneReceived: true,
+          liveMessages,
+          updatedAt: now,
+        };
+      });
 
     case "run/failed":
       return updateRun(state, action.sessionId, (run) => ({

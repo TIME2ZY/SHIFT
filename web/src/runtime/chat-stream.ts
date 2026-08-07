@@ -1,4 +1,5 @@
 import { ApiError, authenticatedFetch } from "../shared/api/client";
+import { agentExitIndicatesFailure } from "../shared/contracts/run-status";
 import { parseSseChunk, type SseFrame } from "./sse-parser";
 import type { SessionRunStore } from "./session-run-store";
 
@@ -250,7 +251,8 @@ export async function runChatStream(
           sessionId: boundSessionId,
           agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
           invocationId: typeof payload.invocationId === "string" ? payload.invocationId : undefined,
-          failed: typeof payload.code === "number" && payload.code !== 0,
+          // Align with server finish: non-zero exit or OS signal ⇒ failed/aborted terminal.
+          failed: agentExitIndicatesFailure(payload),
         });
         break;
 

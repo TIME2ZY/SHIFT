@@ -1,10 +1,13 @@
-export type RunStatus = "idle" | "connecting" | "running" | "done" | "error" | "aborted";
+import type { UiLiveMessageStatus, UiRunStatus } from "../shared/contracts/run-status";
+
+/** UI run status — see shared/contracts/run-status.ts for server mapping. */
+export type RunStatus = UiRunStatus;
 
 export interface LiveMessage {
   agentId: string;
   invocationId?: string;
   text: string;
-  status: "thinking" | "streaming" | "done" | "error";
+  status: UiLiveMessageStatus;
   thinking?: string;
   tools?: RunTool[];
   timeline?: RunTimelineItem[];
