@@ -5,11 +5,11 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 const {
   runSqliteRecoveryDrill,
   inspectCausality,
-} = require("../../src/storage/recovery-drill");
+} = require("../../src/storage/offline/recovery-drill");
 const { verifyRestoredSqliteApi } = require("../../src/server/recovery-verification");
 
 function seed(storage) {

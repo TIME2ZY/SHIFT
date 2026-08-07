@@ -5,7 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage } = require("../../src/storage");
-const { prepareCleanEpoch } = require("../../src/storage/clean-epoch");
+const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 
 test("prepare clean epoch creates and activates a new empty SQLite target", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-clean-epoch-"));

@@ -9,7 +9,7 @@
  */
 const path = require("node:path");
 const { DEFAULT_MEMORY_DB_FILE } = require("../src/shared/runtime-paths");
-const { auditSqliteStorage } = require("../src/storage/audit-storage");
+const { auditSqliteStorage } = require("../src/storage/offline/audit-storage");
 
 function parseArgs(argv) {
   const options = {

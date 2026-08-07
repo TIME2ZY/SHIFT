@@ -13,7 +13,7 @@ const {
   DEFAULT_TRANSCRIPT_DIR,
   LEGACY_MEMORY_DB_FILE,
 } = require("../src/shared/runtime-paths");
-const { migrateRuntimeToSqlite } = require("../src/storage/migrate-runtime");
+const { migrateRuntimeToSqlite } = require("../src/storage/offline/migrate-runtime");
 
 function parseArgs(argv) {
   const options = {

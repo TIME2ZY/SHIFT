@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const { archiveMixedCanonicalEvents } = require("../src/storage/mixed-transcript-retirement");
+const { archiveMixedCanonicalEvents } = require("../src/storage/offline/mixed-transcript-retirement");
 const { ENV } = require("../src/shared/brand");
 const { loadProjectEnv } = require("../src/shared/load-env");
 const runtimePaths = require("../src/shared/runtime-paths");

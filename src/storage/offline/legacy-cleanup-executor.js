@@ -6,7 +6,7 @@ const {
   readEpochMetadata,
 } = require("./legacy-cleanup-manifest");
 const { inspectCanonicalCoverage } = require("./mixed-transcript-retirement");
-const { resolveEpochAuditDirectory } = require("./server-storage");
+const { resolveEpochAuditDirectory } = require("../server-storage");
 
 const ALLOWED_TARGETS = Object.freeze({
   sessions: "sessions.json",

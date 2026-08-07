@@ -8,7 +8,7 @@ const { createStorage } = require("../../src/storage");
 const {
   buildLegacyCleanupManifest,
   readEpochMetadata,
-} = require("../../src/storage/legacy-cleanup-manifest");
+} = require("../../src/storage/offline/legacy-cleanup-manifest");
 
 test("legacy cleanup manifest is read-only and inventories explicit targets", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-cleanup-manifest-"));

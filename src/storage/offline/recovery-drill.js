@@ -1,9 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { createStorage } = require("./index");
+const { createStorage } = require("../index");
 const { auditSqliteStorage } = require("./audit-storage");
-const { backupDatabase, integrityCheck, rebuildDerivedModels } = require("./maintenance");
+const { backupDatabase, integrityCheck, rebuildDerivedModels } = require("../maintenance");
 
 const SOURCE_TABLES = Object.freeze([
   "storage_metadata",

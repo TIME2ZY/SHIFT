@@ -4,9 +4,9 @@ const {
   DEFAULT_MEMORY_DB_FILE,
   DEFAULT_SESSIONS_FILE,
   DEFAULT_TRANSCRIPT_DIR,
-} = require("../shared/runtime-paths");
-const { CANONICAL_EVENT_TYPES } = require("../agents/event-protocol");
-const { createStorage } = require("./index");
+} = require("../../shared/runtime-paths");
+const { CANONICAL_EVENT_TYPES } = require("../../agents/event-protocol");
+const { createStorage } = require("../index");
 const { readLegacySessions } = require("./legacy-session-reader");
 
 const MIRRORED_EVENT_KINDS = new Set([

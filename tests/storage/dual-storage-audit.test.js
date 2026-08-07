@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { auditDualStorage } = require("../../src/storage/audit-dual-storage");
+const { auditDualStorage } = require("../../src/storage/offline/audit-dual-storage");
 const { createStorage } = require("../../src/storage");
 
 function createFixture() {

@@ -13,7 +13,7 @@ const {
   DEFAULT_SESSIONS_FILE,
   DEFAULT_TRANSCRIPT_DIR,
 } = require("../src/shared/runtime-paths");
-const { auditDualStorage } = require("../src/storage/audit-dual-storage");
+const { auditDualStorage } = require("../src/storage/offline/audit-dual-storage");
 
 function parseArgs(argv) {
   const options = {
