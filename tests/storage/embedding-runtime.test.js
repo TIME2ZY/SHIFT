@@ -71,6 +71,7 @@ test("embedding runtime indexes authoritative writes and enables semantic recall
     const service = createRecallService({
       storage,
       embeddingRuntime: runtime,
+      recallMode: "hybrid",
       logger: { error() {}, info() {} },
     });
     const result = await service.searchForAgent(
@@ -88,6 +89,7 @@ test("embedding runtime indexes authoritative writes and enables semantic recall
       recentLimit: 1,
       relatedLimit: 2,
       budgetChars: 2000,
+      recallMode: "hybrid",
     });
     assert.ok(automatic.items[0].channels.includes("vector"));
     assert.equal(automatic.stats.channels.vector, 1);
@@ -125,6 +127,7 @@ test("vector query failure degrades to FTS without failing recall", async () => 
     const service = createRecallService({
       storage,
       embeddingRuntime: runtime,
+      recallMode: "hybrid",
       logger: { error() {}, info() {} },
     });
     const result = await service.searchForAgent(
