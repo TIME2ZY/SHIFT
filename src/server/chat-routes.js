@@ -93,6 +93,7 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   appendInvocationEvent: () => false,
   finishInvocation: () => null,
   finishWithAssistantMessage: () => null,
+  completeInvocation: () => null,
   bindProviderSession: () => false,
   addWindowUsage: () => false,
   setWindowUsageSnapshot: () => false,
@@ -1295,13 +1296,19 @@ function createChatRoutes({
             if (!contextSealHandled) {
               sealContextWindow(ratio, "physical-ceiling-empty");
             }
-            durable.finishInvocation(activeInvocationId, code, signal, {
-              agent,
-              contentBytes: 0,
-              usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
-              fillRatioAtEnd: ratio,
-              sealerState: "sealed",
-              emptyEmergency: true,
+            durable.completeInvocation({
+              invocationId: activeInvocationId,
+              code,
+              signal,
+              reason: "empty-emergency",
+              endPayload: {
+                agent,
+                contentBytes: 0,
+                usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
+                fillRatioAtEnd: ratio,
+                sealerState: "sealed",
+                emptyEmergency: true,
+              },
             });
             const nextWin = storage?.windows?.getOpen?.({
               threadId: sessionId,
@@ -1338,10 +1345,17 @@ function createChatRoutes({
 
         if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
           const abortInvId = threadCtx.currentInvocationId || invocationId;
-          durable.finishInvocation(abortInvId, code, signal, {
-            ...endPayload,
-            terminalState: "aborted",
-            supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
+          // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
+          durable.completeInvocation({
+            invocationId: abortInvId,
+            code,
+            signal,
+            reason: "aborted",
+            endPayload: {
+              ...endPayload,
+              terminalState: "aborted",
+              supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
+            },
           });
           try {
             handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
@@ -1360,9 +1374,15 @@ function createChatRoutes({
         // Clean zero-output exits (legacy mocks / silent success) may still persist "".
         const sealPressure = emergencyStop || sealPending || preCallRotated || contextSealedSseSent;
         if (!hasAssistantText && sealPressure) {
-          durable.finishInvocation(finalInvocationId, code, signal, {
-            ...endPayload,
-            emptyAssistant: true,
+          durable.completeInvocation({
+            invocationId: finalInvocationId,
+            code,
+            signal,
+            reason: "empty-under-seal",
+            endPayload: {
+              ...endPayload,
+              emptyAssistant: true,
+            },
           });
           sendSse(res, "error", {
             message: "Assistant produced no content after context pressure; request not completed.",
@@ -1396,11 +1416,12 @@ function createChatRoutes({
         };
 
         const completed =
-          durable.enabled && typeof durable.finishWithAssistantMessage === "function"
-            ? durable.finishWithAssistantMessage({
+          durable.enabled && typeof durable.completeInvocation === "function"
+            ? durable.completeInvocation({
                 invocationId: finalInvocationId,
                 code,
                 signal,
+                reason: "assistant-final",
                 endPayload,
                 session,
                 windowId: durableRun?.window?.id || null,

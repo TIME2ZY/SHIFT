@@ -90,6 +90,82 @@ test("durable recorder writes thread, window, message, and invocation data", () 
   }
 });
 
+test("completeInvocation is the unified terminal write entry", () => {
+  const storage = createStorage({ file: ":memory:" });
+  const recorder = createDurableRecorder({ storage });
+  const session = sessionFixture();
+  try {
+    session.messages.push({
+      id: "message-user",
+      role: "user",
+      agent: "codex",
+      content: "go",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
+    recorder.mirrorLastMessage(session);
+
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-complete-abort",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+      startedAt: "2026-07-12T00:00:02.000Z",
+      triggerMessageId: "message-user",
+      triggerType: "user-message",
+    });
+    const aborted = recorder.completeInvocation({
+      invocationId: "inv-complete-abort",
+      code: null,
+      signal: "SIGTERM",
+      reason: "aborted",
+      endPayload: { terminalState: "aborted", agent: "codex" },
+    });
+    assert.equal(aborted.reason, "aborted");
+    assert.equal(aborted.message, null);
+    assert.equal(aborted.invocation.state, "aborted");
+    assert.equal(storage.messages.listForThread("thread-1").length, 1);
+
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-complete-final",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+      startedAt: "2026-07-12T00:00:04.000Z",
+      triggerMessageId: "message-user",
+      triggerType: "user-message",
+    });
+    const completed = recorder.completeInvocation({
+      invocationId: "inv-complete-final",
+      code: 0,
+      signal: null,
+      reason: "assistant-final",
+      session,
+      message: {
+        id: "message-assistant-complete",
+        role: "assistant",
+        agent: "codex",
+        content: "done via completeInvocation",
+        createdAt: "2026-07-12T00:00:05.000Z",
+      },
+    });
+    assert.equal(completed.reason, "assistant-final");
+    assert.equal(completed.invocation.state, "completed");
+    assert.equal(completed.message.id, "message-assistant-complete");
+    assert.equal(storage.messages.get("message-assistant-complete").content, "done via completeInvocation");
+    assert.equal(recorder.completeInvocation({}), null);
+    assert.equal(recorder.completeInvocation({ invocationId: "missing" }), null);
+  } finally {
+    recorder.close();
+    storage.close();
+  }
+});
+
 test("finishWithAssistantMessage writes finish event and final message atomically", () => {
   const storage = createStorage({ file: ":memory:" });
   const recorder = createDurableRecorder({ storage });

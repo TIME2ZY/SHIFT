@@ -209,13 +209,14 @@ AI 不得在未确认时启动 XL。
 
 按风险从低到高，**每次 PR 只收口一种事件**：
 
-1. **Invocation 终态**  
-   唯一 finish 入口；chat stream 结束与 callback 汇合到同一函数；消除「有输出无终态」。
-2. **Handoff 消费**  
+1. **Invocation 终态** ✅（2026-08-07，B-1）  
+   调度器唯一写入口：`durableRecorder.completeInvocation`。  
+   底层 `finishInvocation` / `finishWithAssistantMessage` 仅供 facade/测试；孤儿收口仍用 `reconcileThreadActive` / `forceTerminalInvocation`。
+2. **Handoff 消费**（B-2，下一步）  
    唯一 consume 入口 + 幂等键；chat 与 callback 只做触发，不复制业务。
-3. **Message 持久化**  
+3. **Message 持久化**（B-3）  
    与 durable events 的顺序/事务边界写清；禁止第三处 insert。
-4. **Memory 写入**  
+4. **Memory 写入**（B-4）  
    权威写入只经 memory 用例入口；inject/recall 只读派生。
 
 完成标准：双路径列表项被划掉；旧函数删除或变为 thin wrapper 并在下一 PR 删除。

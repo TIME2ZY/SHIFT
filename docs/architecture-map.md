@@ -58,18 +58,17 @@ HTTP createServer (src/server/index.js)
 |------|-------------------|------------|------|
 | start | `durableRecorder.startInvocation` | **仅** `chat-routes`（含 retry 再 start） | `invocations` + `invocation-start` event |
 | 流式事件 | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件 | `invocation_events` + outbox |
-| 正常完成 + assistant 正文 | `durableRecorder.finishWithAssistantMessage` | **仅** chat-routes 成功收尾分支 | **同一事务**：`invocations.finish` + `appendMessage(assistant-final)` + `invocation-end` |
-| 中止 / 空输出压力 / 空 emergency | `durableRecorder.finishInvocation` | chat-routes **多处**直接调用 | 仅终态 + event，**不**写 assistant-final |
-| 孤儿收口 | `durableRecorder.reconcileThreadActive` → `forceTerminalInvocation` | chat-routes 请求结束 `finally` 清理 | 强制 `failed`/`aborted` |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`** | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / empty-under-seal / empty-emergency） | 有 `message` → 原子 finish+assistant-final；无 `message` → 仅终态 |
+| 底层（测试/外观内部） | `finishInvocation` / `finishWithAssistantMessage` | 仅 `completeInvocation` 内部与存量单测 | 同上 |
+| 孤儿收口 | `reconcileThreadActive` → `forceTerminalInvocation` | chat-routes 请求结束 `finally` | 强制 `failed`/`aborted`（非产品成功路径） |
 | 写失败兜底 | `forceFailInvocation` | durable-recorder 内部 / 调用约定 | 避免长期 `active` |
 
-**结论（终态）：**
+**结论（终态）— B-1 已落地（2026-08-07）：**
 
-- **库层 API 已收敛**到 `durable-recorder`（好）。
-- **业务调用点未收敛**：`chat-routes.js` 内至少 4 类 finish 分支 + reconcile；逻辑与「何时算成功有消息」缠在同一大函数里。
-- Callback **不** finish invocation（合理：mid-run）；但 callback 会 `appendToSession` 写入 assistant 片段（见消息路径）。
-
-**阶段 B-1 建议：** 抽出单一 `completeInvocation({ reason, ... })`（或等价模块），chat-routes 只传原因；禁止 routes 内并列 4 套 finish 参数拼装。
+- 调度器面对的唯一写入口 = `completeInvocation({ invocationId, code, signal, reason, endPayload, message? })`。
+- 底层 `finishInvocation` / `finishWithAssistantMessage` 仍保留为实现与测试 API，**chat-routes 热路径不再直接调用**。
+- 分支决策（何时带 message、何时 aborted）仍在 chat-routes；B-1 收口的是**写入口**，不是把业务 if 全部下沉（避免夹带行为变更）。
+- Callback **仍不** finish invocation；孤儿 reconcile 仍走 force 终端 API。
 
 ---
 
@@ -141,7 +140,7 @@ HTTP createServer (src/server/index.js)
 
 | ID | 主题 | 现象 | 严重度 | 建议阶段 |
 |----|------|------|--------|----------|
-| D1 | Invocation finish 多出口 | chat-routes 内 finishInvocation ×N + finishWithAssistantMessage + reconcile | **高** | B-1 |
+| D1 | Invocation finish 多出口 | ~~chat 直接调两类 finish~~ → **已收口** `completeInvocation`；reconcile/force 仍独立 | **已降** | B-1 ✅ |
 | D2 | 规范状态 vs DB 状态 | ADR-002：`created/started/streaming/sealed`…；DB CHECK：`active/completed/failed/aborted` | 中 | B-1 文档+映射单点 |
 | D3 | Handoff 双触发 + 不对称钩子 | chat end / callback post 都 finalize；前后 gate 不一致 | 中高 | B-2 |
 | D4 | Handoff 幂等仅进程内 | `handoff-route-registry` Map；重启可双消费 | 中高 | B-2 |
@@ -219,10 +218,10 @@ HTTP createServer (src/server/index.js)
 
 ## 7. 阶段 B 推荐 PR 切片（仍不改产品能力面）
 
-1. **B-1 Invocation 终态收口**  
-   - 抽 `completeInvocation` / 集中 finish 参数。  
-   - 消除 chat-routes 内重复拼装；reconcile 仍调用同一 force 终端 API。  
-   - 回归：`tests/server/chat-seal-lifecycle.e2e.test.js`、invocation 相关、server.test 子集。
+1. **B-1 Invocation 终态收口** ✅（2026-08-07）  
+   - 已抽 `completeInvocation`；chat-routes 四类产品终态只经此入口。  
+   - reconcile / forceTerminal 仍为孤儿收口，不冒充成功路径。  
+   - 回归：`tests/storage/durable-recorder.test.js` + 相关 server 测试。
 
 2. **B-2 Handoff 生命周期**  
    - bind/complete 与 finalize 同模块边界。  
