@@ -69,6 +69,74 @@ function persistedMessageKey(message: PersistedMessage, index: number): string {
   return `persisted:${message.id || `${message.role}-${message.invocationId || index}`}`;
 }
 
+function messageIdentity(message: PersistedMessage, index: number): string {
+  return message.id || persistedMessageKey(message, index);
+}
+
+function isAssistantCallback(message: PersistedMessage): boolean {
+  return message.messageType === "assistant-callback";
+}
+
+function isAssistantFinal(message: PersistedMessage): boolean {
+  return message.messageType === "assistant-final";
+}
+
+/**
+ * Scheme A: each invocation attaches process/live details to at most one
+ * persisted bubble — prefer the last `assistant-final`. Callbacks never host
+ * process data. Until a host exists, live output stays as a standalone bubble.
+ */
+export function selectProcessHostIdentities(
+  messages: Array<PersistedMessage & { role: "user" | "assistant" }>
+): Set<string> {
+  const hosts = new Set<string>();
+  const byInvocation = new Map<string, Array<{ message: PersistedMessage; index: number }>>();
+
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant" || !message.invocationId) return;
+    const group = byInvocation.get(message.invocationId) || [];
+    group.push({ message, index });
+    byInvocation.set(message.invocationId, group);
+  });
+
+  for (const group of byInvocation.values()) {
+    const finals = group.filter(({ message }) => isAssistantFinal(message));
+    if (finals.length) {
+      const host = finals[finals.length - 1];
+      hosts.add(messageIdentity(host.message, host.index));
+      continue;
+    }
+
+    const hasTyped = group.some(
+      ({ message }) => isAssistantFinal(message) || isAssistantCallback(message)
+    );
+    if (hasTyped) {
+      // Only callbacks so far: wait for final; live bubble stays standalone.
+      continue;
+    }
+
+    // Legacy messages without messageType: last assistant is the host.
+    const host = group[group.length - 1];
+    hosts.add(messageIdentity(host.message, host.index));
+  }
+
+  return hosts;
+}
+
+function invocationHasProcessHost(
+  invocationId: string | undefined,
+  hostIdentities: Set<string>,
+  messages: Array<PersistedMessage & { role: "user" | "assistant" }>
+): boolean {
+  if (!invocationId) return false;
+  return messages.some(
+    (message, index) =>
+      message.role === "assistant" &&
+      message.invocationId === invocationId &&
+      hostIdentities.has(messageIdentity(message, index))
+  );
+}
+
 interface MessageRowProps {
   messageKey: string;
   role: PersistedMessage["role"];
@@ -148,11 +216,17 @@ export function MessageList({
     [messages]
   );
   const liveMessages = run ? Object.values(run.liveMessages) : [];
-  const persistedInvocationIds = new Set(
-    visibleMessages.map((message) => message.invocationId).filter(Boolean)
+  const processHostIdentities = useMemo(
+    () => selectProcessHostIdentities(visibleMessages),
+    [visibleMessages]
   );
+  // Standalone live only when this invocation has no process host yet (e.g. only
+  // assistant-callback persisted, or nothing persisted). Avoids attaching the
+  // streaming answer onto a callback bubble and double-painting with final later.
   const standaloneLiveMessages = liveMessages.filter(
-    (message) => !message.invocationId || !persistedInvocationIds.has(message.invocationId)
+    (message) =>
+      !message.invocationId ||
+      !invocationHasProcessHost(message.invocationId, processHostIdentities, visibleMessages)
   );
   const liveText = liveMessages
     .map((message) => `${message.text}${message.thinking || ""}`)
@@ -347,21 +421,25 @@ export function MessageList({
 
         {visibleMessages.map((message, index) => {
           const key = persistedMessageKey(message, index);
+          const identity = messageIdentity(message, index);
           const agent = resolveAgent(message.agentId, message.agent, agents);
           const agentId = agent?.id || message.agentId || message.agent || "agent";
 
-          // Match live message details for the latest assistant responses so thinking/tools persist
           const isAssistant = message.role === "assistant";
+          const isHost = isAssistant && processHostIdentities.has(identity);
           const isLatestAssistantMsg =
             isAssistant &&
             (index === visibleMessages.length - 1 ||
               (index === visibleMessages.length - 2 &&
                 visibleMessages[visibleMessages.length - 1].role === "user"));
-          const liveData = message.invocationId
-            ? liveMessages.find((item) => item.invocationId === message.invocationId)
-            : isLatestAssistantMsg
-              ? run?.liveMessages[agentId]
-              : undefined;
+          // Process/live attach only to the invocation host (assistant-final).
+          const liveData = isHost
+            ? message.invocationId
+              ? liveMessages.find((item) => item.invocationId === message.invocationId)
+              : isLatestAssistantMsg
+                ? run?.liveMessages[agentId]
+                : undefined
+            : undefined;
 
           return (
             <MessageRow
@@ -376,9 +454,10 @@ export function MessageList({
               {isAssistant ? (
                 <MessageProcessDetails
                   sessionId={sessionId}
-                  invocationId={message.invocationId}
+                  invocationId={isHost ? message.invocationId : undefined}
                   liveMessage={liveData}
                   content={message.content}
+                  loadDurable={isHost && Boolean(message.invocationId)}
                   onOpenWorkspace={onOpenWorkspace}
                 />
               ) : (

@@ -170,4 +170,47 @@ describe("sessionRunReducer", () => {
       changedFiles: [{ path: "src/index.js", changeType: "modified" }],
     });
   });
+
+  it("clears live answer text after sync while keeping process metadata", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "thinking/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      text: "保留思考",
+    });
+    state = sessionRunReducer(state, {
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      text: "最终回答正文",
+    });
+    state = sessionRunReducer(state, {
+      type: "agent/finished",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, { type: "run/synced", sessionId: "s1" });
+
+    expect(state.runs.s1.liveMessages.codex).toMatchObject({
+      invocationId: "i1",
+      text: "",
+      thinking: "保留思考",
+      status: "done",
+      timeline: [
+        { id: "thinking-0", type: "thinking", text: "保留思考" },
+        // text timeline items stripped on sync
+      ],
+    });
+    expect(state.runs.s1.liveMessages.codex.timeline?.some((item) => item.type === "text")).toBe(
+      false
+    );
+    expect(state.runs.s1.optimisticUser).toBeUndefined();
+  });
 });
