@@ -1,3 +1,24 @@
+/**
+ * Online message write contract (Phase B-3 / architecture-map §3.3).
+ *
+ * Physical insert: only this module's `appendMessage` may call
+ * `storage.messages.append` on the hot path. Offline migrate tools may use
+ * the repository directly; server/agents must not.
+ *
+ * Use-case entry points (two rivers, one physical write):
+ * | Case | Entry | messageType |
+ * |------|-------|-------------|
+ * | User / system (incl. A2A notices) | sqlite-session-service.appendToSession | user, a2a-*, system-notice, … |
+ * | Assistant final + invocation end | durableRecorder.completeInvocation({ message }) | assistant-final |
+ * | Mid-run agent callback | appendToSession with source=callback | assistant-callback |
+ *
+ * Rules:
+ * - Callback fragments must use messageType `assistant-callback` (never final).
+ * - Only one assistant-final per successful invocation finish transaction.
+ * - Do not insert messages from routes without going through these entries.
+ */
+const { MESSAGE_TYPES } = require("./message-repository");
+
 const MESSAGE_METADATA_FIELDS = new Set([
   "id",
   "role",
@@ -42,4 +63,9 @@ function upsertMessageRecall(storage, message) {
   });
 }
 
-module.exports = { appendMessage, durableMessageMetadata, upsertMessageRecall };
+module.exports = {
+  appendMessage,
+  durableMessageMetadata,
+  upsertMessageRecall,
+  MESSAGE_TYPES,
+};

@@ -174,7 +174,7 @@ function finalizeA2ARoutes(input = {}) {
       sendSse,
     });
 
-    // Memory capture: only when hasBlock (Wave M rules). Policy does not change capture.
+    // Collaboration event capture (handoff-captured) — not product memory rows (B-4).
     if (memoryCapture && typeof memoryCapture.captureHandoff === "function") {
       const capture = memoryCapture.captureHandoff({
         threadId: sessionId,
@@ -652,9 +652,13 @@ function emitRoute({
   });
 }
 
+/**
+ * Single sink for A2A route diagnostics on the durable event path (Phase B-2).
+ * Prefer EventStore; fall back only to durableRecorder.appendInvocationEvent.
+ * Transcript dual-write is intentionally removed from the hot path.
+ */
 function appendRouteEvent({
   eventStore,
-  transcript,
   durableRecorder,
   sessionId,
   invocationId,
@@ -671,17 +675,36 @@ function appendRouteEvent({
     });
     return;
   }
-  // Legacy fallback when EventStore is not wired (unit tests).
-  if (transcript && typeof transcript.appendEvent === "function") {
-    transcript.appendEvent(sessionId, invocationId, kind, payload);
-  }
   if (durableRecorder && typeof durableRecorder.appendInvocationEvent === "function") {
     durableRecorder.appendInvocationEvent(invocationId, kind, payload);
   }
+  // No transcript fallback: unit tests assert via sendSse / return value; production
+  // always wires eventStore through createServer → durable recorder.
+}
+
+/**
+ * Scheduler-facing hop lifecycle (Phase B-2). Chat routes bind/complete through
+ * these wrappers so hop identity stays on the same module boundary as finalize.
+ * Registry remains process-local until a durable hop store is adopted (map D4).
+ */
+function bindHandoffTargetInvocation(input) {
+  return handoffRouteRegistry.bindTargetInvocation(input);
+}
+
+function completeHandoffByTargetInvocation(targetInvocationId, options) {
+  return handoffRouteRegistry.completeByTargetInvocation(targetInvocationId, options);
+}
+
+function isEffectiveHandoffHop(record) {
+  return handoffRouteRegistry.isEffectiveA2aHop(record);
 }
 
 module.exports = {
   finalizeA2ARoutes,
+  bindHandoffTargetInvocation,
+  completeHandoffByTargetInvocation,
+  isEffectiveHandoffHop,
   handoffRouteRegistry,
   collabTaskRegistry,
+  appendRouteEvent,
 };

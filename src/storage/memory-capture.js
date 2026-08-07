@@ -3,17 +3,34 @@ const { validateCaptureEncoding } = require("./memory-funnel");
 
 const MAX_MEMORY_CONTENT_CHARS = 2048;
 
+/**
+ * Collaboration **event** capture — NOT product memory rows (Phase B-4).
+ *
+ * Writes `handoff-captured` / `window-sealed` invocation events via EventStore.
+ * Product memories (decision/fact/…) go only through
+ * `memoryService.writeMemoryCandidate` (callback/tool HTTP path).
+ *
+ * `memoryService` is intentionally not accepted: do not half-wire product
+ * writes here. Pass `eventStore` in production; `transcript` is test-only sink.
+ */
 function createMemoryCapture({
-  transcript,
+  transcript = null,
   eventStore = null,
   allowTranscriptReplay = true,
   logger = console,
   idFactory = crypto.randomUUID,
+  // Reject accidental half-wiring from older composition roots.
+  memoryService = undefined,
 } = {}) {
+  if (memoryService !== undefined && memoryService !== null) {
+    throw new Error(
+      "createMemoryCapture does not accept memoryService; use memoryService.writeMemoryCandidate for product memory."
+    );
+  }
   const hasTranscript = transcript && typeof transcript.appendEvent === "function";
   const hasEventStore = eventStore && typeof eventStore.append === "function";
   if (!hasTranscript && !hasEventStore) {
-    throw new Error("Memory capture requires an eventStore or transcript event sink.");
+    throw new Error("Memory capture requires an eventStore (or transcript sink in tests).");
   }
   function emitCollaborationEvent(threadId, invocationId, event) {
     const eventKind = event.kind === "window-seal" ? "window-sealed" : "handoff-captured";
@@ -26,6 +43,7 @@ function createMemoryCapture({
       });
       return;
     }
+    // Test / offline sink only — production always wires eventStore.
     transcript.appendEvent(threadId, invocationId, eventKind, event);
   }
 

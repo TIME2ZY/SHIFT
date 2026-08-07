@@ -205,21 +205,16 @@ AI 不得在未确认时启动 XL。
 交付：[`docs/architecture-map.md`](docs/architecture-map.md)（路径表 + 双路径列表 + 归档候选）。  
 **本阶段禁止大重构。** ✅ 文档已交付。
 
-### 阶段 B — 收口写路径（高优先级，行为应对用户可感知更稳）
+### 阶段 B — 收口写路径 ✅（2026-08-07，B-1…B-4）
 
-按风险从低到高，**每次 PR 只收口一种事件**：
+详见 [`docs/architecture-map.md`](docs/architecture-map.md)。
 
-1. **Invocation 终态** ✅（2026-08-07，B-1）  
-   调度器唯一写入口：`durableRecorder.completeInvocation`。  
-   底层 `finishInvocation` / `finishWithAssistantMessage` 仅供 facade/测试；孤儿收口仍用 `reconcileThreadActive` / `forceTerminalInvocation`。
-2. **Handoff 消费**（B-2，下一步）  
-   唯一 consume 入口 + 幂等键；chat 与 callback 只做触发，不复制业务。
-3. **Message 持久化**（B-3）  
-   与 durable events 的顺序/事务边界写清；禁止第三处 insert。
-4. **Memory 写入**（B-4）  
-   权威写入只经 memory 用例入口；inject/recall 只读派生。
+1. **Invocation 终态** ✅ — `durableRecorder.completeInvocation`  
+2. **Handoff 消费** ✅ — `finalizeA2ARoutes` + hop wrappers；无 transcript 热路径双写；幂等进程内（D4）  
+3. **Message 持久化** ✅ — `appendMessage` 唯一物理写；callback 显式 `assistant-callback`  
+4. **Memory 写入** ✅ — 产品 `writeMemoryCandidate`；协作事件 `memoryCapture`（拒 `memoryService` 半接线）
 
-完成标准：双路径列表项被划掉；旧函数删除或变为 thin wrapper 并在下一 PR 删除。
+下一阶段：**C 拆肥文件**（`chat-routes` / `recall-service`），零行为优先。
 
 ### 阶段 C — 拆肥文件（无行为变更优先）
 

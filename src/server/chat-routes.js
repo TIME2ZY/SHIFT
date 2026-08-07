@@ -11,8 +11,12 @@ const {
 } = require("../agents/implementation-plan-gate");
 const { renderOutcomeEvidenceBlock } = require("../agents/outcome-evidence-gate");
 const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
-const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
-const handoffRouteRegistry = require("../agents/handoff-route-registry");
+const {
+  finalizeA2ARoutes,
+  bindHandoffTargetInvocation,
+  completeHandoffByTargetInvocation,
+  isEffectiveHandoffHop,
+} = require("../agents/a2a-finalize");
 const { createRunObservability } = require("../agents/run-observability");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
 const { scanReplacementChars } = require("../shared/encoding-guard");
@@ -839,7 +843,7 @@ function createChatRoutes({
         // Bind A2A hop → target invocation when this agent was started by a handoff.
         if (parentInvocationId && triggerType === "a2a-handoff") {
           try {
-            handoffRouteRegistry.bindTargetInvocation({
+            bindHandoffTargetInvocation({
               threadId: sessionId,
               sourceInvocationId: parentInvocationId,
               targetAgent: agent,
@@ -1358,7 +1362,7 @@ function createChatRoutes({
             },
           });
           try {
-            handoffRouteRegistry.completeByTargetInvocation(abortInvId, { ok: false });
+            completeHandoffByTargetInvocation(abortInvId, { ok: false });
           } catch {
             /* ignore */
           }
@@ -1473,9 +1477,9 @@ function createChatRoutes({
           usage: invocationUsage,
         });
 
-        // Close A2A hop when this agent was the handoff target.
+        // Close A2A hop when this agent was the handoff target (same module boundary as finalize).
         try {
-          const hop = handoffRouteRegistry.completeByTargetInvocation(finalInvocationId, {
+          const hop = completeHandoffByTargetInvocation(finalInvocationId, {
             ok: code === 0,
           });
           if (hop && !res.writableEnded && !res.destroyed) {
@@ -1485,7 +1489,7 @@ function createChatRoutes({
               targetInvocationId: hop.targetInvocationId,
               completeStatus: hop.completeStatus,
               routeStatus: hop.routeStatus,
-              effective: handoffRouteRegistry.isEffectiveA2aHop(hop),
+              effective: isEffectiveHandoffHop(hop),
             });
           }
         } catch (error) {
