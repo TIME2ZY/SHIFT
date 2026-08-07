@@ -19,7 +19,7 @@ const { ENV } = require("../shared/brand");
 const { ROOT } = require("../shared/runtime-paths");
 const { loadProjectEnv } = require("../shared/load-env");
 const { invokeAcp } = require("./invoke-acp");
-const { resolveImplementationGateEnv } = require("./implementation-plan-gate");
+const { resolveImplementationGateEnv } = require("./workflow-gates");
 
 function parseArgs(argv) {
   const args = [...argv];

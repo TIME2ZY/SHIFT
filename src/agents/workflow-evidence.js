@@ -5,7 +5,7 @@ const {
   parseCodeReview,
   parseDeliveryReceipt,
   parseFinalAcceptance,
-} = require("./outcome-evidence-gate");
+} = require("./workflow-gates");
 
 function processWorkflowEvidenceOutput(input = {}) {
   const agent = String(input.agent || "").toLowerCase();

@@ -12,8 +12,8 @@ const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const {
   IMPLEMENTATION_GATE_STATUS,
   renderImplementationGateBlock,
-} = require("../agents/implementation-plan-gate");
-const { renderOutcomeEvidenceBlock } = require("../agents/outcome-evidence-gate");
+  renderOutcomeEvidenceBlock,
+} = require("../agents/workflow-gates");
 const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
 const {
   finalizeA2ARoutes,
