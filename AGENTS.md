@@ -277,12 +277,12 @@ AI 不得在未确认时启动 XL。
 
 完成标准：按用例边界拆清、测试仍绿、**行为不变**；行数下降是伴随结果。
 
-### 阶段 D — 子系统收敛（能力保留，模块变少）
+### 阶段 D — 子系统收敛 ✅
 
-- **Memory**：保留「写、读、inject、metrics」清晰边界；合并仅被单处使用的微文件；eval 留在 `scripts/` / `evals/`。
-- **Recall**：在线默认一条检索策略（FTS 或 hybrid 选其一为默认）；另一策略显式配置，不双默认。
-- **Gates**：plan / outcome evidence 保留，但调用点集中；策略数据进 SQLite/契约，不进散落 if。
-- **Legacy / dual**：确认零热路径引用后，移至 `scripts/archive/` 或 `archive/`，主 `src` 不再 `require`。
+1. **Legacy / dual** ✅ — `src/storage/offline/`（migrate/audit/recovery/legacy + memory eval）；热路径不 require  
+2. **Memory** ✅ — online 角色写在 `memory-service` 头注释；eval/stabilization 进 offline  
+3. **Recall** ✅ — 默认 `fts`；`hybrid` 仅 `SHIFT_RECALL_MODE` / `recallMode` 显式开启  
+4. **Gates** ✅ — `agents/workflow-gates.js` 作为运行时统一 import 面  
 
 ### 阶段 E — 前端对齐
 

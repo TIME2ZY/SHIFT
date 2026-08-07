@@ -1,9 +1,9 @@
 # Architecture Map — Phase A（写路径与双路径清单）
 
-> **状态：** Phase A + B + C 完成  
-> **范围：** 写路径收口 + 按用例拆肥文件；产品能力面不变。  
-> **依据：** `AGENTS.md` §1 主链路、§7 阶段 A/B/C。  
-> **下一步：** 阶段 D — 子系统收敛（memory 微文件、legacy 出热路径等）。
+> **状态：** Phase A + B + C + D 完成  
+> **范围：** 写路径收口 + 拆肥 + 子系统收敛；产品能力面不变。  
+> **依据：** `AGENTS.md` §1 主链路、§7 阶段 A–D。  
+> **下一步：** 阶段 E — 前端对齐（API/运行态以服务端为准）。
 
 ---
 
@@ -173,18 +173,18 @@ HTTP createServer (src/server/index.js)
 
 下列模块 **已被 scripts/tests 使用**；**当前 `src/server` 与 `src/agents` 无 require**（Phase A 核查）。适合阶段 D 迁到 `scripts/` 旁或 `src/storage/offline/` 并加 lint 禁依赖：
 
-| 模块 | 用途 | 引用方 |
+| 模块（均在 `src/storage/offline/`） | 用途 | 引用方 |
 |------|------|--------|
-| `audit-dual-storage.js` | 历史 dual 对比 | `scripts/audit-dual-storage.js` |
-| `legacy-session-reader.js` | 读旧 sessions | dual audit 等 |
-| `legacy-cleanup-*.js` | 清理清单/执行 | plan/execute-legacy-cleanup scripts |
-| `migrate-runtime.js` | 文件→SQLite 迁移 | `scripts/migrate-runtime-to-sqlite.js` |
+| `audit-dual-storage.js` | 历史 dual 对比 | scripts + tests |
+| `legacy-session-reader.js` | 读旧 sessions | offline dual audit |
+| `legacy-cleanup-*.js` | 清理清单/执行 | plan/execute scripts |
+| `migrate-runtime.js` | 文件→SQLite 迁移 | migrate script + tests |
 | `mixed-transcript-retirement.js` | 混合 transcript 归档 | archive/plan scripts |
-| `clean-epoch.js` | 新库 epoch | prepare script + **部分测试** fixture |
-| `recovery-drill.js` | 恢复演练 | `scripts/drill-sqlite-recovery.js` |
-| `audit-storage.js` | SQLite 完整性审计 | audit script + recovery-drill |
+| `clean-epoch.js` | 新库 epoch | prepare script + tests |
+| `recovery-drill.js` / `audit-storage.js` | 恢复演练 / 完整性审计 | drill/audit scripts |
+| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval | scripts + tests |
 
-`clean-epoch` / `audit-storage` 测试依赖可保留；**禁止**重新进入 chat/callback 热路径。
+**禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
 
 ### 5.3 命名/体量告警（非立即删除）
 
