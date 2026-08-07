@@ -457,8 +457,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
    * Finish an invocation and append the assistant-final message in one SQLite
    * transaction (plus EventStore sinks for invocation-end).
    *
-   * Prefer {@link completeInvocation} from chat / request schedulers; this
-   * remains the low-level atomic write used by that facade and tests.
+   * Private: atomic finish + assistant-final. Callers must use completeInvocation.
    */
   function finishWithAssistantMessage(input = {}) {
     if (!storage) return null;
@@ -638,10 +637,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     mirrorLastMessage,
     startInvocation,
     appendInvocationEvent,
-    /** @deprecated Prefer completeInvocation from request schedulers. */
-    finishInvocation,
-    /** @deprecated Prefer completeInvocation from request schedulers. */
-    finishWithAssistantMessage,
+    // finishInvocation / finishWithAssistantMessage are private — only completeInvocation is public.
     completeInvocation,
     forceTerminalInvocation,
     forceFailInvocation,

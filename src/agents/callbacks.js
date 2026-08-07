@@ -1,5 +1,4 @@
 const { getMaxA2ADepth } = require("./routing");
-const transcript = require("../session/transcript");
 const { ENV } = require("../shared/brand");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { processWorkflowEvidenceOutput } = require("./workflow-evidence");
@@ -224,7 +223,6 @@ function postMessage(
   if (currentInvocationId) {
     appendCallbackEvent({
       eventStore,
-      transcript,
       durableRecorder,
       sessionId: callbackSessionId,
       invocationId: currentInvocationId,
@@ -292,7 +290,6 @@ function postMessage(
     a2aCount: thread.a2aCount || 0,
     maxDepth: getMaxA2ADepth(),
     memoryCapture,
-    transcript,
     eventStore,
     durableRecorder,
     sendSse: (event, payload) => sendSse(thread.res, event, payload),
@@ -328,7 +325,6 @@ function postMessage(
   if (currentInvocationId) {
     appendCallbackEvent({
       eventStore,
-      transcript,
       durableRecorder,
       sessionId: callbackSessionId,
       invocationId: currentInvocationId,

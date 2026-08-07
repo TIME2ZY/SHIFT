@@ -43,7 +43,6 @@ function finalizeA2ARoutes(input = {}) {
       ? Math.floor(Number(input.maxDepth))
       : getMaxA2ADepth();
   const memoryCapture = input.memoryCapture || null;
-  const transcript = input.transcript || null;
   const durableRecorder = input.durableRecorder || null;
   const eventStore = input.eventStore || durableRecorder?.eventStore || null;
   const sendSse = typeof input.sendSse === "function" ? input.sendSse : null;
@@ -169,7 +168,6 @@ function finalizeA2ARoutes(input = {}) {
       summary,
       threadId: sessionId,
       invocationId,
-      transcript,
       eventStore,
       sendSse,
     });
@@ -211,7 +209,6 @@ function finalizeA2ARoutes(input = {}) {
         toLabel,
         sessionId,
         invocationId,
-        transcript,
         durableRecorder,
         eventStore,
         sendSse,
@@ -261,7 +258,6 @@ function finalizeA2ARoutes(input = {}) {
         }
         appendRouteEvent({
           eventStore,
-          transcript,
           durableRecorder,
           sessionId,
           invocationId,
@@ -281,7 +277,6 @@ function finalizeA2ARoutes(input = {}) {
         repair,
         sessionId,
         invocationId,
-        transcript,
         durableRecorder,
         eventStore,
         sendSse,
@@ -336,7 +331,6 @@ function finalizeA2ARoutes(input = {}) {
       }
       appendRouteEvent({
         eventStore,
-        transcript,
         durableRecorder,
         sessionId,
         invocationId,
@@ -375,7 +369,6 @@ function finalizeA2ARoutes(input = {}) {
       toLabel,
       sessionId,
       invocationId,
-      transcript,
       durableRecorder,
       eventStore,
       sendSse,
@@ -448,10 +441,9 @@ function finalizeA2ARoutes(input = {}) {
   };
 }
 
-function emitHandoffParsed({ summary, threadId, invocationId, transcript, eventStore, sendSse }) {
+function emitHandoffParsed({ summary, threadId, invocationId, eventStore, sendSse }) {
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder: null,
     sessionId: threadId,
     invocationId,
@@ -467,7 +459,6 @@ function emitSkip({
   toLabel,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -503,7 +494,6 @@ function emitSkip({
   }
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,
@@ -521,7 +511,6 @@ function emitRepair({
   repair,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -549,7 +538,6 @@ function emitRepair({
   if (sendSse) sendSse("handoff-repair-needed", repair);
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,
@@ -571,7 +559,6 @@ function emitRoute({
   toLabel,
   sessionId,
   invocationId,
-  transcript,
   durableRecorder,
   eventStore,
   sendSse,
@@ -628,7 +615,6 @@ function emitRoute({
   }
   appendRouteEvent({
     eventStore,
-    transcript,
     durableRecorder,
     sessionId,
     invocationId,

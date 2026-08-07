@@ -60,7 +60,7 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       createdAt: "2026-07-12T00:00:03.000Z",
     });
     recorder.mirrorLastMessage(session, { invocationId: "invocation-1" });
-    recorder.finishInvocation("invocation-1", 0, null);
+    recorder.completeInvocation({ invocationId: "invocation-1", code: 0, signal: null });
 
     assert.equal(storage.invocations.get("invocation-1").triggerMessageId, "message-user");
     assert.equal(storage.invocations.get("invocation-1").triggerType, "user-message");
@@ -166,7 +166,7 @@ test("completeInvocation is the unified terminal write entry", () => {
   }
 });
 
-test("finishWithAssistantMessage writes finish event and final message atomically", () => {
+test("completeInvocation rolls back assistant message when recall projection fails", () => {
   const storage = createStorage({ file: ":memory:" });
   const recorder = createDurableRecorder({ storage });
   const session = sessionFixture();
@@ -204,7 +204,7 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
 
     assert.throws(
       () =>
-        recorder.finishWithAssistantMessage({
+        recorder.completeInvocation({
           invocationId: "invocation-atomic",
           code: 0,
           signal: null,
@@ -239,7 +239,7 @@ test("finishWithAssistantMessage writes finish event and final message atomicall
       triggerMessageId: "message-user",
       triggerType: "user-message",
     });
-    const completed = recorder.finishWithAssistantMessage({
+    const completed = recorder.completeInvocation({
       invocationId: "invocation-atomic-success",
       code: 0,
       signal: null,
@@ -316,7 +316,7 @@ test("deleting a thread suppresses late writes from its active invocation", () =
       recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "late" }),
       false
     );
-    assert.equal(recorder.finishInvocation("invocation-1", 0, null), null);
+    assert.equal(recorder.completeInvocation({ invocationId: "invocation-1", code: 0, signal: null }), null);
     assert.equal(errors.length, 0);
   } finally {
     recorder.close();

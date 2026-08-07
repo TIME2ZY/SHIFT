@@ -69,3 +69,14 @@ test("missing handoff block remains a no-op", () => {
   assert.equal(result.captured, false);
   assert.deepEqual(events, []);
 });
+
+test("createMemoryCapture rejects memoryService half-wiring", () => {
+  assert.throws(
+    () =>
+      createMemoryCapture({
+        memoryService: {},
+        eventStore: { append: () => ({}) },
+      }),
+    /does not accept memoryService/
+  );
+});
