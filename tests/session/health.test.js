@@ -6,9 +6,9 @@ const { AGENTS } = require("../../src/agents/invoke-cli");
 test("makeTracker uses the configured Codex capacity and 20% reserve", () => {
   const tracker = contextHealth.makeTracker("codex");
   assert.equal(tracker.agentId, "codex");
-  assert.equal(tracker.capacityTokens, 258_000);
-  assert.equal(tracker.reserveTokens, 51_600);
-  assert.equal(tracker.usableContextTokens, 206_400);
+  assert.equal(tracker.capacityTokens, 272_000);
+  assert.equal(tracker.reserveTokens, 54_400);
+  assert.equal(tracker.usableContextTokens, 217_600);
   assert.equal(tracker.getUsedChars(), 0);
   assert.equal(tracker.getFillRatio(), 0);
 });
@@ -88,13 +88,43 @@ test("snapshot returns a consistent view of all counters", () => {
 });
 
 test("agent model capacities match the configured manual limits", () => {
-  assert.equal(contextHealth.getAgentCapacity("codex"), 258_000);
+  assert.equal(contextHealth.getAgentCapacity("codex"), 272_000);
   assert.equal(contextHealth.getAgentCapacity("gemini"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("opencode"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("grok"), 500_000);
   for (const agent of ["codex", "gemini", "opencode", "grok"]) {
     assert.equal(contextHealth.getAgentReserveRatio(agent), 0.2);
   }
+});
+
+test("getAgentSealThresholds: Grok/Codex under native; Gemini caps at 300k", () => {
+  const grok = contextHealth.getAgentSealThresholds("grok");
+  assert.equal(grok.capacityTokens, 500_000);
+  assert.equal(grok.nativeCompactTokens, 425_000);
+  assert.ok(grok.actionTokens <= 400_000);
+  assert.ok(grok.actionTokens < grok.nativeCompactTokens);
+  assert.ok(grok.softTokens < grok.actionTokens);
+  assert.equal(grok.usable.sealer.action, 1);
+  assert.ok(Math.abs(grok.usable.softRatio - 0.95) < 1e-9);
+
+  const codex = contextHealth.getAgentSealThresholds("codex");
+  assert.equal(codex.capacityTokens, 272_000);
+  assert.equal(codex.nativeCompactTokens, Math.floor(272_000 * 0.9));
+  assert.ok(codex.actionTokens < codex.nativeCompactTokens);
+  assert.equal(codex.usable.sealer.action, 1);
+
+  const gemini = contextHealth.getAgentSealThresholds("gemini");
+  assert.equal(gemini.actionTokens, 300_000);
+  assert.equal(gemini.softTokens, 270_000);
+  assert.ok(gemini.actionTokens < gemini.nativeCompactTokens);
+  assert.ok(gemini.physical.action <= 0.3 + 1e-9);
+  assert.ok(gemini.usable.sealer.warn < gemini.usable.sealer.action);
+  assert.ok(gemini.usable.sealer.recovery < gemini.usable.sealer.warn);
+
+  const opencode = contextHealth.getAgentSealThresholds("opencode");
+  assert.equal(opencode.nativeCompactTokens, 980_000);
+  assert.ok(opencode.actionTokens < opencode.nativeCompactTokens);
+  assert.ok(opencode.actionTokens <= 800_000);
 });
 
 test("exact provider context overrides character estimate while billing stays separate", () => {

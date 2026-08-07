@@ -1,9 +1,17 @@
 const DEFAULT_CONTEXT_TOKENS = 200_000;
 const DEFAULT_RESERVE_RATIO = 0.2;
+/** Fallback when a profile omits native compact metadata (relative to physical window). */
+const DEFAULT_NATIVE_COMPACT_RATIO = 0.85;
+/** Physical points: SHIFT action = native - margin (when no absolute seal tokens). */
+const DEFAULT_SEAL_MARGIN = 0.08;
+/** Physical points between soft/warn and action. */
+const DEFAULT_SEAL_SOFT_GAP = 0.04;
+/** Physical points between recovery and soft (sealer hysteresis). */
+const DEFAULT_SEAL_RECOVERY_GAP = 0.05;
 const { getAgentRoleContract } = require("./role-contracts");
 
 function model(providerId, modelId, vendorId, options = {}) {
-  return {
+  const profile = {
     id: modelId,
     providerId,
     vendorId,
@@ -13,28 +21,82 @@ function model(providerId, modelId, vendorId, options = {}) {
     capacitySource: options.capacitySource || "default",
     reasoning: options.reasoning || { supported: false, levels: [] },
   };
+
+  if (typeof options.nativeCompactRatio === "number") {
+    profile.nativeCompactRatio = options.nativeCompactRatio;
+  }
+  if (typeof options.nativeCompactTokens === "number") {
+    profile.nativeCompactTokens = options.nativeCompactTokens;
+  }
+  if (typeof options.sealMargin === "number") {
+    profile.sealMargin = options.sealMargin;
+  }
+  if (typeof options.sealSoftGap === "number") {
+    profile.sealSoftGap = options.sealSoftGap;
+  }
+  if (typeof options.sealRecoveryGap === "number") {
+    profile.sealRecoveryGap = options.sealRecoveryGap;
+  }
+  // Absolute quality/safety caps (e.g. Gemini 300k) — take precedence over ratio math.
+  if (typeof options.sealActionTokens === "number") {
+    profile.sealActionTokens = options.sealActionTokens;
+  }
+  if (typeof options.sealSoftTokens === "number") {
+    profile.sealSoftTokens = options.sealSoftTokens;
+  }
+  // Optional explicit usable ratios (override derived soft/action usable).
+  if (typeof options.sealSoftUsableRatio === "number") {
+    profile.sealSoftUsableRatio = options.sealSoftUsableRatio;
+  }
+  if (typeof options.sealActionUsableRatio === "number") {
+    profile.sealActionUsableRatio = options.sealActionUsableRatio;
+  }
+
+  return profile;
 }
 
-/** Only models used by the four active agents. */
+/**
+ * Only models used by the four active agents.
+ *
+ * nativeCompact* documents provider auto-compact (or quality cap for Gemini).
+ * SHIFT seal must land earlier; see resolveSealThresholds in context-budget.js.
+ */
 const MODEL_PROFILES = [
   model("codex", "gpt-5.6-sol", "openai", {
-    contextTokens: 258_000,
+    contextTokens: 272_000,
     capacitySource: "manual",
+    // CLI: model_auto_compact ≈ window × 0.90 when unset / hard-clamped.
+    nativeCompactRatio: 0.9,
+    // Usable soft/action stay high: 20% reserve already keeps absolute under native.
+    sealSoftUsableRatio: 0.95,
+    sealActionUsableRatio: 1.0,
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
   model("opencode", "deepseek-v4-flash", "deepseek", {
     contextTokens: 1_000_000,
     capacitySource: "manual",
+    // estimated > limit − max(requested_output, ~20k buffer) ≈ 980k.
+    nativeCompactTokens: 980_000,
+    sealSoftUsableRatio: 0.93,
+    sealActionUsableRatio: 0.98,
     reasoning: { supported: true, levels: ["low", "high", "max"] },
   }),
   model("grok", "grok-4.5", "xai", {
     contextTokens: 500_000,
     capacitySource: "manual",
+    // Local config: [session] auto_compact_threshold_percent = 85 (catalog may say 80).
+    nativeCompactRatio: 0.85,
+    sealSoftUsableRatio: 0.95,
+    sealActionUsableRatio: 1.0,
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
   model("antigravity", "gemini-3.6-flash", "google", {
     contextTokens: 1_000_000,
     capacitySource: "manual",
+    // Gemini CLI-style native compact ~50%; SHIFT quality cap is much earlier.
+    nativeCompactRatio: 0.5,
+    sealSoftTokens: 270_000,
+    sealActionTokens: 300_000,
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
   }),
 ];
@@ -121,6 +183,10 @@ function getAgentModelProfile(agentId) {
 module.exports = {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_RESERVE_RATIO,
+  DEFAULT_NATIVE_COMPACT_RATIO,
+  DEFAULT_SEAL_MARGIN,
+  DEFAULT_SEAL_SOFT_GAP,
+  DEFAULT_SEAL_RECOVERY_GAP,
   MODEL_PROFILES,
   MODELS,
   AGENTS,

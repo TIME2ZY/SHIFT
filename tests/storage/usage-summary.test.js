@@ -10,7 +10,7 @@ test("usage summary keeps per-agent billing and a separate session total", () =>
       generation: 1,
       state: "active",
       createdAt: "2026-01-01",
-      capacityTokens: 258000,
+      capacityTokens: 272000,
       reserveRatio: 0.2,
       contextUsedTokens: 100000,
       contextUsageSource: "char_estimated",
@@ -52,7 +52,7 @@ test("usage summary keeps per-agent billing and a separate session total", () =>
 test("usage summary prefers an open context window over sealed history", () => {
   const base = {
     agentId: "codex",
-    capacityTokens: 258000,
+    capacityTokens: 272000,
     reserveRatio: 0.2,
     contextUsageSource: "char_estimated",
     billingTotalTokens: 0,

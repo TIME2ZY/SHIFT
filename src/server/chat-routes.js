@@ -869,7 +869,15 @@ function createChatRoutes({
           healthTracker.addInput(promptForAgent.length);
         }
         const billingAtStart = { ...healthTracker.snapshot().billing };
-        const sealer = sessionSealer.makeSealer();
+        const sealBudget = contextHealth.getAgentSealThresholds(agent, {
+          capacityTokens: healthTracker.capacityTokens,
+          reserveRatio: healthTracker.reserveRatio,
+        });
+        const sealer = sessionSealer.makeSealer({
+          warnThreshold: sealBudget.usable.sealer.warn,
+          actionThreshold: sealBudget.usable.sealer.action,
+          recoveryThreshold: sealBudget.usable.sealer.recovery,
+        });
         sealer.update(healthTracker.getFillRatio());
         threadCtx.sealer = sealer;
         // Keep this payload stable for existing clients. A2A causality lives on
@@ -1467,6 +1475,7 @@ function createChatRoutes({
         const postSoft = shouldSoftSealAfterTurn({
           usableContextTokens: healthTracker.usableContextTokens,
           usedTokens: healthTracker.getUsedTokens(),
+          softRatio: sealBudget.usable.softRatio,
         });
         if ((sealPending || postSoft.seal || emergencyStop) && !contextSealHandled) {
           const ratio = healthTracker.getFillRatio();
