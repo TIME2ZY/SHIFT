@@ -284,10 +284,11 @@ AI 不得在未确认时启动 XL。
 3. **Recall** ✅ — 默认 `fts`；`hybrid` 仅 `SHIFT_RECALL_MODE` / `recallMode` 显式开启  
 4. **Gates** ✅ — `agents/workflow-gates.js` 作为运行时统一 import 面  
 
-### 阶段 E — 前端对齐
+### 阶段 E — 前端对齐 ✅
 
-- API 类型与后端契约一致；避免 UI 私自解释 phase/状态。
-- 运行态（`session-run-*`）与服务端终态不一致时，以服务端为准并修复同步。
+1. **消息类型契约** ✅ — `web/src/shared/contracts/messages.ts` 与后端 `MESSAGE_TYPES` 对齐；MessageList 用契约判断 final/callback  
+2. **运行态终态** ✅ — `run-status.ts` 映射 agent-exit（code/signal）；SSE `done` 封存仍在 streaming 的 live 气泡；失败不被后续 done 覆盖  
+3. **以服务端为准** ✅ — UI 不自造 phase 状态机；进程详情仍只挂 `assistant-final` host  
 
 ### 阶段 F — 固化
 
