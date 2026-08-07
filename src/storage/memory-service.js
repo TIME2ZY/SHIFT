@@ -1,3 +1,18 @@
+/**
+ * Product Memory write/read service (Phase D-2 boundary).
+ *
+ * Online roles:
+ * - Write path: this module (`writeMemoryCandidate` / captureOnce) → memory-repository
+ * - Read/list: this module + memory-repository
+ * - Inject into prompts: memory-inject + memory-funnel (ranking/budget)
+ * - Metrics: memory-metrics
+ * - Keys/kinds/topics: memory-keys + memory-topic-canon
+ * - Retrieval predicate shared with recall: memory-retrieval-contract
+ * - Collaboration events (not product rows): memory-capture
+ *
+ * Offline only (src/storage/offline): memory-stabilization audit, memory-write-eval.
+ */
+
 const crypto = require("node:crypto");
 const {
   PRODUCT_KINDS,
