@@ -692,5 +692,5 @@ module.exports = {
   isEffectiveHandoffHop,
   handoffRouteRegistry,
   collabTaskRegistry,
-  appendRouteEvent,
+  // appendRouteEvent stays module-private (not a second public event API).
 };
