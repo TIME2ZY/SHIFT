@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_CHAT_QUICK_PROMPTS, MessageList } from "./MessageList";
+import {
+  EMPTY_CHAT_QUICK_PROMPTS,
+  MessageList,
+  selectProcessHostIdentities,
+} from "./MessageList";
 
 function renderMessageList(element: ReactElement) {
   const client = new QueryClient({
@@ -14,6 +18,41 @@ function renderMessageList(element: ReactElement) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("selectProcessHostIdentities", () => {
+  it("picks the last assistant-final and ignores callbacks", () => {
+    const hosts = selectProcessHostIdentities([
+      {
+        id: "cb",
+        role: "assistant",
+        invocationId: "i1",
+        messageType: "assistant-callback",
+        content: "handoff",
+      },
+      {
+        id: "f1",
+        role: "assistant",
+        invocationId: "i1",
+        messageType: "assistant-final",
+        content: "status",
+      },
+    ]);
+    expect(hosts).toEqual(new Set(["f1"]));
+  });
+
+  it("returns no host when only callbacks exist for an invocation", () => {
+    const hosts = selectProcessHostIdentities([
+      {
+        id: "cb",
+        role: "assistant",
+        invocationId: "i1",
+        messageType: "assistant-callback",
+        content: "handoff",
+      },
+    ]);
+    expect(hosts.size).toBe(0);
+  });
 });
 
 describe("MessageList", () => {
@@ -251,5 +290,145 @@ describe("MessageList", () => {
 
     expect(screen.getAllByText("不要重复我")).toHaveLength(1);
     expect(screen.queryByText("发送中")).not.toBeInTheDocument();
+  });
+
+  it("does not paint the same final answer on callback and final for one invocation", async () => {
+    const finalText =
+      "我查一下这次 handoff 有没有被平台接受，以及 Gemini 是否真的产生了 invocation。";
+    const handoffText = "@Gemini\n\n```handoff\nto: Gemini\n```";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          version: 1,
+          invocationId: "i-handoff",
+          status: "done",
+          thinking: { text: "", segments: [] },
+          tools: [
+            {
+              toolId: "t1",
+              toolName: "shell",
+              status: "done",
+              changedFiles: [],
+            },
+          ],
+          timeline: [
+            { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
+            {
+              id: "text-2",
+              type: "text",
+              eventNo: 2,
+              lastEventNo: 2,
+              text: finalText,
+            },
+          ],
+          progress: [],
+          changedFiles: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          { id: "u1", role: "user", content: "怎么他不回" },
+          {
+            id: "cb1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i-handoff",
+            messageType: "assistant-callback",
+            content: handoffText,
+          },
+          {
+            id: "f1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i-handoff",
+            messageType: "assistant-final",
+            content: finalText,
+          },
+        ]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={{
+          sessionId: "s1",
+          status: "done",
+          updatedAt: 1,
+          doneReceived: true,
+          liveMessages: {
+            codex: {
+              agentId: "codex",
+              invocationId: "i-handoff",
+              text: finalText,
+              status: "done",
+              timeline: [
+                { id: "tool-t1", type: "tool", toolId: "t1" },
+                { id: "text-2", type: "text", text: finalText },
+              ],
+              tools: [{ id: "t1", name: "shell", status: "done" }],
+            },
+          },
+          invocations: { codex: "i-handoff" },
+          notices: [],
+        }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("shell")).toBeInTheDocument();
+    expect(screen.getAllByText(finalText)).toHaveLength(1);
+    expect(screen.getByText("@Gemini", { exact: false })).toBeInTheDocument();
+    // Durable process loads only for the final host, not the callback.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/s1/invocations/i-handoff/process",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("keeps a standalone live bubble while only a callback exists for the invocation", () => {
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          {
+            id: "cb1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i-mid",
+            messageType: "assistant-callback",
+            content: "@Gemini handoff only",
+          },
+        ]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={{
+          sessionId: "s1",
+          status: "running",
+          updatedAt: 1,
+          doneReceived: false,
+          liveMessages: {
+            codex: {
+              agentId: "codex",
+              invocationId: "i-mid",
+              text: "流式状态说明",
+              status: "streaming",
+            },
+          },
+          invocations: { codex: "i-mid" },
+          notices: [],
+        }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("@Gemini handoff only")).toBeInTheDocument();
+    expect(screen.getByText("流式状态说明")).toBeInTheDocument();
+    expect(screen.getByText("输出中")).toBeInTheDocument();
   });
 });

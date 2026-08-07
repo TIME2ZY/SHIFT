@@ -32,6 +32,18 @@ function liveProcessStatus(status: LiveMessage["status"]): "running" | "done" | 
   return "running";
 }
 
+function timelineBodyText(
+  timeline: Array<InvocationTimelineItem | RunTimelineItem>
+): string {
+  return timeline
+    .filter(
+      (item): item is Extract<typeof item, { type: "text" }> =>
+        item.type === "text" && typeof item.text === "string" && Boolean(item.text)
+    )
+    .map((item) => item.text)
+    .join("");
+}
+
 function ThinkingTimelineItem({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -46,6 +58,13 @@ function ThinkingTimelineItem({ text }: { text: string }) {
   );
 }
 
+/**
+ * Renders one assistant bubble body + optional process details.
+ *
+ * Scheme A: message body always comes from `content` (or live/durable text
+ * fallback when content is empty). Timeline `text` items are never rendered as
+ * a second copy of the answer — they only feed the empty-content fallback.
+ */
 export function MessageProcessDetails({
   sessionId,
   invocationId,
@@ -73,26 +92,33 @@ export function MessageProcessDetails({
     : durable?.timeline || [];
   const progress = liveProgressItems.length ? liveProgressItems : durable?.progress || [];
   const changedFiles: InvocationChangedFile[] = durable?.changedFiles || [];
-  const visibleChangedFiles =
-    liveMessage?.changedFiles?.length ? liveMessage.changedFiles : changedFiles;
+  const visibleChangedFiles = liveMessage?.changedFiles?.length
+    ? liveMessage.changedFiles
+    : changedFiles;
   const status = liveMessage
     ? liveProcessStatus(liveMessage.status)
     : durable?.status || "running";
   const isLoading = canLoadDurable && process.isPending;
+  // Process chrome excludes answer text (that is always `bodyText`).
+  const processTimeline = timeline.filter((item) => item.type !== "text");
   const hasProcess = Boolean(
     thinking ||
       tools.length ||
-      timeline.length ||
+      processTimeline.length ||
       progress.length ||
       visibleChangedFiles.length ||
       isLoading ||
       (canLoadDurable && process.isError)
   );
   const toolById = new Map(tools.map((tool) => [tool.toolId, tool]));
-  const timelineHasText = timeline.some((item) => item.type === "text" && item.text);
+
+  const trimmedContent = typeof content === "string" ? content.trim() : "";
+  const liveText = typeof liveMessage?.text === "string" ? liveMessage.text : "";
+  const bodyText =
+    trimmedContent || liveText.trim() || timelineBodyText(timeline) || "";
 
   if (!hasProcess) {
-    if (content) return <MarkdownContent content={content} />;
+    if (bodyText) return <MarkdownContent content={bodyText} />;
     return liveMessage ? <span className="react-thinking">正在准备回答…</span> : null;
   }
 
@@ -109,25 +135,24 @@ export function MessageProcessDetails({
           </button>
         </div>
       ) : null}
-      {timeline.map((item) => {
+      {processTimeline.map((item) => {
         if (item.type === "thinking") {
           return <ThinkingTimelineItem text={item.text} key={item.id} />;
-        }
-        if (item.type === "text") {
-          return (
-            <div className="react-timeline-text" key={item.id}>
-              <MarkdownContent content={item.text} />
-            </div>
-          );
         }
         const tool = toolById.get(item.toolId);
         return tool ? <ToolCallDetails tool={tool} key={item.id} /> : null;
       })}
-      {!timeline.length && thinking ? <ThinkingTimelineItem text={thinking} /> : null}
-      {!timeline.length
+      {!processTimeline.length && thinking ? (
+        <ThinkingTimelineItem text={thinking} />
+      ) : null}
+      {!processTimeline.length
         ? tools.map((tool) => <ToolCallDetails tool={tool} key={tool.toolId} />)
         : null}
-      {!timelineHasText && content ? <MarkdownContent content={content} /> : null}
+      {bodyText ? (
+        <div className="react-timeline-text react-message-body">
+          <MarkdownContent content={bodyText} />
+        </div>
+      ) : null}
       {progress.length ? (
         <section className="react-process-section">
           <h3>进度</h3>

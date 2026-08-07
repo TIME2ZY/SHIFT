@@ -309,11 +309,29 @@ export function sessionRunReducer(
       }));
 
     case "run/synced":
-      return updateRun(state, action.sessionId, (run) => ({
-        ...run,
-        optimisticUser: undefined,
-        updatedAt: now,
-      }));
+      // Messages are now in the persisted transcript. Drop live answer text so
+      // MessageList cannot paint the same body via live timeline + content.
+      // Keep thinking/tools/files for process details on the host bubble.
+      return updateRun(state, action.sessionId, (run) => {
+        const liveMessages: SessionRun["liveMessages"] = {};
+        for (const [agentId, message] of Object.entries(run.liveMessages)) {
+          if (message.status !== "done" && message.status !== "error") {
+            liveMessages[agentId] = message;
+            continue;
+          }
+          liveMessages[agentId] = {
+            ...message,
+            text: "",
+            timeline: (message.timeline || []).filter((item) => item.type !== "text"),
+          };
+        }
+        return {
+          ...run,
+          optimisticUser: undefined,
+          liveMessages,
+          updatedAt: now,
+        };
+      });
 
     case "session/rekeyed": {
       if (action.from === action.to) return state;
