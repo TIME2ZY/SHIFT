@@ -34,4 +34,12 @@ describe("parseSseChunk", () => {
     expect(frames).toEqual([{ event: "done", data: {} }]);
     expect(result.malformed).toBe(1);
   });
+
+  it("does not misclassify event contract failures as malformed JSON", () => {
+    expect(() =>
+      parseSseChunk("event: agent-start\ndata: {}\n\n", () => {
+        throw new Error("missing invocationId");
+      })
+    ).toThrow("missing invocationId");
+  });
 });

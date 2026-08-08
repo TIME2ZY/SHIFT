@@ -43,7 +43,7 @@ describe("runChatStream", () => {
         'event: agent-start\ndata: {"agent":"grok","invocationId":"i2"}\n\n',
         'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","args":{"description":"List top-level","subagent_type":"explore"}}\n\n',
         'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","status":"ok","args":{"description":"List top-level","subagent_type":"explore","run_in_background":true},"result":{"type":"Text","text":"Subagent started in background.\\nsubagent_id: abc"}}\n\n',
-        'event: agent-exit\ndata: {"agent":"grok","code":0}\n\n',
+        'event: agent-exit\ndata: {"agent":"grok","invocationId":"i2","code":0}\n\n',
         "event: done\ndata: {}\n\n",
       ])
     );
@@ -51,7 +51,7 @@ describe("runChatStream", () => {
     const store = createSessionRunStore();
     const controller = store.startController("s2");
     await runChatStream({ sessionId: "s2", agentId: "grok", prompt: "go" }, store, controller);
-    expect(store.getSnapshot().runs.s2.liveMessages.grok.tools).toMatchObject([
+    expect(store.getSnapshot().runs.s2.liveMessages.i2.tools).toMatchObject([
       {
         id: "sp1",
         name: "spawn_subagent",
@@ -66,7 +66,7 @@ describe("runChatStream", () => {
         },
       },
     ]);
-    expect(store.getSnapshot().runs.s2.liveMessages.grok.tools?.[0]?.output).toMatch(
+    expect(store.getSnapshot().runs.s2.liveMessages.i2.tools?.[0]?.output).toMatch(
       /subagent_id/
     );
   });
@@ -85,7 +85,7 @@ describe("runChatStream", () => {
     const store = createSessionRunStore();
     const controller = store.startController("s3");
     await runChatStream({ sessionId: "s3", agentId: "grok", prompt: "go" }, store, controller);
-    expect(store.getSnapshot().runs.s3.liveMessages.grok.tools?.[0]).toMatchObject({
+    expect(store.getSnapshot().runs.s3.liveMessages.i3.tools?.[0]).toMatchObject({
       id: "t9",
       title: "Explore",
       label: "Subagent",
@@ -101,13 +101,13 @@ describe("runChatStream", () => {
           sseResponse([
             'event: session\ndata: {"sessionId":"s1"}\n\n',
             'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
-            'event: agent-event\ndata: {"type":"thinking.delta","agent":"codex","text":"plan"}\n\n',
+            'event: agent-event\ndata: {"type":"thinking.delta","agent":"codex","invocationId":"i1","text":"plan"}\n\n',
             'event: agent-event\ndata: {"type":"tool.started","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","args":{"path":"src/index.js"}}\n\n',
-            'event: agent-event\ndata: {"type":"progress.update","agent":"codex","items":[{"id":"p1","label":"Read","status":"completed"}]}\n\n',
+            'event: agent-event\ndata: {"type":"progress.update","agent":"codex","invocationId":"i1","items":[{"id":"p1","label":"Read","status":"completed"}]}\n\n',
             'event: agent-event\ndata: {"type":"tool.finished","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","status":"completed","result":{"ok":true}}\n\n',
             'event: agent-event\ndata: {"type":"file.changed","agent":"codex","invocationId":"i1","path":"src/index.js","changeType":"modified"}\n\n',
-            'event: agent-event\ndata: {"type":"text.delta","agent":"codex","text":"hello"}\n\n',
-            'event: agent-exit\ndata: {"agent":"codex","code":0}\n\n',
+            'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i1","text":"hello"}\n\n',
+            'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
             "event: done\ndata: {}\n\n",
           ]));
     vi.stubGlobal("fetch", fetchMock);
@@ -131,7 +131,7 @@ describe("runChatStream", () => {
       clientTurnId: "turn-123",
     });
     expect(store.getSnapshot().runs.s1.status).toBe("done");
-    expect(store.getSnapshot().runs.s1.liveMessages.codex).toMatchObject({
+    expect(store.getSnapshot().runs.s1.liveMessages.i1).toMatchObject({
       text: "hello",
       status: "done",
       thinking: "plan",
@@ -155,7 +155,7 @@ describe("runChatStream", () => {
     });
   });
 
-  it("rejects a stream that closes before done", async () => {
+  it("rejects a stream event that is missing invocationId", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(sseResponse(['event: agent-start\ndata: {"agent":"codex"}\n\n']))
@@ -165,7 +165,38 @@ describe("runChatStream", () => {
 
     await expect(
       runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller)
-    ).rejects.toThrow("完成事件");
+    ).rejects.toThrow("invocationId");
+  });
+
+  it("reports each committed agent exit with its invocation identity", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
+          'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
+          'event: agent-start\ndata: {"agent":"gemini","invocationId":"i2"}\n\n',
+          'event: agent-exit\ndata: {"agent":"gemini","invocationId":"i2","code":0}\n\n',
+          'event: agent-start\ndata: {"agent":"codex","invocationId":"i3"}\n\n',
+          'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i3","text":"new"}\n\n',
+          'event: done\ndata: {}\n\n',
+        ])
+      )
+    );
+    const store = createSessionRunStore();
+    const controller = store.startController("s1");
+    const onAgentExit = vi.fn();
+
+    await runChatStream(
+      { sessionId: "s1", agentId: "codex", prompt: "go" },
+      store,
+      controller,
+      { onAgentExit }
+    );
+
+    expect(onAgentExit.mock.calls).toEqual([["s1", "i1"], ["s1", "i2"]]);
+    expect(store.getSnapshot().runs.s1.liveMessages.i1.status).toBe("done");
+    expect(store.getSnapshot().runs.s1.liveMessages.i3.text).toBe("new");
   });
 
   it("forwards memory lifecycle and run error events", async () => {

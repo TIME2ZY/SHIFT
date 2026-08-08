@@ -10,7 +10,8 @@ function emptyRun(sessionId: string, now = Date.now()): SessionRun {
     updatedAt: now,
     doneReceived: false,
     liveMessages: {},
-    invocations: {},
+    latestInvocationByAgent: {},
+    invocationOrder: [],
     notices: [],
   };
 }
@@ -88,17 +89,22 @@ export function sessionRunReducer(
           ...run,
           status: "running",
           updatedAt: now,
-          liveMessages: { ...run.liveMessages, [action.agentId]: message },
-          invocations: action.invocationId
-            ? { ...run.invocations, [action.agentId]: action.invocationId }
-            : run.invocations,
+          liveMessages: { ...run.liveMessages, [action.invocationId]: message },
+          latestInvocationByAgent: {
+            ...run.latestInvocationByAgent,
+            [action.agentId]: action.invocationId,
+          },
+          invocationOrder: run.invocationOrder.includes(action.invocationId)
+            ? run.invocationOrder
+            : [...run.invocationOrder, action.invocationId],
         };
       });
 
     case "message/delta":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "streaming" as const,
         };
@@ -107,9 +113,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               text: current.text + action.text,
               timeline: appendTimelineText(current.timeline, "text", action.text),
               status: "streaming",
@@ -120,8 +125,9 @@ export function sessionRunReducer(
 
     case "thinking/delta":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "thinking" as const,
         };
@@ -130,9 +136,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               thinking: (current.thinking || "") + action.text,
               timeline: appendTimelineText(current.timeline, "thinking", action.text),
             },
@@ -142,8 +147,9 @@ export function sessionRunReducer(
 
     case "tool/started":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "thinking" as const,
         };
@@ -153,9 +159,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               tools: [
                 ...tools,
                 {
@@ -176,8 +181,9 @@ export function sessionRunReducer(
 
     case "tool/finished":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "thinking" as const,
         };
@@ -209,9 +215,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               tools: matched
                 ? existingTools.map((tool) =>
                     tool.id === action.toolId
@@ -237,8 +242,9 @@ export function sessionRunReducer(
 
     case "progress/updated":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "thinking" as const,
         };
@@ -247,9 +253,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               progress: action.items,
             },
           },
@@ -258,8 +263,9 @@ export function sessionRunReducer(
 
     case "file/changed":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId] ?? {
+        const current = run.liveMessages[action.invocationId] ?? {
           agentId: action.agentId,
+          invocationId: action.invocationId,
           text: "",
           status: "thinking" as const,
         };
@@ -271,9 +277,8 @@ export function sessionRunReducer(
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
-              invocationId: action.invocationId || current.invocationId,
               changedFiles: [
                 ...changedFiles,
                 { path: action.path, changeType: action.changeType },
@@ -285,14 +290,14 @@ export function sessionRunReducer(
 
     case "agent/finished":
       return updateRun(state, action.sessionId, (run) => {
-        const current = run.liveMessages[action.agentId];
+        const current = run.liveMessages[action.invocationId];
         if (!current) return { ...run, updatedAt: now };
         return {
           ...run,
           updatedAt: now,
           liveMessages: {
             ...run.liveMessages,
-            [action.agentId]: {
+            [action.invocationId]: {
               ...current,
               status: action.failed ? "error" : "done",
             },
@@ -311,8 +316,8 @@ export function sessionRunReducer(
       // Server SSE `done` is authoritative: seal any still-open live agent bubbles.
       return updateRun(state, action.sessionId, (run) => {
         const liveMessages: SessionRun["liveMessages"] = {};
-        for (const [agentId, message] of Object.entries(run.liveMessages)) {
-          liveMessages[agentId] = {
+        for (const [invocationId, message] of Object.entries(run.liveMessages)) {
+          liveMessages[invocationId] = {
             ...message,
             status: sealLiveMessageStatus(message.status),
           };
@@ -347,12 +352,12 @@ export function sessionRunReducer(
       // Keep thinking/tools/files for process details on the host bubble.
       return updateRun(state, action.sessionId, (run) => {
         const liveMessages: SessionRun["liveMessages"] = {};
-        for (const [agentId, message] of Object.entries(run.liveMessages)) {
+        for (const [invocationId, message] of Object.entries(run.liveMessages)) {
           if (message.status !== "done" && message.status !== "error") {
-            liveMessages[agentId] = message;
+            liveMessages[invocationId] = message;
             continue;
           }
-          liveMessages[agentId] = {
+          liveMessages[invocationId] = {
             ...message,
             text: "",
             timeline: (message.timeline || []).filter((item) => item.type !== "text"),
