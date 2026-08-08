@@ -219,7 +219,11 @@ export function MessageList({
       ),
     [messages]
   );
-  const liveMessages = run ? Object.values(run.liveMessages) : [];
+  const liveMessages = run
+    ? run.invocationOrder
+        .map((invocationId) => run.liveMessages[invocationId])
+        .filter((message): message is NonNullable<typeof message> => Boolean(message))
+    : [];
   const processHostIdentities = useMemo(
     () => selectProcessHostIdentities(visibleMessages),
     [visibleMessages]
@@ -229,7 +233,6 @@ export function MessageList({
   // streaming answer onto a callback bubble and double-painting with final later.
   const standaloneLiveMessages = liveMessages.filter(
     (message) =>
-      !message.invocationId ||
       !invocationHasProcessHost(message.invocationId, processHostIdentities, visibleMessages)
   );
   const liveText = liveMessages
@@ -431,18 +434,11 @@ export function MessageList({
 
           const isAssistant = message.role === "assistant";
           const isHost = isAssistant && processHostIdentities.has(identity);
-          const isLatestAssistantMsg =
-            isAssistant &&
-            (index === visibleMessages.length - 1 ||
-              (index === visibleMessages.length - 2 &&
-                visibleMessages[visibleMessages.length - 1].role === "user"));
           // Process/live attach only to the invocation host (assistant-final).
           const liveData = isHost
             ? message.invocationId
               ? liveMessages.find((item) => item.invocationId === message.invocationId)
-              : isLatestAssistantMsg
-                ? run?.liveMessages[agentId]
-                : undefined
+              : undefined
             : undefined;
 
           return (

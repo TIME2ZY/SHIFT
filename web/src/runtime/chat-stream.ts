@@ -23,6 +23,7 @@ export interface ChatStreamEvents {
   onMemoryInject?(payload: Record<string, unknown>, sessionId: string): void;
   onMemoryMetrics?(payload: Record<string, unknown>, sessionId: string): void;
   onRunError?(message: string, sessionId: string): void;
+  onAgentExit?(sessionId: string, invocationId: string): void;
 }
 
 interface CanonicalAgentEvent {
@@ -97,6 +98,18 @@ export async function runChatStream(
   let malformedFrames = 0;
   let doneReceived = false;
   let hasStructuredEvents = false;
+  const currentInvocationByAgent = new Map<string, string>();
+
+  function requiredInvocationId(agentId: string, payloadInvocationId: unknown): string {
+    if (typeof payloadInvocationId === "string" && payloadInvocationId) {
+      return payloadInvocationId;
+    }
+    throw new Error(`消息流事件缺少 invocationId（Agent: ${agentId}）。`);
+  }
+
+  function currentInvocationId(agentId: string): string {
+    return requiredInvocationId(agentId, currentInvocationByAgent.get(agentId));
+  }
 
   const response = await authenticatedFetch("/api/chat", {
     method: "POST",
@@ -137,25 +150,30 @@ export async function runChatStream(
         break;
       }
 
-      case "agent-start":
+      case "agent-start": {
+        const agentId = typeof payload.agent === "string" ? payload.agent : request.agentId;
+        const invocationId = requiredInvocationId(agentId, payload.invocationId);
+        currentInvocationByAgent.set(agentId, invocationId);
         store.dispatch({
           type: "agent/started",
           sessionId: boundSessionId,
-          agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
-          invocationId: typeof payload.invocationId === "string" ? payload.invocationId : undefined,
+          agentId,
+          invocationId,
         });
         break;
+      }
 
       case "agent-event": {
         hasStructuredEvents = true;
         const agentEvent = payload as CanonicalAgentEvent;
         const agentId = agentEvent.agent || request.agentId;
+        const invocationId = requiredInvocationId(agentId, agentEvent.invocationId);
         if (agentEvent.type === "text.delta" && agentEvent.text) {
           store.dispatch({
             type: "message/delta",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             text: agentEvent.text,
           });
         } else if (agentEvent.type === "thinking.delta" && agentEvent.text) {
@@ -163,7 +181,7 @@ export async function runChatStream(
             type: "thinking/delta",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             text: agentEvent.text,
           });
         } else if (agentEvent.type === "tool.started" && agentEvent.toolId && agentEvent.toolName) {
@@ -171,7 +189,7 @@ export async function runChatStream(
             type: "tool/started",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             toolId: agentEvent.toolId,
             toolName: agentEvent.toolName,
             input: agentEvent.args,
@@ -184,7 +202,7 @@ export async function runChatStream(
             type: "tool/finished",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             toolId: agentEvent.toolId,
             toolName: agentEvent.toolName,
             failed: ["error", "failed"].includes(agentEvent.status || ""),
@@ -206,7 +224,7 @@ export async function runChatStream(
             type: "file/changed",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             path: agentEvent.path,
             changeType: agentEvent.changeType,
           });
@@ -215,7 +233,7 @@ export async function runChatStream(
             type: "progress/updated",
             sessionId: boundSessionId,
             agentId,
-            invocationId: agentEvent.invocationId,
+            invocationId,
             items: agentEvent.items.map((item, index) => ({
               id: item.id || `step-${index + 1}`,
               label: item.label || item.text || `步骤 ${index + 1}`,
@@ -236,25 +254,33 @@ export async function runChatStream(
 
       case "message":
         if (!hasStructuredEvents && typeof payload.text === "string") {
+          const agentId = typeof payload.agent === "string" ? payload.agent : request.agentId;
           store.dispatch({
             type: "message/delta",
             sessionId: boundSessionId,
-            agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
+            agentId,
+            // Legacy `message` frames predate per-event invocation ids. They
+            // are bound only to the explicit preceding agent-start identity.
+            invocationId: currentInvocationId(agentId),
             text: payload.text,
           });
         }
         break;
 
-      case "agent-exit":
+      case "agent-exit": {
+        const agentId = typeof payload.agent === "string" ? payload.agent : request.agentId;
+        const invocationId = requiredInvocationId(agentId, payload.invocationId);
         store.dispatch({
           type: "agent/finished",
           sessionId: boundSessionId,
-          agentId: typeof payload.agent === "string" ? payload.agent : request.agentId,
-          invocationId: typeof payload.invocationId === "string" ? payload.invocationId : undefined,
+          agentId,
+          invocationId,
           // Align with server finish: non-zero exit or OS signal ⇒ failed/aborted terminal.
           failed: agentExitIndicatesFailure(payload),
         });
+        events.onAgentExit?.(boundSessionId, invocationId);
         break;
+      }
 
       case "a2a-route": {
         // Agent handoffs are execution metadata. They remain available in the

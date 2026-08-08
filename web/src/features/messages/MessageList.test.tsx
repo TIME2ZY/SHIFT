@@ -89,13 +89,15 @@ describe("MessageList", () => {
           updatedAt: 1,
           doneReceived: false,
           liveMessages: {
-            codex: {
+            "i-live": {
               agentId: "codex",
+              invocationId: "i-live",
               text: "实时回答",
               status: "streaming",
             },
           },
-          invocations: {},
+          latestInvocationByAgent: { codex: "i-live" },
+          invocationOrder: ["i-live"],
           notices: [],
         }}
         isLoading={false}
@@ -209,7 +211,7 @@ describe("MessageList", () => {
           updatedAt: 1,
           doneReceived: true,
           liveMessages: {
-            codex: {
+            i1: {
               agentId: "codex",
               invocationId: "i1",
               text: "最终回答",
@@ -217,7 +219,8 @@ describe("MessageList", () => {
               status: "done",
             },
           },
-          invocations: { codex: "i1" },
+          latestInvocationByAgent: { codex: "i1" },
+          invocationOrder: ["i1"],
           notices: [],
         }}
         isLoading={false}
@@ -278,7 +281,8 @@ describe("MessageList", () => {
           updatedAt: 1,
           doneReceived: false,
           liveMessages: {},
-          invocations: {},
+          latestInvocationByAgent: {},
+          invocationOrder: [],
           notices: [],
           optimisticUser: { agentId: "codex", content: "不要重复我" },
         }}
@@ -358,7 +362,7 @@ describe("MessageList", () => {
           updatedAt: 1,
           doneReceived: true,
           liveMessages: {
-            codex: {
+            "i-handoff": {
               agentId: "codex",
               invocationId: "i-handoff",
               text: finalText,
@@ -370,7 +374,8 @@ describe("MessageList", () => {
               tools: [{ id: "t1", name: "shell", status: "done" }],
             },
           },
-          invocations: { codex: "i-handoff" },
+          latestInvocationByAgent: { codex: "i-handoff" },
+          invocationOrder: ["i-handoff"],
           notices: [],
         }}
         isLoading={false}
@@ -411,14 +416,15 @@ describe("MessageList", () => {
           updatedAt: 1,
           doneReceived: false,
           liveMessages: {
-            codex: {
+            "i-mid": {
               agentId: "codex",
               invocationId: "i-mid",
               text: "流式状态说明",
               status: "streaming",
             },
           },
-          invocations: { codex: "i-mid" },
+          latestInvocationByAgent: { codex: "i-mid" },
+          invocationOrder: ["i-mid"],
           notices: [],
         }}
         isLoading={false}

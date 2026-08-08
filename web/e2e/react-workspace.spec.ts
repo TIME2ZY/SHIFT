@@ -206,7 +206,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
           'event: memory-inject\ndata: {"sessionId":"session-1","count":1,"items":[{"id":"memory-1","kind":"decision","topic":"React 迁移","content":"工作区流程已经通过浏览器验证。"}]}\n\n',
           'event: memory\ndata: {"sessionId":"session-1","action":"upsert"}\n\n',
           'event: memory-metrics\ndata: {"threadId":"session-1","totalWrites":1}\n\n',
-          'event: agent-exit\ndata: {"agent":"gemini","code":0}\n\n',
+          'event: agent-exit\ndata: {"agent":"gemini","invocationId":"invocation-1","code":0}\n\n',
           "event: done\ndata: {}\n\n",
         ].join(""),
       });

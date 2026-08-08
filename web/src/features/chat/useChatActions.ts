@@ -64,6 +64,17 @@ export function useChatActions() {
             onRunError(message) {
               toast.show(message, { variant: "error", ttl: 7000 });
             },
+            onAgentExit(eventSessionId, invocationId) {
+              void queryClient.invalidateQueries({
+                queryKey: queryKeys.sessions.messages(eventSessionId),
+              });
+              void queryClient.invalidateQueries({
+                queryKey: queryKeys.sessions.usage(eventSessionId),
+              });
+              void queryClient.invalidateQueries({
+                queryKey: queryKeys.sessions.invocationProcess(eventSessionId, invocationId),
+              });
+            },
           }
         );
         resultSessionId = result.sessionId;

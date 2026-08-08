@@ -95,7 +95,7 @@ export function App() {
   const activeParticipantIds = uniqueAgentIds([
     ...(activeSession?.participantAgentIds ?? []),
     ...(messages.data ?? []).map((message) => message.agentId || message.agent),
-    ...Object.keys(run?.liveMessages ?? {}),
+    ...Object.values(run?.liveMessages ?? {}).map((message) => message.agentId),
   ]);
   const activeParticipantNames = activeParticipantIds.map(
     (agentId) => agents.data?.find((agent) => agent.id === agentId)?.label || agentId

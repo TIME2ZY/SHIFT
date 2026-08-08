@@ -5,7 +5,7 @@ export type RunStatus = UiRunStatus;
 
 export interface LiveMessage {
   agentId: string;
-  invocationId?: string;
+  invocationId: string;
   text: string;
   status: UiLiveMessageStatus;
   thinking?: string;
@@ -64,8 +64,12 @@ export interface SessionRun {
   startedAt?: number;
   updatedAt: number;
   doneReceived: boolean;
+  /** Live execution state, keyed by invocationId. */
   liveMessages: Record<string, LiveMessage>;
-  invocations: Record<string, string>;
+  /** Most recently started invocation for each agent. */
+  latestInvocationByAgent: Record<string, string>;
+  /** Stable display order for invocations seen in this run. */
+  invocationOrder: string[];
   notices: string[];
   optimisticUser?: {
     agentId: string;
@@ -85,27 +89,27 @@ export type SessionRunAction =
       type: "agent/started";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
     }
   | {
       type: "message/delta";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       text: string;
     }
   | {
       type: "thinking/delta";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       text: string;
     }
   | {
       type: "tool/started";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       toolId: string;
       toolName: string;
       input?: Record<string, unknown>;
@@ -117,7 +121,7 @@ export type SessionRunAction =
       type: "tool/finished";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       toolId: string;
       toolName?: string;
       failed?: boolean;
@@ -132,14 +136,14 @@ export type SessionRunAction =
       type: "progress/updated";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       items: RunProgressItem[];
     }
   | {
       type: "file/changed";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       path: string;
       changeType?: string;
     }
@@ -147,7 +151,7 @@ export type SessionRunAction =
       type: "agent/finished";
       sessionId: string;
       agentId: string;
-      invocationId?: string;
+      invocationId: string;
       failed?: boolean;
     }
   | { type: "notice/received"; sessionId: string; message: string }

@@ -17,11 +17,12 @@ describe("sessionRunReducer", () => {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "one",
     });
 
-    expect(state.runs.s1.liveMessages.codex.text).toBe("one");
-    expect(state.runs.s2.liveMessages.codex).toBeUndefined();
+    expect(state.runs.s1.liveMessages.i1.text).toBe("one");
+    expect(state.runs.s2.liveMessages.i1).toBeUndefined();
   });
 
   it("appends deltas without mutating the previous state", () => {
@@ -34,17 +35,19 @@ describe("sessionRunReducer", () => {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "hello",
     });
     const second = sessionRunReducer(first, {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: " world",
     });
 
-    expect(first.runs.s1.liveMessages.codex.text).toBe("hello");
-    expect(second.runs.s1.liveMessages.codex.text).toBe("hello world");
+    expect(first.runs.s1.liveMessages.i1.text).toBe("hello");
+    expect(second.runs.s1.liveMessages.i1.text).toBe("hello world");
   });
 
   it("rekeys a pending run when the server assigns a session id", () => {
@@ -97,13 +100,14 @@ describe("sessionRunReducer", () => {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "partial",
     });
-    expect(state.runs.s1.liveMessages.codex.status).toBe("streaming");
+    expect(state.runs.s1.liveMessages.i1.status).toBe("streaming");
     state = sessionRunReducer(state, { type: "run/done", sessionId: "s1" });
     expect(state.runs.s1.status).toBe("done");
-    expect(state.runs.s1.liveMessages.codex.status).toBe("done");
-    expect(state.runs.s1.liveMessages.codex.text).toBe("partial");
+    expect(state.runs.s1.liveMessages.i1.status).toBe("done");
+    expect(state.runs.s1.liveMessages.i1.text).toBe("partial");
   });
 
   it("tracks thinking, progress, and tool lifecycle per agent", () => {
@@ -117,12 +121,14 @@ describe("sessionRunReducer", () => {
       type: "thinking/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "inspect",
     });
     state = sessionRunReducer(state, {
       type: "tool/started",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       toolId: "t1",
       toolName: "read_file",
     });
@@ -130,22 +136,25 @@ describe("sessionRunReducer", () => {
       type: "tool/finished",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       toolId: "t1",
     });
     state = sessionRunReducer(state, {
       type: "progress/updated",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       items: [{ id: "p1", label: "读取", status: "completed" }],
     });
     state = sessionRunReducer(state, {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "done",
     });
 
-    const message = state.runs.s1.liveMessages.codex;
+    const message = state.runs.s1.liveMessages.i1;
     expect(message.thinking).toBe("inspect");
     expect(message.tools).toEqual([
       {
@@ -189,7 +198,7 @@ describe("sessionRunReducer", () => {
     });
     state = sessionRunReducer(state, { type: "run/synced", sessionId: "s1" });
 
-    expect(state.runs.s1.liveMessages.codex).toMatchObject({
+    expect(state.runs.s1.liveMessages.i1).toMatchObject({
       invocationId: "i1",
       thinking: "保留",
       changedFiles: [{ path: "src/index.js", changeType: "modified" }],
@@ -207,12 +216,14 @@ describe("sessionRunReducer", () => {
       type: "thinking/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "保留思考",
     });
     state = sessionRunReducer(state, {
       type: "message/delta",
       sessionId: "s1",
       agentId: "codex",
+      invocationId: "i1",
       text: "最终回答正文",
     });
     state = sessionRunReducer(state, {
@@ -223,7 +234,7 @@ describe("sessionRunReducer", () => {
     });
     state = sessionRunReducer(state, { type: "run/synced", sessionId: "s1" });
 
-    expect(state.runs.s1.liveMessages.codex).toMatchObject({
+    expect(state.runs.s1.liveMessages.i1).toMatchObject({
       invocationId: "i1",
       text: "",
       thinking: "保留思考",
@@ -233,9 +244,39 @@ describe("sessionRunReducer", () => {
         // text timeline items stripped on sync
       ],
     });
-    expect(state.runs.s1.liveMessages.codex.timeline?.some((item) => item.type === "text")).toBe(
+    expect(state.runs.s1.liveMessages.i1.timeline?.some((item) => item.type === "text")).toBe(
       false
     );
     expect(state.runs.s1.optimisticUser).toBeUndefined();
+  });
+
+  it("keeps repeated agent invocations isolated through finish, done, and sync", () => {
+    let state = initialSessionRunState;
+    const dispatch = (action: Parameters<typeof sessionRunReducer>[1]) => {
+      state = sessionRunReducer(state, action);
+    };
+
+    dispatch({ type: "agent/started", sessionId: "s1", agentId: "codex", invocationId: "i1" });
+    dispatch({ type: "message/delta", sessionId: "s1", agentId: "codex", invocationId: "i1", text: "first" });
+    dispatch({ type: "agent/finished", sessionId: "s1", agentId: "codex", invocationId: "i1" });
+    dispatch({ type: "agent/started", sessionId: "s1", agentId: "gemini", invocationId: "i2" });
+    dispatch({ type: "agent/finished", sessionId: "s1", agentId: "gemini", invocationId: "i2" });
+    dispatch({ type: "agent/started", sessionId: "s1", agentId: "codex", invocationId: "i3" });
+    dispatch({ type: "message/delta", sessionId: "s1", agentId: "codex", invocationId: "i3", text: "second" });
+
+    expect(state.runs.s1.invocationOrder).toEqual(["i1", "i2", "i3"]);
+    expect(state.runs.s1.latestInvocationByAgent).toEqual({ codex: "i3", gemini: "i2" });
+    expect(state.runs.s1.liveMessages.i1).toMatchObject({ text: "first", status: "done" });
+    expect(state.runs.s1.liveMessages.i3).toMatchObject({ text: "second", status: "streaming" });
+
+    // A delayed exit for i1 must never seal the newer Codex invocation.
+    dispatch({ type: "agent/finished", sessionId: "s1", agentId: "codex", invocationId: "i1" });
+    expect(state.runs.s1.liveMessages.i3.status).toBe("streaming");
+
+    dispatch({ type: "run/done", sessionId: "s1" });
+    expect(Object.values(state.runs.s1.liveMessages).every((item) => item.status === "done")).toBe(true);
+    dispatch({ type: "run/synced", sessionId: "s1" });
+    expect(state.runs.s1.liveMessages.i1.text).toBe("");
+    expect(state.runs.s1.liveMessages.i3.text).toBe("");
   });
 });

@@ -23,14 +23,15 @@ const TABS: ReadonlyArray<readonly [PanelTab, string]> = [
 ];
 
 function activityStatus(agentId: string, run: SessionRun | null): AgentActivityStatus {
-  const live = run?.liveMessages[agentId];
+  const invocationId = run?.latestInvocationByAgent[agentId];
+  const live = invocationId ? run?.liveMessages[invocationId] : undefined;
   if (live?.status === "thinking") return "thinking";
   if (live?.status === "streaming") return "running";
   if (live?.status === "error") return "error";
   if (live?.status === "done") return "done";
   if (run?.status === "connecting" && run.optimisticUser?.agentId === agentId) return "connecting";
-  if (run?.status === "error" && run.invocations[agentId]) return "error";
-  if (run?.status === "done" && run.invocations[agentId]) return "done";
+  if (run?.status === "error" && invocationId) return "error";
+  if (run?.status === "done" && invocationId) return "done";
   return "idle";
 }
 
