@@ -9,7 +9,12 @@ function eventPlainText(kind, payload) {
   const eventKind = typeof kind === "string" ? kind : "unknown";
   const data = normalizePayload(payload);
 
-  if (eventKind === "text.delta" || eventKind === "thinking.delta" || eventKind === "stderr") {
+  if (
+    eventKind === "text.delta" ||
+    eventKind === "commentary.delta" ||
+    eventKind === "thinking.delta" ||
+    eventKind === "stderr"
+  ) {
     return truncate(stringField(data, ["text", "content", "message"]));
   }
 

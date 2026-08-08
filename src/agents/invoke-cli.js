@@ -180,14 +180,22 @@ function invoke(cli, prompt, options = {}) {
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const transport = resolvedCli.transport || "cli";
   const workspaceCwd = process.env[ENV.WORKTREE_DIR] || process.cwd();
-  const { command, args } = buildProviderTransportInvocation(resolvedCli, prompt, transport);
+  const invocationId = process.env[ENV.INVOCATION_ID] || "standalone";
+  const providerInvocation = buildProviderTransportInvocation(resolvedCli, prompt, transport, {
+    invocationId,
+    cwd: workspaceCwd,
+  });
+  const { command, args } = providerInvocation;
+  const runtimeConfig = {
+    ...resolvedCli,
+    invocationArtifacts: providerInvocation.artifacts || {},
+  };
   const { env: childEnv, runOptions: resolvedRun } = buildProviderEnvironment(
     config,
     runOptions,
     process.env
   );
 
-  const invocationId = process.env[ENV.INVOCATION_ID] || "standalone";
   const rawLogger = createRawEventLogger({
     invocationId,
     providerId,
@@ -229,7 +237,7 @@ function invoke(cli, prompt, options = {}) {
     retries: resolvedRun.retries ?? 0,
     // Shared lifecycle across retries; decoder state recreated per attempt.
     createRuntime: (lifecycle, shared) =>
-      createProviderRuntime(config, {
+      createProviderRuntime(runtimeConfig, {
         lifecycle,
         usageAccumulator: shared && shared.usageAccumulator,
       }),

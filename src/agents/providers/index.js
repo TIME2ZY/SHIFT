@@ -120,8 +120,7 @@ function validateProviderConfig(config) {
  */
 function createProviderRuntime(config, options = {}) {
   const { adapter } = validateProviderConfig(config);
-  const transportAdapter =
-    options.transport === "acp" && adapter.acp ? adapter.acp : adapter;
+  const transportAdapter = options.transport === "acp" && adapter.acp ? adapter.acp : adapter;
   const runtime = transportAdapter.createRuntime(config);
   if (!runtime || typeof runtime.transform !== "function") {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
@@ -193,7 +192,9 @@ function createProviderRuntime(config, options = {}) {
     finish(context, outcome = {}) {
       if (lifecycle.terminal && outcome.terminal !== true) return [];
       const rawEvents =
-        lifecycle.terminal || typeof runtime.finish !== "function" ? [] : runtime.finish(context);
+        lifecycle.terminal || typeof runtime.finish !== "function"
+          ? []
+          : runtime.finish(context, outcome);
       const events = validateEvents(rawEvents, context);
       if (outcome.terminal === true && !lifecycle.terminal) {
         if (!lifecycle.started) {
@@ -267,9 +268,9 @@ function collectProviderStartupDiagnostics(env = process.env) {
   return messages;
 }
 
-function buildProviderInvocation(config, prompt) {
+function buildProviderInvocation(config, prompt, context = {}) {
   const { adapter } = validateProviderConfig(config);
-  return adapter.buildInvocation(config, prompt);
+  return adapter.buildInvocation(config, prompt, context);
 }
 
 function getProviderTransportAdapter(config, transport = config?.transport || "cli") {
@@ -279,9 +280,14 @@ function getProviderTransportAdapter(config, transport = config?.transport || "c
   throw new Error(`Provider "${adapter.id}" does not support transport "${transport}".`);
 }
 
-function buildProviderTransportInvocation(config, prompt, transport = config?.transport || "cli") {
+function buildProviderTransportInvocation(
+  config,
+  prompt,
+  transport = config?.transport || "cli",
+  context = {}
+) {
   const adapter = getProviderTransportAdapter(config, transport);
-  return adapter.buildInvocation(config, prompt);
+  return adapter.buildInvocation(config, prompt, context);
 }
 
 function resolveProviderRunOptions(config, options = {}, env = process.env) {

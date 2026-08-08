@@ -236,7 +236,7 @@ export function MessageList({
       !invocationHasProcessHost(message.invocationId, processHostIdentities, visibleMessages)
   );
   const liveText = liveMessages
-    .map((message) => `${message.text}${message.thinking || ""}`)
+    .map((message) => `${message.text}${message.commentary || ""}${message.thinking || ""}`)
     .join("");
   const latestPersistedMessage = visibleMessages.at(-1);
   const showOptimisticUser = Boolean(

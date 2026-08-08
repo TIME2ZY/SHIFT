@@ -12,6 +12,13 @@ test("eventPlainText extracts text.delta body instead of JSON shell", () => {
   assert.doesNotMatch(plain, /"meta"/);
 });
 
+test("eventPlainText indexes commentary text for process recall", () => {
+  assert.equal(
+    eventPlainText("commentary.delta", { text: "investigating the provider stream" }),
+    "investigating the provider stream"
+  );
+});
+
 test("eventPlainText renders handoff summary fields", () => {
   const plain = eventPlainText("handoff", {
     to: "opencode",

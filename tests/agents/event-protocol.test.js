@@ -21,6 +21,16 @@ test("makeEvent stamps protocolVersion", () => {
   assert.equal(event.type, "text.delta");
 });
 
+test("commentary.delta is a first-class canonical content event", () => {
+  const event = makeEvent("commentary.delta", {
+    agent: "codex",
+    invocationId: "inv-commentary",
+    text: "working",
+  });
+  assert.doesNotThrow(() => assertCanonicalEvent(event));
+  assert.equal(lifecyclePhase(event.type), "content");
+});
+
 test("canonical protocol rejects removed event types", () => {
   const {
     CANONICAL_EVENT_TYPES,
@@ -183,7 +193,7 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
   );
   assert.deepEqual(
     first.map((e) => e.type),
-    ["run.started", "text.delta"]
+    ["run.started", "commentary.delta"]
   );
   assert.ok(first.every((e) => e.protocolVersion === PROTOCOL_VERSION));
 
@@ -214,7 +224,7 @@ test("shared lifecycle across recreated runtimes suppresses second run.started",
   );
   assert.deepEqual(
     first.map((e) => e.type),
-    ["run.started", "text.delta"]
+    ["run.started", "commentary.delta"]
   );
   // Intermediate process failure: flush without terminal.
   assert.deepEqual(attempt1.finish(ctx, { terminal: false }), []);
@@ -226,7 +236,7 @@ test("shared lifecycle across recreated runtimes suppresses second run.started",
   );
   assert.deepEqual(
     second.map((e) => e.type),
-    ["text.delta"]
+    ["commentary.delta"]
   );
   assert.equal(second[0].text, "b");
   assert.deepEqual(

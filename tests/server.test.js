@@ -9,10 +9,7 @@ const { createServer } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
 const { createCollabTaskRegistry } = require("../src/agents/collab-task-registry");
-const {
-  hashUserGoal,
-  hashSolutionBaseline,
-} = require("../src/agents/outcome-evidence-gate");
+const { hashUserGoal, hashSolutionBaseline } = require("../src/agents/outcome-evidence-gate");
 const { hashImplementationPlan } = require("../src/agents/implementation-plan-gate");
 const { createStorage } = require("../src/storage");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
@@ -510,7 +507,7 @@ test("chat endpoint emits canonical agent-event SSE frames", async () => {
   );
 });
 
-test("chat history stores only assistant text reconstructed from text.delta", async () => {
+test("chat history excludes commentary and stores only final text.delta", async () => {
   await withServer(
     {
       spawnRunner() {
@@ -530,6 +527,14 @@ test("chat history stores only assistant text reconstructed from text.delta", as
               agent: "opencode",
               invocationId: "inv-2",
               text: "inspect",
+            }) + "\n"
+          );
+          child.stdout.write(
+            JSON.stringify({
+              type: "commentary.delta",
+              agent: "opencode",
+              invocationId: "inv-2",
+              text: "working update",
             }) + "\n"
           );
           child.stdout.write(
@@ -565,6 +570,7 @@ test("chat history stores only assistant text reconstructed from text.delta", as
       const history = await (await fetch(`${baseUrl}/api/messages?sessionId=${sid}`)).json();
       const assistant = history.messages.find((msg) => msg.role === "assistant");
       assert.equal(assistant.content, "final answer");
+      assert.doesNotMatch(assistant.content, /working update/);
     }
   );
 });
@@ -1025,8 +1031,12 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
       const retry = await sendTurn("turn-same");
       const firstTrigger = first.match(/"triggerMessageId":"([^"]+)"/)?.[1];
       const retryTrigger = retry.match(/"triggerMessageId":"([^"]+)"/)?.[1];
-      const firstInvocation = first.match(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/)?.[1];
-      const retryInvocation = retry.match(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/)?.[1];
+      const firstInvocation = first.match(
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/
+      )?.[1];
+      const retryInvocation = retry.match(
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/
+      )?.[1];
       assert.ok(firstTrigger);
       assert.equal(retryTrigger, firstTrigger);
       assert.ok(firstInvocation);
@@ -1036,20 +1046,14 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
       let detail = await fetch(`${baseUrl}/api/sessions/${session.id}`).then((response) =>
         response.json()
       );
-      assert.equal(
-        detail.session.messages.filter((message) => message.role === "user").length,
-        1
-      );
+      assert.equal(detail.session.messages.filter((message) => message.role === "user").length, 1);
       assert.equal(detail.session.messages[0].clientTurnId, "turn-same");
 
       await sendTurn("turn-intentional-repeat");
       detail = await fetch(`${baseUrl}/api/sessions/${session.id}`).then((response) =>
         response.json()
       );
-      assert.equal(
-        detail.session.messages.filter((message) => message.role === "user").length,
-        2
-      );
+      assert.equal(detail.session.messages.filter((message) => message.role === "user").length, 2);
     }
   );
 });
@@ -1408,10 +1412,7 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
               }) + "\n"
             );
           } else {
-            reviewedContent = fs.readFileSync(
-              path.join(options.cwd, "review-target.txt"),
-              "utf8"
-            );
+            reviewedContent = fs.readFileSync(path.join(options.cwd, "review-target.txt"), "utf8");
             child.stdout.write(
               JSON.stringify({
                 type: "text.delta",
@@ -1657,14 +1658,10 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       });
       const text = await response.text();
       assert.equal(response.status, 200);
-      assert.deepEqual(runs.map((run) => run.agent), [
-        "codex",
-        "grok",
-        "codex",
-        "grok",
-        "opencode",
-        "codex",
-      ]);
+      assert.deepEqual(
+        runs.map((run) => run.agent),
+        ["codex", "grok", "codex", "grok", "opencode", "codex"]
+      );
       assert.match(runs[0].prompt, /solution_baseline/);
       assert.match(runs[4].prompt, /OpenCode Review 与交付门禁/);
       assert.match(runs[5].prompt, /final_acceptance/);

@@ -6,9 +6,9 @@ const {
   projectInvocationProcess,
 } = require("../../src/server/invocation-process");
 
-test("projectInvocationProcess restores thinking, tools, progress, and changed files", () => {
+test("projectInvocationProcess restores commentary, thinking, tools, progress, and files", () => {
   const process = projectInvocationProcess("i1", [
-    { eventNo: 0, kind: "text.delta", payload: { text: "先说明。" } },
+    { eventNo: 0, kind: "commentary.delta", payload: { text: "先说明。" } },
     { eventNo: 4, kind: "thinking.delta", payload: { text: "B" } },
     {
       eventNo: 2,
@@ -38,6 +38,7 @@ test("projectInvocationProcess restores thinking, tools, progress, and changed f
   ]);
 
   assert.equal(process.status, "done");
+  assert.equal(process.commentary.text, "先说明。");
   assert.equal(process.thinking.text, "AB");
   assert.deepEqual(process.tools[0], {
     toolId: "t1",
@@ -52,8 +53,8 @@ test("projectInvocationProcess restores thinking, tools, progress, and changed f
   });
   assert.deepEqual(process.timeline, [
     {
-      id: "text-0",
-      type: "text",
+      id: "commentary-0",
+      type: "commentary",
       eventNo: 0,
       lastEventNo: 0,
       text: "先说明。",

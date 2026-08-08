@@ -3,11 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  EMPTY_CHAT_QUICK_PROMPTS,
-  MessageList,
-  selectProcessHostIdentities,
-} from "./MessageList";
+import { EMPTY_CHAT_QUICK_PROMPTS, MessageList, selectProcessHostIdentities } from "./MessageList";
 
 function renderMessageList(element: ReactElement) {
   const client = new QueryClient({
@@ -157,6 +153,7 @@ describe("MessageList", () => {
             text: "历史思考",
             segments: [{ eventNo: 1, text: "历史思考" }],
           },
+          commentary: { text: "", segments: [] },
           tools: [
             {
               toolId: "t1",

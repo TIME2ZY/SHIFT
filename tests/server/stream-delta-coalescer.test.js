@@ -30,6 +30,21 @@ test("coalesces consecutive text.delta under maxChars into one durable write", (
   assert.equal(writes[0].payload.text, "partial answer");
 });
 
+test("coalesces commentary.delta without merging it into final text", () => {
+  const { writes, coalescer } = collectWrites({ maxChars: 100 });
+  coalescer.accept({ type: "commentary.delta", agent: "a", text: "working " });
+  coalescer.accept({ type: "commentary.delta", agent: "a", text: "still" });
+  coalescer.accept({ type: "text.delta", agent: "a", text: "final" });
+  coalescer.flushAll();
+  assert.deepEqual(
+    writes.map(({ kind, payload }) => [kind, payload.text]),
+    [
+      ["commentary.delta", "working still"],
+      ["text.delta", "final"],
+    ]
+  );
+});
+
 test("flushes text.delta when maxChars is reached", () => {
   const { writes, coalescer } = collectWrites({ maxChars: 10 });
   coalescer.accept({ type: "text.delta", agent: "a", text: "12345" });

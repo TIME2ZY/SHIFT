@@ -3,7 +3,7 @@
  * Live SSE stays unbatched at the
  * call site — this helper only decides *what* to write, not what to emit.
  *
- * Coalesce kinds: text.delta, thinking.delta.
+ * Coalesce kinds: text.delta, commentary.delta, thinking.delta.
  *
  * Strategy A — adjacent same-kind only:
  *   - Same kind as the open buffer → append
@@ -28,7 +28,7 @@
  *   - passthrough metadata (usage.update)
  */
 
-const COALESCE_KINDS = new Set(["text.delta", "thinking.delta"]);
+const COALESCE_KINDS = new Set(["text.delta", "commentary.delta", "thinking.delta"]);
 
 /**
  * Metadata that may arrive mid-stream. Write immediately without ending the
@@ -65,7 +65,9 @@ function createStreamDeltaCoalescer(options = {}) {
   }
 
   const write = options.write;
-  const maxChars = Number.isFinite(options.maxChars) ? Math.max(0, options.maxChars) : DEFAULT_MAX_CHARS;
+  const maxChars = Number.isFinite(options.maxChars)
+    ? Math.max(0, options.maxChars)
+    : DEFAULT_MAX_CHARS;
   const maxMs = Number.isFinite(options.maxMs) ? Math.max(0, options.maxMs) : DEFAULT_MAX_MS;
   const maxMsByKind =
     options.maxMsByKind && typeof options.maxMsByKind === "object" ? options.maxMsByKind : null;

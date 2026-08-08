@@ -32,7 +32,7 @@ function updateRun(
 
 function appendTimelineText(
   timeline: LiveMessage["timeline"],
-  type: "thinking" | "text",
+  type: "commentary" | "thinking" | "text",
   text: string
 ): NonNullable<LiveMessage["timeline"]> {
   const current = timeline || [];
@@ -140,6 +140,28 @@ export function sessionRunReducer(
               ...current,
               thinking: (current.thinking || "") + action.text,
               timeline: appendTimelineText(current.timeline, "thinking", action.text),
+            },
+          },
+        };
+      });
+
+    case "commentary/delta":
+      return updateRun(state, action.sessionId, (run) => {
+        const current = run.liveMessages[action.invocationId] ?? {
+          agentId: action.agentId,
+          invocationId: action.invocationId,
+          text: "",
+          status: "thinking" as const,
+        };
+        return {
+          ...run,
+          updatedAt: now,
+          liveMessages: {
+            ...run.liveMessages,
+            [action.invocationId]: {
+              ...current,
+              commentary: (current.commentary || "") + action.text,
+              timeline: appendTimelineText(current.timeline, "commentary", action.text),
             },
           },
         };
@@ -279,10 +301,7 @@ export function sessionRunReducer(
             ...run.liveMessages,
             [action.invocationId]: {
               ...current,
-              changedFiles: [
-                ...changedFiles,
-                { path: action.path, changeType: action.changeType },
-              ],
+              changedFiles: [...changedFiles, { path: action.path, changeType: action.changeType }],
             },
           },
         };

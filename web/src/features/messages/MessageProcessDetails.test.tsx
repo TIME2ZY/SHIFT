@@ -6,11 +6,7 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import type { InvocationProcess } from "./invocation-types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 
-function renderProcess(
-  process: InvocationProcess,
-  onOpenWorkspace = vi.fn(),
-  content?: string
-) {
+function renderProcess(process: InvocationProcess, onOpenWorkspace = vi.fn(), content?: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -42,6 +38,7 @@ describe("MessageProcessDetails", () => {
           text: "先读取项目，再修改代码。",
           segments: [{ eventNo: 1, text: "先读取项目，再修改代码。" }],
         },
+        commentary: { text: "", segments: [] },
         tools: [
           {
             toolId: "t1",
@@ -117,35 +114,33 @@ describe("MessageProcessDetails", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    client.setQueryData(
-      queryKeys.sessions.invocationProcess("s1", "i1"),
-      {
-        version: 1,
-        invocationId: "i1",
-        status: "done",
-        thinking: { text: "", segments: [] },
-        tools: [
-          {
-            toolId: "t1",
-            toolName: "shell",
-            status: "done",
-            changedFiles: [],
-          },
-        ],
-        timeline: [
-          { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
-          {
-            id: "text-2",
-            type: "text",
-            eventNo: 2,
-            lastEventNo: 2,
-            text: "我查一下这次 handoff",
-          },
-        ],
-        progress: [],
-        changedFiles: [],
-      } satisfies InvocationProcess
-    );
+    client.setQueryData(queryKeys.sessions.invocationProcess("s1", "i1"), {
+      version: 1,
+      invocationId: "i1",
+      status: "done",
+      thinking: { text: "", segments: [] },
+      commentary: { text: "", segments: [] },
+      tools: [
+        {
+          toolId: "t1",
+          toolName: "shell",
+          status: "done",
+          changedFiles: [],
+        },
+      ],
+      timeline: [
+        { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
+        {
+          id: "text-2",
+          type: "text",
+          eventNo: 2,
+          lastEventNo: 2,
+          text: "我查一下这次 handoff",
+        },
+      ],
+      progress: [],
+      changedFiles: [],
+    } satisfies InvocationProcess);
 
     render(
       <QueryClientProvider client={client}>
@@ -171,6 +166,48 @@ describe("MessageProcessDetails", () => {
     expect(screen.getAllByText("我查一下这次 handoff")).toHaveLength(1);
   });
 
+  it("renders commentary as collapsed progress without duplicating the final body", () => {
+    const { container } = renderProcess(
+      {
+        version: 1,
+        invocationId: "i1",
+        status: "done",
+        thinking: { text: "", segments: [] },
+        commentary: {
+          text: "正在审查调用链。",
+          segments: [{ eventNo: 1, text: "正在审查调用链。" }],
+        },
+        tools: [],
+        timeline: [
+          {
+            id: "commentary-1",
+            type: "commentary",
+            eventNo: 1,
+            lastEventNo: 1,
+            text: "正在审查调用链。",
+          },
+          {
+            id: "text-2",
+            type: "text",
+            eventNo: 2,
+            lastEventNo: 2,
+            text: "修复完成。",
+          },
+        ],
+        progress: [],
+        changedFiles: [],
+      },
+      vi.fn(),
+      "修复完成。"
+    );
+
+    const commentaryDetails = screen.getByText("进展").closest("details");
+    expect(commentaryDetails).not.toHaveAttribute("open");
+    expect(screen.getByText("正在审查调用链。")).toBeInTheDocument();
+    expect(screen.getAllByText("修复完成。")).toHaveLength(1);
+    expect(container.querySelectorAll(".react-message-body")).toHaveLength(1);
+  });
+
   it("does not render a phantom loading process without an invocation", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -191,6 +228,7 @@ describe("MessageProcessDetails", () => {
       invocationId: "i1",
       status: "running",
       thinking: { text: "", segments: [] },
+      commentary: { text: "", segments: [] },
       tools: [
         {
           toolId: "running-tool",

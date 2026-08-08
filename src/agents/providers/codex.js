@@ -1,4 +1,6 @@
 const { makeEvent } = require("../event-protocol");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
@@ -143,6 +145,8 @@ function classifyCodexStderr(line) {
 }
 
 function createCodexRuntime(cli) {
+  const finalOutputPath = String(cli?.invocationArtifacts?.finalOutputPath || "");
+
   function fileChangeEvents(base, item) {
     const changes = item && Array.isArray(item.changes) ? item.changes : [];
     return changes
@@ -329,7 +333,7 @@ function createCodexRuntime(cli) {
         typeof event.item.text === "string"
       ) {
         return [
-          makeEvent("text.delta", {
+          makeEvent("commentary.delta", {
             ...base,
             text: event.item.text,
           }),
@@ -343,7 +347,7 @@ function createCodexRuntime(cli) {
           .filter((item) => item.type === "text" && typeof item.text === "string")
           .map((item) => item.text)
           .join("");
-        return text ? [makeEvent("text.delta", { ...base, text })] : [];
+        return text ? [makeEvent("commentary.delta", { ...base, text })] : [];
       }
 
       if (event.type === "turn.completed" && event.usage) {
@@ -357,7 +361,7 @@ function createCodexRuntime(cli) {
       const content = event.content || (event.properties && event.properties.content);
       if (content && content.type === "text" && typeof content.text === "string") {
         return [
-          makeEvent("text.delta", {
+          makeEvent("commentary.delta", {
             ...base,
             text: content.text,
           }),
@@ -405,6 +409,34 @@ function createCodexRuntime(cli) {
       }
       return [];
     },
+    finish(ctx, outcome = {}) {
+      if (!finalOutputPath) return [];
+      if (outcome.terminal !== true || outcome.ok !== true) {
+        fs.rmSync(finalOutputPath, { force: true });
+        return [];
+      }
+      let text = "";
+      try {
+        text = fs.readFileSync(finalOutputPath, "utf8");
+      } catch (error) {
+        return [
+          makeEvent("run.failed", {
+            ...ctx,
+            error: `Codex final output could not be read: ${error?.message || error}`,
+          }),
+        ];
+      } finally {
+        fs.rmSync(finalOutputPath, { force: true });
+      }
+      return text
+        ? [makeEvent("text.delta", { ...ctx, text })]
+        : [
+            makeEvent("run.failed", {
+              ...ctx,
+              error: "Codex completed without a final response.",
+            }),
+          ];
+    },
   };
 }
 
@@ -422,7 +454,7 @@ const codexProvider = {
   classifyStderr: classifyCodexStderr,
   resolveProxy,
   buildEnvironment: buildCodexEnvironment,
-  buildInvocation(config, prompt) {
+  buildInvocation(config, prompt, context = {}) {
     const providerOptions = config.providerOptions || {};
     const args = [
       "-s",
@@ -435,12 +467,27 @@ const codexProvider = {
     }
     args.push(...shiftContextMcpConfigArgs());
     if (config.model) args.push("-m", config.model);
+    const safeInvocationId = String(context.invocationId || "")
+      .replace(/[^a-zA-Z0-9._-]/g, "-")
+      .slice(0, 120);
+    const finalOutputPath = safeInvocationId
+      ? path.join(os.tmpdir(), `shift-codex-final-${process.pid}-${safeInvocationId}.txt`)
+      : "";
+    if (finalOutputPath) fs.rmSync(finalOutputPath, { force: true });
     if (config.resumeSessionId) {
-      args.push("exec", "resume", "--json", config.resumeSessionId, prompt);
+      args.push("exec", "resume", "--json");
+      if (finalOutputPath) args.push("--output-last-message", finalOutputPath);
+      args.push(config.resumeSessionId, prompt);
     } else {
-      args.push("exec", "--json", prompt);
+      args.push("exec", "--json");
+      if (finalOutputPath) args.push("--output-last-message", finalOutputPath);
+      args.push(prompt);
     }
-    return { command: "codex", args };
+    return {
+      command: "codex",
+      args,
+      artifacts: finalOutputPath ? { finalOutputPath } : {},
+    };
   },
 };
 

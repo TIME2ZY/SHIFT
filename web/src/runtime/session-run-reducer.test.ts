@@ -110,6 +110,38 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.liveMessages.i1.text).toBe("partial");
   });
 
+  it("keeps commentary separate from final text and thinking", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "commentary/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+      text: "正在检查",
+    });
+    state = sessionRunReducer(state, {
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+      text: "最终回答",
+    });
+
+    expect(state.runs.s1.liveMessages.i1).toMatchObject({
+      commentary: "正在检查",
+      text: "最终回答",
+      timeline: [
+        { id: "commentary-0", type: "commentary", text: "正在检查" },
+        { id: "text-1", type: "text", text: "最终回答" },
+      ],
+    });
+  });
+
   it("tracks thinking, progress, and tool lifecycle per agent", () => {
     let state = sessionRunReducer(initialSessionRunState, {
       type: "agent/started",
@@ -257,12 +289,24 @@ describe("sessionRunReducer", () => {
     };
 
     dispatch({ type: "agent/started", sessionId: "s1", agentId: "codex", invocationId: "i1" });
-    dispatch({ type: "message/delta", sessionId: "s1", agentId: "codex", invocationId: "i1", text: "first" });
+    dispatch({
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+      text: "first",
+    });
     dispatch({ type: "agent/finished", sessionId: "s1", agentId: "codex", invocationId: "i1" });
     dispatch({ type: "agent/started", sessionId: "s1", agentId: "gemini", invocationId: "i2" });
     dispatch({ type: "agent/finished", sessionId: "s1", agentId: "gemini", invocationId: "i2" });
     dispatch({ type: "agent/started", sessionId: "s1", agentId: "codex", invocationId: "i3" });
-    dispatch({ type: "message/delta", sessionId: "s1", agentId: "codex", invocationId: "i3", text: "second" });
+    dispatch({
+      type: "message/delta",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i3",
+      text: "second",
+    });
 
     expect(state.runs.s1.invocationOrder).toEqual(["i1", "i2", "i3"]);
     expect(state.runs.s1.latestInvocationByAgent).toEqual({ codex: "i3", gemini: "i2" });
@@ -274,7 +318,9 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.liveMessages.i3.status).toBe("streaming");
 
     dispatch({ type: "run/done", sessionId: "s1" });
-    expect(Object.values(state.runs.s1.liveMessages).every((item) => item.status === "done")).toBe(true);
+    expect(Object.values(state.runs.s1.liveMessages).every((item) => item.status === "done")).toBe(
+      true
+    );
     dispatch({ type: "run/synced", sessionId: "s1" });
     expect(state.runs.s1.liveMessages.i1.text).toBe("");
     expect(state.runs.s1.liveMessages.i3.text).toBe("");
