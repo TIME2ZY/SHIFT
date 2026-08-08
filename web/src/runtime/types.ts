@@ -8,6 +8,7 @@ export interface LiveMessage {
   invocationId: string;
   text: string;
   status: UiLiveMessageStatus;
+  commentary?: string;
   thinking?: string;
   tools?: RunTool[];
   timeline?: RunTimelineItem[];
@@ -37,6 +38,11 @@ export interface RunProgressItem {
 }
 
 export type RunTimelineItem =
+  | {
+      id: string;
+      type: "commentary";
+      text: string;
+    }
   | {
       id: string;
       type: "thinking";
@@ -93,6 +99,13 @@ export type SessionRunAction =
     }
   | {
       type: "message/delta";
+      sessionId: string;
+      agentId: string;
+      invocationId: string;
+      text: string;
+    }
+  | {
+      type: "commentary/delta";
       sessionId: string;
       agentId: string;
       invocationId: string;

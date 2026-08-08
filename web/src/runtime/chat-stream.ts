@@ -176,6 +176,14 @@ export async function runChatStream(
             invocationId,
             text: agentEvent.text,
           });
+        } else if (agentEvent.type === "commentary.delta" && agentEvent.text) {
+          store.dispatch({
+            type: "commentary/delta",
+            sessionId: boundSessionId,
+            agentId,
+            invocationId,
+            text: agentEvent.text,
+          });
         } else if (agentEvent.type === "thinking.delta" && agentEvent.text) {
           store.dispatch({
             type: "thinking/delta",

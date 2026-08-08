@@ -25,7 +25,7 @@ function invocationUsageDelta(current = {}, baseline = {}) {
 
 function contextCharsFromEvent(event) {
   if (!event || typeof event !== "object") return 0;
-  if (event.type === "thinking.delta") {
+  if (event.type === "thinking.delta" || event.type === "commentary.delta") {
     return typeof event.text === "string" ? event.text.length : 0;
   }
   if (event.type !== "tool.finished") return 0;

@@ -35,9 +35,7 @@ function liveProcessStatus(status: LiveMessage["status"]): "running" | "done" | 
   return "running";
 }
 
-function timelineBodyText(
-  timeline: Array<InvocationTimelineItem | RunTimelineItem>
-): string {
+function timelineBodyText(timeline: Array<InvocationTimelineItem | RunTimelineItem>): string {
   return timeline
     .filter(
       (item): item is Extract<typeof item, { type: "text" }> =>
@@ -56,6 +54,15 @@ function ThinkingTimelineItem({ text }: { text: string }) {
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
       <summary>思考</summary>
+      <div className="react-process-thinking">{text}</div>
+    </details>
+  );
+}
+
+function CommentaryTimelineItem({ text }: { text: string }) {
+  return (
+    <details className="react-thinking-step">
+      <summary>进展</summary>
       <div className="react-process-thinking">{text}</div>
     </details>
   );
@@ -89,6 +96,7 @@ export function MessageProcessDetails({
   const liveToolItems = liveTools(liveMessage);
   const liveProgressItems = liveProgress(liveMessage);
   const thinking = liveMessage?.thinking || durable?.thinking.text || "";
+  const commentary = liveMessage?.commentary || durable?.commentary.text || "";
   const tools = liveToolItems.length ? liveToolItems : durable?.tools || [];
   const timeline: Array<InvocationTimelineItem | RunTimelineItem> = liveMessage?.timeline?.length
     ? liveMessage.timeline
@@ -98,27 +106,25 @@ export function MessageProcessDetails({
   const visibleChangedFiles = liveMessage?.changedFiles?.length
     ? liveMessage.changedFiles
     : changedFiles;
-  const status = liveMessage
-    ? liveProcessStatus(liveMessage.status)
-    : durable?.status || "running";
+  const status = liveMessage ? liveProcessStatus(liveMessage.status) : durable?.status || "running";
   const isLoading = canLoadDurable && process.isPending;
   // Process chrome excludes answer text (that is always `bodyText`).
   const processTimeline = timeline.filter((item) => item.type !== "text");
   const hasProcess = Boolean(
     thinking ||
-      tools.length ||
-      processTimeline.length ||
-      progress.length ||
-      visibleChangedFiles.length ||
-      isLoading ||
-      (canLoadDurable && process.isError)
+    commentary ||
+    tools.length ||
+    processTimeline.length ||
+    progress.length ||
+    visibleChangedFiles.length ||
+    isLoading ||
+    (canLoadDurable && process.isError)
   );
   const toolById = new Map(tools.map((tool) => [tool.toolId, tool]));
 
   const trimmedContent = typeof content === "string" ? content.trim() : "";
   const liveText = typeof liveMessage?.text === "string" ? liveMessage.text : "";
-  const bodyText =
-    trimmedContent || liveText.trim() || timelineBodyText(timeline) || "";
+  const bodyText = trimmedContent || liveText.trim() || timelineBodyText(timeline) || "";
 
   if (!hasProcess) {
     if (bodyText) return <MarkdownContent content={bodyText} />;
@@ -139,15 +145,17 @@ export function MessageProcessDetails({
         </div>
       ) : null}
       {processTimeline.map((item) => {
+        if (item.type === "commentary") {
+          return <CommentaryTimelineItem text={item.text} key={item.id} />;
+        }
         if (item.type === "thinking") {
           return <ThinkingTimelineItem text={item.text} key={item.id} />;
         }
         const tool = toolById.get(item.toolId);
         return tool ? <ToolCallDetails tool={tool} key={item.id} /> : null;
       })}
-      {!processTimeline.length && thinking ? (
-        <ThinkingTimelineItem text={thinking} />
-      ) : null}
+      {!processTimeline.length && thinking ? <ThinkingTimelineItem text={thinking} /> : null}
+      {!processTimeline.length && commentary ? <CommentaryTimelineItem text={commentary} /> : null}
       {!processTimeline.length
         ? tools.map((tool) => <ToolCallDetails tool={tool} key={tool.toolId} />)
         : null}

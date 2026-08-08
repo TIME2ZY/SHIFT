@@ -12,6 +12,7 @@ const CANONICAL_EVENT_FIELDS = {
   "run.finished": ["agent", "invocationId", "exitCode"],
   "run.failed": ["agent", "invocationId", "error"],
   "text.delta": ["agent", "invocationId", "text"],
+  "commentary.delta": ["agent", "invocationId", "text"],
   "thinking.delta": ["agent", "invocationId", "text"],
   stderr: ["agent", "invocationId", "text"],
   "file.changed": ["agent", "invocationId", "path"],

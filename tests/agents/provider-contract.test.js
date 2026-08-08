@@ -18,6 +18,7 @@ const {
   validateCanonicalEvent,
 } = require("../../src/agents/event-protocol");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const CONFIGS = {
@@ -107,13 +108,97 @@ test("runtime envelope enforces started-before-content and one terminal event", 
   );
   assert.deepEqual(
     content.map((event) => event.type),
-    ["run.started", "text.delta"]
+    ["run.started", "commentary.delta"]
   );
   assert.deepEqual(
     runtime.finish(context, { terminal: true, ok: true, exitCode: 0 }).map((event) => event.type),
     ["run.finished"]
   );
   assert.deepEqual(runtime.finish(context, { terminal: true, ok: true }), []);
+});
+
+test("codex invocation publishes only --output-last-message as final text", () => {
+  const invocation = buildProviderInvocation(CONFIGS.codex, "ship it", {
+    invocationId: "inv/final-contract",
+    cwd: process.cwd(),
+  });
+  const outputIndex = invocation.args.indexOf("--output-last-message");
+  assert.ok(outputIndex > -1);
+  assert.equal(invocation.args[outputIndex + 1], invocation.artifacts.finalOutputPath);
+  assert.ok(invocation.artifacts.finalOutputPath.startsWith(os.tmpdir()));
+
+  fs.writeFileSync(invocation.artifacts.finalOutputPath, "final answer", "utf8");
+  const runtime = createProviderRuntime({
+    ...CONFIGS.codex,
+    invocationArtifacts: invocation.artifacts,
+  });
+  const context = { agent: "codex", invocationId: "inv/final-contract" };
+  const streamed = runtime.transform(
+    { type: "item.completed", item: { type: "agent_message", text: "still working" } },
+    context
+  );
+  assert.deepEqual(
+    streamed.map((event) => event.type),
+    ["run.started", "commentary.delta"]
+  );
+  assert.deepEqual(
+    runtime
+      .finish(context, { terminal: true, ok: true, exitCode: 0 })
+      .map((event) => [event.type, event.text]),
+    [
+      ["text.delta", "final answer"],
+      ["run.finished", undefined],
+    ]
+  );
+  assert.equal(fs.existsSync(invocation.artifacts.finalOutputPath), false);
+});
+
+test("codex resume invocation carries the final-output contract", () => {
+  const invocation = buildProviderInvocation(
+    { ...CONFIGS.codex, resumeSessionId: "session-1" },
+    "continue",
+    { invocationId: "inv-resume" }
+  );
+  assert.deepEqual(invocation.args.slice(-5), [
+    "--json",
+    "--output-last-message",
+    invocation.artifacts.finalOutputPath,
+    "session-1",
+    "continue",
+  ]);
+});
+
+test("codex retry cleanup never promotes partial output to final text", () => {
+  const invocation = buildProviderInvocation(CONFIGS.codex, "retry", {
+    invocationId: "inv-retry-output",
+  });
+  fs.writeFileSync(invocation.artifacts.finalOutputPath, "partial", "utf8");
+  const runtime = createProviderRuntime({
+    ...CONFIGS.codex,
+    invocationArtifacts: invocation.artifacts,
+  });
+  const context = { agent: "codex", invocationId: "inv-retry-output" };
+  assert.deepEqual(runtime.finish(context, { terminal: false }), []);
+  assert.equal(fs.existsSync(invocation.artifacts.finalOutputPath), false);
+});
+
+test("codex success without a final-output artifact fails explicitly", () => {
+  const invocation = buildProviderInvocation(CONFIGS.codex, "empty", {
+    invocationId: "inv-missing-output",
+  });
+  const runtime = createProviderRuntime({
+    ...CONFIGS.codex,
+    invocationArtifacts: invocation.artifacts,
+  });
+  const events = runtime.finish(
+    { agent: "codex", invocationId: "inv-missing-output" },
+    { terminal: true, ok: true, exitCode: 0 }
+  );
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["run.started", "run.failed"]
+  );
+  assert.match(events[1].error, /final output could not be read/);
 });
 
 test("provider options configure adapters without central provider branches", () => {

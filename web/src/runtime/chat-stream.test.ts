@@ -37,16 +37,18 @@ describe("formatToolResultForDisplay", () => {
 
 describe("runChatStream", () => {
   it("maps subagent tool display fields into the session run store", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse([
-        'event: session\ndata: {"sessionId":"s2"}\n\n',
-        'event: agent-start\ndata: {"agent":"grok","invocationId":"i2"}\n\n',
-        'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","args":{"description":"List top-level","subagent_type":"explore"}}\n\n',
-        'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","status":"ok","args":{"description":"List top-level","subagent_type":"explore","run_in_background":true},"result":{"type":"Text","text":"Subagent started in background.\\nsubagent_id: abc"}}\n\n',
-        'event: agent-exit\ndata: {"agent":"grok","invocationId":"i2","code":0}\n\n',
-        "event: done\ndata: {}\n\n",
-      ])
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse([
+          'event: session\ndata: {"sessionId":"s2"}\n\n',
+          'event: agent-start\ndata: {"agent":"grok","invocationId":"i2"}\n\n',
+          'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","args":{"description":"List top-level","subagent_type":"explore"}}\n\n',
+          'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i2","toolId":"sp1","toolName":"spawn_subagent","title":"List top-level","label":"Subagent","toolKind":"task","status":"ok","args":{"description":"List top-level","subagent_type":"explore","run_in_background":true},"result":{"type":"Text","text":"Subagent started in background.\\nsubagent_id: abc"}}\n\n',
+          'event: agent-exit\ndata: {"agent":"grok","invocationId":"i2","code":0}\n\n',
+          "event: done\ndata: {}\n\n",
+        ])
+      );
     vi.stubGlobal("fetch", fetchMock);
     const store = createSessionRunStore();
     const controller = store.startController("s2");
@@ -66,21 +68,21 @@ describe("runChatStream", () => {
         },
       },
     ]);
-    expect(store.getSnapshot().runs.s2.liveMessages.i2.tools?.[0]?.output).toMatch(
-      /subagent_id/
-    );
+    expect(store.getSnapshot().runs.s2.liveMessages.i2.tools?.[0]?.output).toMatch(/subagent_id/);
   });
 
   it("merges tool.finished args when start had empty args", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse([
-        'event: session\ndata: {"sessionId":"s3"}\n\n',
-        'event: agent-start\ndata: {"agent":"grok","invocationId":"i3"}\n\n',
-        'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","args":{}}\n\n',
-        'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","title":"Explore","label":"Subagent","toolKind":"task","status":"ok","args":{"subagent_type":"explore","description":"Explore"},"result":{"type":"Text","text":"ok"}}\n\n',
-        'event: done\ndata: {}\n\n',
-      ])
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse([
+          'event: session\ndata: {"sessionId":"s3"}\n\n',
+          'event: agent-start\ndata: {"agent":"grok","invocationId":"i3"}\n\n',
+          'event: agent-event\ndata: {"type":"tool.started","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","args":{}}\n\n',
+          'event: agent-event\ndata: {"type":"tool.finished","agent":"grok","invocationId":"i3","toolId":"t9","toolName":"spawn_subagent","title":"Explore","label":"Subagent","toolKind":"task","status":"ok","args":{"subagent_type":"explore","description":"Explore"},"result":{"type":"Text","text":"ok"}}\n\n',
+          "event: done\ndata: {}\n\n",
+        ])
+      );
     vi.stubGlobal("fetch", fetchMock);
     const store = createSessionRunStore();
     const controller = store.startController("s3");
@@ -98,18 +100,20 @@ describe("runChatStream", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-          sseResponse([
-            'event: session\ndata: {"sessionId":"s1"}\n\n',
-            'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
-            'event: agent-event\ndata: {"type":"thinking.delta","agent":"codex","invocationId":"i1","text":"plan"}\n\n',
-            'event: agent-event\ndata: {"type":"tool.started","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","args":{"path":"src/index.js"}}\n\n',
-            'event: agent-event\ndata: {"type":"progress.update","agent":"codex","invocationId":"i1","items":[{"id":"p1","label":"Read","status":"completed"}]}\n\n',
-            'event: agent-event\ndata: {"type":"tool.finished","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","status":"completed","result":{"ok":true}}\n\n',
-            'event: agent-event\ndata: {"type":"file.changed","agent":"codex","invocationId":"i1","path":"src/index.js","changeType":"modified"}\n\n',
-            'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i1","text":"hello"}\n\n',
-            'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
-            "event: done\ndata: {}\n\n",
-          ]));
+        sseResponse([
+          'event: session\ndata: {"sessionId":"s1"}\n\n',
+          'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
+          'event: agent-event\ndata: {"type":"thinking.delta","agent":"codex","invocationId":"i1","text":"plan"}\n\n',
+          'event: agent-event\ndata: {"type":"commentary.delta","agent":"codex","invocationId":"i1","text":"working"}\n\n',
+          'event: agent-event\ndata: {"type":"tool.started","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","args":{"path":"src/index.js"}}\n\n',
+          'event: agent-event\ndata: {"type":"progress.update","agent":"codex","invocationId":"i1","items":[{"id":"p1","label":"Read","status":"completed"}]}\n\n',
+          'event: agent-event\ndata: {"type":"tool.finished","agent":"codex","invocationId":"i1","toolId":"t1","toolName":"read","status":"completed","result":{"ok":true}}\n\n',
+          'event: agent-event\ndata: {"type":"file.changed","agent":"codex","invocationId":"i1","path":"src/index.js","changeType":"modified"}\n\n',
+          'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i1","text":"hello"}\n\n',
+          'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
+          "event: done\ndata: {}\n\n",
+        ])
+      );
     vi.stubGlobal("fetch", fetchMock);
     const store = createSessionRunStore();
     const controller = store.startController("s1");
@@ -135,6 +139,7 @@ describe("runChatStream", () => {
       text: "hello",
       status: "done",
       thinking: "plan",
+      commentary: "working",
       invocationId: "i1",
       tools: [
         {
@@ -147,8 +152,9 @@ describe("runChatStream", () => {
       ],
       timeline: [
         { id: "thinking-0", type: "thinking", text: "plan" },
+        { id: "commentary-1", type: "commentary", text: "working" },
         { id: "tool-t1", type: "tool", toolId: "t1" },
-        { id: "text-2", type: "text", text: "hello" },
+        { id: "text-3", type: "text", text: "hello" },
       ],
       progress: [{ id: "p1", label: "Read", status: "completed" }],
       changedFiles: [{ path: "src/index.js", changeType: "modified" }],
@@ -171,30 +177,32 @@ describe("runChatStream", () => {
   it("reports each committed agent exit with its invocation identity", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        sseResponse([
-          'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
-          'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
-          'event: agent-start\ndata: {"agent":"gemini","invocationId":"i2"}\n\n',
-          'event: agent-exit\ndata: {"agent":"gemini","invocationId":"i2","code":0}\n\n',
-          'event: agent-start\ndata: {"agent":"codex","invocationId":"i3"}\n\n',
-          'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i3","text":"new"}\n\n',
-          'event: done\ndata: {}\n\n',
-        ])
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'event: agent-start\ndata: {"agent":"codex","invocationId":"i1"}\n\n',
+            'event: agent-exit\ndata: {"agent":"codex","invocationId":"i1","code":0}\n\n',
+            'event: agent-start\ndata: {"agent":"gemini","invocationId":"i2"}\n\n',
+            'event: agent-exit\ndata: {"agent":"gemini","invocationId":"i2","code":0}\n\n',
+            'event: agent-start\ndata: {"agent":"codex","invocationId":"i3"}\n\n',
+            'event: agent-event\ndata: {"type":"text.delta","agent":"codex","invocationId":"i3","text":"new"}\n\n',
+            "event: done\ndata: {}\n\n",
+          ])
+        )
     );
     const store = createSessionRunStore();
     const controller = store.startController("s1");
     const onAgentExit = vi.fn();
 
-    await runChatStream(
-      { sessionId: "s1", agentId: "codex", prompt: "go" },
-      store,
-      controller,
-      { onAgentExit }
-    );
+    await runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller, {
+      onAgentExit,
+    });
 
-    expect(onAgentExit.mock.calls).toEqual([["s1", "i1"], ["s1", "i2"]]);
+    expect(onAgentExit.mock.calls).toEqual([
+      ["s1", "i1"],
+      ["s1", "i2"],
+    ]);
     expect(store.getSnapshot().runs.s1.liveMessages.i1.status).toBe("done");
     expect(store.getSnapshot().runs.s1.liveMessages.i3.text).toBe("new");
   });

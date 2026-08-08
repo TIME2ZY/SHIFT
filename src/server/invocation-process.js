@@ -102,6 +102,7 @@ function projectInvocationProcess(invocationId, events = []) {
     (left, right) => Number(left?.eventNo || 0) - Number(right?.eventNo || 0)
   );
   const thinkingSegments = [];
+  const commentarySegments = [];
   const tools = new Map();
   const timeline = [];
   const timelineToolIds = new Set();
@@ -121,6 +122,15 @@ function projectInvocationProcess(invocationId, events = []) {
       if (text) {
         thinkingSegments.push({ eventNo, text });
         appendTimelineText(timeline, "thinking", eventNo, text);
+      }
+      continue;
+    }
+
+    if (kind === "commentary.delta") {
+      const text = typeof payload.text === "string" ? payload.text : "";
+      if (text) {
+        commentarySegments.push({ eventNo, text });
+        appendTimelineText(timeline, "commentary", eventNo, text);
       }
       continue;
     }
@@ -237,6 +247,10 @@ function projectInvocationProcess(invocationId, events = []) {
     thinking: {
       text: thinkingSegments.map((segment) => segment.text).join(""),
       segments: thinkingSegments,
+    },
+    commentary: {
+      text: commentarySegments.map((segment) => segment.text).join(""),
+      segments: commentarySegments,
     },
     tools: [...tools.values()]
       .sort((left, right) => left.firstEventNo - right.firstEventNo)

@@ -54,6 +54,12 @@ function runScriptWithEnv(args, extraEnv) {
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
+
+function writeLastMessage(args, text) {
+  const outputIndex = args.indexOf("--output-last-message");
+  if (outputIndex >= 0) fs.writeFileSync(args[outputIndex + 1], text, "utf8");
+}
 
 function commandBase(command) {
   const raw = String(command || "");
@@ -81,6 +87,7 @@ childProcess.spawn = function spawn(command, args, options = {}) {
         part: { type: "text", text: commandBase(command) + ":" + args.join(" ") + ":" + options.env.HTTP_PROXY + ":cwd=" + options.cwd }
       }) + "\\n");
     } else {
+      const text = "codex:" + args.join(" ") + ":" + options.env.HTTP_PROXY;
       child.stdout.write(JSON.stringify({
         type: "thread.started",
         thread_id: "codex-session-1"
@@ -89,10 +96,11 @@ childProcess.spawn = function spawn(command, args, options = {}) {
         type: "assistant",
         message: {
           content: [
-            { type: "text", text: "codex:" + args.join(" ") + ":" + options.env.HTTP_PROXY }
+            { type: "text", text }
           ]
         }
       }) + "\\n");
+      writeLastMessage(args, text);
     }
 
     child.stdout.end();
@@ -144,6 +152,7 @@ function runScriptWithSession(args, sessions) {
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
 
 childProcess.spawn = function spawn(command, args, options = {}) {
   const child = new EventEmitter();
@@ -151,10 +160,13 @@ childProcess.spawn = function spawn(command, args, options = {}) {
   child.stderr = new PassThrough();
 
   process.nextTick(() => {
+    const text = command.split(/[\\\\/]/).pop() + ":" + args.join(" ");
     child.stdout.write(JSON.stringify({
       type: "assistant",
-      message: { content: [{ type: "text", text: command.split(/[\\\\/]/).pop() + ":" + args.join(" ") }] }
+      message: { content: [{ type: "text", text }] }
     }) + "\\n");
+    const outputIndex = args.indexOf("--output-last-message");
+    if (outputIndex >= 0) fs.writeFileSync(args[outputIndex + 1], text, "utf8");
     child.stdout.end();
     child.emit("close", 0, null);
   });
@@ -216,7 +228,7 @@ test("uses codex agent by default", () => {
   assert.equal(result.status, 0);
   assert.deepEqual(
     parseOutputEvents(result.stdout).map((event) => event.type),
-    ["run.started", "text.delta", "run.finished"]
+    ["run.started", "commentary.delta", "text.delta", "run.finished"]
   );
   assert.match(parseOutputEvents(result.stdout)[1].text, /codex:-s danger-full-access/);
   assert.equal(result.stderr, "");
@@ -259,8 +271,9 @@ test("invoke-cli writes normalized NDJSON events instead of plain assistant text
   assert.equal(result.status, 0);
   const lines = parseOutputEvents(result.stdout);
   assert.equal(lines[0].type, "run.started");
-  assert.equal(lines[1].type, "text.delta");
+  assert.equal(lines[1].type, "commentary.delta");
   assert.equal(lines[1].text.includes("codex:-s danger-full-access"), true);
+  assert.equal(lines[2].type, "text.delta");
 });
 
 test("invoke-cli persists provider session IDs while emitting NDJSON", () => {
@@ -346,7 +359,7 @@ test("codex runtime maps agent_message and todo_list into normalized events", ()
 
   assert.equal(started[0].type, "run.started");
   assert.equal(todo[0].type, "progress.update");
-  assert.equal(text[0].type, "text.delta");
+  assert.equal(text[0].type, "commentary.delta");
   assert.equal(text[0].text, "Hello from Codex");
 });
 
@@ -1134,7 +1147,7 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
   assert.throws(() => createProviderRuntime({ name: "claude" }), /Unsupported provider/);
 });
 
-test("codex runtime reads text from content and properties.content fallbacks", () => {
+test("codex runtime maps generic text fallbacks to commentary.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const ctx = { invocationId: "inv-4", agent: "codex" };
@@ -1158,7 +1171,7 @@ test("codex runtime reads text from content and properties.content fallbacks", (
   );
 
   assert.deepEqual(
-    direct.filter((event) => event.type === "text.delta").map((event) => event.text),
+    direct.filter((event) => event.type === "commentary.delta").map((event) => event.text),
     ["direct content"]
   );
   assert.deepEqual(
@@ -1167,7 +1180,7 @@ test("codex runtime reads text from content and properties.content fallbacks", (
   );
 });
 
-test("codex runtime maps agent message events to text.delta", () => {
+test("codex runtime maps agent message events to commentary.delta", () => {
   const { createProviderRuntime } = require("../../src/agents/providers");
   const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
   const events = runtime.transform(
@@ -1180,7 +1193,7 @@ test("codex runtime maps agent message events to text.delta", () => {
     },
     { agent: "codex", invocationId: "inv-legacy" }
   );
-  const text = events.find((event) => event.type === "text.delta");
+  const text = events.find((event) => event.type === "commentary.delta");
   assert.ok(text);
   assert.equal(text.text, "Hello from Codex");
 });
@@ -1192,9 +1205,12 @@ test("resumes remembered codex session", () => {
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
-  const text = events.find((event) => event.type === "text.delta");
+  const text = events.find((event) => event.type === "commentary.delta");
   assert.ok(text);
-  assert.match(text.text, /exec resume --json codex-session-previous hello again/);
+  assert.match(
+    text.text,
+    /exec resume --json --output-last-message .+ codex-session-previous hello again/
+  );
   assert.equal(result.stderr, "");
 });
 
@@ -1322,8 +1338,9 @@ test("stderr activity prevents idle timeout", () => {
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
 
-childProcess.spawn = function spawn() {
+childProcess.spawn = function spawn(command, args) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -1339,6 +1356,8 @@ childProcess.spawn = function spawn() {
       type: "assistant",
       message: { content: [{ type: "text", text: "done" }] }
     }) + "\\n");
+    const outputIndex = args.indexOf("--output-last-message");
+    fs.writeFileSync(args[outputIndex + 1], "done", "utf8");
     child.stdout.end();
     child.emit("close", 0, null);
   }, 70);
@@ -1364,8 +1383,9 @@ test("Codex startup diagnostics are coalesced without leaking through stderr", (
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
 
-childProcess.spawn = function spawn() {
+childProcess.spawn = function spawn(command, args) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -1384,6 +1404,8 @@ childProcess.spawn = function spawn() {
       type: "item.completed",
       item: { type: "agent_message", text: "done" }
     }) + "\\n");
+    const outputIndex = args.indexOf("--output-last-message");
+    fs.writeFileSync(args[outputIndex + 1], "done", "utf8");
     child.stdout.end();
     child.emit("close", 0, null);
   });
@@ -1446,9 +1468,10 @@ test("retries failed child when configured", () => {
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
 let attempt = 0;
 
-childProcess.spawn = function spawn() {
+childProcess.spawn = function spawn(command, args) {
   attempt += 1;
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -1469,6 +1492,8 @@ childProcess.spawn = function spawn() {
       type: "assistant",
       message: { content: [{ type: "text", text: "retry-success" }] }
     }) + "\\n");
+    const outputIndex = args.indexOf("--output-last-message");
+    fs.writeFileSync(args[outputIndex + 1], "retry-success", "utf8");
     child.stdout.end();
     child.emit("close", 0, null);
   });
@@ -1501,9 +1526,10 @@ test("retries keep a single lifecycle when first attempt already emitted content
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const fs = require("node:fs");
 let attempt = 0;
 
-childProcess.spawn = function spawn() {
+childProcess.spawn = function spawn(command, args) {
   attempt += 1;
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -1532,6 +1558,8 @@ childProcess.spawn = function spawn() {
       type: "item.completed",
       item: { type: "agent_message", text: "recovered" }
     }) + "\\n");
+    const outputIndex = args.indexOf("--output-last-message");
+    fs.writeFileSync(args[outputIndex + 1], "final", "utf8");
     child.stdout.end();
     child.emit("close", 0, null);
   });
@@ -1546,6 +1574,10 @@ childProcess.spawn = function spawn() {
   assert.equal(events.filter((e) => e.type === "run.started").length, 1);
   assert.equal(events.filter((e) => e.type === "run.finished").length, 1);
   assert.equal(events.filter((e) => e.type === "run.failed").length, 0);
-  const texts = events.filter((e) => e.type === "text.delta").map((e) => e.text);
-  assert.deepEqual(texts, ["partial ", "recovered"]);
+  const commentary = events.filter((e) => e.type === "commentary.delta").map((e) => e.text);
+  assert.deepEqual(commentary, ["partial ", "recovered"]);
+  assert.deepEqual(
+    events.filter((e) => e.type === "text.delta").map((e) => e.text),
+    ["final"]
+  );
 });

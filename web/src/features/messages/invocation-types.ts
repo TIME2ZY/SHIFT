@@ -3,6 +3,11 @@ export interface InvocationThinkingSegment {
   text: string;
 }
 
+export interface InvocationCommentarySegment {
+  eventNo: number;
+  text: string;
+}
+
 export interface InvocationChangedFile {
   path: string;
   changeType?: string;
@@ -34,6 +39,13 @@ export interface InvocationProgressItem {
 export type InvocationTimelineItem =
   | {
       id: string;
+      type: "commentary";
+      eventNo: number;
+      lastEventNo: number;
+      text: string;
+    }
+  | {
+      id: string;
       type: "thinking";
       eventNo: number;
       lastEventNo: number;
@@ -60,6 +72,10 @@ export interface InvocationProcess {
   thinking: {
     text: string;
     segments: InvocationThinkingSegment[];
+  };
+  commentary: {
+    text: string;
+    segments: InvocationCommentarySegment[];
   };
   tools: InvocationTool[];
   timeline: InvocationTimelineItem[];
