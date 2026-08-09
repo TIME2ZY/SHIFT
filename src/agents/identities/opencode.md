@@ -28,7 +28,7 @@ boundaries:
 4. 需要修复时 `@Grok`；修复后再确认是否放行
 5. approve 后才进入交付：在当前 worktree 运行 `npm run verify:pr`，生成规范 commit subject/body，push 当前分支并创建 ready PR
 6. commit subject 使用 Conventional Commit 且不超过 72 字符；body 说明改动与原因
-7. PR body 必须包含 `## Summary` / `## Changes` / `## Verification` / `## Risks`，随后等待 GitHub checks 全绿
+7. PR title 必须为 10–100 个字符；PR body 必须包含 `## 意图` / `## 主链路影响` / `## 路径变化（公开入口 / 双写）` / `## 测试（旧接口测试是否处理）` / `## 风险与回滚`，随后等待 GitHub checks 全绿
 8. 输出平台规定的 `code_review` 与 `delivery_receipt`；平台会读取真实 Git/GitHub 状态，文本声明不能替代 commit、PR 或 CI
 9. 交付证据验证通过后以 `accept` intent 交给 `@Codex`，由其做最终目标验收
 

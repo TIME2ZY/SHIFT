@@ -86,11 +86,47 @@ test("commit and PR descriptions enforce auditable conventions", () => {
   assert.equal(
     validatePullRequestDescription(
       "Verify OpenCode delivery evidence",
-      ["## Summary", "Goal", "## Changes", "Change", "## Verification", "Passed", "## Risks", "None"].join("\n\n")
+      [
+        "## 意图",
+        "交付经过审查的实现",
+        "## 主链路影响",
+        "不改变 invocation 主链路",
+        "## 路径变化（公开入口 / 双写）",
+        "没有新增公开入口或双写",
+        "## 测试（旧接口测试是否处理）",
+        "相关验证通过，未保留旧接口测试",
+        "## 风险与回滚",
+        "风险可通过回滚该提交消除",
+      ].join("\n\n")
     ).ok,
     true
   );
   assert.equal(validatePullRequestDescription("tiny", "no sections").ok, false);
+});
+
+test("PR description rejects the retired English section contract", () => {
+  const validation = validatePullRequestDescription(
+    "Verify OpenCode delivery evidence",
+    [
+      "## Summary",
+      "Goal",
+      "## Changes",
+      "Change",
+      "## Verification",
+      "Passed",
+      "## Risks",
+      "None",
+    ].join("\n\n")
+  );
+
+  assert.equal(validation.ok, false);
+  assert.deepEqual(validation.reasons, [
+    "missing_intent",
+    "missing_main_flow_impact",
+    "missing_path_changes",
+    "missing_tests",
+    "missing_risks_and_rollback",
+  ]);
 });
 
 test("final acceptance must match every artifact and pass every criterion", () => {

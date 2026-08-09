@@ -148,7 +148,17 @@ tests/                回归测试，负责钉住意图
 
 AI 不得擅自实施 XL 变更。最小 diff 指最小必要语义范围，不等于最少代码行。
 
-提交或 PR 必须说明：
+### Commit、PR 与分支
+
+Agent 创建的非 merge commit 必须满足：
+
+- subject 使用 Conventional Commit：`<type>(<optional-scope>): <description>`。
+- type 限定为 `feat | fix | refactor | perf | test | docs | build | ci | chore | revert`。
+- subject 不超过 72 个字符；body 必须说明改了什么以及为什么改，不能只重复 subject。
+- 一个 commit 应表达一个可独立审查的意图。
+
+PR title 必须清楚描述用户可观察结果，长度为 10–100 个字符。PR body 由负责交付的 Agent
+撰写，并且必须包含以下固定章节：
 
 ```text
 ## 意图
@@ -157,6 +167,30 @@ AI 不得擅自实施 XL 变更。最小 diff 指最小必要语义范围，不�
 ## 测试（旧接口测试是否处理）
 ## 风险与回滚
 ```
+
+其中必须说明主链路影响、公开入口或双写变化、旧路径是否退出、执行过的验证、旧接口测试
+如何处理，以及风险与回滚方式。
+
+SHIFT 自动创建的会话分支固定为 `codex/session-<sanitized-session-id>`，不得手工改名。
+手工创建的工作分支推荐使用 `<type>/<short-kebab-description>`；Agent 在 Codex 环境中创建
+分支时使用 `codex/<short-kebab-description>`。分支名使用小写英文、数字、斜杠和连字符，
+不得使用含义不明的名称。
+
+### 架构实现地图维护
+
+`docs/architecture-map.md` 描述当前实现路径，不是历史归档。当改动影响以下任一内容时，
+必须在代码完成后同步更新该文件：
+
+- 主链路的启动、流式输出、终态或持久化路径；
+- invocation、handoff、message、Memory 的权威写入口；
+- 在线热路径与 offline、迁移或审计模块的边界；
+- 模块依赖方向、composition root 或目录职责；
+- 公开入口、旧路径、双写或兼容路径的增删；
+- 架构地图中列出的代码锚点、状态或结论。
+
+纯文案、样式、局部算法、私有 helper 或不改变上述映射关系的重构，不要求修改架构地图。
+PR 必须说明 `architecture-map.md` 已更新，或说明本次改动不影响实现地图及其原因。不得让
+架构地图描述已不存在的入口，也不得为了匹配旧地图而保留已经被替换的代码路径。
 
 ---
 

@@ -151,7 +151,10 @@ Grok 计划期写权限、OpenCode Git/PR 操作和 Codex 目标验收门禁由�
 - Codex `solution_baseline` 绑定用户目标、收敛方案、约束、非目标和逐项验收标准；
 - OpenCode 输出结构化 `code_review` 与 `delivery_receipt`，并亲自完成 commit、push、ready PR 与 CI；
 - 平台以只读方式独立核对 clean worktree、真实 commit、仓库默认 base、PR head、PR 描述和 GitHub checks；
-- commit subject 强制 Conventional Commit / 72 字符限制，body 强制说明原因；PR body 强制四个审计章节；
+- commit subject 强制 Conventional Commit / 72 字符限制，body 强制说明改动与原因；PR title 长度限制为
+  10–100 个字符，PR body 强制使用 `## 意图`、`## 主链路影响`、
+  `## 路径变化（公开入口 / 双写）`、`## 测试（旧接口测试是否处理）`、`## 风险与回滚`
+  五个中文审计章节；
 - Codex `final_acceptance` 绑定 user goal / solution / implementation plan / commit hash，并逐项提供 pass/fail 证据；
 - 只有 OpenCode review、delivery、CI 与 Codex 目标验收全部匹配，`deliver` 才能进入 `done`。
 
