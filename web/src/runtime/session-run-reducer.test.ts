@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { initialSessionRunState, sessionRunReducer } from "./session-run-reducer";
 
 describe("sessionRunReducer", () => {
+  it("keeps the client turn identity on the optimistic user message", () => {
+    const state = sessionRunReducer(initialSessionRunState, {
+      type: "user/submitted",
+      sessionId: "s1",
+      agentId: "codex",
+      content: "检查这个问题",
+      clientTurnId: "turn-1",
+    });
+
+    expect(state.runs.s1.optimisticUser).toEqual({
+      agentId: "codex",
+      content: "检查这个问题",
+      clientTurnId: "turn-1",
+    });
+  });
+
   it("isolates live output by session", () => {
     let state = sessionRunReducer(initialSessionRunState, {
       type: "run/started",

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
@@ -141,6 +141,59 @@ describe("MessageList", () => {
     expect(userBubble).toHaveAttribute("aria-current", "location");
   });
 
+  it("stops following new output after the user scrolls away from the latest message", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const baseProps = {
+      sessionId: "s1",
+      agents: [{ id: "codex", label: "Codex" }],
+      run: null,
+      isLoading: false,
+      error: null,
+      onRetry: vi.fn(),
+    };
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <MessageList
+          {...baseProps}
+          messages={[
+            { id: "m1", role: "user", content: "第一条" },
+            { id: "m2", role: "assistant", agentId: "codex", content: "第二条" },
+          ]}
+        />
+      </QueryClientProvider>
+    );
+    const transcript = screen.getByRole("log");
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 200, writable: true },
+    });
+
+    fireEvent.scroll(transcript);
+    expect(screen.getByRole("button", { name: "回到最新" })).toBeInTheDocument();
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <MessageList
+          {...baseProps}
+          messages={[
+            { id: "m1", role: "user", content: "第一条" },
+            { id: "m2", role: "assistant", agentId: "codex", content: "第二条" },
+            { id: "m3", role: "assistant", agentId: "codex", content: "第三条" },
+          ]}
+        />
+      </QueryClientProvider>
+    );
+
+    expect(transcript.scrollTop).toBe(200);
+    await user.click(screen.getByRole("button", { name: "回到最新" }));
+    expect(transcript.scrollTop).toBe(1_000);
+    expect(screen.queryByRole("button", { name: "回到最新" })).not.toBeInTheDocument();
+  });
+
   it("restores a persisted message process by invocation id without a duplicate live bubble", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockResolvedValue(
@@ -226,9 +279,12 @@ describe("MessageList", () => {
       />
     );
 
-    expect(await screen.findByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("历史思考")).toBeInTheDocument();
     expect(screen.getAllByText("最终回答")).toHaveLength(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("执行完成"));
+    expect(await screen.findByText("read_file")).toBeInTheDocument();
+    expect(screen.getByText("思考")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/s1/invocations/i1/process",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
@@ -262,6 +318,7 @@ describe("MessageList", () => {
     );
 
     expect(screen.queryByText("Codex → Gemini")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Codex 已将任务交接给 Gemini" })).toBeInTheDocument();
     expect(screen.getByText("开始协作")).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
   });
@@ -270,7 +327,7 @@ describe("MessageList", () => {
     renderMessageList(
       <MessageList
         sessionId="s1"
-        messages={[{ id: "m1", role: "user", content: "不要重复我" }]}
+        messages={[{ id: "m1", role: "user", content: "不要重复我", clientTurnId: "turn-1" }]}
         agents={[{ id: "codex", label: "Codex" }]}
         run={{
           sessionId: "s1",
@@ -281,7 +338,11 @@ describe("MessageList", () => {
           latestInvocationByAgent: {},
           invocationOrder: [],
           notices: [],
-          optimisticUser: { agentId: "codex", content: "不要重复我" },
+          optimisticUser: {
+            agentId: "codex",
+            content: "不要重复我",
+            clientTurnId: "turn-1",
+          },
         }}
         isLoading={false}
         error={null}
@@ -293,7 +354,63 @@ describe("MessageList", () => {
     expect(screen.queryByText("发送中")).not.toBeInTheDocument();
   });
 
+  it("does not repeat the persisted user turn before a handoff agent live reply", () => {
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          {
+            id: "u1",
+            role: "user",
+            content: "检查这个问题",
+            clientTurnId: "turn-handoff",
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            agentId: "codex",
+            content: "我交给 Gemini 继续检查。",
+          },
+        ]}
+        agents={[
+          { id: "codex", label: "Codex" },
+          { id: "gemini", label: "Gemini" },
+        ]}
+        run={{
+          sessionId: "s1",
+          status: "running",
+          updatedAt: 1,
+          doneReceived: false,
+          liveMessages: {
+            i2: {
+              agentId: "gemini",
+              invocationId: "i2",
+              text: "Gemini 正在继续分析",
+              status: "streaming",
+            },
+          },
+          latestInvocationByAgent: { gemini: "i2" },
+          invocationOrder: ["i2"],
+          notices: [],
+          optimisticUser: {
+            agentId: "codex",
+            content: "检查这个问题",
+            clientTurnId: "turn-handoff",
+          },
+        }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText("检查这个问题")).toHaveLength(1);
+    expect(screen.queryByText("发送中")).not.toBeInTheDocument();
+    expect(screen.getByText("Gemini 正在继续分析")).toBeInTheDocument();
+  });
+
   it("does not paint the same final answer on callback and final for one invocation", async () => {
+    const user = userEvent.setup();
     const finalText =
       "我查一下这次 handoff 有没有被平台接受，以及 Gemini 是否真的产生了 invocation。";
     const handoffText = "@Gemini\n\n```handoff\nto: Gemini\n```";
@@ -381,9 +498,12 @@ describe("MessageList", () => {
       />
     );
 
-    expect(await screen.findByText("shell")).toBeInTheDocument();
     expect(screen.getAllByText(finalText)).toHaveLength(1);
     expect(screen.getByText("@Gemini", { exact: false })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByText("执行完成"));
+    expect(await screen.findByText("shell")).toBeInTheDocument();
     // Durable process loads only for the final host, not the callback.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(

@@ -7,6 +7,10 @@ export interface PersistedMessage {
   kind?: string;
   messageType?: string;
   invocationId?: string;
+  clientTurnId?: string;
+  from?: string;
+  to?: string;
+  handoffDegraded?: boolean;
   exitCode?: number | null;
   createdAt?: string | number;
 }

@@ -1,11 +1,4 @@
-import {
-  type FormEvent,
-  type KeyboardEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { agentMentionLabel, findExplicitLeadingAgent } from "../agents/routing";
 import type { AgentSummary } from "../agents/types";
@@ -178,7 +171,7 @@ export function Composer({
         </div>
         <span className="react-composer-hint">
           {running
-            ? "Agent 正在运行"
+            ? "可继续编辑，当前运行结束后再发送"
             : explicitAgent
               ? `本条将发给 ${explicitAgent.label}`
               : useWorktree
@@ -227,34 +220,35 @@ export function Composer({
         />
 
         {running ? (
-          <button className="react-stop-button" type="button" onClick={onStop}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <button className="react-stop-button" type="button" onClick={onStop} title="停止当前运行">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
             停止
           </button>
-        ) : (
-          <button
-            className="react-send-button"
-            type="submit"
-            disabled={!sessionId || !draft.trim() || !targetAgent}
+        ) : null}
+        <button
+          className="react-send-button"
+          type="submit"
+          disabled={running || !sessionId || !draft.trim() || !targetAgent}
+          title={running ? "当前运行结束后可发送" : undefined}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-            发送
-          </button>
-        )}
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+          发送
+        </button>
       </div>
     </form>
   );

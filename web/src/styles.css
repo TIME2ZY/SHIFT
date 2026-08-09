@@ -584,7 +584,7 @@ body {
     max(var(--space-5), calc((100% - 800px) / 2));
   overflow-y: auto;
   overflow-x: hidden;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   box-sizing: border-box;
 }
 
@@ -709,7 +709,7 @@ body {
 .react-message {
   position: relative;
   display: grid;
-  width: min(100%, 780px);
+  width: min(90%, 920px);
   max-width: 100%;
   min-width: 0;
   grid-template-columns: 38px minmax(0, 1fr);
@@ -738,7 +738,7 @@ body {
 
 /* CRITICAL FIX: User message layout & right alignment right next to avatar */
 .react-message[data-role="user"] {
-  width: min(88%, 720px);
+  width: min(82%, 780px);
   max-width: 100%;
   min-width: 0;
   margin: var(--space-3) 0 var(--space-5) auto;
@@ -823,8 +823,13 @@ body {
 }
 
 .react-message[data-role="assistant"] .react-message-bubble {
-  border-color: color-mix(in srgb, var(--agent-color, var(--border)) 25%, var(--border-subtle));
-  border-top-left-radius: 4px;
+  padding: 4px 0 4px 14px;
+  border: 0;
+  border-inline-start: 2px solid
+    color-mix(in srgb, var(--agent-color, var(--accent)) 68%, var(--border-subtle));
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .react-message[data-role="user"] .react-message-bubble {
@@ -847,6 +852,13 @@ body {
 .react-message[data-live] .react-message-bubble {
   border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border-subtle));
   box-shadow: 0 0 16px -4px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
+}
+
+.react-message[data-role="assistant"][data-live] .react-message-bubble {
+  border: 0;
+  border-inline-start: 2px solid
+    color-mix(in srgb, var(--agent-color, var(--accent)) 68%, var(--border-subtle));
+  box-shadow: none;
 }
 
 .react-message-content {
@@ -974,26 +986,31 @@ body {
   font-style: italic;
 }
 
-.react-process {
-  margin-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.react-process summary {
-  width: max-content;
-  padding: var(--space-2) 0;
-  cursor: pointer;
-  color: var(--text-tertiary);
-  font-weight: 500;
-  user-select: none;
-}
-
 .react-process-timeline {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
+}
+
+.react-message-flow {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.react-commentary-message {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.react-commentary-message .react-markdown > :first-child {
+  margin-top: 0;
+}
+
+.react-commentary-message .react-markdown > :last-child {
+  margin-bottom: 0;
 }
 
 .react-timeline-text {
@@ -1002,14 +1019,14 @@ body {
 
 .react-thinking-step {
   overflow: hidden;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: var(--surface-instrument);
+  background: transparent;
 }
 
 .react-thinking-step > summary {
   width: max-content;
-  padding: var(--space-2) var(--space-3);
+  max-width: 100%;
+  min-height: 30px;
+  padding: var(--space-1) 0;
   cursor: pointer;
   color: var(--text-tertiary);
   font-size: 11px;
@@ -1025,15 +1042,91 @@ body {
   background: var(--surface-inset);
 }
 
-.react-process > summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.react-process-summary {
+  min-width: 0;
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
-.react-process > summary small {
+.react-process-summary > summary {
+  display: flex;
+  min-height: 38px;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
   color: var(--text-tertiary);
-  font-weight: 400;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.react-process-summary > summary::-webkit-details-marker {
+  display: none;
+}
+
+.react-process-summary > summary::after {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  content: "›";
+  font-size: 16px;
+  line-height: 1;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.react-process-summary[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.react-process-summary > summary:focus-visible,
+.react-tool-call > summary:focus-visible,
+.react-thinking-step > summary:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.react-process-summary > summary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-process-summary > summary small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 10px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-process-status {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.react-process-summary[data-status="running"] .react-process-status {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.react-process-summary[data-status="error"] .react-process-status {
+  background: var(--danger);
+}
+
+.react-process-summary-body {
+  display: grid;
+  gap: 2px;
+  padding: 0 0 var(--space-2) 15px;
+  border-left: 1px solid var(--border-subtle);
 }
 
 .react-process-section {
@@ -1081,8 +1174,7 @@ body {
   white-space: pre-wrap;
 }
 
-.react-progress-list,
-.react-tool-list {
+.react-progress-list {
   display: grid;
   gap: var(--space-2);
   margin: var(--space-2) 0;
@@ -1090,8 +1182,7 @@ body {
   list-style: none;
 }
 
-.react-progress-list li,
-.react-tool-list li {
+.react-progress-list li {
   position: relative;
   padding: var(--space-2) var(--space-3) var(--space-2) 28px;
   border-radius: var(--radius-sm);
@@ -1099,8 +1190,7 @@ body {
   border: 1px solid var(--border-subtle);
 }
 
-.react-progress-list li::before,
-.react-tool-list li::before {
+.react-progress-list li::before {
   position: absolute;
   top: 12px;
   left: 10px;
@@ -1111,54 +1201,23 @@ body {
   content: "";
 }
 
-.react-progress-list li[data-status="completed"]::before,
-.react-tool-list li[data-status="done"]::before {
+.react-progress-list li[data-status="completed"]::before {
   border-color: var(--success);
   background: var(--success);
 }
 
-.react-progress-list li[data-status="in_progress"]::before,
-.react-tool-list li[data-status="running"]::before {
+.react-progress-list li[data-status="in_progress"]::before {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent);
 }
 
-.react-tool-list li[data-status="error"]::before {
-  border-color: var(--danger);
-  background: var(--danger);
-}
-
-.react-tool-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1) var(--space-3);
-}
-
-.react-tool-list small {
-  color: var(--text-tertiary);
-}
-
-.react-tool-list code {
-  grid-column: 1 / -1;
-  max-height: 96px;
-  padding-top: var(--space-1);
-  overflow: auto;
-  color: var(--text-tertiary);
-  font: 11px/1.5 var(--font-mono);
-  white-space: pre-wrap;
-}
-
-.react-tool-calls {
-  display: grid;
-  gap: var(--space-2);
-}
-
 .react-tool-call {
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-instrument);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .react-tool-call > summary {
@@ -1167,7 +1226,8 @@ body {
   align-items: center;
   gap: var(--space-2);
   width: auto;
-  padding: var(--space-2) var(--space-3);
+  min-height: 34px;
+  padding: var(--space-1) 0;
   color: var(--text-secondary);
   cursor: pointer;
   list-style: none;
@@ -1246,8 +1306,9 @@ body {
 .react-tool-call-body {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-2) 0 var(--space-3) 15px;
+  border-top: 0;
+  border-left: 1px solid var(--border-subtle);
   background: var(--surface-inset);
 }
 
@@ -1323,6 +1384,52 @@ body {
   font-size: 12px;
 }
 
+.react-handoff-divider {
+  display: flex;
+  width: min(100%, 780px);
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-5) 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.react-handoff-divider::before,
+.react-handoff-divider::after {
+  height: 1px;
+  flex: 1 1 28px;
+  min-width: 12px;
+  background: var(--border-subtle);
+  content: "";
+}
+
+.react-handoff-divider > span {
+  overflow: hidden;
+  max-width: 150px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-handoff-divider svg {
+  width: 40px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+
+.react-handoff-divider small {
+  color: var(--warning);
+  white-space: nowrap;
+}
+
 .react-run-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   color: var(--danger);
@@ -1346,11 +1453,11 @@ body {
 .react-messages {
   height: 100%;
   min-height: 0;
-  padding: var(--space-5) max(28px, calc((100% - 800px) / 2)) var(--space-5)
-    max(var(--space-5), calc((100% - 800px) / 2));
+  padding: var(--space-5) max(28px, calc((100% - 1040px) / 2)) var(--space-5)
+    max(var(--space-5), calc((100% - 1040px) / 2));
   overflow-y: auto;
   overflow-x: hidden;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   box-sizing: border-box;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--border) 60%, transparent) transparent;
@@ -1361,6 +1468,44 @@ body {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.react-jump-latest {
+  position: absolute;
+  z-index: 12;
+  right: var(--space-5);
+  bottom: var(--space-4);
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  background: var(--surface-instrument-raised);
+  box-shadow: var(--shadow-md);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.react-jump-latest:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.react-jump-latest:focus-visible {
+  box-shadow: var(--focus-ring), var(--shadow-md);
+}
+
+.react-jump-latest svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
 }
 
 /* Scrub rail — Auto-hiding floating minimap constrained strictly within bounds */
@@ -1402,8 +1547,8 @@ body {
 
 .react-message-nav button {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border-radius: 50%;
   touch-action: manipulation;
@@ -1584,7 +1729,7 @@ body {
 .react-composer-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: end;
   gap: var(--space-3);
   padding: 4px;
@@ -3042,7 +3187,7 @@ body {
   }
 
   .react-messages {
-    padding-right: 22px;
+    padding-right: var(--space-3);
     padding-left: var(--space-3);
   }
 
@@ -3051,8 +3196,7 @@ body {
   }
 
   .react-message-nav {
-    right: 2px;
-    max-height: 48%;
+    display: none;
   }
 
   .react-composer-hint {
@@ -3060,11 +3204,13 @@ body {
   }
 
   .react-message {
+    width: 100%;
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 8px;
   }
 
   .react-message[data-role="user"] {
+    width: min(92%, 780px);
     grid-template-columns: minmax(0, 1fr) 32px;
   }
 

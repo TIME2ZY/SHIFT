@@ -28,6 +28,7 @@ export function useChatActions() {
         sessionId,
         agentId,
         content,
+        clientTurnId,
       });
 
       let resultSessionId = sessionId;
