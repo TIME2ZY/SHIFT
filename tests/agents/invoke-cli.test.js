@@ -505,9 +505,35 @@ test("codex turn.completed maps usage to canonical fields", () => {
   assert.ok(usage);
   assert.equal(usage.scope, "turn");
   assert.equal(usage.mode, "cumulative");
+  assert.equal(usage.counterScope, "provider-session");
   assert.equal(usage.totalTokens, 1120);
   assert.equal(usage.cachedInputTokens, 600);
   assert.equal(usage.reasoningTokens, 40);
+});
+
+test("codex maps provider context and runtime capacity separately from cumulative billing", () => {
+  const runtime = createProviderRuntime({
+    providerId: "codex",
+    id: "codex",
+    model: "gpt-5.6-sol",
+  });
+  const events = runtime.transform(
+    {
+      type: "turn.completed",
+      usage: {
+        input_tokens: 100000,
+        output_tokens: 2000,
+        last_token_usage: { total_tokens: 42204 },
+        model_context_window: 258400,
+      },
+    },
+    { invocationId: "inv-codex-context", agent: "codex" }
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.equal(usage.totalTokens, 102000);
+  assert.equal(usage.contextTokens, 42204);
+  assert.equal(usage.contextTokensExact, true);
+  assert.equal(usage.contextWindowTokens, 258400);
 });
 
 test("opencode runtime maps tool/task parts into tool events only", () => {

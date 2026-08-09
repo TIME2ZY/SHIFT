@@ -39,9 +39,7 @@ function getAgentSealThresholds(agentId, opts = {}) {
       ? opts.capacityTokens
       : getAgentCapacity(agentId);
   const reserveRatio =
-    typeof opts.reserveRatio === "number"
-      ? opts.reserveRatio
-      : getAgentReserveRatio(agentId);
+    typeof opts.reserveRatio === "number" ? opts.reserveRatio : getAgentReserveRatio(agentId);
   return resolveSealThresholds({
     ...modelProfile,
     contextTokens: capacityTokens,
@@ -50,16 +48,22 @@ function getAgentSealThresholds(agentId, opts = {}) {
 }
 
 function makeTracker(agentId, opts = {}) {
-  const capacityTokens = opts.capacityTokens || getAgentCapacity(agentId);
+  let capacityTokens = opts.capacityTokens || getAgentCapacity(agentId);
   const reserveRatio = validRatio(opts.reserveRatio, getAgentReserveRatio(agentId));
-  const reserveTokens = Math.floor(capacityTokens * reserveRatio);
-  const usableContextTokens = Math.max(1, capacityTokens - reserveTokens);
   let inputChars = nonNegativeNumber(opts.inputChars);
   let outputChars = nonNegativeNumber(opts.outputChars);
+  let observedCharsBaseline = inputChars + outputChars;
   const persistedContextSource = opts.contextUsageSource || "char_estimated";
-  let providerContextTokens =
-    persistedContextSource !== "char_estimated" ? nonNegativeNumber(opts.contextUsedTokens) : 0;
-  let contextUsageSource = providerContextTokens > 0 ? persistedContextSource : "char_estimated";
+  const persistedContextTokens = nonNegativeNumber(opts.contextUsedTokens);
+  const charBaselineTokens = Math.floor(observedCharsBaseline / CHARS_PER_TOKEN);
+  let contextBaselineTokens =
+    persistedContextSource === "char_estimated"
+      ? Math.max(persistedContextTokens, charBaselineTokens)
+      : persistedContextTokens || charBaselineTokens;
+  let contextUsageSource =
+    persistedContextSource !== "char_estimated" && contextBaselineTokens > 0
+      ? persistedContextSource
+      : "char_estimated";
   const billing = {
     inputTokens: nonNegativeNumber(opts.billingInputTokens),
     cachedInputTokens: nonNegativeNumber(opts.billingCachedInputTokens),
@@ -68,6 +72,7 @@ function makeTracker(agentId, opts = {}) {
     totalTokens: nonNegativeNumber(opts.billingTotalTokens),
     costUsd: nonNegativeNumber(opts.billingCostUsd),
   };
+  let billingComplete = opts.billingComplete !== false;
   const usageFields = [
     "inputTokens",
     "cachedInputTokens",
@@ -81,11 +86,21 @@ function makeTracker(agentId, opts = {}) {
   const startedAt = Date.now();
 
   function addInput(n) {
-    if (typeof n === "number" && n > 0) inputChars += n;
+    if (typeof n === "number" && n > 0) {
+      inputChars += n;
+      if (contextUsageSource === "provider_exact") {
+        contextUsageSource = "provider_baseline_estimated_delta";
+      }
+    }
   }
 
   function addOutput(n) {
-    if (typeof n === "number" && n > 0) outputChars += n;
+    if (typeof n === "number" && n > 0) {
+      outputChars += n;
+      if (contextUsageSource === "provider_exact") {
+        contextUsageSource = "provider_baseline_estimated_delta";
+      }
+    }
   }
 
   function getUsedChars() {
@@ -93,11 +108,12 @@ function makeTracker(agentId, opts = {}) {
   }
 
   function getEstimatedTokens() {
-    return Math.floor(getUsedChars() / CHARS_PER_TOKEN);
+    const observedDelta = Math.max(0, getUsedChars() - observedCharsBaseline);
+    return contextBaselineTokens + Math.floor(observedDelta / CHARS_PER_TOKEN);
   }
 
   function getUsedTokens() {
-    return providerContextTokens > 0 ? providerContextTokens : getEstimatedTokens();
+    return getEstimatedTokens();
   }
 
   function getPhysicalFillRatio() {
@@ -105,14 +121,23 @@ function makeTracker(agentId, opts = {}) {
   }
 
   function getFillRatio() {
+    const usableContextTokens = Math.max(
+      1,
+      capacityTokens - Math.floor(capacityTokens * reserveRatio)
+    );
     return getUsedTokens() / usableContextTokens;
   }
 
   function applyUsage(event) {
     if (!event || event.type !== "usage.update") return false;
     if (event.contextTokensExact === true && typeof event.contextTokens === "number") {
-      providerContextTokens = event.contextTokens;
+      contextBaselineTokens = event.contextTokens;
+      observedCharsBaseline = getUsedChars();
       contextUsageSource = "provider_exact";
+    }
+
+    if (typeof event.contextWindowTokens === "number" && event.contextWindowTokens > 0) {
+      capacityTokens = event.contextWindowTokens;
     }
 
     const scopeRank = { step: 0, turn: 1, run: 2 }[event.scope] ?? 0;
@@ -121,11 +146,19 @@ function makeTracker(agentId, opts = {}) {
     if (event.mode === "cumulative") {
       for (const field of usageFields) {
         if (typeof event[field] !== "number") continue;
-        const delta = event[field] - accountedInvocation[field];
-        billing[field] = Math.max(0, billing[field] + delta);
+        if (event.counterScope === "provider-session") {
+          // Codex resumes one provider session across child processes. Its
+          // counters are watermarks for that session, so replace the window
+          // snapshot instead of adding the watermark again per invocation.
+          billing[field] = event[field];
+        } else {
+          const delta = event[field] - accountedInvocation[field];
+          billing[field] = Math.max(0, billing[field] + delta);
+        }
         accountedInvocation[field] = event[field];
       }
       highestUsageScope = scopeRank;
+      if (event.counterScope === "provider-session") billingComplete = true;
     } else if (scopeRank === highestUsageScope || highestUsageScope < 0) {
       for (const field of usageFields) {
         if (typeof event[field] !== "number") continue;
@@ -138,6 +171,8 @@ function makeTracker(agentId, opts = {}) {
   }
 
   function snapshot() {
+    const reserveTokens = Math.floor(capacityTokens * reserveRatio);
+    const usableContextTokens = Math.max(1, capacityTokens - reserveTokens);
     const usedTokens = getUsedTokens();
     return {
       agentId,
@@ -157,19 +192,29 @@ function makeTracker(agentId, opts = {}) {
       budgetFillRatio: getFillRatio(),
       fillRatio: getFillRatio(),
       billing: { ...billing },
+      billingComplete,
       elapsedMs: Date.now() - startedAt,
     };
   }
 
   return {
     agentId,
-    capacityTokens,
+    get capacityTokens() {
+      return capacityTokens;
+    },
     reserveRatio,
-    reserveTokens,
-    usableContextTokens,
+    get reserveTokens() {
+      return Math.floor(capacityTokens * reserveRatio);
+    },
+    get usableContextTokens() {
+      return Math.max(1, capacityTokens - Math.floor(capacityTokens * reserveRatio));
+    },
     addInput,
     addOutput,
     applyUsage,
+    markBillingIncomplete() {
+      billingComplete = false;
+    },
     getUsedChars,
     getUsedTokens,
     getPhysicalFillRatio,

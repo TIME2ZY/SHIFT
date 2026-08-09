@@ -20,6 +20,7 @@ test("usage summary keeps per-agent billing and a separate session total", () =>
       billingReasoningTokens: 50,
       billingTotalTokens: 1200,
       billingCostUsd: 0,
+      billingComplete: false,
     },
     {
       id: "g1",
@@ -43,6 +44,7 @@ test("usage summary keeps per-agent billing and a separate session total", () =>
   assert.equal(summary.session.totalTokens, 3500);
   assert.equal(summary.session.cachedInputTokens, 400);
   assert.equal(summary.agents.find((entry) => entry.agentId === "codex").billing.totalTokens, 1200);
+  assert.equal(summary.agents.find((entry) => entry.agentId === "codex").billingComplete, false);
   const gemini = summary.agents.find((entry) => entry.agentId === "gemini");
   assert.equal(gemini.billing.totalTokens, 2300);
   assert.equal(gemini.context.usableContextTokens, 800000);
@@ -70,6 +72,7 @@ test("usage summary prefers an open context window over sealed history", () => {
   );
   assert.equal(summary.agents[0].context.windowId, "active");
   assert.equal(summary.agents[0].context.contextUsedTokens, 1000);
+  assert.equal(summary.agents[0].recentSealedContext.windowId, "sealed");
 });
 
 test("usage summary repairs historical provider counters into the canonical shape", () => {

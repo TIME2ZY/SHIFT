@@ -468,7 +468,7 @@ test("context usage migration rebases only legacy active model capacities", () =
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'active-codex'").get()
         .capacity_tokens,
-      272000
+      258400
     );
     assert.equal(
       db.prepare("SELECT capacity_tokens FROM context_windows WHERE id = 'sealed-gemini'").get()

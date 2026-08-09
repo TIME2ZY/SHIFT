@@ -66,16 +66,15 @@ test("catalog profiles: every agent yields valid sealer thresholds", () => {
       `${agentId} recovery < warn`
     );
     assert.ok(
-      budget.usable.sealer.warn < budget.usable.sealer.action ||
-        budget.usable.sealer.action === 1,
+      budget.usable.sealer.warn < budget.usable.sealer.action || budget.usable.sealer.action === 1,
       `${agentId} warn/action order`
     );
   }
 });
 
-test("catalog: Codex 272k @ 90%, OpenCode native 980k, Grok 85%", () => {
+test("catalog: Codex 258400 @ 90%, OpenCode native 980k, Grok 85%", () => {
   const codex = getAgentModelProfile("codex");
-  assert.equal(codex.contextTokens, 272_000);
+  assert.equal(codex.contextTokens, 258_400);
   assert.equal(codex.nativeCompactRatio, 0.9);
 
   const grok = getAgentModelProfile("grok");

@@ -6,9 +6,9 @@ const { AGENTS } = require("../../src/agents/invoke-cli");
 test("makeTracker uses the configured Codex capacity and 20% reserve", () => {
   const tracker = contextHealth.makeTracker("codex");
   assert.equal(tracker.agentId, "codex");
-  assert.equal(tracker.capacityTokens, 272_000);
-  assert.equal(tracker.reserveTokens, 54_400);
-  assert.equal(tracker.usableContextTokens, 217_600);
+  assert.equal(tracker.capacityTokens, 258_400);
+  assert.equal(tracker.reserveTokens, 51_680);
+  assert.equal(tracker.usableContextTokens, 206_720);
   assert.equal(tracker.getUsedChars(), 0);
   assert.equal(tracker.getFillRatio(), 0);
 });
@@ -88,7 +88,7 @@ test("snapshot returns a consistent view of all counters", () => {
 });
 
 test("agent model capacities match the configured manual limits", () => {
-  assert.equal(contextHealth.getAgentCapacity("codex"), 272_000);
+  assert.equal(contextHealth.getAgentCapacity("codex"), 258_400);
   assert.equal(contextHealth.getAgentCapacity("gemini"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("opencode"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("grok"), 500_000);
@@ -108,8 +108,8 @@ test("getAgentSealThresholds: Grok/Codex under native; Gemini caps at 300k", () 
   assert.ok(Math.abs(grok.usable.softRatio - 0.95) < 1e-9);
 
   const codex = contextHealth.getAgentSealThresholds("codex");
-  assert.equal(codex.capacityTokens, 272_000);
-  assert.equal(codex.nativeCompactTokens, Math.floor(272_000 * 0.9));
+  assert.equal(codex.capacityTokens, 258_400);
+  assert.equal(codex.nativeCompactTokens, Math.floor(258_400 * 0.9));
   assert.ok(codex.actionTokens < codex.nativeCompactTokens);
   assert.equal(codex.usable.sealer.action, 1);
 
@@ -162,6 +162,54 @@ test("repeated cumulative usage snapshots are not double counted", () => {
   tracker.applyUsage(usage);
   tracker.applyUsage(usage);
   assert.equal(tracker.snapshot().billing.totalTokens, 120);
+});
+
+test("runtime-reported provider capacity overrides the catalog fallback", () => {
+  const tracker = contextHealth.makeTracker("codex", { capacityTokens: 272000 });
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "turn",
+    mode: "cumulative",
+    contextWindowTokens: 258400,
+    contextTokens: 42000,
+    contextTokensExact: true,
+  });
+  assert.equal(tracker.capacityTokens, 258400);
+  assert.equal(tracker.snapshot().contextWindowTokens, 258400);
+});
+
+test("Codex provider-session watermarks replace persisted billing across invocations", () => {
+  const tracker = contextHealth.makeTracker("codex", {
+    billingInputTokens: 1000,
+    billingOutputTokens: 100,
+    billingTotalTokens: 1100,
+  });
+  tracker.applyUsage({
+    type: "usage.update",
+    scope: "turn",
+    mode: "cumulative",
+    counterScope: "provider-session",
+    inputTokens: 1250,
+    outputTokens: 150,
+    totalTokens: 1400,
+  });
+  const billing = tracker.snapshot().billing;
+  assert.equal(billing.inputTokens, 1250);
+  assert.equal(billing.outputTokens, 150);
+  assert.equal(billing.totalTokens, 1400);
+});
+
+test("estimated context resumes its persisted snapshot and adds only new observed chars", () => {
+  const tracker = contextHealth.makeTracker("codex", {
+    capacityTokens: 10_000,
+    inputChars: 400,
+    outputChars: 400,
+    contextUsedTokens: 5000,
+    contextUsageSource: "char_estimated",
+  });
+  assert.equal(tracker.getUsedTokens(), 5000);
+  tracker.addOutput(400);
+  assert.equal(tracker.getUsedTokens(), 5100);
 });
 
 test("authoritative run usage reconciles provisional step deltas", () => {

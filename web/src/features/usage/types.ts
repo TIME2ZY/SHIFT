@@ -14,12 +14,16 @@ export interface ContextUsage {
   remainingTokens?: number;
   budgetFillRatio?: number;
   contextUsageSource?: string;
+  state?: string;
+  sealReason?: string | null;
 }
 
 export interface AgentUsage {
   agentId: string;
   billing?: BillingUsage;
+  billingComplete?: boolean;
   context?: ContextUsage | null;
+  recentSealedContext?: ContextUsage | null;
 }
 
 export interface UsageSummary {
