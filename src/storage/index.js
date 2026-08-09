@@ -12,6 +12,7 @@ const { createMemoryService } = require("./memory-service");
 const { createMessageRepository } = require("./message-repository");
 const { createOutboxRepository } = require("./outbox-repository");
 const { createProjectEvidenceRepository, reindexThreadProject } = require("./project-evidence");
+const { createProjectRepository } = require("./project-repository");
 const { createRecallRepository } = require("./recall-repository");
 const { createStorageMetadataRepository } = require("./storage-metadata-repository");
 const { createThreadRepository } = require("./thread-repository");
@@ -35,6 +36,7 @@ function createStorage(options = {}) {
     messages: createMessageRepository(db),
     invocations: createInvocationRepository(db),
     collaborationTasks: createCollaborationTaskRepository(db),
+    projects: createProjectRepository(db, options.projectRepositoryOptions),
     memories: createMemoryRepository(db, recall),
     digests: createMemoryDigestRepository(db),
     projectEvidence: createProjectEvidenceRepository(db, {
