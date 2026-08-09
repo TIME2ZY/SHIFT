@@ -6,10 +6,11 @@ const COMMIT_SUBJECT_RE =
   /^(feat|fix|refactor|perf|test|docs|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^\r\n]+$/;
 const SAFE_BRANCH_RE = /^(?![./])(?!.*(?:\.\.|@\{|\\|\s|[~^:?*[]))(?!.*\/$).+$/;
 const REQUIRED_PR_SECTIONS = Object.freeze([
-  "## Summary",
-  "## Changes",
-  "## Verification",
-  "## Risks",
+  { key: "intent", heading: "## 意图" },
+  { key: "main_flow_impact", heading: "## 主链路影响" },
+  { key: "path_changes", heading: "## 路径变化（公开入口 / 双写）" },
+  { key: "tests", heading: "## 测试（旧接口测试是否处理）" },
+  { key: "risks_and_rollback", heading: "## 风险与回滚" },
 ]);
 
 function parseSolutionBaseline(text) {
@@ -147,8 +148,8 @@ function validatePullRequestDescription(title, body) {
   const normalizedBody = String(body || "").trim();
   const reasons = [];
   if (normalizedTitle.length < 10 || normalizedTitle.length > 100) reasons.push("title_length");
-  for (const heading of REQUIRED_PR_SECTIONS) {
-    if (!normalizedBody.includes(heading)) reasons.push(`missing_${heading.slice(3).toLowerCase()}`);
+  for (const section of REQUIRED_PR_SECTIONS) {
+    if (!normalizedBody.includes(section.heading)) reasons.push(`missing_${section.key}`);
   }
   return { ok: reasons.length === 0, reasons };
 }
@@ -308,7 +309,7 @@ function renderOpenCodeEvidenceBlock(task, context = {}) {
     "你是唯一的代码 reviewer 和 Git/PR 交付者。先 review；需要修改就交回 Grok。只有 approve 后才执行交付。",
     "approve 时必须由你在当前 worktree 运行 `npm run verify:pr`，规范 commit、push、创建 ready PR，并等待 GitHub checks 成功。",
     "commit subject 必须使用 Conventional Commit 且不超过 72 字符；commit body 必须说明改动与原因。",
-    "PR body 必须包含 `## Summary`、`## Changes`、`## Verification`、`## Risks` 四节。",
+    "PR title 必须为 10–100 个字符；PR body 必须包含 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、`## 测试（旧接口测试是否处理）`、`## 风险与回滚` 五节。",
     `当前分支：\`${context.branch || "missing"}\`；当前 review gate：${review?.verdict || "pending"}。`,
     "",
     "最终输出必须包含两个 block：",
