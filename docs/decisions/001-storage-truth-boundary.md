@@ -3,18 +3,19 @@ title: "ADR-001: Storage Truth Boundary"
 status: accepted
 decision_id: ADR-001
 created: 2026-07-26
-amended: 2026-07-26
+amended: 2026-08-09
 scope: sessions, messages, invocations, memory, transcripts, project knowledge, and search projections
 supersedes: []
 related:
   - ../memory-data-contract.md
+  - 006-project-first-runtime-home.md
 ---
 
 # ADR-001：存储真相边界
 
 ## 1. 状态
 
-**Accepted — implemented and closed**
+**Accepted — original cutover closed; 2026-08-09 runtime-home amendment pending**
 
 本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离、
 真实 legacy 数据清理和在线兼容模式退役均已完成。产品 composition root 只接受 SQLite；
@@ -62,6 +63,7 @@ SHIFT 采用四类明确分工的持久化边界：
 3. **JSONL 是追加式审计、诊断和导出材料，不参与正常在线仲裁或业务恢复。**
 4. **普通 JSON 仅用于配置、迁移 checkpoint 或可重建的本机绑定；不得承载核心业务真相。**
 5. **现有 legacy 运行数据不迁移到新存储 epoch；它只作为临时验证语料，切换验收后清除。**
+6. **正式在线数据库的唯一物理位置是 `SHIFT_HOME/data/shift.sqlite`。**
 
 Recall、FTS、passage、digest 和 usage summary 是派生读模型，可以从权威来源重建。
 
@@ -72,6 +74,7 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 
 | 概念                                    | 权威来源                         | 非权威表示                            |
 | --------------------------------------- | -------------------------------- | ------------------------------------- |
+| Project 存在性、目录绑定和归档状态      | SQLite `projects`                | UI 当前选择、最近项目缓存             |
 | Thread 存在性、标题、项目绑定、归档状态 | SQLite `threads`                 | UI cache、导出 JSON                   |
 | 正式用户/Agent 消息                     | SQLite `messages`                | JSONL audit、recall/FTS               |
 | Invocation 生命周期和终态               | SQLite `invocations`             | JSONL audit、UI runtime               |
@@ -91,8 +94,10 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | Digest/summary/injection card           | SQLite 派生投影或运行时结果      | 导航信息，不是原始证据                |
 | 环境配置                                | 进程环境、`.env`、明确的配置文件 | 进程内解析对象                        |
 
-这里的“SQLite”表示逻辑数据库边界，不要求所有领域永远共用同一个 `.sqlite` 文件。
-未来可以按领域拆分物理数据库，但每个概念仍只能有一个 owner。
+当前产品的“SQLite”同时表示逻辑数据库边界和一个正式物理数据库：
+`SHIFT_HOME/data/shift.sqlite`。不得按 Project 创建平行数据库，也不得让在线服务通过另一
+环境变量选择任意业务数据库。未来若按领域拆分物理数据库，必须先提交新的 ADR，且每个概念
+仍只能有一个 owner。
 
 ## 5. SQLite 的职责
 
@@ -135,6 +140,37 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 - 权威读取失败时返回 `degraded/unavailable`，不能把旧 JSON 文件伪装成当前结果；
 - 派生投影失败可以在 source transaction 之外重试，但必须暴露健康状态；
 - 非关键归档失败不能回滚已提交业务事务，但必须保留 outbox 并告警。
+
+### 5.4 用户级运行目录
+
+`SHIFT_HOME` 表示 SHIFT 的用户级应用根目录；未设置时为 `os.homedir()/.shift`。本 ADR
+冻结的在线运行数据目录为：
+
+```text
+SHIFT_HOME/
+└─ data/
+   ├─ shift.sqlite
+   ├─ shift.sqlite-wal
+   ├─ shift.sqlite-shm
+   ├─ audit-transcripts/
+   ├─ raw-events/
+   ├─ worktrees.json
+   ├─ migration/
+   └─ backups/
+```
+
+`SHIFT_HOME` 可以由进程环境或仓库本机 `.env` 提供；`.env` 不进入 Git，只提交
+`.env.example`。在线 composition root 必须先加载环境，再一次性解析所有运行路径。数据库、
+canonical audit、raw events 和 worktree 绑定状态均从 `SHIFT_HOME/data` 派生，不能各自
+保留第二个在线路径开关。
+
+仓库内旧 `data/runtime/shift.sqlite` 只允许由一次性离线迁移工具读取。迁移通过 SQLite
+一致性 backup、权威表指纹、foreign key 和 integrity 校验后，原子发布到新位置。在线服务
+从切换提交开始不得导入旧路径、探测旧库、双读、合并或失败回退；新库缺失或无效时启动
+失败。离线审计和恢复工具仍可通过显式 `--db` 读取用户指定的备份文件。
+
+本次迁移的现有业务数据均属于 SHIFT 仓库项目。迁移工具必须验证这一前提：空项目绑定可
+补为 SHIFT 项目；规范路径指向其他项目的 Thread 必须令迁移失败，不能自动合并为 SHIFT。
 
 ## 6. 文件真相源的职责
 
@@ -406,26 +442,27 @@ legacy validation SQLite 共 378 个文件已永久删除；权威 SQLite、cano
 
 历史模式的最终处置为：
 
-| 模式     | 定位                    | 终态                         |
-| -------- | ----------------------- | ---------------------------- |
+| 模式     | 定位                    | 终态                           |
+| -------- | ----------------------- | ------------------------------ |
 | `files`  | legacy fixture 历史语义 | 已从产品 composition root 移除 |
 | `dual`   | legacy 差异历史语义     | 已从产品 composition root 移除 |
-| `sqlite` | 正常在线业务模式        | 唯一正式模式                 |
+| `sqlite` | 正常在线业务模式        | 唯一正式模式                   |
 
 Canonical audit 是否开启是独立维度，不由 storage mode 隐式决定。在线配置语义为：
 
 ```text
+SHIFT_HOME=<user-home>/.shift
 SHIFT_STORAGE_MODE=sqlite
 SHIFT_AUDIT_TRANSCRIPT=on
-SHIFT_AUDIT_TRANSCRIPT_DIR=data/runtime/audit-transcripts
 SHIFT_RAW_EVENT_LOG=off
 ```
 
 `SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
 outbox row，health 显示 `disabled`，不会形成无法投递的假积压。离线 migrate/audit
 测试可读取 fixture transcript，但它们不是产品服务的存储模式，也不参与在线读取。
-`SHIFT_AUDIT_TRANSCRIPT_DIR` 只承载 post-cutover canonical archive；不得指向 legacy
-`SHIFT_TRANSCRIPT_DIR`。
+canonical archive 固定从 `SHIFT_HOME/data/audit-transcripts` 派生；raw provider log 固定
+从 `SHIFT_HOME/data/raw-events` 派生。旧 `SHIFT_AUDIT_TRANSCRIPT_DIR`、
+`SHIFT_TRANSCRIPT_DIR` 和 `SHIFT_MEMORY_DB` 不再是在线路径入口。
 
 `dual` 退出条件：
 
@@ -443,14 +480,17 @@ outbox row，health 显示 `disabled`，不会形成无法投递的假积压。�
 
 以上退出条件已全部满足，真实 legacy 数据已删除，`files/dual` 在线产品分支也已退役。
 
-Clean cutover 必须指向一个不存在的新数据库文件，并通过显式命令创建、激活：
+全新安装必须在不存在的 `SHIFT_HOME/data/shift.sqlite` 上通过显式命令创建、激活 clean
+epoch。现有仓库运行数据必须通过一次性 home migration 命令迁移：
 
 ```text
-npm run prepare:storage:epoch -- --db <new-storage.sqlite>
+npm run storage:init-home
+npm run storage:migrate-home
 ```
 
-命令拒绝覆盖已有数据库及其 WAL/SHM sidecar。旧 validation DB 不得原地激活或复用为
-clean epoch。
+命令拒绝覆盖或合并已有目标数据库及其 WAL/SHM sidecar。旧 validation DB 不得原地激活
+或复用为 clean epoch；home migration 完成后，旧仓库数据库只能作为备份，不得恢复为在线
+路径。
 
 ## 14. 实现关闭状态
 
@@ -458,6 +498,10 @@ SQLite 正式路径的 truth boundary 已完成：session/message/invocation、p
 memory 和 recall/detail 正常读取均不访问 legacy 文件；SQLite 错误 fail closed；canonical
 event 通过 transactional outbox 幂等归档；health、retention、恢复演练和 legacy 清理均
 已有验收证据。
+
+2026-08-09 amendment 只改变正式数据库的物理位置并增加 Project 生命周期边界，不重新
+打开 `files/dual`。其完成状态以 ADR-006 和对应实现 PR 为准；在实现提交落地前，本节随后
+列出的历史关闭结论仍只描述原 storage-mode cutover。
 
 兼容代码收尾已完成：
 
@@ -503,7 +547,9 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 9. JSONL 归档失败必须可重试、可观测；
 10. 原始 provider 输出不能绕过 canonical protocol 写入正式业务表；
 11. Git 拥有 worktree 内容，SHIFT 只拥有绑定；
-12. availability 必须区分 empty、degraded 和 unavailable。
+12. 在线业务只打开 `SHIFT_HOME/data/shift.sqlite`，不得读取仓库旧数据库；
+13. Project 归档只改变可见性和正常检索资格，不物理删除所属 Thread；
+14. availability 必须区分 empty、degraded 和 unavailable。
 
 ## 17. 后果
 
