@@ -8,14 +8,14 @@ function createWindowRepository(db) {
        reserve_ratio, context_used_tokens, context_usage_source,
        billing_input_tokens, billing_cached_input_tokens, billing_output_tokens,
        billing_reasoning_tokens, billing_total_tokens, billing_cost_usd,
-       seal_reason, created_at, sealed_at)
+       billing_complete, seal_reason, created_at, sealed_at)
     VALUES
       (@id, @threadId, @agentId, @providerKey, @workspaceKey, @generation,
        @providerSessionId, @state, @capacityTokens, @inputChars, @outputChars,
        @reserveRatio, @contextUsedTokens, @contextUsageSource,
        @billingInputTokens, @billingCachedInputTokens, @billingOutputTokens,
        @billingReasoningTokens, @billingTotalTokens, @billingCostUsd,
-       @sealReason, @createdAt, @sealedAt)
+       @billingComplete, @sealReason, @createdAt, @sealedAt)
   `);
   const findById = db.prepare("SELECT * FROM context_windows WHERE id = ?");
   const findOpen = db.prepare(`
@@ -58,7 +58,8 @@ function createWindowRepository(db) {
         billing_output_tokens = @billingOutputTokens,
         billing_reasoning_tokens = @billingReasoningTokens,
         billing_total_tokens = @billingTotalTokens,
-        billing_cost_usd = @billingCostUsd
+        billing_cost_usd = @billingCostUsd,
+        billing_complete = @billingComplete
     WHERE id = @id
   `);
   const markSealing = db.prepare(`
@@ -123,6 +124,7 @@ function createWindowRepository(db) {
           "billing total tokens"
         ),
         billingCostUsd: nonNegativeNumber(input.billingCostUsd || 0, "billing cost USD"),
+        billingComplete: input.billingComplete === false ? 0 : 1,
         sealReason: nullableString(input.sealReason),
         createdAt: now,
         sealedAt: nullableString(input.sealedAt),
@@ -191,6 +193,7 @@ function createWindowRepository(db) {
           ),
           billingTotalTokens: nonNegativeInteger(billing.totalTokens || 0, "billing total tokens"),
           billingCostUsd: nonNegativeNumber(billing.costUsd || 0, "billing cost USD"),
+          billingComplete: usage.billingComplete === false ? 0 : 1,
         }).changes > 0
       );
     },
@@ -275,6 +278,7 @@ function mapWindow(row) {
     billingReasoningTokens: row.billing_reasoning_tokens,
     billingTotalTokens: row.billing_total_tokens,
     billingCostUsd: row.billing_cost_usd,
+    billingComplete: row.billing_complete !== 0,
     sealReason: row.seal_reason,
     createdAt: row.created_at,
     sealedAt: row.sealed_at,

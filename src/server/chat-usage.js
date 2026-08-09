@@ -30,12 +30,9 @@ function contextCharsFromEvent(event) {
   }
   if (event.type !== "tool.finished") return 0;
 
-  if (typeof event.originalOutputChars === "number" && event.originalOutputChars > 0) {
-    return event.originalOutputChars;
-  }
-  if (typeof event.originalResultChars === "number" && event.originalResultChars > 0) {
-    return event.originalResultChars;
-  }
+  // Context accounting follows the canonical value retained in model-visible
+  // history. original*Chars describes the CLI transport before truncation and
+  // can be orders of magnitude larger than what the provider kept.
   const value = event.output !== undefined ? event.output : event.result;
   if (typeof value === "string") return value.length;
   if (value && typeof value === "object") {

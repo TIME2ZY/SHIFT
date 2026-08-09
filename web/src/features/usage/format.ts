@@ -20,7 +20,13 @@ export function contextRatio(context: ContextUsage | null | undefined): number |
       ? Number(context.contextUsedTokens || 0) / context.usableContextTokens
       : null);
   if (ratio === null || !Number.isFinite(ratio)) return null;
-  return Math.max(0, Math.min(1, ratio));
+  return Math.max(0, ratio);
+}
+
+export function contextSourceLabel(source: string | undefined): string {
+  if (source === "provider_exact") return "Provider 精确值";
+  if (source === "provider_baseline_estimated_delta") return "Provider 基线 + 增量估算";
+  return "字符估算";
 }
 
 export function contextTone(ratio: number): "normal" | "warning" | "danger" {

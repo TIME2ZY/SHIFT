@@ -1,7 +1,13 @@
 import type { KeyboardEvent } from "react";
 import type { AgentSummary } from "../agents/types";
 import { AgentAvatar, agentColorSlot } from "../agents/AgentAvatar";
-import { compactTokens, contextLabel, contextRatio, contextTone } from "./format";
+import {
+  compactTokens,
+  contextLabel,
+  contextRatio,
+  contextSourceLabel,
+  contextTone,
+} from "./format";
 import type { AgentUsage } from "./types";
 
 export type AgentActivityStatus = "idle" | "connecting" | "thinking" | "running" | "done" | "error";
@@ -34,6 +40,7 @@ export function AgentUsageCard({
 }: AgentUsageCardProps) {
   const billing = usage?.billing;
   const context = usage?.context;
+  const recentSealedContext = usage?.recentSealedContext;
   const ratio = contextRatio(context);
   const totalTokens = Number(billing?.totalTokens || 0);
   const model = [agent.modelVendor, agent.model].filter(Boolean).join(" · ");
@@ -90,9 +97,12 @@ export function AgentUsageCard({
           {usage && (totalTokens > 0 || context) ? (
             <div className="react-agent-usage">
               <div className="react-agent-usage-total">
-                <span>累计用量</span>
+                <span>累计计费用量</span>
                 <strong>{compactTokens(totalTokens)} tokens</strong>
               </div>
+              {usage.billingComplete === false ? (
+                <small role="status">计费用量不完整：失败运行可能尚未计入</small>
+              ) : null}
 
               {context && ratio !== null ? (
                 <div className="react-agent-context" data-tone={contextTone(ratio)}>
@@ -100,6 +110,7 @@ export function AgentUsageCard({
                     <span>
                       上下文 {compactTokens(context.contextUsedTokens)} /{" "}
                       {compactTokens(context.usableContextTokens)}
+                      {` · ${contextSourceLabel(context.contextUsageSource)}`}
                     </span>
                     <strong>
                       {Math.round(ratio * 100)}% · {contextLabel(ratio)}
@@ -107,10 +118,14 @@ export function AgentUsageCard({
                   </div>
                   <progress
                     max={100}
-                    value={Math.round(ratio * 100)}
+                    value={Math.min(100, Math.round(ratio * 100))}
                     aria-label={`${agent.label} 上下文使用率`}
                   />
                 </div>
+              ) : null}
+
+              {recentSealedContext?.sealReason ? (
+                <small role="note">上一上下文窗口已封存：{recentSealedContext.sealReason}</small>
               ) : null}
 
               {billing ? (

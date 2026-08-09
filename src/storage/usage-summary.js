@@ -45,6 +45,7 @@ function contextSnapshot(window) {
     physicalFillRatio: contextWindowTokens > 0 ? contextUsedTokens / contextWindowTokens : 0,
     budgetFillRatio: usableContextTokens > 0 ? contextUsedTokens / usableContextTokens : 0,
     contextUsageSource: window.contextUsageSource || "char_estimated",
+    sealReason: window.sealReason || null,
   };
 }
 
@@ -64,12 +65,18 @@ function buildUsageSummary(storage, threadId) {
         billing: emptyBilling(),
         windowCount: 0,
         latestWindow: null,
+        latestSealedWindow: null,
+        billingComplete: true,
       });
     }
     const entry = agents.get(window.agentId);
     addWindowBilling(entry.billing, window);
     entry.windowCount += 1;
+    entry.billingComplete = entry.billingComplete && window.billingComplete !== false;
     if (newerWindow(window, entry.latestWindow)) entry.latestWindow = window;
+    if (window.state === "sealed" && newerWindow(window, entry.latestSealedWindow)) {
+      entry.latestSealedWindow = window;
+    }
   }
 
   return {
@@ -79,8 +86,10 @@ function buildUsageSummary(storage, threadId) {
       .map((entry) => ({
         agentId: entry.agentId,
         billing: entry.billing,
+        billingComplete: entry.billingComplete,
         windowCount: entry.windowCount,
         context: contextSnapshot(entry.latestWindow),
+        recentSealedContext: contextSnapshot(entry.latestSealedWindow),
       }))
       .sort((a, b) => a.agentId.localeCompare(b.agentId)),
   };

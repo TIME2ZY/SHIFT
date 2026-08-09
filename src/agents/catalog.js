@@ -63,7 +63,7 @@ function model(providerId, modelId, vendorId, options = {}) {
  */
 const MODEL_PROFILES = [
   model("codex", "gpt-5.6-sol", "openai", {
-    contextTokens: 272_000,
+    contextTokens: 258_400,
     capacitySource: "manual",
     // CLI: model_auto_compact ≈ window × 0.90 when unset / hard-clamped.
     nativeCompactRatio: 0.9,

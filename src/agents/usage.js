@@ -31,6 +31,12 @@ const ALIASES = Object.freeze({
   totalTokens: ["totalTokens", "total_tokens", "total"],
   costUsd: ["costUsd", "cost_usd", "cost"],
   contextTokens: ["contextTokens", "context_tokens"],
+  contextWindowTokens: [
+    "contextWindowTokens",
+    "context_window_tokens",
+    "modelContextWindow",
+    "model_context_window",
+  ],
 });
 
 function finiteNonNegative(value) {
@@ -54,6 +60,13 @@ function usageSource(raw) {
   return raw;
 }
 
+function nestedTotal(value) {
+  if (value == null) return undefined;
+  if (typeof value === "number") return finiteNonNegative(value);
+  if (typeof value !== "object" || Array.isArray(value)) return undefined;
+  return firstValue(value, ["totalTokens", "total_tokens", "total"]);
+}
+
 function normalizeUsage(raw, options = {}) {
   const source = usageSource(raw);
   if (!source) return null;
@@ -70,6 +83,10 @@ function normalizeUsage(raw, options = {}) {
   if (normalized.costUsd === undefined && source.cost && typeof source.cost === "object") {
     normalized.costUsd = firstValue(source.cost, ["usd", "total"]);
   }
+  if (normalized.contextTokens === undefined) {
+    const contextTokens = nestedTotal(source.last_token_usage ?? source.lastTokenUsage);
+    if (contextTokens !== undefined) normalized.contextTokens = contextTokens;
+  }
 
   if (Object.keys(normalized).length === 0) return null;
   const billing = normalizeBillingUsage(normalized, options);
@@ -84,7 +101,9 @@ function normalizeUsage(raw, options = {}) {
     delete normalized[field];
   }
   Object.assign(normalized, billing);
-  if (options.contextTokensExact === true) normalized.contextTokensExact = true;
+  if (options.contextTokensExact === true && normalized.contextTokens !== undefined) {
+    normalized.contextTokensExact = true;
+  }
   return normalized;
 }
 
@@ -95,6 +114,7 @@ function makeUsageEvent(base, raw, options = {}) {
     ...base,
     scope: options.scope || "run",
     mode: options.mode || "cumulative",
+    ...(options.counterScope ? { counterScope: options.counterScope } : {}),
     ...usage,
     ...(options.includeRaw === true ? { providerRaw: raw } : {}),
   });

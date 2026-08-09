@@ -50,7 +50,7 @@ test("contextCharsFromEvent counts thinking and tool content without duplicates"
       output: "short preview",
       originalOutputChars: 100000,
     }),
-    100000
+    "short preview".length
   );
   assert.equal(
     chatRoutes.contextCharsFromEvent({

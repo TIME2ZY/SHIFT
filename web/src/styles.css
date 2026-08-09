@@ -752,7 +752,7 @@ body {
 .react-message[data-role="user"] .react-message-main {
   order: 1;
   justify-items: end;
-  text-align: right;
+  text-align: left;
   min-width: 0;
   max-width: 100%;
 }

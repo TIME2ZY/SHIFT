@@ -330,6 +330,7 @@ try {
       billingReasoningTokens: openWindow?.billingReasoningTokens,
       billingTotalTokens: openWindow?.billingTotalTokens,
       billingCostUsd: openWindow?.billingCostUsd,
+      billingComplete: openWindow?.billingComplete,
     });
     const usedBeforePrompt = healthTracker.getUsedTokens();
     const promptTokens = charsToTokens(promptForAgent.length);
@@ -470,10 +471,11 @@ try {
         billingReasoningTokens: durableRun.window.billingReasoningTokens,
         billingTotalTokens: durableRun.window.billingTotalTokens,
         billingCostUsd: durableRun.window.billingCostUsd,
+        billingComplete: durableRun.window.billingComplete,
       });
       healthTracker.addInput(promptForAgent.length);
     }
-    const billingAtStart = { ...healthTracker.snapshot().billing };
+    let billingAtStart = { ...healthTracker.snapshot().billing };
     const sealBudget = contextHealth.getAgentSealThresholds(agent, {
       capacityTokens: healthTracker.capacityTokens,
       reserveRatio: healthTracker.reserveRatio,
@@ -654,6 +656,8 @@ try {
         explicitCapacity: opts.capacityTokens,
       });
       const sealReason = formatSealReason(reason, partial);
+      const sealedWindowId = durableRun?.window?.id || null;
+      const sealedGeneration = durableRun?.window?.generation || null;
       let rotated = null;
       if (durableRun?.window?.id) {
         rotated = durable.sealAndRotateWindow({
@@ -687,7 +691,7 @@ try {
         reason,
         ratio,
         workspaceKey,
-        generation: durableRun?.window?.generation || null,
+        generation: sealedGeneration,
         nextCapacityTokens: rotateCapacity,
         missingFields:
           partial && !String(assistantContent || "").trim() ? ["assistantContent"] : [],
@@ -695,9 +699,9 @@ try {
       const capture = memories.captureWindowSeal({
         threadId: sessionId,
         invocationId: activeInvocationId,
-        windowId: durableRun?.window?.id || null,
+        windowId: sealedWindowId,
         agentId: agent,
-        generation: durableRun?.window?.generation || null,
+        generation: sealedGeneration,
         ratio,
         reason: sealReason,
         assistantContent,
@@ -727,7 +731,9 @@ try {
         usedTokens: healthTracker.getUsedTokens(),
         physicalKillRatio: 0.98,
       });
-      if (emergency.stop) {
+      // A character estimate is useful for warnings and turn-boundary rotation,
+      // but it is not authoritative enough to kill a live provider process.
+      if (emergency.stop && healthTracker.snapshot().contextUsageSource === "provider_exact") {
         emergencyStop = true;
         if (!contextSealedSseSent) {
           sendSse(res, "sealed", {
@@ -749,6 +755,7 @@ try {
     let code = 0;
     let signal = null;
     let replayedAfterEmpty = false;
+    let sawUsageEvent = false;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (attempt > 0) {
         // New window after empty emergency — start a fresh invocation.
@@ -756,6 +763,10 @@ try {
         observedProviderSessionId = "";
         emergencyStop = false;
         sealPending = false;
+        contextSealHandled = false;
+        contextSealedSseSent = false;
+        contextWarned = false;
+        sawUsageEvent = false;
         const retry = callbacks.createInvocation(sessionId, agent);
         const retryRun = durable.startInvocation({
           session,
@@ -785,6 +796,7 @@ try {
           reserveRatio: retryRun.window?.reserveRatio ?? healthTracker.reserveRatio,
         });
         healthTracker.addInput(promptForAgent.length);
+        billingAtStart = { ...healthTracker.snapshot().billing };
         sendSse(res, "agent-start", { agent, invocationId: retry.invocationId });
         sendSse(res, "window-meta", {
           agent,
@@ -842,6 +854,7 @@ try {
             runObs.noteToolEvent();
           }
           if (event.type === "usage.update") {
+            sawUsageEvent = true;
             healthTracker.applyUsage(event);
             if (durableRun?.window?.id) {
               durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
@@ -881,6 +894,9 @@ try {
       code = streamResult.code;
       signal = streamResult.signal;
       durableCoalescer.flushAll();
+      if (!sawUsageEvent && agent === "codex") {
+        healthTracker.markBillingIncomplete();
+      }
       if (streamResult.encoding?.total > 0) {
         runObs.noteDegraded("encoding_in_stream");
       }
@@ -895,11 +911,10 @@ try {
 
       const hasText = Boolean(String(assistantContent || "").trim());
       if (!hasText && emergencyStop && attempt === 0) {
-        // Empty emergency: rotate (if needed) and replay once on generation N+1.
+        // The scheduler-facing terminal write owns invocation completion. Finish
+        // the old invocation before rotation, whose orphan cleanup must never
+        // race the normal terminal path.
         const ratio = healthTracker.getFillRatio();
-        if (!contextSealHandled) {
-          sealContextWindow(ratio, "physical-ceiling-empty");
-        }
         durable.completeInvocation({
           invocationId: activeInvocationId,
           code,
@@ -914,6 +929,9 @@ try {
             emptyEmergency: true,
           },
         });
+        if (!contextSealHandled) {
+          sealContextWindow(ratio, "physical-ceiling-empty");
+        }
         const nextWin = storage?.windows?.getOpen?.({
           threadId: sessionId,
           agentId: agent,

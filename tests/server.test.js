@@ -2915,6 +2915,102 @@ test("chat endpoint terminates the chain with sealed event when action threshold
   }
 });
 
+test("empty exact-context emergency completes old invocation before one-shot replay", async () => {
+  const previousCapacity = process.env.SHIFT_TEST_CAPACITY;
+  process.env.SHIFT_TEST_CAPACITY = "1000";
+  let attempt = 0;
+  try {
+    await withServer(
+      {
+        initialSessionIds: ["session-empty-emergency"],
+        spawnRunner() {
+          attempt += 1;
+          const child = createMockChild();
+          child.kill = () => {
+            process.nextTick(() => child.emit("close", null, "SIGTERM"));
+            return true;
+          };
+          process.nextTick(() => {
+            if (attempt === 1) {
+              child.stdout.write(
+                `${JSON.stringify({
+                  type: "usage.update",
+                  agent: "codex",
+                  invocationId: "provider-inv-1",
+                  scope: "turn",
+                  mode: "cumulative",
+                  counterScope: "provider-session",
+                  inputTokens: 900,
+                  outputTokens: 90,
+                  totalTokens: 990,
+                  contextTokens: 990,
+                  contextTokensExact: true,
+                })}\n`
+              );
+              child.stdout.write("\n");
+              return;
+            }
+            child.stdout.write(
+              `${JSON.stringify({
+                type: "text.delta",
+                agent: "codex",
+                invocationId: "provider-inv-2",
+                text: "replayed successfully",
+              })}\n`
+            );
+            child.stdout.write(
+              `${JSON.stringify({
+                type: "usage.update",
+                agent: "codex",
+                invocationId: "provider-inv-2",
+                scope: "turn",
+                mode: "cumulative",
+                counterScope: "provider-session",
+                inputTokens: 100,
+                outputTokens: 20,
+                totalTokens: 120,
+                contextTokens: 120,
+                contextTokensExact: true,
+              })}\n`
+            );
+            child.emit("close", 0, null);
+          });
+          return child;
+        },
+      },
+      async (baseUrl, { memoryDbFile }) => {
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "session-empty-emergency",
+            agent: "codex",
+            prompt: "continue",
+          }),
+        });
+        const body = await response.text();
+        assert.match(body, /replayed successfully/);
+        assert.doesNotMatch(body, /Invocation .* is not active/);
+        assert.equal(attempt, 2);
+
+        const storage = createStorage({ file: memoryDbFile });
+        try {
+          const invocations = storage.invocations.listForThread("session-empty-emergency");
+          assert.equal(invocations.length, 2);
+          assert.ok(invocations.every((item) => item.isTerminal));
+          assert.equal(invocations[1].state, "completed");
+          assert.ok(storage.windows.listForThread("session-empty-emergency").length >= 2);
+        } finally {
+          storage.close();
+        }
+      }
+    );
+  } finally {
+    if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
+    else process.env.SHIFT_TEST_CAPACITY = previousCapacity;
+  }
+});
+
 // ── Phase 3: transcript callback endpoints ─────────────────────
 
 /**

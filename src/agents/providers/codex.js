@@ -354,6 +354,9 @@ function createCodexRuntime(cli) {
         const usage = makeUsageEvent(base, event.usage, {
           scope: "turn",
           mode: "cumulative",
+          counterScope: "provider-session",
+          contextTokensExact:
+            event.usage.last_token_usage != null || event.usage.lastTokenUsage != null,
         });
         return usage ? [usage] : [];
       }

@@ -858,6 +858,23 @@ const MIGRATIONS = Object.freeze([
         AND capacity_tokens = 258000;
     `,
   },
+  {
+    version: 22,
+    name: "codex_runtime_capacity_and_billing_completeness",
+    sql: `
+      ALTER TABLE context_windows
+        ADD COLUMN billing_complete INTEGER NOT NULL DEFAULT 1 CHECK (billing_complete IN (0, 1));
+
+      -- Codex reports the effective model window as 258400 at runtime. Keep
+      -- the static fallback aligned for calls that have not emitted runtime
+      -- metadata yet.
+      UPDATE context_windows
+      SET capacity_tokens = 258400
+      WHERE agent_id = 'codex'
+        AND state IN ('active', 'sealing')
+        AND capacity_tokens = 272000;
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {
