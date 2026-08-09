@@ -362,18 +362,23 @@ function lifecyclePhase(type) {
 }
 
 /**
- * Track run.started → content → single terminal. Pure helper for tests and envelope.
- * @returns {{ started: boolean, terminal: boolean, accept: (type: string) => boolean }}
+ * Track one invocation's run and tool lifecycles. The provider envelope uses
+ * this shared state across retries so every accepted tool start is either
+ * matched by the provider or closed explicitly before the run terminal.
  */
 function createRunLifecycle() {
   let started = false;
   let terminal = false;
+  const openTools = new Map();
   return {
     get started() {
       return started;
     },
     get terminal() {
       return terminal;
+    },
+    get openToolCount() {
+      return openTools.size;
     },
     accept(type) {
       const phase = lifecyclePhase(type);
@@ -397,6 +402,46 @@ function createRunLifecycle() {
     markTerminal() {
       started = true;
       terminal = true;
+    },
+    observe(event) {
+      if (!event || typeof event !== "object") return;
+      if (event.type === "tool.started") {
+        openTools.set(event.toolId, {
+          toolId: event.toolId,
+          toolName: event.toolName,
+          args: event.args,
+          title: event.title,
+          label: event.label,
+          toolKind: event.toolKind,
+        });
+      } else if (event.type === "tool.finished") {
+        openTools.delete(event.toolId);
+      }
+    },
+    closeOpenTools(context = {}, outcome = {}) {
+      if (openTools.size === 0) return [];
+      const error =
+        outcome.ok === false
+          ? "Provider run failed before the tool reported completion."
+          : "Provider run ended before the tool reported completion.";
+      const events = [...openTools.values()].map((tool) =>
+        makeEvent("tool.finished", {
+          agent: context.agent,
+          invocationId: context.invocationId,
+          toolName: tool.toolName,
+          toolId: tool.toolId,
+          args: tool.args,
+          title: tool.title,
+          label: tool.label,
+          toolKind: tool.toolKind,
+          status: "error",
+          error,
+          failureSource: "lifecycle-terminal",
+          failureReason: error,
+        })
+      );
+      openTools.clear();
+      return events;
     },
   };
 }

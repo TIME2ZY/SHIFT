@@ -110,6 +110,7 @@ function projectInvocationProcess(invocationId, events = []) {
   let progress = [];
   let status = "running";
   let runFailed = false;
+  let terminalReached = false;
 
   for (const event of ordered) {
     if (!event || typeof event !== "object") continue;
@@ -174,8 +175,12 @@ function projectInvocationProcess(invocationId, events = []) {
         });
         const failed = outcome.failed;
         current.status = failed ? "error" : "done";
-        if (failed && outcome.failureSource) current.failureSource = outcome.failureSource;
-        if (failed && outcome.failureReason) current.failureReason = outcome.failureReason;
+        if (failed && (payload.failureSource || outcome.failureSource)) {
+          current.failureSource = payload.failureSource || outcome.failureSource;
+        }
+        if (failed && (payload.failureReason || outcome.failureReason)) {
+          current.failureReason = payload.failureReason || outcome.failureReason;
+        }
         const finishedAt = eventTime(event);
         if (finishedAt !== undefined) current.finishedAt = finishedAt;
         if (!current.startedAt && payload.startedAt) current.startedAt = payload.startedAt;
@@ -219,16 +224,19 @@ function projectInvocationProcess(invocationId, events = []) {
     }
 
     if (kind === "run.failed") {
+      terminalReached = true;
       runFailed = true;
       status = "error";
       continue;
     }
     if (kind === "run.finished") {
+      terminalReached = true;
       if (Number(payload.exitCode || 0) !== 0) runFailed = true;
       status = runFailed ? "error" : "done";
       continue;
     }
     if (kind === "invocation-end") {
+      terminalReached = true;
       const state = String(payload.state || "");
       const exitCode = typeof payload.exitCode === "number" ? payload.exitCode : payload.code;
       if (state === "failed" || (typeof exitCode === "number" && exitCode !== 0)) {
@@ -237,6 +245,17 @@ function projectInvocationProcess(invocationId, events = []) {
       } else if ((state === "completed" || exitCode === 0) && !runFailed) {
         status = "done";
       }
+    }
+  }
+
+  if (terminalReached) {
+    const error = "Invocation reached a terminal state before the tool reported completion.";
+    for (const tool of tools.values()) {
+      if (tool.status !== "running") continue;
+      tool.status = "error";
+      tool.error = error;
+      tool.failureSource = "lifecycle-terminal";
+      tool.failureReason = error;
     }
   }
 

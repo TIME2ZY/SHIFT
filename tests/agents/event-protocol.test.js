@@ -226,6 +226,91 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
   assert.deepEqual(runtime.finish(ctx, { terminal: true, ok: true, exitCode: 0 }), []);
 });
 
+test("runtime envelope closes open tools before the invocation terminal event", () => {
+  const lifecycle = createRunLifecycle();
+  const runtime = createProviderRuntime(
+    {
+      providerId: "codex",
+      model: "gpt-5.6-sol",
+    },
+    { lifecycle }
+  );
+  const ctx = { agent: "codex", invocationId: "inv-open-tool" };
+
+  const started = runtime.transform(
+    {
+      type: "item.started",
+      item: {
+        id: "tool-1",
+        type: "mcp_tool_call",
+        tool: "web_search",
+        arguments: { query: "SHIFT" },
+      },
+    },
+    ctx
+  );
+  assert.deepEqual(
+    started.map((event) => event.type),
+    ["run.started", "tool.started"]
+  );
+  assert.equal(lifecycle.openToolCount, 1);
+
+  const terminal = runtime.finish(ctx, { terminal: true, ok: true, exitCode: 0 });
+  assert.deepEqual(
+    terminal.map((event) => event.type),
+    ["tool.finished", "run.finished"]
+  );
+  assert.deepEqual(terminal[0], {
+    type: "tool.finished",
+    protocolVersion: PROTOCOL_VERSION,
+    agent: "codex",
+    invocationId: "inv-open-tool",
+    toolName: "web_search",
+    toolId: "tool-1",
+    args: { query: "SHIFT" },
+    title: undefined,
+    label: undefined,
+    toolKind: undefined,
+    status: "error",
+    error: "Provider run ended before the tool reported completion.",
+    failureSource: "lifecycle-terminal",
+    failureReason: "Provider run ended before the tool reported completion.",
+    state: "failed",
+  });
+  assert.equal(lifecycle.openToolCount, 0);
+});
+
+test("open tool lifecycle survives a provider retry and closes only at final termination", () => {
+  const lifecycle = createRunLifecycle();
+  const config = { providerId: "codex", model: "gpt-5.6-sol" };
+  const ctx = { agent: "codex", invocationId: "inv-tool-retry" };
+  const attempt1 = createProviderRuntime(config, { lifecycle });
+
+  attempt1.transform(
+    {
+      type: "item.started",
+      item: { id: "tool-retry", type: "mcp_tool_call", tool: "read", arguments: {} },
+    },
+    ctx
+  );
+  assert.deepEqual(attempt1.finish(ctx, { terminal: false }), []);
+  assert.equal(lifecycle.openToolCount, 1);
+
+  const attempt2 = createProviderRuntime(config, { lifecycle });
+  const terminal = attempt2.finish(ctx, {
+    terminal: true,
+    ok: false,
+    exitCode: 1,
+    error: "provider failed",
+  });
+  assert.deepEqual(
+    terminal.map((event) => event.type),
+    ["tool.finished", "run.failed"]
+  );
+  assert.equal(terminal[0].error, "Provider run failed before the tool reported completion.");
+  assert.equal(lifecycle.openToolCount, 0);
+});
+
 test("shared lifecycle across recreated runtimes suppresses second run.started", () => {
   const { createRunLifecycle } = require("../../src/agents/event-protocol");
   const lifecycle = createRunLifecycle();
