@@ -26,7 +26,7 @@ function renderProcess(process: InvocationProcess, onOpenWorkspace = vi.fn(), co
 }
 
 describe("MessageProcessDetails", () => {
-  it("renders body from content once, with thinking/tools and workspace links", async () => {
+  it("keeps narrative events in stream order and moves only tools to the end", async () => {
     const user = userEvent.setup();
     const body = "先说明目标。\n\n修改完成。";
     const { container, onOpenWorkspace } = renderProcess(
@@ -81,25 +81,31 @@ describe("MessageProcessDetails", () => {
       body
     );
 
-    const thinkingDetails = screen.getByText("思考").closest("details");
-    const toolDetails = screen.getByText("apply_patch").closest("details");
-    expect(thinkingDetails).not.toHaveAttribute("open");
-    expect(toolDetails).not.toHaveAttribute("open");
-    expect(screen.getByText("先读取项目，再修改代码。")).toBeInTheDocument();
-    await user.click(screen.getByText("思考"));
-    expect(thinkingDetails).toHaveAttribute("open");
-    const steps = Array.from(
-      container.querySelector(".react-process-timeline")?.children || []
-    ).slice(0, 3);
-    expect(steps.map((step) => step.className)).toEqual([
+    const flowItems = Array.from(container.querySelector(".react-message-flow")?.children || []);
+    expect(flowItems.map((item) => item.className)).toEqual([
+      "react-timeline-text react-message-body",
       "react-thinking-step",
-      "react-tool-call",
       "react-timeline-text react-message-body",
     ]);
+    expect(screen.getByText("思考")).toBeInTheDocument();
+    expect(screen.queryByText("apply_patch")).not.toBeInTheDocument();
+
+    const thinkingDetails = screen.getByText("思考").closest("details");
+    expect(thinkingDetails).not.toHaveAttribute("open");
+    expect(screen.queryByText("先读取项目，再修改代码。")).not.toBeInTheDocument();
+    await user.click(screen.getByText("思考"));
+    expect(thinkingDetails).toHaveAttribute("open");
+    expect(screen.getByText("先读取项目，再修改代码。")).toBeInTheDocument();
+
+    await user.click(screen.getByText("执行完成"));
+    const toolDetails = screen.getByText("apply_patch").closest("details");
+    expect(toolDetails).not.toHaveAttribute("open");
+    const toolSummary = container.querySelector(".react-process-summary");
+    expect(toolSummary?.previousElementSibling).toHaveClass("react-message-flow");
     // Timeline answer text is not painted separately from content.
     expect(screen.getAllByText("先说明目标。", { exact: false }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("修改完成。", { exact: false })).toBeInTheDocument();
-    expect(container.querySelectorAll(".react-message-body")).toHaveLength(1);
+    expect(container.querySelectorAll(".react-message-body")).toHaveLength(2);
 
     await user.click(screen.getByText("apply_patch"));
     expect(toolDetails).toHaveAttribute("open");
@@ -110,37 +116,10 @@ describe("MessageProcessDetails", () => {
     expect(onOpenWorkspace).toHaveBeenCalledOnce();
   });
 
-  it("does not paint timeline text when content already provides the body", () => {
+  it("removes final commentary that exactly repeats the authoritative text", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    client.setQueryData(queryKeys.sessions.invocationProcess("s1", "i1"), {
-      version: 1,
-      invocationId: "i1",
-      status: "done",
-      thinking: { text: "", segments: [] },
-      commentary: { text: "", segments: [] },
-      tools: [
-        {
-          toolId: "t1",
-          toolName: "shell",
-          status: "done",
-          changedFiles: [],
-        },
-      ],
-      timeline: [
-        { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
-        {
-          id: "text-2",
-          type: "text",
-          eventNo: 2,
-          lastEventNo: 2,
-          text: "我查一下这次 handoff",
-        },
-      ],
-      progress: [],
-      changedFiles: [],
-    } satisfies InvocationProcess);
 
     render(
       <QueryClientProvider client={client}>
@@ -154,11 +133,15 @@ describe("MessageProcessDetails", () => {
             text: "我查一下这次 handoff",
             status: "done",
             timeline: [
-              { id: "tool-t1", type: "tool", toolId: "t1" },
+              {
+                id: "commentary-0",
+                type: "commentary",
+                text: "我查一下这次 handoff",
+              },
               { id: "text-2", type: "text", text: "我查一下这次 handoff" },
             ],
-            tools: [{ id: "t1", name: "shell", status: "done" }],
           }}
+          loadDurable={false}
         />
       </QueryClientProvider>
     );
@@ -166,7 +149,46 @@ describe("MessageProcessDetails", () => {
     expect(screen.getAllByText("我查一下这次 handoff")).toHaveLength(1);
   });
 
-  it("renders commentary as collapsed progress without duplicating the final body", () => {
+  it("trims a repeated final-text suffix while preserving earlier commentary", () => {
+    renderProcess(
+      {
+        version: 1,
+        invocationId: "i1",
+        status: "done",
+        thinking: { text: "", segments: [] },
+        commentary: {
+          text: "正在审查调用链。\n\n修复完成。",
+          segments: [{ eventNo: 1, text: "正在审查调用链。\n\n修复完成。" }],
+        },
+        tools: [],
+        timeline: [
+          {
+            id: "commentary-1",
+            type: "commentary",
+            eventNo: 1,
+            lastEventNo: 1,
+            text: "正在审查调用链。\n\n修复完成。",
+          },
+          {
+            id: "text-2",
+            type: "text",
+            eventNo: 2,
+            lastEventNo: 2,
+            text: "修复完成。",
+          },
+        ],
+        progress: [],
+        changedFiles: [],
+      },
+      vi.fn(),
+      "修复完成。"
+    );
+
+    expect(screen.getByText("正在审查调用链。")).toBeInTheDocument();
+    expect(screen.getAllByText("修复完成。")).toHaveLength(1);
+  });
+
+  it("renders commentary as an inline process message in its original position", () => {
     const { container } = renderProcess(
       {
         version: 1,
@@ -201,11 +223,34 @@ describe("MessageProcessDetails", () => {
       "修复完成。"
     );
 
-    const commentaryDetails = screen.getByText("进展").closest("details");
-    expect(commentaryDetails).not.toHaveAttribute("open");
     expect(screen.getByText("正在审查调用链。")).toBeInTheDocument();
+    expect(screen.queryByText("进展")).not.toBeInTheDocument();
     expect(screen.getAllByText("修复完成。")).toHaveLength(1);
     expect(container.querySelectorAll(".react-message-body")).toHaveLength(1);
+    const flowItems = Array.from(container.querySelector(".react-message-flow")?.children || []);
+    expect(flowItems.map((item) => item.className)).toEqual([
+      "react-commentary-message",
+      "react-timeline-text react-message-body",
+    ]);
+  });
+
+  it("shows a persisted final invocation as complete before loading durable details", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MessageProcessDetails
+          sessionId="s1"
+          invocationId="i1"
+          content="已完成。"
+          initialStatus="done"
+        />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText("执行完成")).toBeInTheDocument();
+    expect(screen.queryByText("正在执行")).not.toBeInTheDocument();
   });
 
   it("does not render a phantom loading process without an invocation", () => {
@@ -250,10 +295,40 @@ describe("MessageProcessDetails", () => {
       changedFiles: [],
     });
 
+    await user.click(screen.getByText("正在执行 · read_file"));
     const details = screen.getByText("read_file").closest("details");
     expect(details).not.toHaveAttribute("open");
     await user.click(screen.getByText("read_file"));
     expect(details).toHaveAttribute("open");
     expect(screen.getByText(/package\.json/)).toBeInTheDocument();
+  });
+
+  it("keeps failed tools collapsed until the user opens them", async () => {
+    const user = userEvent.setup();
+    renderProcess({
+      version: 1,
+      invocationId: "i1",
+      status: "error",
+      thinking: { text: "", segments: [] },
+      commentary: { text: "", segments: [] },
+      tools: [
+        {
+          toolId: "failed-tool",
+          toolName: "shell",
+          status: "error",
+          error: "command failed",
+          changedFiles: [],
+        },
+      ],
+      timeline: [{ id: "tool-failed-tool", type: "tool", eventNo: 1, toolId: "failed-tool" }],
+      progress: [],
+      changedFiles: [],
+    });
+
+    expect(screen.queryByText("shell")).not.toBeInTheDocument();
+    await user.click(screen.getByText("执行有失败"));
+    const toolDetails = screen.getByText("shell").closest("details");
+    expect(toolDetails).not.toHaveAttribute("open");
+    expect(screen.queryByText("command failed")).not.toBeInTheDocument();
   });
 });

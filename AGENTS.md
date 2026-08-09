@@ -1,227 +1,202 @@
 # AGENTS.md — SHIFT 工程与写码标准
 
-> 人和 AI 在本仓库改代码时的**强制约定**。  
-> 与 ADR 冲突时：先改文档并达成一致，再改代码。  
-> 决策与数据契约：`docs/decisions/`、`docs/memory-data-contract.md`。
+> 人和 AI 在本仓库改代码时的强制约定。与 ADR 冲突时，先修改文档并达成一致，再修改代码。设计决策与数据契约见 `docs/decisions/`、`docs/memory-data-contract.md`。
 
 ---
 
-## 1. 项目是什么
+## 1. 项目定位
 
-SHIFT 是**本地多 Agent 协作控制台**：不提供模型，只编排本机已安装的 Agent CLI/ACP；用 SQLite 持久化会话与协作状态；在浏览器展示过程。
+SHIFT 是本地多 Agent 协作控制台：不提供模型，只编排本机已安装的 Agent CLI/ACP；用 SQLite 持久化会话与协作状态；在浏览器展示执行过程。
 
-**要稳的是主链路，不是抽象层数量，也不是 diff 行数。**
+项目优先保证主链路可靠，不以抽象层数量、文件数量、diff 行数或测试数量衡量质量。
 
-### 主链路（任何改动不得破坏）
+### 必须守住的主链路
 
 ```text
-1. 建 thread + 绑定 project_dir
-2. 用户发消息 → 选中/解析 Agent
-3. 启动 invocation（明确 started）
-4. SSE 流式输出（text / tool / progress）
-5. 终态闭环（completed | failed | aborted，禁止长期 active 无故悬挂）
-6. 消息与事件写入 SQLite（权威源）
-7. 刷新/重启后会话可恢复
-8. 可选：@Agent handoff 只消费一次，且产生可追踪的目标 invocation
+1. 创建 thread，并绑定 project_dir
+2. 用户发送消息，系统选择或解析 Agent
+3. 启动 invocation，并明确记录 started
+4. 通过 SSE 输出 text / tool / progress
+5. invocation 进入 completed | failed | aborted 之一，禁止无故长期 active
+6. 消息、invocation 和规范事件写入 SQLite
+7. 刷新或重启后可以恢复会话
+8. 可选的 @Agent handoff 只消费一次，并产生可追踪的目标 invocation
 ```
 
-合入前自问：是在加固主链路，还是在旁路再开一条路？
+任何改动都应说明它如何影响这条主链路。不得为新功能旁路出另一套启动、流式、终态或持久化流程。
 
-### 目录与依赖
+---
+
+## 2. 架构与数据边界
+
+### 目录职责
 
 ```text
-web/                  UI → 仅 HTTP/SSE API
-src/server/           传输与路由组装（薄）
-src/agents/           Provider、handoff、协作策略、进程
-src/session/          上下文窗口、seal
-src/storage/          SQLite 真相源、repository、派生索引
-src/storage/offline/  迁移/审计/eval（禁止热路径 require）
+web/                  UI，仅通过 HTTP/SSE API 访问后端
+src/server/           传输、鉴权、路由与 composition root
+src/agents/           Provider、进程、handoff 与协作策略
+src/session/          上下文窗口、seal 与会话生命周期
+src/storage/          SQLite、repository、持久化服务与派生读模型
+src/storage/offline/  迁移、审计与 eval，禁止进入在线热路径
 src/worktree/         Git worktree 与交付校验
-src/shared/           薄共享（契约、路径、env）
-scripts/              离线工具、live、eval
-tests/                回归（钉意图）
+src/shared/           无业务状态的薄共享契约、路径与环境解析
+scripts/              离线、live 与 eval 工具
+tests/                回归测试，负责钉住意图
 ```
 
-| 允许 | 禁止 |
-|------|------|
-| `server` → agents / session / storage / worktree / shared | `storage` → server / web |
-| `agents` → storage（显式接口）/ shared | `shared` → 业务层 |
-| `web` → HTTP API only | `web` 直接假设 SQLite schema |
-| `scripts` 可依赖 `src/*` | 热路径 require `storage/offline/*` 或 dual/legacy 在线模式 |
+依赖约束：
 
-路由：鉴权、解析、调领域函数、写响应。状态机与业务写路径下沉到 agents / session / storage。
+- `server` 可以组装 agents、session、storage、worktree 和 shared。
+- `agents` 只能通过显式接口访问 storage；可以依赖 shared。
+- `storage` 不得依赖 server 或 web。
+- `shared` 不得依赖任何业务层。
+- `web` 不得读取后端文件、依赖 SQLite schema 或绕过 HTTP/SSE API。
+- 在线热路径不得依赖 offline、迁移、审计或历史兼容模块。
 
-### 存储真相（ADR-001）
+路由只负责鉴权、输入解析、调用用例和写响应。状态机、业务分支与权威写入必须位于对应领域模块。
 
-1. **SQLite** 是唯一在线业务真相源。  
-2. **Git 工作区** 是项目代码真相源；SQLite 只存引用与运行绑定。  
-3. **JSONL** 仅审计/诊断，不参与在线仲裁。  
-4. **Recall / FTS / embedding / digest** 是可重建的派生读模型。  
-5. **禁止** `files` / `dual` 在线模式。
+### 真相源
 
-**写路径：** 一个业务事件只有一个权威写入口；幂等做在写入口，不双写再对账。
+1. SQLite 是唯一在线业务真相源。
+2. Git 工作区是项目代码与项目文件的真相源；SQLite 只保存引用、索引与运行绑定。
+3. JSONL 只用于审计、诊断和导出，不参与在线仲裁或业务恢复。
+4. Recall、FTS、embedding、digest 和其他索引是可重建的派生读模型，不得反向覆盖权威数据。
+5. 普通 JSON 只能承载配置、迁移 checkpoint 或可重建的本机绑定，不得承载核心业务事实。
 
-当前要点（实现锚点，非任务清单）：
+每个业务事件在同一语义层级只能有一个权威写入口。幂等必须在权威入口完成；禁止先双写再对账。
 
-| 事件 | 权威入口 |
-|------|----------|
-| invocation 终态 | `durableRecorder.completeInvocation` |
-| handoff 消费 | `finalizeA2ARoutes`（hop bind/complete 经 a2a-finalize wrappers） |
-| message 物理写 | `message-persistence.appendMessage` |
-| 产品 memory 写 | `memoryService.writeMemoryCandidate` |
-| 协作事件（非产品行） | `memoryCapture` + EventStore |
-| 在线 recall 默认 | FTS；`hybrid` 需 `SHIFT_RECALL_MODE` / `recallMode` |
-
-前端消息类型与运行态映射：`web/src/shared/contracts/`。
+产品 Memory 与协作事件是不同概念：产品 Memory 进入产品记忆生命周期；handoff、seal 等协作事件只作为事件记录，不得借用产品 Memory 表达。
 
 ---
 
-## 2. 什么叫「做好了」
+## 3. 完成标准
 
-### 主标准
+一项改动只有同时满足以下条件才算完成：
 
-1. 主链路正确、终态闭环、失败显式。  
-2. 同一业务事件的**公开写入口**为 1（或更少），不是「新 facade + 旧入口并存」。  
-3. 双路径/双语义删除或降到非热路径（禁止无截止日期的 `@deprecated`）。  
-4. 旧公开 API 的测试删除或并入新语义；禁止改名叠两套。  
-5. 下次改同一语义的心智范围更小。
+1. 主链路行为正确，终态闭环，失败显式。
+2. 同一业务语义的公开写入口只有一个。
+3. 被替换的旧路径已经删除、不再导出或退出在线热路径。
+4. 替换公开接口或业务语义时，保护旧接口、旧语义的测试已经删除或合并。
+5. 新测试钉住用户可观察行为、数据契约或关键不变量。
+6. 下次修改同一语义时，需要理解的入口和分支更少。
 
-### 不是主标准
+净增行、净减行、单文件行数和测试数量只能作为分析信号，不能作为完成标准。
 
-| 信号 | 可用 | 禁止 |
-|------|------|------|
-| diff 净增/净减行 | 粗看是否只加不删路径 | 用行数否决或刷行数 |
-| 单文件行数 | 提示是否该按用例拆 | 用「行数下降」当成功 |
-| 测试条数 | 意图是否钉住 | 叠用例掩盖双入口 |
-
-**减法减的是路径与旧测，不是 KPI 行数。**  
-收口可以净增行（契约、单一 facade、守卫测），只要旧公开入口不可达。
-
-> 完成 = 行为对 **且** 旧公开路径已死 **且** 测试钉新单一语义 — **与 diff 正负无关。**
+收缩的目标是减少公开路径、双写和重复语义，不是追求更小的 diff。新增契约、守卫测试或单一入口可以导致净增行。
 
 ---
 
-## 3. 写码铁律
+## 4. 写码规范
 
-### 3.1 加法配减法（路径）
+### 加法必须配路径减法
 
-| 做了 | 合入前必须 |
-|------|------------|
-| 新公开写入口 / facade | 旧入口删除或不再导出，调用方迁完 |
-| 新 Service / Gate / Policy | 收窄至少一条旧路径 |
-| 新枚举 | 更新契约 + ADR + 删过时分支 |
-| 新兼容 fallback | 删除条件与截止日期 |
-| 新抽象 | 证明少一层会坏 |
-| 新/改测试 | 旧接口测删或并 |
+- 新增公开写入口、facade、service、gate 或 policy 时，必须删除或收窄被替代的旧路径。
+- 新增枚举或 phase 时，必须先更新契约和 ADR，并删除过时分支。
+- 新增兼容 fallback 时，必须写明删除条件、负责人范围和截止日期。
+- 新增抽象前，必须说明少这一层会破坏什么边界或不变量。
+- 不得以兼容层代替旧热路径的删除。
 
-不算完成：只加 facade、只加测不删路径、为 diff 好看删测或糊逻辑。  
-算完成：单入口、去掉一条双写、测只钉新语义（即使行数净增）。
+### 禁止长期双语义
 
-### 3.2 禁止第三条路
+禁止同一 handoff 被两套逻辑消费、同一业务实体写入多个在线真相源、同一能力存在两套默认模式，或新旧终态 API 同时公开。
 
-禁止长期：双消费同一 handoff、文件与 SQLite 双写业务实体、两套默认 recall、新旧 finish 同时导出。  
-过渡期仅单次迁移 PR。私有 helper 可以；**公开面单一**。
+过渡只能存在于一次有明确终点的迁移中。私有 helper 可以复用，公开业务语义必须单一。
 
-### 3.3 失败显式
+### 失败必须显式
 
-- 禁止静默换语义还报成功。  
-- 半成功（有 SSE、无 durable finish）是 bug。  
-- 空 `catch` 仅清理/best-effort IO。
+- 禁止静默改变语义后仍返回成功。
+- 有流式输出但没有 durable 终态属于失败，不得按成功处理。
+- 空 `catch` 只允许用于清理或明确标注的 best-effort IO。
+- 可恢复降级必须可观察，并且不能改变权威数据含义。
 
-### 3.4 体量（信号，不是成绩）
+### 文件与抽象体量
 
-| 软上限 | 处理 |
-|--------|------|
-| 单文件 > 500 行 | 评估按用例拆 |
-| 单文件 > 1000 行 | 未计划拆分时禁止堆新业务分支 |
-| 新 `*-service` | 先找已有入口能否扩展 |
+| 信号               | 要求                                 |
+| ------------------ | ------------------------------------ |
+| 单文件超过 500 行  | 评估是否应按用例拆分                 |
+| 单文件超过 1000 行 | 未有拆分计划时，禁止继续增加业务分支 |
+| 新增 `*-service`   | 先确认现有用例入口无法合理承载       |
 
-按**用例**拆，不为名词再套一层。
+按用例和变化原因拆分，不为名词机械增加层级。
 
-### 3.5 命名与契约
+### 命名与契约
 
-- 标识符/路径/API：**英文**；用户文案/本文件：中文可。  
-- `repository` / `service` / `gate` / `policy` 名副其实。  
-- 协作枚举与 phase：`src/shared/collab-contracts.js` + ADR；先改契约再改实现。
+- 标识符、路径和 API 使用英文；用户文案和说明文档可以使用中文。
+- `repository`、`service`、`gate`、`policy` 必须名副其实。
+- 后端和前端共享的状态、消息类型与协作枚举必须有单一契约来源。
+- 变更协作状态、phase、持久化语义或数据所有权前，必须先更新对应 ADR 或数据契约。
 
-### 3.6 语言与测试
+### 技术与测试
 
-**Backend：** Node ≥ 20，CommonJS；工厂 `createX`；Prettier + ESLint。  
-**Frontend：** TS + React + Vite；`features/*`；React Query + `runtime/*`。  
-**测试：** 钉意图；换 API 必须删/并旧测；`npm test` / `npm run test:web` / `npm run verify:pr`。
-
----
-
-## 4. AI 助手规则
-
-1. 先读调用方与测试，禁止盲写平行实现。  
-2. 最小 diff；未要求不做大重构。  
-3. 不投机加 embedding / phase / gate / metrics 管道。  
-4. 重构完成定义见 §2，不是净减行。  
-5. 禁止用兼容层代替删除热路径旧入口。  
-6. 禁止热路径恢复 legacy 文件存储读写。  
-7. 未要求不新增 markdown（本文件与 ADR 除外）。  
-8. 提交说明：动机、主链路影响、删/收窄了哪条路径。  
-9. 合入前自检：旧入口是否不可达？旧测删/并了吗？是否用兼容层糊弄？
-
-| 级别 | 例子 | 要求 |
-|------|------|------|
-| S | 文案、纯展示 | 直接改 |
-| M | 单模块行为 | 单测 + 主链路无影响 |
-| L | finish / handoff / memory / schema | 契约 + 路径收口 + 测 |
-| XL | 存储边界、双路径合并、大挪目录 | 先书面计划，用户确认 |
-
-AI 不得擅自做 XL。
+- Backend：Node.js >= 20、CommonJS；工厂函数使用 `createX` 命名。
+- Frontend：TypeScript、React、Vite；按 feature 组织，服务端状态使用 React Query，运行中状态位于 runtime 层。
+- 代码必须通过 Prettier、ESLint 和类型检查。
+- 测试优先验证行为和不变量，避免只验证内部调用次数或私有 helper 形状。
+- 修改前先阅读调用方与现有测试，禁止盲写平行实现。
+- 未经要求不得顺手扩大重构范围或新增 Markdown 文档。
 
 ---
 
-## 5. PR 与验证
+## 5. 变更分级
+
+| 级别 | 示例                                     | 最低要求                     |
+| ---- | ---------------------------------------- | ---------------------------- |
+| S    | 文案、纯展示                             | 直接修改并做针对性检查       |
+| M    | 单模块行为                               | 单测，并确认主链路无影响     |
+| L    | invocation 终态、handoff、Memory、schema | 契约、路径收口和回归测试     |
+| XL   | 存储边界、双路径合并、大规模目录调整     | 先提交书面计划并取得用户确认 |
+
+AI 不得擅自实施 XL 变更。最小 diff 指最小必要语义范围，不等于最少代码行。
+
+提交或 PR 必须说明：
 
 ```text
 ## 意图
 ## 主链路影响
 ## 路径变化（公开入口 / 双写）
-## 测试（旧接口测是否处理）
+## 测试（旧接口测试是否处理）
 ## 风险与回滚
 ```
 
-Review 看路径与语义，不用 `+N/-M` 当通过条件。
+---
+
+## 6. 验证
+
+常规后端改动：
 
 ```bash
-npm run check && npm run lint && npm test
-# 动 web 时：
-npm run typecheck:web && npm run test:web
-# 合并前：
+npm run check
+npm run lint
+npm test
+```
+
+修改 web 时追加：
+
+```bash
+npm run typecheck:web
+npm run test:web
+```
+
+合并前运行：
+
+```bash
 npm run verify:pr
 ```
 
----
-
-## 6. 非目标（未明确要求则不做）
-
-- 新在线存储模式或「智能双读」  
-- 顺手加 Agent Provider  
-- 远程多租户 SaaS  
-- 为干净而整仓重写  
-- 扩大协作 phase（见 ADR-004）  
-- 以减行数为目标的重构  
+验证通过不代表设计自动合格；Review 仍需检查主链路、权威入口、失败语义和旧路径是否真正收口。
 
 ---
 
-## 7. 速查
+## 7. 非目标
 
-| 主题 | 位置 |
-|------|------|
-| Agent 目录 | `src/agents/catalog.js` |
-| 协作契约 | `src/shared/collab-contracts.js` |
-| 工作流门禁 facade | `src/agents/workflow-gates.js` |
-| 存储组装 | `src/storage/index.js`、`server-storage.js` |
-| HTTP 入口 | `src/server/index.js` |
-| 离线工具 | `src/storage/offline/` |
-| 前端消息/运行态契约 | `web/src/shared/contracts/` |
-| 存储边界 | `docs/decisions/001-storage-truth-boundary.md` |
-| 可靠性契约 | `docs/decisions/002-multi-agent-reliability-contracts.md` |
-| 五阶段工作流 | `docs/decisions/004-five-phase-collaboration-workflow.md` |
-| 记忆数据契约 | `docs/memory-data-contract.md` |
+除非用户明确要求并先更新相关设计决策，否则不做：
 
-变更本文件中的主链路、真相源或验收尺子时，PR 中单独说明。
+- 新的在线存储模式、多真相源、双写仲裁或智能双读。
+- 顺手新增 Agent Provider。
+- 远程多租户 SaaS。
+- 为追求整洁而整仓重写。
+- 扩大既有协作 phase 或增加平行工作流。
+- 未经验证的 embedding、gate、metrics 管道或抽象层。
+- 以减少行数、文件数或测试数为目标的重构。
+
+设计与数据边界以 `docs/decisions/`、`docs/memory-data-contract.md` 为准；当前实现地图属于架构文档，不属于本文件的长期规范。

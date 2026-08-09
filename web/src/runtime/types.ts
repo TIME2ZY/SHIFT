@@ -80,6 +80,7 @@ export interface SessionRun {
   optimisticUser?: {
     agentId: string;
     content: string;
+    clientTurnId: string;
   };
   error?: string;
 }
@@ -90,7 +91,13 @@ export interface SessionRunState {
 
 export type SessionRunAction =
   | { type: "run/started"; sessionId: string; startedAt: number }
-  | { type: "user/submitted"; sessionId: string; agentId: string; content: string }
+  | {
+      type: "user/submitted";
+      sessionId: string;
+      agentId: string;
+      content: string;
+      clientTurnId: string;
+    }
   | {
       type: "agent/started";
       sessionId: string;

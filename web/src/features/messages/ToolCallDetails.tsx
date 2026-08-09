@@ -59,40 +59,42 @@ export function ToolCallDetails({ tool }: { tool: InvocationTool }) {
         {tool.durationMs !== undefined ? <time>{durationLabel(tool.durationMs)}</time> : null}
         {secondaryId ? <code className="react-tool-id">{secondaryId}</code> : null}
       </summary>
-      <div className="react-tool-call-body">
-        {inputText ? (
-          <section>
-            <h4>调用参数</h4>
-            <pre>
-              <code>{inputText}</code>
-            </pre>
-          </section>
-        ) : null}
-        {output ? (
-          <section>
-            <h4>{tool.status === "error" ? "错误" : "执行结果"}</h4>
-            <pre>
-              <code>{output}</code>
-            </pre>
-            {tool.outputTruncated ? <small>输出过长，当前仅显示截断内容。</small> : null}
-          </section>
-        ) : null}
-        {tool.changedFiles.length ? (
-          <section>
-            <h4>修改文件</h4>
-            <ul>
-              {tool.changedFiles.map((file) => (
-                <li key={file.path}>
-                  <code>{file.path}</code>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-        {!inputText && !output && !tool.changedFiles.length ? (
-          <p className="react-tool-empty">该工具没有返回可展示的详情。</p>
-        ) : null}
-      </div>
+      {expanded ? (
+        <div className="react-tool-call-body">
+          {inputText ? (
+            <section>
+              <h4>调用参数</h4>
+              <pre>
+                <code>{inputText}</code>
+              </pre>
+            </section>
+          ) : null}
+          {output ? (
+            <section>
+              <h4>{tool.status === "error" ? "错误" : "执行结果"}</h4>
+              <pre>
+                <code>{output}</code>
+              </pre>
+              {tool.outputTruncated ? <small>输出过长，当前仅显示截断内容。</small> : null}
+            </section>
+          ) : null}
+          {tool.changedFiles.length ? (
+            <section>
+              <h4>修改文件</h4>
+              <ul>
+                {tool.changedFiles.map((file) => (
+                  <li key={file.path}>
+                    <code>{file.path}</code>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {!inputText && !output && !tool.changedFiles.length ? (
+            <p className="react-tool-empty">该工具没有返回可展示的详情。</p>
+          ) : null}
+        </div>
+      ) : null}
     </details>
   );
 }

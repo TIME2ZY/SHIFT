@@ -72,6 +72,7 @@ export function sessionRunReducer(
         optimisticUser: {
           agentId: action.agentId,
           content: action.content,
+          clientTurnId: action.clientTurnId,
         },
         updatedAt: now,
       }));

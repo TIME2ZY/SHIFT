@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import {
+  MESSAGE_TYPES,
   isAssistantCallbackMessage,
   isAssistantFinalMessage,
 } from "../../shared/contracts/messages";
@@ -195,6 +196,38 @@ function MessageRow({
   );
 }
 
+function HandoffDivider({
+  message,
+  agents,
+}: {
+  message: PersistedMessage;
+  agents: AgentSummary[];
+}) {
+  const fallback = message.content.replace(/^\s*[^\p{L}\p{N}@]+/u, "").split("→");
+  const fromId = message.from || fallback[0]?.trim() || "agent";
+  const toId = message.to || fallback[1]?.replace(/（.*$/, "").trim() || "agent";
+  const from = resolveAgent(fromId, fromId, agents);
+  const to = resolveAgent(toId, toId, agents);
+  const fromLabel = from?.label || fromId;
+  const toLabel = to?.label || toId;
+
+  return (
+    <div
+      className="react-handoff-divider"
+      data-degraded={message.handoffDegraded || undefined}
+      role="status"
+      aria-label={`${fromLabel} 已将任务交接给 ${toLabel}`}
+    >
+      <span>{fromLabel}</span>
+      <svg viewBox="0 0 40 12" aria-hidden="true">
+        <path d="M1 6h35M31 2l5 4-5 4" />
+      </svg>
+      <span>{toLabel}</span>
+      {message.handoffDegraded ? <small>交接信息不完整</small> : null}
+    </div>
+  );
+}
+
 export function MessageList({
   sessionId,
   messages,
@@ -209,6 +242,7 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const [activeMessageKey, setActiveMessageKey] = useState<string | null>(null);
+  const [followingLatest, setFollowingLatest] = useState(true);
   const visibleMessages = useMemo(
     () =>
       messages.filter(
@@ -216,6 +250,13 @@ export function MessageList({
           message
         ): message is PersistedMessage & { role: Exclude<PersistedMessage["role"], "system"> } =>
           message.role !== "system"
+      ),
+    [messages]
+  );
+  const transcriptMessages = useMemo(
+    () =>
+      messages.filter(
+        (message) => message.role !== "system" || message.messageType === MESSAGE_TYPES.A2A_ROUTE
       ),
     [messages]
   );
@@ -238,14 +279,14 @@ export function MessageList({
   const liveText = liveMessages
     .map((message) => `${message.text}${message.commentary || ""}${message.thinking || ""}`)
     .join("");
-  const latestPersistedMessage = visibleMessages.at(-1);
-  const showOptimisticUser = Boolean(
+  const optimisticUserPersisted = Boolean(
     run?.optimisticUser &&
-    !(
-      latestPersistedMessage?.role === "user" &&
-      latestPersistedMessage.content.trim() === run.optimisticUser.content.trim()
+    visibleMessages.some(
+      (message) =>
+        message.role === "user" && message.clientTurnId === run.optimisticUser?.clientTurnId
     )
   );
+  const showOptimisticUser = Boolean(run?.optimisticUser && !optimisticUserPersisted);
 
   const navigationItems = useMemo<MessageNavigationItem[]>(
     () => [
@@ -280,7 +321,7 @@ export function MessageList({
 
   useEffect(() => {
     const element = scrollRef.current;
-    if (element) {
+    if (element && followingLatest) {
       element.scrollTop = element.scrollHeight;
       if (latestMessageKey) setActiveMessageKey(latestMessageKey);
     }
@@ -290,7 +331,12 @@ export function MessageList({
     visibleMessages.length,
     liveMessages.length,
     run?.optimisticUser?.content,
+    followingLatest,
   ]);
+
+  useEffect(() => {
+    setFollowingLatest(true);
+  }, [sessionId]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -331,8 +377,24 @@ export function MessageList({
     const target = messageRefs.current.get(key);
     if (!target) return;
     setActiveMessageKey(key);
+    setFollowingLatest(key === latestMessageKey);
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.focus({ preventScroll: true });
+  }
+
+  function handleMessageScroll() {
+    const element = scrollRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setFollowingLatest(distanceFromBottom < 80);
+  }
+
+  function scrollToLatest() {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    setFollowingLatest(true);
+    if (latestMessageKey) setActiveMessageKey(latestMessageKey);
   }
 
   if (isLoading) {
@@ -378,6 +440,7 @@ export function MessageList({
       <div
         className="react-messages"
         ref={scrollRef}
+        onScroll={handleMessageScroll}
         role="log"
         aria-live="polite"
         aria-atomic="false"
@@ -426,27 +489,39 @@ export function MessageList({
           </section>
         ) : null}
 
-        {visibleMessages.map((message, index) => {
-          const key = persistedMessageKey(message, index);
-          const identity = messageIdentity(message, index);
-          const agent = resolveAgent(message.agentId, message.agent, agents);
-          const agentId = agent?.id || message.agentId || message.agent || "agent";
+        {transcriptMessages.map((message, transcriptIndex) => {
+          if (message.role === "system") {
+            return (
+              <HandoffDivider
+                message={message}
+                agents={agents}
+                key={persistedMessageKey(message, transcriptIndex)}
+              />
+            );
+          }
 
-          const isAssistant = message.role === "assistant";
+          const visibleMessage = message as PersistedMessage & { role: "user" | "assistant" };
+          const index = visibleMessages.indexOf(visibleMessage);
+          const key = persistedMessageKey(visibleMessage, index);
+          const identity = messageIdentity(visibleMessage, index);
+          const agent = resolveAgent(visibleMessage.agentId, visibleMessage.agent, agents);
+          const agentId = agent?.id || visibleMessage.agentId || visibleMessage.agent || "agent";
+
+          const isAssistant = visibleMessage.role === "assistant";
           const isHost = isAssistant && processHostIdentities.has(identity);
           // Process/live attach only to the invocation host (assistant-final).
           const liveData = isHost
-            ? message.invocationId
-              ? liveMessages.find((item) => item.invocationId === message.invocationId)
+            ? visibleMessage.invocationId
+              ? liveMessages.find((item) => item.invocationId === visibleMessage.invocationId)
               : undefined
             : undefined;
 
           return (
             <MessageRow
               messageKey={key}
-              role={message.role}
-              author={roleLabel(message, agents)}
-              status={message.exitCode ? "运行失败" : null}
+              role={visibleMessage.role}
+              author={roleLabel(visibleMessage, agents)}
+              status={visibleMessage.exitCode ? "运行失败" : null}
               agentId={isAssistant ? agentId : undefined}
               setMessageRef={setMessageRef}
               key={key}
@@ -454,14 +529,15 @@ export function MessageList({
               {isAssistant ? (
                 <MessageProcessDetails
                   sessionId={sessionId}
-                  invocationId={isHost ? message.invocationId : undefined}
+                  invocationId={isHost ? visibleMessage.invocationId : undefined}
                   liveMessage={liveData}
-                  content={message.content}
-                  loadDurable={isHost && Boolean(message.invocationId)}
+                  content={visibleMessage.content}
+                  loadDurable={isHost && Boolean(visibleMessage.invocationId)}
+                  initialStatus={isHost ? (visibleMessage.exitCode ? "error" : "done") : undefined}
                   onOpenWorkspace={onOpenWorkspace}
                 />
               ) : (
-                message.content
+                visibleMessage.content
               )}
             </MessageRow>
           );
@@ -523,6 +599,15 @@ export function MessageList({
           <div className="react-run-notice">已停止当前运行。</div>
         ) : null}
       </div>
+
+      {!followingLatest && latestMessageKey ? (
+        <button className="react-jump-latest" type="button" onClick={scrollToLatest}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 3v11m-4-4 4 4 4-4M4 17h12" />
+          </svg>
+          回到最新
+        </button>
+      ) : null}
     </div>
   );
 }
