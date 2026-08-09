@@ -17,7 +17,7 @@ const { buildMemoryInjectPayload } = require("../../src/storage/memory-metrics")
 
 function createFixture() {
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   return storage;
 }
 
