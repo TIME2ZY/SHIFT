@@ -169,7 +169,7 @@ test("createGrokRuntime extracts session id from end", () => {
   );
 });
 
-test("grok end maps usage without double-counting token subsets", () => {
+test("grok end converts additional cached input to the canonical inclusive input", () => {
   const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.5" });
   const events = runtime.transform(
     {
@@ -180,7 +180,7 @@ test("grok end maps usage without double-counting token subsets", () => {
         cache_read_input_tokens: 40,
         output_tokens: 30,
         reasoning_tokens: 10,
-        total_tokens: 130,
+        total_tokens: 170,
         cost: 0.25,
       },
     },
@@ -188,10 +188,10 @@ test("grok end maps usage without double-counting token subsets", () => {
   );
   const usage = events.find((event) => event.type === "usage.update");
   assert.ok(usage);
-  assert.equal(usage.inputTokens, 100);
+  assert.equal(usage.inputTokens, 140);
   assert.equal(usage.cachedInputTokens, 40);
   assert.equal(usage.reasoningTokens, 10);
-  assert.equal(usage.totalTokens, 130);
+  assert.equal(usage.totalTokens, 170);
   assert.equal(usage.costUsd, 0.25);
 });
 

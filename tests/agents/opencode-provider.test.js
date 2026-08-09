@@ -122,7 +122,8 @@ test("opencode step_finish maps tokens and cost to usage.update", () => {
   assert.ok(usage);
   assert.equal(usage.scope, "step");
   assert.equal(usage.mode, "delta");
-  assert.equal(usage.totalTokens, 250);
+  assert.equal(usage.inputTokens, 280);
+  assert.equal(usage.totalTokens, 330);
   assert.equal(usage.cachedInputTokens, 80);
   assert.equal(usage.costUsd, 0.04);
 });

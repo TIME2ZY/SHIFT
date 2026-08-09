@@ -26,7 +26,13 @@ describe("AgentUsageCard", () => {
         onSelect={() => undefined}
         usage={{
           agentId: "codex",
-          billing: { inputTokens: 1200, outputTokens: 1200, totalTokens: 2400 },
+          billing: {
+            inputTokens: 1200,
+            cachedInputTokens: 800,
+            outputTokens: 1200,
+            reasoningTokens: 400,
+            totalTokens: 2400,
+          },
           context: {
             usableContextTokens: 200_000,
             contextUsedTokens: 80_000,
@@ -37,9 +43,14 @@ describe("AgentUsageCard", () => {
     );
 
     expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.getByText("累计用量")).toBeInTheDocument();
     expect(screen.getByText("2.4k tokens")).toBeInTheDocument();
     expect(screen.getByText("上下文 80k / 200k")).toBeInTheDocument();
     expect(screen.getByText("40% · 充足")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Codex 上下文使用率" })).toHaveValue(40);
+    expect(screen.getByText("输入（含缓存）")).toBeInTheDocument();
+    expect(screen.getByText("缓存命中（输入子集）")).toBeInTheDocument();
+    expect(screen.getByText("输出（含推理）")).toBeInTheDocument();
+    expect(screen.getByText("推理（输出子集）")).toBeInTheDocument();
   });
 });

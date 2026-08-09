@@ -132,6 +132,21 @@ test("usage.update validates normalized provider-neutral fields", () => {
   assert.ok(invalid.some((error) => /scope/.test(error)));
   const negativeContext = validateCanonicalEvent({ ...usage, contextTokens: -1 });
   assert.ok(negativeContext.some((error) => /contextTokens/.test(error)));
+  assert.ok(
+    validateCanonicalEvent({ ...usage, cachedInputTokens: 101 }).some((error) =>
+      /cachedInputTokens must be a subset/.test(error)
+    )
+  );
+  assert.ok(
+    validateCanonicalEvent({ ...usage, reasoningTokens: 21 }).some((error) =>
+      /reasoningTokens must be a subset/.test(error)
+    )
+  );
+  assert.ok(
+    validateCanonicalEvent({ ...usage, totalTokens: 121 }).some((error) =>
+      /totalTokens must equal/.test(error)
+    )
+  );
 });
 
 test("normalize coerces loose field types before validation", () => {

@@ -1,23 +1,19 @@
-const BILLING_FIELDS = Object.freeze([
-  "inputTokens",
-  "cachedInputTokens",
-  "outputTokens",
-  "reasoningTokens",
-  "totalTokens",
-  "costUsd",
-]);
+const { BILLING_FIELDS, normalizeBillingUsage } = require("../shared/usage-contract");
 
 function emptyBilling() {
   return Object.fromEntries(BILLING_FIELDS.map((field) => [field, 0]));
 }
 
 function addWindowBilling(target, window) {
-  target.inputTokens += Number(window.billingInputTokens || 0);
-  target.cachedInputTokens += Number(window.billingCachedInputTokens || 0);
-  target.outputTokens += Number(window.billingOutputTokens || 0);
-  target.reasoningTokens += Number(window.billingReasoningTokens || 0);
-  target.totalTokens += Number(window.billingTotalTokens || 0);
-  target.costUsd += Number(window.billingCostUsd || 0);
+  const billing = normalizeBillingUsage({
+    inputTokens: window.billingInputTokens,
+    cachedInputTokens: window.billingCachedInputTokens,
+    outputTokens: window.billingOutputTokens,
+    reasoningTokens: window.billingReasoningTokens,
+    totalTokens: window.billingTotalTokens,
+    costUsd: window.billingCostUsd,
+  });
+  for (const field of BILLING_FIELDS) target[field] += Number(billing[field] || 0);
 }
 
 function newerWindow(candidate, current) {

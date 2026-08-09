@@ -71,3 +71,36 @@ test("usage summary prefers an open context window over sealed history", () => {
   assert.equal(summary.agents[0].context.windowId, "active");
   assert.equal(summary.agents[0].context.contextUsedTokens, 1000);
 });
+
+test("usage summary repairs historical provider counters into the canonical shape", () => {
+  const summary = buildUsageSummary(
+    {
+      windows: {
+        listForThread: () => [
+          {
+            id: "legacy-grok",
+            agentId: "grok",
+            generation: 1,
+            state: "active",
+            capacityTokens: 500000,
+            reserveRatio: 0.2,
+            billingInputTokens: 7791,
+            billingCachedInputTokens: 11136,
+            billingOutputTokens: 480,
+            billingReasoningTokens: 321,
+            billingTotalTokens: 19407,
+          },
+        ],
+      },
+    },
+    "thread-1"
+  );
+  assert.deepEqual(summary.session, {
+    inputTokens: 18927,
+    cachedInputTokens: 11136,
+    outputTokens: 480,
+    reasoningTokens: 321,
+    totalTokens: 19407,
+    costUsd: 0,
+  });
+});

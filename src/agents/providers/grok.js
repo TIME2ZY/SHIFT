@@ -137,6 +137,7 @@ function createGrokRuntime(cli) {
           const usage = makeUsageEvent(base, event.usage, {
             scope: "run",
             mode: "cumulative",
+            cachedInputMode: "additional",
           });
           if (usage) out.push(usage);
           return out;

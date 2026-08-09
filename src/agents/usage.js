@@ -1,4 +1,5 @@
 const { makeEvent } = require("./event-protocol");
+const { normalizeBillingUsage } = require("../shared/usage-contract");
 
 const ALIASES = Object.freeze({
   inputTokens: ["inputTokens", "input_tokens", "input", "promptTokens", "prompt_tokens"],
@@ -70,15 +71,19 @@ function normalizeUsage(raw, options = {}) {
     normalized.costUsd = firstValue(source.cost, ["usd", "total"]);
   }
 
-  if (
-    normalized.totalTokens === undefined &&
-    (normalized.inputTokens !== undefined || normalized.outputTokens !== undefined)
-  ) {
-    // Cached input and reasoning are normally subsets of input/output and are
-    // deliberately not added again.
-    normalized.totalTokens = (normalized.inputTokens || 0) + (normalized.outputTokens || 0);
-  }
   if (Object.keys(normalized).length === 0) return null;
+  const billing = normalizeBillingUsage(normalized, options);
+  for (const field of [
+    "inputTokens",
+    "cachedInputTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "totalTokens",
+    "costUsd",
+  ]) {
+    delete normalized[field];
+  }
+  Object.assign(normalized, billing);
   if (options.contextTokensExact === true) normalized.contextTokensExact = true;
   return normalized;
 }
