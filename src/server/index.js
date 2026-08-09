@@ -1,10 +1,9 @@
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
-const { loadProjectEnv } = require("../shared/load-env");
 const { ENV } = require("../shared/brand");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
-const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
+const { getProviderAdapter } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
@@ -14,7 +13,7 @@ const sessionSealer = require("../session/sealer");
 const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
 const { createDeliveryVerifier } = require("../worktree/delivery-verifier");
-const runtimePaths = require("../shared/runtime-paths");
+const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
 const projectDirService = require("./project-dir");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
@@ -32,20 +31,6 @@ const { createServerStorage } = require("../storage/server-storage");
 const { createMemoryCapture } = require("../storage/memory-capture");
 const { createRecallService } = require("../storage/recall-service");
 const {
-  ROOT,
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_AUDIT_TRANSCRIPT_DIR,
-  DEFAULT_WORKTREE_STATE_FILE,
-} = runtimePaths;
-
-// When started as the main process (npm start), load project .env so local
-// knobs like INVOKE_CLI_PROXY / INVOKE_CODEX_HOME persist without shell export.
-// Tests require this module as a library and skip file loading.
-if (require.main === module) {
-  loadProjectEnv(ROOT);
-}
-const {
   getSkills,
   publicSkills,
   matchSkills,
@@ -57,7 +42,6 @@ const {
 const { validateProjectDir } = projectDirService;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
-const DEFAULT_PORT = Number(process.env.PORT || 8787);
 // Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
   try {
@@ -105,37 +89,30 @@ function createServer(options = {}) {
   // Surface missing identity packs early so new agents aren't silent no-ops.
   agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const uiToken = uiSecurity.createUiToken(options.uiToken);
+  const appPaths =
+    options.runtimePaths ||
+    createRuntimePaths({ env: options.env || process.env, homeDir: options.homeDir });
   const webDistDir = options.webDistDir || path.join(ROOT, "dist", "web");
   const webIndexPath = options.webIndexPath || path.join(webDistDir, "index.html");
   const spawnRunner = options.spawnRunner || spawn;
-  const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager =
     options.worktreeManager ||
     worktreeManagerModule.createWorktreeManager({
       rootDir: ROOT,
-      stateFile: DEFAULT_WORKTREE_STATE_FILE,
+      stateFile: options.worktreeStateFile || appPaths.worktreeStateFile,
     });
   const deliveryVerifier = options.deliveryVerifier || createDeliveryVerifier();
   const logger = options.logger || console;
   const auditTranscriptDir = path.resolve(
-    options.auditTranscriptDir ||
-      process.env[ENV.AUDIT_TRANSCRIPT_DIR] ||
-      (options.sessionsFile
-        ? path.join(path.dirname(sessionsFile), "audit-transcripts")
-        : DEFAULT_AUDIT_TRANSCRIPT_DIR)
+    options.auditTranscriptDir || appPaths.auditTranscriptDir
   );
-  const legacyTranscriptDir = path.resolve(
-    process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR
-  );
-  if (runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)) {
-    throw new Error(
-      `SQLite canonical audit directory must not overlap legacy transcripts: ` +
-        `${auditTranscriptDir} <> ${legacyTranscriptDir}`
-    );
-  }
   const storageContext = createServerStorage(
-    { ...options, auditTranscriptDir, defaultProjectDir: ROOT },
-    sessionsFile,
+    {
+      ...options,
+      memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
+      auditTranscriptDir,
+      defaultProjectDir: ROOT,
+    },
     logger
   );
   const durableRecorder = storageContext.recorder;
@@ -394,16 +371,6 @@ function createServer(options = {}) {
   // Expose for tests / orchestrated shutdown that can await flush-before-close.
   server.closeStorageContext = closeStorageContext;
   return server;
-}
-
-if (require.main === module) {
-  const server = createServer();
-  server.listen(DEFAULT_PORT, "127.0.0.1", () => {
-    console.log(`Shift listening at http://127.0.0.1:${DEFAULT_PORT}`);
-    for (const line of collectProviderStartupDiagnostics()) {
-      console.log(line);
-    }
-  });
 }
 
 module.exports = {

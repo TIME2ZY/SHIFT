@@ -3,10 +3,10 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { isValidOpaqueId } = require("../../server/id-policy");
 const {
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_MEMORY_DB_FILE,
-} = require("../../shared/runtime-paths");
+  LEGACY_SESSIONS_FILE,
+  LEGACY_TRANSCRIPT_DIR,
+  LEGACY_MEMORY_DB_FILE,
+} = require("./legacy-runtime-paths");
 const { durableMessageMetadata } = require("../message-persistence");
 const { integrityCheck, rebuildThreadRecall } = require("../maintenance");
 
@@ -25,9 +25,9 @@ const MIGRATION_WORKSPACE = "migrated:runtime";
  * Idempotent: re-running fills gaps and rebuilds recall projections.
  */
 async function migrateRuntimeToSqlite(options = {}) {
-  const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
-  const transcriptDir = options.transcriptDir || DEFAULT_TRANSCRIPT_DIR;
-  const memoryDbFile = options.memoryDbFile || DEFAULT_MEMORY_DB_FILE;
+  const sessionsFile = options.sessionsFile || LEGACY_SESSIONS_FILE;
+  const transcriptDir = options.transcriptDir || LEGACY_TRANSCRIPT_DIR;
+  const memoryDbFile = options.memoryDbFile || LEGACY_MEMORY_DB_FILE;
   const dryRun = Boolean(options.dryRun);
   const logger = options.logger || console;
   const ownsStorage = !options.storage;

@@ -19,18 +19,8 @@ const { preflight, printPreflight } = require("./lib/preflight");
 const { createApiClient } = require("./lib/api-client");
 const { startHarness, resolveProjectDir } = require("./lib/harness");
 const { collectMemoryInjectPayloads } = require("./lib/sse");
-const {
-  evaluateLiveRun,
-  annotateTurnOutcomes,
-  classifyTurnOutcome,
-} = require("./lib/live-assert");
-const {
-  createDumpDir,
-  dumpTurn,
-  writeReport,
-  writeJson,
-  writeText,
-} = require("./lib/live-dump");
+const { evaluateLiveRun, annotateTurnOutcomes, classifyTurnOutcome } = require("./lib/live-assert");
+const { createDumpDir, dumpTurn, writeReport, writeJson, writeText } = require("./lib/live-dump");
 const scenario = require("./scenarios/solo-grok-auth");
 const { DEFAULT_MEMORY_DB_FILE } = require("../../src/shared/runtime-paths");
 
@@ -116,9 +106,7 @@ async function main() {
     // Re-check health after spawn
     const health = await api.health();
     if (!health.ok) {
-      throw new Error(
-        `storage health failed (${health.status}): ${JSON.stringify(health.body)}`
-      );
+      throw new Error(`storage health failed (${health.status}): ${JSON.stringify(health.body)}`);
     }
 
     if (!sessionId) {
@@ -158,7 +146,9 @@ async function main() {
         );
       }
       fillTurns = fillTurns.slice(idx);
-      console.log(`[live] resuming stack from ${opts.startFrom} (${fillTurns.length} fill turns left)`);
+      console.log(
+        `[live] resuming stack from ${opts.startFrom} (${fillTurns.length} fill turns left)`
+      );
     }
     let turnIndex = 0;
 
@@ -456,7 +446,7 @@ function snapshotWindows(sessionId) {
   if (!sessionId) return [];
   try {
     const { createStorage } = require("../../src/storage");
-    const file = process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE;
+    const file = DEFAULT_MEMORY_DB_FILE;
     const storage = createStorage({ file });
     try {
       return storage.windows.listForThread(sessionId).map((w) => ({
@@ -491,10 +481,7 @@ function dumpFailure(dumpDir, turnId, result, ctx) {
       sanitizedHint:
         "Server may only return {error:'Internal server error.'}; check server logs for SqliteError/stack.",
     });
-    writeText(
-      path.join(dumpDir, `failure-${turnId}.sse.txt`),
-      String(result.text || "")
-    );
+    writeText(path.join(dumpDir, `failure-${turnId}.sse.txt`), String(result.text || ""));
   } catch {
     // ignore
   }

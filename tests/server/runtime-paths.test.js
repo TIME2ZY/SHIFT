@@ -4,35 +4,43 @@ const test = require("node:test");
 
 const runtimePaths = require("../../src/shared/runtime-paths");
 
-test("runtime paths live under data/runtime", () => {
-  const root = path.resolve(__dirname, "../..");
-  const runtimeDir = path.join(root, "data", "runtime");
+test("runtime paths derive every online artifact from SHIFT_HOME/data", () => {
+  const homeDir = path.resolve("fixture-user-home");
+  const shiftHome = path.join(homeDir, ".shift-custom");
+  const paths = runtimePaths.createRuntimePaths({
+    env: { SHIFT_HOME: shiftHome },
+    homeDir,
+  });
+  const dataDir = path.join(shiftHome, "data");
 
-  assert.equal(runtimePaths.ROOT, root);
-  assert.equal(runtimePaths.RUNTIME_DATA_DIR, runtimeDir);
-  assert.equal(runtimePaths.DEFAULT_SESSIONS_FILE, path.join(runtimeDir, "sessions.json"));
-  assert.equal(runtimePaths.DEFAULT_INVOCATIONS_FILE, path.join(runtimeDir, "invocations.json"));
-  assert.equal(runtimePaths.DEFAULT_SESSION_MAP_ROOT, path.join(runtimeDir, "session-maps"));
-  assert.equal(runtimePaths.DEFAULT_TRANSCRIPT_DIR, path.join(runtimeDir, "transcripts"));
-  assert.equal(
-    runtimePaths.DEFAULT_AUDIT_TRANSCRIPT_DIR,
-    path.join(runtimeDir, "audit-transcripts")
-  );
-  assert.equal(runtimePaths.DEFAULT_WORKTREE_STATE_FILE, path.join(runtimeDir, "worktrees.json"));
-  assert.equal(runtimePaths.DEFAULT_RAW_EVENTS_DIR, path.join(runtimeDir, "raw-events"));
-  assert.equal(runtimePaths.LEGACY_MEMORY_DB_FILE, path.join(runtimeDir, "memory.sqlite"));
-  assert.equal(runtimePaths.DEFAULT_MEMORY_DB_FILE, path.join(runtimeDir, "shift.sqlite"));
+  assert.equal(paths.shiftHome, shiftHome);
+  assert.equal(paths.dataDir, dataDir);
+  assert.equal(paths.databaseFile, path.join(dataDir, "shift.sqlite"));
+  assert.equal(paths.auditTranscriptDir, path.join(dataDir, "audit-transcripts"));
+  assert.equal(paths.rawEventsDir, path.join(dataDir, "raw-events"));
+  assert.equal(paths.transcriptDir, path.join(dataDir, "transcripts"));
+  assert.equal(paths.worktreeStateFile, path.join(dataDir, "worktrees.json"));
+  assert.equal(paths.migrationDir, path.join(dataDir, "migration"));
+  assert.equal(paths.backupDir, path.join(dataDir, "backups"));
 });
 
-test("worktreeStateFileFor nests under root/data/runtime", () => {
-  const tmpRoot = path.join(path.sep === "\\" ? "C:\\tmp" : "/tmp", "shift-root");
+test("runtime paths default to the user .shift directory", () => {
+  const homeDir = path.resolve("fixture-default-home");
+  const paths = runtimePaths.createRuntimePaths({ env: {}, homeDir });
+  assert.equal(paths.shiftHome, path.join(homeDir, ".shift"));
+  assert.equal(paths.dataDir, path.join(homeDir, ".shift", "data"));
+});
+
+test("SHIFT_HOME expands a leading tilde and rejects filesystem roots", () => {
+  const homeDir = path.resolve("fixture-tilde-home");
   assert.equal(
-    runtimePaths.worktreeStateFileFor(tmpRoot),
-    path.join(path.resolve(tmpRoot), "data", "runtime", "worktrees.json")
+    runtimePaths.resolveShiftHome("~/.shift-alt", homeDir),
+    path.join(homeDir, ".shift-alt")
   );
-  assert.equal(
-    runtimePaths.worktreeStateFileFor(runtimePaths.ROOT),
-    runtimePaths.DEFAULT_WORKTREE_STATE_FILE
+  const filesystemRoot = path.parse(path.resolve("fixture")).root;
+  assert.throws(
+    () => runtimePaths.resolveShiftHome(filesystemRoot, homeDir),
+    /must not be a filesystem root/
   );
 });
 

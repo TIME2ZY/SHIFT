@@ -12,6 +12,7 @@ test("agent child environment excludes server-owned storage and harness settings
     {
       PATH: "base-path",
       SHIFT_MEMORY_DB: "server.sqlite",
+      SHIFT_HOME: "server-home",
       SHIFT_TRANSCRIPT_DIR: "server-transcripts",
       SHIFT_AUDIT_TRANSCRIPT_DIR: "server-audit",
       SHIFT_TEST_CAPACITY: "48000",
@@ -19,12 +20,14 @@ test("agent child environment excludes server-owned storage and harness settings
     {
       SHIFT_API_URL: "http://127.0.0.1:61223",
       SHIFT_MEMORY_DB: "override.sqlite",
+      SHIFT_HOME: "override-home",
     }
   );
 
   assert.equal(env.PATH, "base-path");
   assert.equal(env.SHIFT_API_URL, "http://127.0.0.1:61223");
   assert.equal(env.SHIFT_MEMORY_DB, undefined);
+  assert.equal(env.SHIFT_HOME, undefined);
   assert.equal(env.SHIFT_TRANSCRIPT_DIR, undefined);
   assert.equal(env.SHIFT_AUDIT_TRANSCRIPT_DIR, undefined);
   assert.equal(env.SHIFT_TEST_CAPACITY, undefined);

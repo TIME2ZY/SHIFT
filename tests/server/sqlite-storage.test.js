@@ -91,30 +91,28 @@ function worktreeManager() {
   };
 }
 
-test("sqlite server rejects overlapping legacy and canonical transcript roots", () => {
+test("sqlite server ignores the retired online transcript path override", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sqlite-audit-boundary-"));
   const databaseFile = path.join(tmpDir, "shift.sqlite");
   const transcriptDir = path.join(tmpDir, "transcripts");
   const previousTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   prepareCleanEpoch({ file: databaseFile });
   process.env.SHIFT_TRANSCRIPT_DIR = transcriptDir;
+  let server;
   try {
-    assert.throws(
-      () =>
-        createServer({
-          storageMode: "sqlite",
-          memoryDbFile: databaseFile,
-          sessionsFile: path.join(tmpDir, "sessions.json"),
-          auditTranscriptDir: transcriptDir,
-          worktreeManager: worktreeManager(),
-          uiToken: UI_TOKEN,
-        }),
-      /must not overlap legacy transcripts/
-    );
+    server = createServer({
+      storageMode: "sqlite",
+      memoryDbFile: databaseFile,
+      auditTranscriptDir: transcriptDir,
+      worktreeManager: worktreeManager(),
+      uiToken: UI_TOKEN,
+    });
+    assert.ok(server);
   } finally {
+    await server?.closeStorageContext();
     if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
     else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 

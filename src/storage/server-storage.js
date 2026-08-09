@@ -1,7 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createCanonicalTranscriptSink } = require("../session/transcript");
-const { DEFAULT_MEMORY_DB_FILE, DEFAULT_SESSIONS_FILE } = require("../shared/runtime-paths");
 const { ENV } = require("../shared/brand");
 const { createDurableRecorder } = require("./durable-recorder");
 const { createEventStore } = require("./event-store");
@@ -10,7 +9,7 @@ const { createStorage } = require("./index");
 const { createEmbeddingRuntime } = require("./embedding-runtime");
 const { createSqliteSessionService } = require("./sqlite-session-service");
 
-function createServerStorage(options = {}, sessionsFile, logger = console) {
+function createServerStorage(options = {}, logger = console) {
   const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "sqlite";
   const auditTranscript = resolveBoolean(
     options.auditTranscript,
@@ -26,17 +25,15 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
   let storage = options.storage || null;
   const ownsStorage = !storage;
   if (!storage) {
-    const file =
-      options.memoryDbFile ||
-      process.env[ENV.MEMORY_DB] ||
-      (sessionsFile && path.resolve(sessionsFile) !== path.resolve(DEFAULT_SESSIONS_FILE)
-        ? path.join(path.dirname(sessionsFile), "shift.sqlite")
-        : DEFAULT_MEMORY_DB_FILE);
+    const file = options.memoryDbFile;
+    if (typeof file !== "string" || !file.trim()) {
+      throw new Error("SHIFT_STORAGE_MODE=sqlite requires an explicit runtime database path.");
+    }
     try {
       if (file !== ":memory:" && !fs.existsSync(file)) {
         throw new Error(
           `active clean epoch database does not exist: ${path.resolve(file)}; ` +
-            "create it with npm run prepare:storage:epoch -- --db <new-file>"
+            "run npm run storage:init-home or npm run storage:migrate-home"
         );
       }
       storage = createStorage({ file });
@@ -60,9 +57,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
     }
   } catch (error) {
     if (ownsStorage && storage) storage.close();
-    throw new Error(
-      `SHIFT_STORAGE_MODE=sqlite requires an active clean epoch (${error.message})`
-    );
+    throw new Error(`SHIFT_STORAGE_MODE=sqlite requires an active clean epoch (${error.message})`);
   }
 
   const eventStore = createEventStore({
@@ -209,11 +204,7 @@ function createServerStorage(options = {}, sessionsFile, logger = console) {
 
 function safeEpochDirectory(epochId) {
   const value = String(epochId || "").trim();
-  if (
-    value === "." ||
-    value === ".." ||
-    !/^[A-Za-z0-9._-]+$/.test(value)
-  ) {
+  if (value === "." || value === ".." || !/^[A-Za-z0-9._-]+$/.test(value)) {
     throw new Error(`Unsafe storage epoch id for audit archive: ${value || "(missing)"}`);
   }
   return value;

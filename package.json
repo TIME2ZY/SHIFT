@@ -9,7 +9,7 @@
   },
   "scripts": {
     "prestart": "npm run build:web",
-    "start": "node src/server/index.js",
+    "start": "node src/server/main.js",
     "dev:web": "node scripts/dev-web.js",
     "dev:web:vite": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
@@ -37,6 +37,8 @@
     "plan:storage:cleanup": "node scripts/plan-legacy-cleanup.js",
     "execute:storage:cleanup": "node scripts/execute-legacy-cleanup.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
+    "storage:init-home": "node scripts/init-storage-home.js",
+    "storage:migrate-home": "node scripts/migrate-storage-home.js",
     "test:live:solo-grok": "node scripts/live/run-solo-grok.js",
     "test:live:multi-collab": "node scripts/live/run-multi-collab.js"
   },

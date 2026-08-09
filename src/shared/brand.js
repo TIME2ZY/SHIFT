@@ -14,9 +14,11 @@ const UI_TOKEN_PLACEHOLDER = "__SHIFT_UI_TOKEN__";
 const LOCAL_STATE_DIR = ".shift";
 
 const ENV = Object.freeze({
+  HOME: "SHIFT_HOME",
   UI_TOKEN: "SHIFT_UI_TOKEN",
   API_URL: "SHIFT_API_URL",
   TOKEN_TTL_MS: "SHIFT_TOKEN_TTL_MS",
+  // Offline legacy tooling only; online paths derive exclusively from SHIFT_HOME.
   TRANSCRIPT_DIR: "SHIFT_TRANSCRIPT_DIR",
   AUDIT_TRANSCRIPT_DIR: "SHIFT_AUDIT_TRANSCRIPT_DIR",
   TEST_CAPACITY: "SHIFT_TEST_CAPACITY",

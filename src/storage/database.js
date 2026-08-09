@@ -1,12 +1,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
-const { DEFAULT_MEMORY_DB_FILE } = require("../shared/runtime-paths");
+const { createRuntimePaths } = require("../shared/runtime-paths");
 const { applyMigrations } = require("./migrations");
 const { PRAGMAS } = require("./schema");
 
 function openMemoryDatabase(options = {}) {
-  const file = options.file || DEFAULT_MEMORY_DB_FILE;
+  const file = options.file || createRuntimePaths().databaseFile;
   if (file !== ":memory:") {
     fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   }

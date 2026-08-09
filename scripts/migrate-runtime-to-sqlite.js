@@ -9,16 +9,16 @@
  */
 const path = require("node:path");
 const {
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_TRANSCRIPT_DIR,
+  LEGACY_SESSIONS_FILE,
+  LEGACY_TRANSCRIPT_DIR,
   LEGACY_MEMORY_DB_FILE,
-} = require("../src/shared/runtime-paths");
+} = require("../src/storage/offline/legacy-runtime-paths");
 const { migrateRuntimeToSqlite } = require("../src/storage/offline/migrate-runtime");
 
 function parseArgs(argv) {
   const options = {
-    sessionsFile: DEFAULT_SESSIONS_FILE,
-    transcriptDir: DEFAULT_TRANSCRIPT_DIR,
+    sessionsFile: LEGACY_SESSIONS_FILE,
+    transcriptDir: LEGACY_TRANSCRIPT_DIR,
     memoryDbFile: LEGACY_MEMORY_DB_FILE,
     dryRun: false,
     json: false,
