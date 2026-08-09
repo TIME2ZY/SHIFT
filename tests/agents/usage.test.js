@@ -33,6 +33,36 @@ test("usage normalization never adds cached or reasoning subsets twice", () => {
   assert.equal(usage.totalTokens, 130);
 });
 
+test("usage normalization reconciles observed provider-specific token semantics", () => {
+  const grok = normalizeUsage(
+    {
+      input_tokens: 7791,
+      cache_read_input_tokens: 11136,
+      output_tokens: 480,
+      reasoning_tokens: 321,
+      total_tokens: 19407,
+    },
+    { cachedInputMode: "additional" }
+  );
+  assert.equal(grok.inputTokens, 18927);
+  assert.equal(grok.cachedInputTokens, 11136);
+  assert.equal(grok.outputTokens, 480);
+  assert.equal(grok.totalTokens, 19407);
+
+  const opencode = normalizeUsage(
+    {
+      input: 6,
+      output: 452,
+      cache: { read: 40214 },
+      total: 54902,
+    },
+    { cachedInputMode: "additional" }
+  );
+  assert.equal(opencode.inputTokens, 54450);
+  assert.equal(opencode.cachedInputTokens, 40214);
+  assert.equal(opencode.totalTokens, 54902);
+});
+
 test("usage accumulator removes repeated snapshots", () => {
   const accumulator = createUsageAccumulator();
   const event = {

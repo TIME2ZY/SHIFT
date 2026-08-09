@@ -1,4 +1,5 @@
 const { makeEvent } = require("./event-protocol");
+const { makeUsageEvent } = require("./usage");
 
 const ACP_THINKING_FLUSH_CHARS = 80;
 const ACP_TEXT_FLUSH_CHARS = 40;
@@ -199,19 +200,22 @@ function createAcpRuntime(_config = {}) {
       if (event.type === "acp.prompt_result") {
         const usage = event.result?.usage;
         if (!usage || typeof usage !== "object") return [];
-        return [
-          ...flushBuffers(ctx, true),
-          makeEvent("usage.update", {
-            ...base(ctx),
+        const usageEvent = makeUsageEvent(
+          base(ctx),
+          {
+            inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedReadTokens,
+            outputTokens: usage.outputTokens,
+            reasoningTokens: usage.thoughtTokens,
+            totalTokens: usage.totalTokens,
+          },
+          {
             scope: "turn",
             mode: "cumulative",
-            inputTokens: Number(usage.inputTokens || 0),
-            cachedInputTokens: Number(usage.cachedReadTokens || 0),
-            outputTokens: Number(usage.outputTokens || 0),
-            reasoningTokens: Number(usage.thoughtTokens || 0),
-            totalTokens: Number(usage.totalTokens || 0),
-          }),
-        ];
+            reasoningOutputMode: "additional",
+          }
+        );
+        return [...flushBuffers(ctx, true), ...(usageEvent ? [usageEvent] : [])];
       }
       if (event.type !== "acp.session_update") {
         return [

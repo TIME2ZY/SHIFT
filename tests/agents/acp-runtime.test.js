@@ -318,6 +318,7 @@ test("ACP prompt result usage maps to the shared usage event", () => {
   assert.equal(usage.inputTokens, 100);
   assert.equal(usage.cachedInputTokens, 20);
   assert.equal(usage.reasoningTokens, 10);
+  assert.equal(usage.outputTokens, 40);
   assert.equal(usage.totalTokens, 140);
 });
 

@@ -90,7 +90,7 @@ export function AgentUsageCard({
           {usage && (totalTokens > 0 || context) ? (
             <div className="react-agent-usage">
               <div className="react-agent-usage-total">
-                <span>本会话</span>
+                <span>累计用量</span>
                 <strong>{compactTokens(totalTokens)} tokens</strong>
               </div>
 
@@ -118,19 +118,19 @@ export function AgentUsageCard({
                   <summary>用量明细</summary>
                   <dl>
                     <div>
-                      <dt>输入</dt>
+                      <dt>输入（含缓存）</dt>
                       <dd>{compactTokens(billing.inputTokens)}</dd>
                     </div>
                     <div>
-                      <dt>缓存</dt>
+                      <dt>缓存命中（输入子集）</dt>
                       <dd>{compactTokens(billing.cachedInputTokens)}</dd>
                     </div>
                     <div>
-                      <dt>输出</dt>
+                      <dt>输出（含推理）</dt>
                       <dd>{compactTokens(billing.outputTokens)}</dd>
                     </div>
                     <div>
-                      <dt>推理</dt>
+                      <dt>推理（输出子集）</dt>
                       <dd>{compactTokens(billing.reasoningTokens)}</dd>
                     </div>
                     {billing.costUsd ? (

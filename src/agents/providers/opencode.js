@@ -420,6 +420,7 @@ function createOpencodeRuntime(cli) {
         const usage = makeUsageEvent(base, rawUsage, {
           scope: "step",
           mode: "delta",
+          cachedInputMode: "additional",
         });
         if (usage) out.push(usage);
         return out;

@@ -245,7 +245,7 @@ test("edits the project directory and completes a worktree chat run", async ({ p
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
-  await expect(page.getByText("本会话 321 tokens")).toBeVisible();
+  await expect(page.getByText("累计用量 321 tokens")).toBeVisible();
   await expect(page.getByText("10% · 充足")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();

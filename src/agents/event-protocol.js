@@ -303,6 +303,28 @@ function validateCanonicalEvent(event) {
     if (!tokenFields.some((field) => event[field] !== undefined && event[field] !== null)) {
       errors.push("usage.update must include at least one usage value");
     }
+    if (
+      typeof event.cachedInputTokens === "number" &&
+      typeof event.inputTokens === "number" &&
+      event.cachedInputTokens > event.inputTokens
+    ) {
+      errors.push("usage.update.cachedInputTokens must be a subset of inputTokens");
+    }
+    if (
+      typeof event.reasoningTokens === "number" &&
+      typeof event.outputTokens === "number" &&
+      event.reasoningTokens > event.outputTokens
+    ) {
+      errors.push("usage.update.reasoningTokens must be a subset of outputTokens");
+    }
+    if (
+      typeof event.inputTokens === "number" &&
+      typeof event.outputTokens === "number" &&
+      typeof event.totalTokens === "number" &&
+      event.totalTokens !== event.inputTokens + event.outputTokens
+    ) {
+      errors.push("usage.update.totalTokens must equal inputTokens + outputTokens");
+    }
   }
   if (event.type === "diagnostic") {
     if (
