@@ -9,6 +9,7 @@ const {
   makeEvent,
   normalizeCanonicalEvent,
   createRunLifecycle,
+  lifecyclePhase,
 } = require("../event-protocol");
 const { resolveProxy, proxyEnvVars } = require("../proxy");
 const { createUsageAccumulator } = require("../usage");
@@ -153,11 +154,31 @@ function createProviderRuntime(config, options = {}) {
     }
 
     const accepted = [];
-    for (const event of normalized) {
+    const acceptEvent = (event) => {
       const acceptedUsage = usageAccumulator.accept(event);
-      if (!acceptedUsage) continue;
-      if (!lifecycle.accept(acceptedUsage.type)) continue;
-      accepted.push(assertCanonicalEvent(acceptedUsage));
+      if (!acceptedUsage) return;
+      if (lifecyclePhase(acceptedUsage.type) === "terminal") {
+        const openToolEvents = lifecycle.closeOpenTools(
+          {
+            agent: acceptedUsage.agent || context.agent,
+            invocationId: acceptedUsage.invocationId || context.invocationId,
+          },
+          { ok: acceptedUsage.type === "run.finished" }
+        );
+        for (const openToolEvent of openToolEvents) {
+          if (!lifecycle.accept(openToolEvent.type)) continue;
+          const canonicalToolEvent = assertCanonicalEvent(openToolEvent);
+          lifecycle.observe(canonicalToolEvent);
+          accepted.push(canonicalToolEvent);
+        }
+      }
+      if (!lifecycle.accept(acceptedUsage.type)) return;
+      const canonicalEvent = assertCanonicalEvent(acceptedUsage);
+      lifecycle.observe(canonicalEvent);
+      accepted.push(canonicalEvent);
+    };
+    for (const event of normalized) {
+      acceptEvent(event);
     }
     return accepted;
   };
@@ -197,18 +218,6 @@ function createProviderRuntime(config, options = {}) {
           : runtime.finish(context, outcome);
       const events = validateEvents(rawEvents, context);
       if (outcome.terminal === true && !lifecycle.terminal) {
-        if (!lifecycle.started) {
-          const started = assertCanonicalEvent(
-            makeEvent("run.started", {
-              agent: context.agent,
-              invocationId: context.invocationId,
-              sessionId: "",
-              provider: adapter.id,
-              model: config.model || "",
-            })
-          );
-          if (lifecycle.accept(started.type)) events.push(started);
-        }
         const terminalEvent = outcome.ok
           ? makeEvent("run.finished", {
               agent: context.agent,
@@ -223,8 +232,7 @@ function createProviderRuntime(config, options = {}) {
               exitCode: outcome.exitCode ?? null,
               signal: outcome.signal || null,
             });
-        const terminal = assertCanonicalEvent(terminalEvent);
-        if (lifecycle.accept(terminal.type)) events.push(terminal);
+        events.push(...validateEvents([terminalEvent], context));
       }
       return events;
     },

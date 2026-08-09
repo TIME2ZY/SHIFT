@@ -230,3 +230,30 @@ test("projectInvocationProcess repairs legacy tool status without failing the ag
   assert.equal(process.tools[0].failureSource, "output-signature");
   assert.match(process.tools[0].error, /pull request create failed/);
 });
+
+test("projectInvocationProcess closes historical open tools at invocation terminal", () => {
+  const process = projectInvocationProcess("i-open", [
+    {
+      eventNo: 1,
+      kind: "tool.started",
+      payload: {
+        toolId: "tool-open",
+        toolName: "read",
+        args: { path: "AGENTS.md" },
+      },
+    },
+    { eventNo: 2, kind: "run.finished", payload: { exitCode: 0 } },
+  ]);
+
+  assert.equal(process.status, "done");
+  assert.deepEqual(process.tools[0], {
+    toolId: "tool-open",
+    toolName: "read",
+    status: "error",
+    input: { path: "AGENTS.md" },
+    error: "Invocation reached a terminal state before the tool reported completion.",
+    failureSource: "lifecycle-terminal",
+    failureReason: "Invocation reached a terminal state before the tool reported completion.",
+    changedFiles: [],
+  });
+});
