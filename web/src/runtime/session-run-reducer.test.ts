@@ -66,23 +66,6 @@ describe("sessionRunReducer", () => {
     expect(second.runs.s1.liveMessages.i1.text).toBe("hello world");
   });
 
-  it("rekeys a pending run when the server assigns a session id", () => {
-    const pending = sessionRunReducer(initialSessionRunState, {
-      type: "run/started",
-      sessionId: "_pending",
-      startedAt: 10,
-    });
-    const state = sessionRunReducer(pending, {
-      type: "session/rekeyed",
-      from: "_pending",
-      to: "s-real",
-    });
-
-    expect(state.runs._pending).toBeUndefined();
-    expect(state.runs["s-real"].sessionId).toBe("s-real");
-    expect(state.runs["s-real"].status).toBe("connecting");
-  });
-
   it("keeps a run failed when a later done frame arrives", () => {
     let state = sessionRunReducer(initialSessionRunState, {
       type: "run/started",
@@ -98,6 +81,33 @@ describe("sessionRunReducer", () => {
 
     expect(state.runs.s1.status).toBe("error");
     expect(state.runs.s1.doneReceived).toBe(true);
+  });
+
+  it("terminalizes open invocations when a run fails or is aborted", () => {
+    let failed = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "failed",
+      agentId: "codex",
+      invocationId: "i-failed",
+    });
+    failed = sessionRunReducer(failed, {
+      type: "run/failed",
+      sessionId: "failed",
+      error: "connection lost",
+    });
+    failed = sessionRunReducer(failed, { type: "run/synced", sessionId: "failed" });
+
+    let aborted = sessionRunReducer(initialSessionRunState, {
+      type: "agent/started",
+      sessionId: "aborted",
+      agentId: "codex",
+      invocationId: "i-aborted",
+    });
+    aborted = sessionRunReducer(aborted, { type: "run/aborted", sessionId: "aborted" });
+    aborted = sessionRunReducer(aborted, { type: "run/synced", sessionId: "aborted" });
+
+    expect(failed.runs.failed.liveMessages["i-failed"].status).toBe("error");
+    expect(aborted.runs.aborted.liveMessages["i-aborted"].status).toBe("aborted");
   });
 
   it("seals still-streaming live messages when server done arrives", () => {

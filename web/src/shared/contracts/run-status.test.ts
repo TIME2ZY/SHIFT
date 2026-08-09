@@ -17,6 +17,7 @@ describe("run status contracts", () => {
     expect(sealLiveMessageStatus("streaming")).toBe("done");
     expect(sealLiveMessageStatus("thinking")).toBe("done");
     expect(sealLiveMessageStatus("error")).toBe("error");
+    expect(sealLiveMessageStatus("aborted")).toBe("aborted");
     expect(sealLiveMessageStatus("done")).toBe("done");
   });
 

@@ -30,7 +30,10 @@ function liveProgress(message?: LiveMessage): InvocationProgressItem[] {
   return (message?.progress || []).map((item) => ({ ...item }));
 }
 
-function liveProcessStatus(status: LiveMessage["status"]): "running" | "done" | "error" {
+type ProcessStatus = "running" | "done" | "error" | "aborted";
+
+function liveProcessStatus(status: LiveMessage["status"]): ProcessStatus {
+  if (status === "aborted") return "aborted";
   if (status === "error") return "error";
   if (status === "done") return "done";
   return "running";
@@ -139,12 +142,19 @@ export function MessageProcessDetails({
 }) {
   const canLoadDurable = loadDurable && Boolean(sessionId && invocationId);
   const [processExpanded, setProcessExpanded] = useState(false);
-  const process = useInvocationProcessQuery(
+  const summaryProcess = useInvocationProcessQuery(
     sessionId,
     invocationId,
-    canLoadDurable && processExpanded
+    "summary",
+    canLoadDurable
   );
-  const durable = process.data;
+  const detailProcess = useInvocationProcessQuery(
+    sessionId,
+    invocationId,
+    "full",
+    canLoadDurable && processExpanded && !liveMessage
+  );
+  const durable = detailProcess.data || summaryProcess.data;
   const liveToolItems = liveTools(liveMessage);
   const liveProgressItems = liveProgress(liveMessage);
   const thinking = liveMessage?.thinking || durable?.thinking?.text || "";
@@ -161,7 +171,10 @@ export function MessageProcessDetails({
   const status = liveMessage
     ? liveProcessStatus(liveMessage.status)
     : durable?.status || initialStatus || "running";
-  const isLoading = canLoadDurable && process.isPending;
+  const isLoading =
+    canLoadDurable &&
+    (summaryProcess.isPending || (processExpanded && !liveMessage && detailProcess.isPending));
+  const processError = summaryProcess.isError || (processExpanded && detailProcess.isError);
   const narrativeTimeline = timeline.filter(
     (item): item is NarrativeTimelineItem => item.type !== "tool"
   );
@@ -177,7 +190,7 @@ export function MessageProcessDetails({
     progress.length ||
     visibleChangedFiles.length ||
     isLoading ||
-    (canLoadDurable && process.isError)
+    (canLoadDurable && processError)
   );
   const toolById = new Map(tools.map((tool) => [tool.toolId, tool]));
   const orderedTools = timelineTools
@@ -214,9 +227,11 @@ export function MessageProcessDetails({
       ? `正在执行 · ${formatToolPrimaryTitle(runningTool)}`
       : status === "running"
         ? "正在执行"
-        : status === "error"
-          ? "执行有失败"
-          : "执行完成";
+        : status === "aborted"
+          ? "已停止"
+          : status === "error"
+            ? "执行有失败"
+            : "执行完成";
   const summaryMeta = [
     tools.length ? `${tools.length} 次工具调用` : "",
     visibleChangedFiles.length ? `${visibleChangedFiles.length} 个文件` : "",
@@ -271,17 +286,24 @@ export function MessageProcessDetails({
               {isLoading && !liveMessage ? (
                 <p className="react-process-loading">正在加载运行过程…</p>
               ) : null}
-              {canLoadDurable && process.isError && !liveMessage ? (
+              {canLoadDurable && processError && !liveMessage ? (
                 <div className="react-process-error" role="alert">
                   <span>运行过程加载失败。</span>
-                  <button type="button" onClick={() => void process.refetch()}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void (summaryProcess.isError
+                        ? summaryProcess.refetch()
+                        : detailProcess.refetch())
+                    }
+                  >
                     重试
                   </button>
                 </div>
               ) : null}
-              {orderedTools.map((tool) => (
-                <ToolCallDetails tool={tool} key={tool.toolId} />
-              ))}
+              {!canLoadDurable || liveMessage || detailProcess.data
+                ? orderedTools.map((tool) => <ToolCallDetails tool={tool} key={tool.toolId} />)
+                : null}
               {progress.length ? (
                 <section className="react-process-section">
                   <h3>任务进度</h3>

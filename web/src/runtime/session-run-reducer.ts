@@ -52,6 +52,22 @@ function appendTimelineTool(
   return [...current, { id: `tool-${toolId}`, type: "tool", toolId }];
 }
 
+function finishOpenLiveMessages(
+  liveMessages: SessionRun["liveMessages"],
+  status: "error" | "aborted"
+): SessionRun["liveMessages"] {
+  return Object.fromEntries(
+    Object.entries(liveMessages).map(([invocationId, message]) => [
+      invocationId,
+      {
+        ...message,
+        status:
+          message.status === "thinking" || message.status === "streaming" ? status : message.status,
+      },
+    ])
+  );
+}
+
 export function sessionRunReducer(
   state: SessionRunState,
   action: SessionRunAction
@@ -344,7 +360,7 @@ export function sessionRunReducer(
         }
         return {
           ...run,
-          status: run.status === "error" ? "error" : "done",
+          status: run.status === "error" || run.status === "aborted" ? run.status : "done",
           doneReceived: true,
           liveMessages,
           updatedAt: now,
@@ -356,6 +372,7 @@ export function sessionRunReducer(
         ...run,
         status: "error",
         error: action.error,
+        liveMessages: finishOpenLiveMessages(run.liveMessages, "error"),
         updatedAt: now,
       }));
 
@@ -363,6 +380,7 @@ export function sessionRunReducer(
       return updateRun(state, action.sessionId, (run) => ({
         ...run,
         status: "aborted",
+        liveMessages: finishOpenLiveMessages(run.liveMessages, "aborted"),
         updatedAt: now,
       }));
 
@@ -373,7 +391,7 @@ export function sessionRunReducer(
       return updateRun(state, action.sessionId, (run) => {
         const liveMessages: SessionRun["liveMessages"] = {};
         for (const [invocationId, message] of Object.entries(run.liveMessages)) {
-          if (message.status !== "done" && message.status !== "error") {
+          if (message.status !== "done") {
             liveMessages[invocationId] = message;
             continue;
           }
@@ -391,19 +409,6 @@ export function sessionRunReducer(
         };
       });
 
-    case "session/rekeyed": {
-      if (action.from === action.to) return state;
-      const source = state.runs[action.from];
-      if (!source) return state;
-      const { [action.from]: _removed, ...remaining } = state.runs;
-      return {
-        runs: {
-          ...remaining,
-          [action.to]: { ...source, sessionId: action.to, updatedAt: now },
-        },
-      };
-    }
-
     case "session/disposed": {
       if (!state.runs[action.sessionId]) return state;
       const { [action.sessionId]: _removed, ...remaining } = state.runs;
@@ -411,5 +416,3 @@ export function sessionRunReducer(
     }
   }
 }
-
-export const sessionRunReducerInternals = { emptyRun };

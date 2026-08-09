@@ -36,6 +36,27 @@ describe("formatToolResultForDisplay", () => {
 });
 
 describe("runChatStream", () => {
+  it("rejects a session identity change instead of moving client state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'event: session\ndata: {"sessionId":"unexpected"}\n\n',
+            "event: done\ndata: {}\n\n",
+          ])
+        )
+    );
+    const store = createSessionRunStore();
+    const controller = store.startController("s1");
+
+    await expect(
+      runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller)
+    ).rejects.toThrow("会话标识");
+    expect(store.getSnapshot().runs.s1.status).toBe("connecting");
+  });
+
   it("maps subagent tool display fields into the session run store", async () => {
     const fetchMock = vi
       .fn()
@@ -129,7 +150,7 @@ describe("runChatStream", () => {
       controller
     );
 
-    expect(result.doneReceived).toBe(true);
+    expect(result.malformedFrames).toBe(0);
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       sessionId: "s1",
       clientTurnId: "turn-123",

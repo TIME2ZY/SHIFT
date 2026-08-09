@@ -95,7 +95,13 @@ function createSessionRoutes({
         sendJson(res, 404, { error: "Invocation not found." });
         return true;
       }
-      sendJson(res, 200, projectInvocationProcess(invocationId, events));
+      sendJson(
+        res,
+        200,
+        projectInvocationProcess(invocationId, events, {
+          includeToolDetails: url.searchParams.get("detail") !== "summary",
+        })
+      );
       return true;
     }
 

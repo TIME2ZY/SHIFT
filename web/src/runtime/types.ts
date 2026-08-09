@@ -179,5 +179,4 @@ export type SessionRunAction =
   | { type: "run/failed"; sessionId: string; error: string }
   | { type: "run/aborted"; sessionId: string }
   | { type: "run/synced"; sessionId: string }
-  | { type: "session/rekeyed"; from: string; to: string }
   | { type: "session/disposed"; sessionId: string };

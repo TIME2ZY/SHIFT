@@ -20,18 +20,6 @@ export function createSessionRunStore(
   const controllers = new Map<string, AbortController>();
 
   function dispatch(action: SessionRunAction) {
-    if (action.type === "session/rekeyed" && action.from !== action.to) {
-      const sourceController = controllers.get(action.from);
-      if (sourceController) {
-        const conflictingController = controllers.get(action.to);
-        if (conflictingController && conflictingController !== sourceController) {
-          conflictingController.abort();
-        }
-        controllers.delete(action.from);
-        controllers.set(action.to, sourceController);
-      }
-    }
-
     const next = sessionRunReducer(state, action);
     if (next === state) return;
     state = next;
