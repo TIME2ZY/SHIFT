@@ -12,10 +12,8 @@ export interface ChatRequest {
   clientTurnId?: string;
 }
 
-export interface ChatStreamResult {
-  sessionId: string;
+interface ChatStreamResult {
   malformedFrames: number;
-  doneReceived: boolean;
 }
 
 export interface ChatStreamEvents {
@@ -94,7 +92,7 @@ export async function runChatStream(
   controller: AbortController,
   events: ChatStreamEvents = {}
 ): Promise<ChatStreamResult> {
-  let boundSessionId = request.sessionId;
+  const boundSessionId = request.sessionId;
   let malformedFrames = 0;
   let doneReceived = false;
   let hasStructuredEvents = false;
@@ -137,15 +135,12 @@ export async function runChatStream(
 
     switch (event) {
       case "session": {
-        const nextSessionId =
-          typeof payload.sessionId === "string" ? payload.sessionId : boundSessionId;
-        if (nextSessionId !== boundSessionId) {
-          store.dispatch({
-            type: "session/rekeyed",
-            from: boundSessionId,
-            to: nextSessionId,
-          });
-          boundSessionId = nextSessionId;
+        if (
+          typeof payload.sessionId === "string" &&
+          payload.sessionId &&
+          payload.sessionId !== boundSessionId
+        ) {
+          throw new Error("服务器返回了与请求不一致的会话标识。");
         }
         break;
       }
@@ -357,5 +352,5 @@ export async function runChatStream(
     throw new Error("消息流在完成事件之前中断。");
   }
 
-  return { sessionId: boundSessionId, malformedFrames, doneReceived };
+  return { malformedFrames };
 }

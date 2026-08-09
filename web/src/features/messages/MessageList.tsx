@@ -10,14 +10,14 @@ import type { AgentSummary } from "../agents/types";
 import type { PersistedMessage } from "./types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 
-export interface QuickPrompt {
+interface QuickPrompt {
   title: string;
   description: string;
   prompt: string;
   useWorktree?: true;
 }
 
-export const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
+const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
   {
     title: "审查前端 UI 与美观性",
     description: "分析页面配色、排版规范与动画微交互",
@@ -86,12 +86,22 @@ function isAssistantFinal(message: PersistedMessage): boolean {
   return isAssistantFinalMessage(message);
 }
 
+function liveMessageStatusLabel(
+  status: NonNullable<SessionRun>["liveMessages"][string]["status"]
+): string {
+  if (status === "thinking") return "思考中";
+  if (status === "streaming") return "输出中";
+  if (status === "done") return "已完成";
+  if (status === "aborted") return "已停止";
+  return "运行失败";
+}
+
 /**
  * Scheme A: each invocation attaches process/live details to at most one
  * persisted bubble — prefer the last `assistant-final`. Callbacks never host
  * process data. Until a host exists, live output stays as a standalone bubble.
  */
-export function selectProcessHostIdentities(
+function selectProcessHostIdentities(
   messages: Array<PersistedMessage & { role: "user" | "assistant" }>
 ): Set<string> {
   const hosts = new Set<string>();
@@ -510,11 +520,15 @@ export function MessageList({
           const isAssistant = visibleMessage.role === "assistant";
           const isHost = isAssistant && processHostIdentities.has(identity);
           // Process/live attach only to the invocation host (assistant-final).
-          const liveData = isHost
+          const liveCandidate = isHost
             ? visibleMessage.invocationId
               ? liveMessages.find((item) => item.invocationId === visibleMessage.invocationId)
               : undefined
             : undefined;
+          const liveData =
+            liveCandidate?.status === "thinking" || liveCandidate?.status === "streaming"
+              ? liveCandidate
+              : undefined;
 
           return (
             <MessageRow
@@ -571,7 +585,7 @@ export function MessageList({
               messageKey={key}
               role="assistant"
               author={author}
-              status={message.status === "thinking" ? "思考中" : "输出中"}
+              status={liveMessageStatusLabel(message.status)}
               agentId={message.agentId}
               live
               setMessageRef={setMessageRef}

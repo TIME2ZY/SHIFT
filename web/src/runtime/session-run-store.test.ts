@@ -15,19 +15,4 @@ describe("session run store", () => {
     expect(store.isCurrentController("s1", first)).toBe(true);
     expect(store.releaseController("s1", first)).toBe(true);
   });
-
-  it("moves the active controller when a pending session is rekeyed", () => {
-    const store = createSessionRunStore();
-    const controller = store.startController("_pending");
-
-    store.dispatch({
-      type: "session/rekeyed",
-      from: "_pending",
-      to: "s-real",
-    });
-
-    expect(store.abort("_pending")).toBe(false);
-    expect(store.abort("s-real")).toBe(true);
-    expect(controller.signal.aborted).toBe(true);
-  });
 });

@@ -97,7 +97,8 @@ function appendTimelineText(timeline, type, eventNo, text) {
   });
 }
 
-function projectInvocationProcess(invocationId, events = []) {
+function projectInvocationProcess(invocationId, events = [], options = {}) {
+  const includeToolDetails = options.includeToolDetails !== false;
   const ordered = [...events].sort(
     (left, right) => Number(left?.eventNo || 0) - Number(right?.eventNo || 0)
   );
@@ -162,7 +163,7 @@ function projectInvocationProcess(invocationId, events = []) {
       }
       current.toolName = String(payload.toolName || current.toolName || "tool");
       assignToolDisplayFields(current, payload);
-      mergeToolInput(current, payload);
+      if (includeToolDetails) mergeToolInput(current, payload);
 
       if (kind === "tool.started") {
         current.status = "running";
@@ -184,13 +185,15 @@ function projectInvocationProcess(invocationId, events = []) {
         const finishedAt = eventTime(event);
         if (finishedAt !== undefined) current.finishedAt = finishedAt;
         if (!current.startedAt && payload.startedAt) current.startedAt = payload.startedAt;
-        const outputValue = toolOutputValue(payload, failed);
-        const output = limitedText(outputValue);
-        if (output.text) {
-          if (failed) current.error = output.text;
-          else current.output = output.text;
+        if (includeToolDetails) {
+          const outputValue = toolOutputValue(payload, failed);
+          const output = limitedText(outputValue);
+          if (output.text) {
+            if (failed) current.error = output.text;
+            else current.output = output.text;
+          }
+          if (output.truncated) current.outputTruncated = true;
         }
-        if (output.truncated) current.outputTruncated = true;
       }
 
       if (current.startedAt && current.finishedAt) {
@@ -253,7 +256,7 @@ function projectInvocationProcess(invocationId, events = []) {
     for (const tool of tools.values()) {
       if (tool.status !== "running") continue;
       tool.status = "error";
-      tool.error = error;
+      if (includeToolDetails) tool.error = error;
       tool.failureSource = "lifecycle-terminal";
       tool.failureReason = error;
     }

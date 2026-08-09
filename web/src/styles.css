@@ -1122,6 +1122,10 @@ body {
   background: var(--danger);
 }
 
+.react-process-summary[data-status="aborted"] .react-process-status {
+  background: var(--warning);
+}
+
 .react-process-summary-body {
   display: grid;
   gap: 2px;

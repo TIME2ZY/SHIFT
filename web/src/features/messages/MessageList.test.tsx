@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_CHAT_QUICK_PROMPTS, MessageList, selectProcessHostIdentities } from "./MessageList";
+import { MessageList } from "./MessageList";
 
 function renderMessageList(element: ReactElement) {
   const client = new QueryClient({
@@ -14,41 +14,6 @@ function renderMessageList(element: ReactElement) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-});
-
-describe("selectProcessHostIdentities", () => {
-  it("picks the last assistant-final and ignores callbacks", () => {
-    const hosts = selectProcessHostIdentities([
-      {
-        id: "cb",
-        role: "assistant",
-        invocationId: "i1",
-        messageType: "assistant-callback",
-        content: "handoff",
-      },
-      {
-        id: "f1",
-        role: "assistant",
-        invocationId: "i1",
-        messageType: "assistant-final",
-        content: "status",
-      },
-    ]);
-    expect(hosts).toEqual(new Set(["f1"]));
-  });
-
-  it("returns no host when only callbacks exist for an invocation", () => {
-    const hosts = selectProcessHostIdentities([
-      {
-        id: "cb",
-        role: "assistant",
-        invocationId: "i1",
-        messageType: "assistant-callback",
-        content: "handoff",
-      },
-    ]);
-    expect(hosts.size).toBe(0);
-  });
 });
 
 describe("MessageList", () => {
@@ -68,9 +33,12 @@ describe("MessageList", () => {
       />
     );
 
-    const first = EMPTY_CHAT_QUICK_PROMPTS[0];
-    await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));
-    expect(onUsePrompt).toHaveBeenCalledWith(first);
+    await user.click(screen.getByRole("button", { name: "使用推荐提示：审查前端 UI 与美观性" }));
+    expect(onUsePrompt).toHaveBeenCalledWith({
+      title: "审查前端 UI 与美观性",
+      description: "分析页面配色、排版规范与动画微交互",
+      prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+    });
   });
 
   it("renders persisted and live messages in the same transcript", () => {
@@ -196,49 +164,50 @@ describe("MessageList", () => {
 
   it("restores a persisted message process by invocation id without a duplicate live bubble", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          version: 1,
-          invocationId: "i1",
-          status: "done",
-          thinking: {
-            text: "历史思考",
-            segments: [{ eventNo: 1, text: "历史思考" }],
-          },
-          commentary: { text: "", segments: [] },
-          tools: [
-            {
-              toolId: "t1",
-              toolName: "read_file",
-              status: "done",
-              input: { path: "src/index.js" },
-              output: "文件内容",
-              changedFiles: [],
-            },
-          ],
-          timeline: [
-            {
-              id: "thinking-1",
-              type: "thinking",
-              eventNo: 1,
-              lastEventNo: 1,
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            invocationId: "i1",
+            status: "done",
+            thinking: {
               text: "历史思考",
+              segments: [{ eventNo: 1, text: "历史思考" }],
             },
-            { id: "tool-t1", type: "tool", eventNo: 2, toolId: "t1" },
-            {
-              id: "text-3",
-              type: "text",
-              eventNo: 3,
-              lastEventNo: 3,
-              text: "最终回答",
-            },
-          ],
-          progress: [],
-          changedFiles: [],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )
+            commentary: { text: "", segments: [] },
+            tools: [
+              {
+                toolId: "t1",
+                toolName: "read_file",
+                status: "done",
+                input: { path: "src/index.js" },
+                output: "文件内容",
+                changedFiles: [],
+              },
+            ],
+            timeline: [
+              {
+                id: "thinking-1",
+                type: "thinking",
+                eventNo: 1,
+                lastEventNo: 1,
+                text: "历史思考",
+              },
+              { id: "tool-t1", type: "tool", eventNo: 2, toolId: "t1" },
+              {
+                id: "text-3",
+                type: "text",
+                eventNo: 3,
+                lastEventNo: 3,
+                text: "最终回答",
+              },
+            ],
+            progress: [],
+            changedFiles: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -265,7 +234,7 @@ describe("MessageList", () => {
               agentId: "codex",
               invocationId: "i1",
               text: "最终回答",
-              thinking: "历史思考",
+              thinking: "残留的 live 思考",
               status: "done",
             },
           },
@@ -280,11 +249,19 @@ describe("MessageList", () => {
     );
 
     expect(screen.getAllByText("最终回答")).toHaveLength(1);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("思考")).toBeInTheDocument();
+    expect(screen.queryByText("read_file")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/s1/invocations/i1/process?detail=summary",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+
+    await user.click(screen.getByText("思考"));
+    expect(screen.getByText("历史思考")).toBeInTheDocument();
+    expect(screen.queryByText("残留的 live 思考")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("执行完成"));
     expect(await screen.findByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("思考")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/s1/invocations/i1/process",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
@@ -292,6 +269,80 @@ describe("MessageList", () => {
 
     await user.click(screen.getByText("read_file"));
     expect(screen.getByText("文件内容")).toBeInTheDocument();
+  });
+
+  it("loads and renders markdown commentary for every persisted invocation before expansion", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      const invocationId = input.includes("/i1/") ? "i1" : "i2";
+      const label = invocationId === "i1" ? "进展一" : "进展二";
+      const finalText = invocationId === "i1" ? "第一条回答" : "第二条回答";
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            version: 1,
+            invocationId,
+            status: "done",
+            thinking: { text: "", segments: [] },
+            commentary: { text: `**${label}**`, segments: [] },
+            tools: [],
+            timeline: [
+              {
+                id: `commentary-${invocationId}`,
+                type: "commentary",
+                eventNo: 1,
+                lastEventNo: 1,
+                text: `**${label}**`,
+              },
+              {
+                id: `text-${invocationId}`,
+                type: "text",
+                eventNo: 2,
+                lastEventNo: 2,
+                text: finalText,
+              },
+            ],
+            progress: [],
+            changedFiles: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          {
+            id: "m1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i1",
+            messageType: "assistant-final",
+            content: "第一条回答",
+          },
+          {
+            id: "m2",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i2",
+            messageType: "assistant-final",
+            content: "第二条回答",
+          },
+        ]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={null}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("进展一")).toHaveRole("strong");
+    expect(await screen.findByText("进展二")).toHaveRole("strong");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByText("执行完成")).toHaveLength(2);
   });
 
   it("keeps handoff metadata out of the transcript", () => {
@@ -414,36 +465,37 @@ describe("MessageList", () => {
     const finalText =
       "我查一下这次 handoff 有没有被平台接受，以及 Gemini 是否真的产生了 invocation。";
     const handoffText = "@Gemini\n\n```handoff\nto: Gemini\n```";
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          version: 1,
-          invocationId: "i-handoff",
-          status: "done",
-          thinking: { text: "", segments: [] },
-          tools: [
-            {
-              toolId: "t1",
-              toolName: "shell",
-              status: "done",
-              changedFiles: [],
-            },
-          ],
-          timeline: [
-            { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
-            {
-              id: "text-2",
-              type: "text",
-              eventNo: 2,
-              lastEventNo: 2,
-              text: finalText,
-            },
-          ],
-          progress: [],
-          changedFiles: [],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            invocationId: "i-handoff",
+            status: "done",
+            thinking: { text: "", segments: [] },
+            tools: [
+              {
+                toolId: "t1",
+                toolName: "shell",
+                status: "done",
+                changedFiles: [],
+              },
+            ],
+            timeline: [
+              { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
+              {
+                id: "text-2",
+                type: "text",
+                eventNo: 2,
+                lastEventNo: 2,
+                text: finalText,
+              },
+            ],
+            progress: [],
+            changedFiles: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -500,12 +552,17 @@ describe("MessageList", () => {
 
     expect(screen.getAllByText(finalText)).toHaveLength(1);
     expect(screen.getByText("@Gemini", { exact: false })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("shell")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("执行完成"));
     expect(await screen.findByText("shell")).toBeInTheDocument();
     // Durable process loads only for the final host, not the callback.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/s1/invocations/i-handoff/process?detail=summary",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/s1/invocations/i-handoff/process",
       expect.objectContaining({ signal: expect.any(AbortSignal) })

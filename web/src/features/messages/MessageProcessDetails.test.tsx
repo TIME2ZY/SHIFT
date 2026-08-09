@@ -10,7 +10,8 @@ function renderProcess(process: InvocationProcess, onOpenWorkspace = vi.fn(), co
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  client.setQueryData(queryKeys.sessions.invocationProcess("s1", "i1"), process);
+  client.setQueryData(queryKeys.sessions.invocationProcess("s1", "i1", "summary"), process);
+  client.setQueryData(queryKeys.sessions.invocationProcess("s1", "i1", "full"), process);
 
   const rendered = render(
     <QueryClientProvider client={client}>

@@ -86,6 +86,39 @@ test("projectInvocationProcess restores commentary, thinking, tools, progress, a
   assert.deepEqual(process.changedFiles, [{ path: "web/src/App.tsx", changeType: "modified" }]);
 });
 
+test("projectInvocationProcess omits heavy tool fields from summary projections", () => {
+  const process = projectInvocationProcess(
+    "i-summary",
+    [
+      {
+        eventNo: 1,
+        kind: "tool.started",
+        payload: {
+          toolId: "t1",
+          toolName: "shell",
+          args: { command: "npm test" },
+        },
+      },
+      {
+        eventNo: 2,
+        kind: "tool.finished",
+        payload: {
+          toolId: "t1",
+          toolName: "shell",
+          output: "large output",
+        },
+      },
+      { eventNo: 3, kind: "run.finished", payload: { exitCode: 0 } },
+    ],
+    { includeToolDetails: false }
+  );
+
+  assert.equal(process.tools[0].status, "done");
+  assert.equal(process.tools[0].input, undefined);
+  assert.equal(process.tools[0].output, undefined);
+  assert.equal(process.tools[0].error, undefined);
+});
+
 test("projectInvocationProcess keeps title/label/toolKind and merges finish args", () => {
   const process = projectInvocationProcess("i-sub", [
     {
@@ -232,7 +265,7 @@ test("projectInvocationProcess repairs legacy tool status without failing the ag
 });
 
 test("projectInvocationProcess closes historical open tools at invocation terminal", () => {
-  const process = projectInvocationProcess("i-open", [
+  const events = [
     {
       eventNo: 1,
       kind: "tool.started",
@@ -243,7 +276,9 @@ test("projectInvocationProcess closes historical open tools at invocation termin
       },
     },
     { eventNo: 2, kind: "run.finished", payload: { exitCode: 0 } },
-  ]);
+  ];
+  const process = projectInvocationProcess("i-open", events);
+  const summary = projectInvocationProcess("i-open", events, { includeToolDetails: false });
 
   assert.equal(process.status, "done");
   assert.deepEqual(process.tools[0], {
@@ -256,4 +291,7 @@ test("projectInvocationProcess closes historical open tools at invocation termin
     failureReason: "Invocation reached a terminal state before the tool reported completion.",
     changedFiles: [],
   });
+  assert.equal(summary.tools[0].status, "error");
+  assert.equal(summary.tools[0].input, undefined);
+  assert.equal(summary.tools[0].error, undefined);
 });

@@ -31,7 +31,6 @@ export function useChatActions() {
         clientTurnId,
       });
 
-      let resultSessionId = sessionId;
       let memoryDirty = false;
       try {
         const result = await runChatStream(
@@ -78,11 +77,10 @@ export function useChatActions() {
             },
           }
         );
-        resultSessionId = result.sessionId;
         if (result.malformedFrames > 0) {
           store.dispatch({
             type: "notice/received",
-            sessionId: resultSessionId,
+            sessionId,
             message: `消息流中有 ${result.malformedFrames} 个事件无法解析。`,
           });
           toast.show(`消息流中有 ${result.malformedFrames} 个事件无法解析。`, {
@@ -90,36 +88,36 @@ export function useChatActions() {
           });
         }
       } catch (error) {
-        if (!controller.signal.aborted && store.isCurrentController(resultSessionId, controller)) {
+        if (!controller.signal.aborted && store.isCurrentController(sessionId, controller)) {
           const message = error instanceof Error ? error.message : "连接中断。";
           store.dispatch({
             type: "run/failed",
-            sessionId: resultSessionId,
+            sessionId,
             error: message,
           });
           toast.show(message, { variant: "error", ttl: 7000 });
         }
       } finally {
-        const owned = store.releaseController(resultSessionId, controller);
+        const owned = store.releaseController(sessionId, controller);
         if (owned) {
           const syncs = [
             queryClient.invalidateQueries({
-              queryKey: queryKeys.sessions.messages(resultSessionId),
+              queryKey: queryKeys.sessions.messages(sessionId),
             }),
             queryClient.invalidateQueries({
-              queryKey: queryKeys.sessions.usage(resultSessionId),
+              queryKey: queryKeys.sessions.usage(sessionId),
             }),
             queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
           ];
           if (memoryDirty) {
             syncs.push(
               queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.memories(resultSessionId),
+                queryKey: queryKeys.sessions.memories(sessionId),
               })
             );
           }
           await Promise.all(syncs);
-          store.dispatch({ type: "run/synced", sessionId: resultSessionId });
+          store.dispatch({ type: "run/synced", sessionId });
         }
       }
     },

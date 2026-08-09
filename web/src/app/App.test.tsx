@@ -1,7 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_CHAT_QUICK_PROMPTS } from "../features/messages/MessageList";
 import { App } from "./App";
 
 const mocks = vi.hoisted(() => ({
@@ -96,8 +95,14 @@ describe("App recommended prompt integration", () => {
 
     const input = screen.getByRole("textbox", { name: "消息" });
     const toggle = screen.getByRole("checkbox", { name: "隔离改代码" });
-    const first = EMPTY_CHAT_QUICK_PROMPTS[0];
-    const refactor = EMPTY_CHAT_QUICK_PROMPTS[2];
+    const first = {
+      title: "审查前端 UI 与美观性",
+      prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+    };
+    const refactor = {
+      title: "重构项目核心模块",
+      prompt: "请重构项目核心模块：在隔离 worktree 中全自动重构代码。",
+    };
 
     await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));
     expect(input).toHaveValue(first.prompt);
