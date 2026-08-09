@@ -18,12 +18,17 @@ const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 
 const UI_TOKEN = "seal-lifecycle-token";
+let activeProjectKey = "";
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
-  return fetch(url, { ...init, headers });
+  let body = init.body;
+  if (init.method === "POST" && new URL(url).pathname === "/api/sessions") {
+    body = JSON.stringify({ ...(body ? JSON.parse(body) : {}), projectKey: activeProjectKey });
+  }
+  return fetch(url, { ...init, headers, ...(body !== undefined ? { body } : {}) });
 }
 
 function spawnText(text, opts = {}) {
@@ -67,6 +72,7 @@ async function withSealServer(spawnRunner, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seal-life-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
+  activeProjectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
@@ -85,6 +91,7 @@ async function withSealServer(spawnRunner, fn) {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
     storage.close();
+    activeProjectKey = "";
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
     else process.env.SHIFT_TEST_CAPACITY = prevCapacity;
@@ -94,129 +101,134 @@ async function withSealServer(spawnRunner, fn) {
 test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant; one user", async () => {
   const prompts = [];
   let spawnCount = 0;
-  await withSealServer((_cmd, args) => {
-    spawnCount += 1;
-    prompts.push(args[args.length - 1]);
-    return spawnText("answer after rotate on fresh window");
-  }, async ({ baseUrl, storage }) => {
-    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      body: "{}",
-    }).then((r) => r.json());
+  await withSealServer(
+    (_cmd, args) => {
+      spawnCount += 1;
+      prompts.push(args[args.length - 1]);
+      return spawnText("answer after rotate on fresh window");
+    },
+    async ({ baseUrl, storage }) => {
+      const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        body: "{}",
+      }).then((r) => r.json());
 
-    // Fill open window near capacity so projected (prompt+reserve) cannot fit.
-    // Prime a window, inflate usage, then call again to force PRE-seal.
-    await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "prime window",
-      }),
-    }).then((r) => r.text());
+      // Fill open window near capacity so projected (prompt+reserve) cannot fit.
+      // Prime a window, inflate usage, then call again to force PRE-seal.
+      await apiFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: session.id,
+          agent: "codex",
+          prompt: "prime window",
+        }),
+      }).then((r) => r.text());
 
-    const open = storage.windows
-      .listForThread(session.id)
-      .find((w) => w.state === "active" || w.state === "sealing");
-    assert.ok(open, "expected active window after prime");
-    // usable ≈ 800 tokens → ~3200 chars. Push used near full.
-    storage.windows.addUsage(open.id, {
-      inputChars: 50_000,
-      outputChars: 50_000,
-    });
-    // Also set exact context tokens if column exists via setUsageSnapshot path:
-    if (typeof storage.windows.setUsageSnapshot === "function") {
-      storage.windows.setUsageSnapshot(open.id, {
-        contextUsedTokens: 790,
-        contextUsageSource: "provider_exact",
+      const open = storage.windows
+        .listForThread(session.id)
+        .find((w) => w.state === "active" || w.state === "sealing");
+      assert.ok(open, "expected active window after prime");
+      // usable ≈ 800 tokens → ~3200 chars. Push used near full.
+      storage.windows.addUsage(open.id, {
+        inputChars: 50_000,
+        outputChars: 50_000,
       });
+      // Also set exact context tokens if column exists via setUsageSnapshot path:
+      if (typeof storage.windows.setUsageSnapshot === "function") {
+        storage.windows.setUsageSnapshot(open.id, {
+          contextUsedTokens: 790,
+          contextUsageSource: "provider_exact",
+        });
+      }
+
+      spawnCount = 0;
+      prompts.length = 0;
+      const genBefore = open.generation;
+
+      const body = await apiFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: session.id,
+          agent: "codex",
+          prompt: "second turn must pre-rotate then answer fully",
+        }),
+      }).then((r) => r.text());
+
+      assert.match(body, /event: sealed/);
+      assert.match(body, /pre-call-projected|post-turn/);
+      assert.equal(spawnCount, 1, "exactly one provider spawn after pre-rotate");
+      assert.match(body, /answer after rotate on fresh window/);
+
+      const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>
+        r.json()
+      );
+      const users = (msgRes.messages || []).filter((m) => m.role === "user");
+      const assistants = (msgRes.messages || []).filter(
+        (m) => m.role === "assistant" && String(m.content || "").trim()
+      );
+      // prime + second user = 2 users total; second turn itself one user
+      assert.ok(users.length >= 2);
+      assert.ok(
+        assistants.some((m) => /answer after rotate/.test(m.content)),
+        "non-empty assistant for rotated turn"
+      );
+      assert.ok(!assistants.some((m) => m.content === ""), "no empty assistant-final content");
+
+      const wins = storage.windows.listForThread(session.id);
+      const sealed = wins.filter((w) => w.state === "sealed");
+      assert.ok(sealed.length >= 1);
+      const active = wins.find((w) => w.state === "active");
+      assert.ok(active);
+      assert.ok(active.generation > genBefore, "generation advanced after rotate");
     }
-
-    spawnCount = 0;
-    prompts.length = 0;
-    const genBefore = open.generation;
-
-    const body = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "second turn must pre-rotate then answer fully",
-      }),
-    }).then((r) => r.text());
-
-    assert.match(body, /event: sealed/);
-    assert.match(body, /pre-call-projected|post-turn/);
-    assert.equal(spawnCount, 1, "exactly one provider spawn after pre-rotate");
-    assert.match(body, /answer after rotate on fresh window/);
-
-    const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>
-      r.json()
-    );
-    const users = (msgRes.messages || []).filter((m) => m.role === "user");
-    const assistants = (msgRes.messages || []).filter(
-      (m) => m.role === "assistant" && String(m.content || "").trim()
-    );
-    // prime + second user = 2 users total; second turn itself one user
-    assert.ok(users.length >= 2);
-    assert.ok(
-      assistants.some((m) => /answer after rotate/.test(m.content)),
-      "non-empty assistant for rotated turn"
-    );
-    assert.ok(
-      !assistants.some((m) => m.content === ""),
-      "no empty assistant-final content"
-    );
-
-    const wins = storage.windows.listForThread(session.id);
-    const sealed = wins.filter((w) => w.state === "sealed");
-    assert.ok(sealed.length >= 1);
-    const active = wins.find((w) => w.state === "active");
-    assert.ok(active);
-    assert.ok(active.generation > genBefore, "generation advanced after rotate");
-  });
+  );
 });
 
 test("POST soft seal: complete answer then seal, no mid-stream kill required", async () => {
   let spawnCount = 0;
-  await withSealServer((_cmd, _args) => {
-    spawnCount += 1;
-    // Moderate output under physical kill, but enough with prior usage for soft seal after turn.
-    return spawnText("complete answer that should persist before soft seal ".repeat(20));
-  }, async ({ baseUrl, storage }) => {
-    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      body: "{}",
-    }).then((r) => r.json());
+  await withSealServer(
+    (_cmd, _args) => {
+      spawnCount += 1;
+      // Moderate output under physical kill, but enough with prior usage for soft seal after turn.
+      return spawnText("complete answer that should persist before soft seal ".repeat(20));
+    },
+    async ({ baseUrl, storage }) => {
+      const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        body: "{}",
+      }).then((r) => r.json());
 
-    await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "warm" }),
-    }).then((r) => r.text());
+      await apiFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "warm" }),
+      }).then((r) => r.text());
 
-    const open = storage.windows.listForThread(session.id).find((w) => w.state === "active");
-    // Leave room for this turn's answer but little remaining after (~ soft seal).
-    storage.windows.addUsage(open.id, { inputChars: 12_000, outputChars: 12_000 });
+      const open = storage.windows.listForThread(session.id).find((w) => w.state === "active");
+      // Leave room for this turn's answer but little remaining after (~ soft seal).
+      storage.windows.addUsage(open.id, { inputChars: 12_000, outputChars: 12_000 });
 
-    spawnCount = 0;
-    const text = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "please give a full reply",
-      }),
-    }).then((r) => r.text());
+      spawnCount = 0;
+      const text = await apiFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: session.id,
+          agent: "codex",
+          prompt: "please give a full reply",
+        }),
+      }).then((r) => r.text());
 
-    assert.equal(spawnCount, 1);
-    assert.match(text, /complete answer that should persist/);
-    // Soft seal may or may not fire depending on estimates; if sealed, answer still present.
-    const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>
-      r.json()
-    );
-    const lastAssistant = [...(msgRes.messages || [])].reverse().find((m) => m.role === "assistant");
-    assert.ok(lastAssistant?.content?.includes("complete answer"));
-  });
+      assert.equal(spawnCount, 1);
+      assert.match(text, /complete answer that should persist/);
+      // Soft seal may or may not fire depending on estimates; if sealed, answer still present.
+      const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>
+        r.json()
+      );
+      const lastAssistant = [...(msgRes.messages || [])]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      assert.ok(lastAssistant?.content?.includes("complete answer"));
+    }
+  );
 });
 
 test("tiny capacity: spawn once and never leave only empty assistant", async () => {
@@ -225,6 +237,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seal-tiny-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
+  activeProjectKey = storage.projects.openDirectory(tmpDir).projectKey;
   let spawns = 0;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
@@ -265,6 +278,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
     storage.close();
+    activeProjectKey = "";
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
     else process.env.SHIFT_TEST_CAPACITY = prevCapacity;

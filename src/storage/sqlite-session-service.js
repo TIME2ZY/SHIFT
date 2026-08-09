@@ -8,19 +8,12 @@ const { withSqliteBusyRetry } = require("./sqlite-retry");
  * worktree is process-local runtime state (authoritative copy lives in the
  * worktree manager state file); it is not part of the durable thread row.
  */
-function createSqliteSessionService({
-  storage,
-  logger = console,
-  idFactory = generateId,
-  defaultProjectDir = "",
-} = {}) {
-  if (!storage?.threads || !storage?.messages) {
-    throw new Error("SQLite session service requires thread and message repositories.");
+function createSqliteSessionService({ storage, logger = console, idFactory = generateId } = {}) {
+  if (!storage?.threads || !storage?.messages || !storage?.projects) {
+    throw new Error("SQLite session service requires Thread, Message, and Project repositories.");
   }
 
   const worktrees = new Map();
-  const initialProjectDir =
-    typeof defaultProjectDir === "string" ? defaultProjectDir : "";
 
   function attempt(operation, work) {
     try {
@@ -50,15 +43,16 @@ function createSqliteSessionService({
     };
   }
 
-  function createSession({ projectDir = initialProjectDir } = {}) {
+  function createSession({ projectKey } = {}) {
     return attempt("create session", () => {
+      const project = storage.projects.requireActive(projectKey);
       const id = idFactory();
       assertValidOpaqueId(id, "sessionId");
       const createdAt = new Date().toISOString();
       storage.threads.create({
         id,
         title: "",
-        projectDir,
+        project,
         lastAgentId: null,
         createdAt,
         updatedAt: createdAt,
@@ -69,12 +63,17 @@ function createSqliteSessionService({
 
   function getSession(sessionId) {
     if (!isValidOpaqueId(sessionId)) return null;
-    return attempt("get session", () => toSession(storage.threads.get(sessionId)));
+    return attempt("get session", () => {
+      const thread = storage.threads.get(sessionId);
+      if (!thread?.projectKey || !storage.projects.get(thread.projectKey)) return null;
+      return toSession(thread);
+    });
   }
 
-  function listSessions() {
-    return attempt("list sessions", () =>
-      storage.threads.listWithMessageCounts().map((thread) => {
+  function listSessions(projectKey) {
+    return attempt("list sessions", () => {
+      storage.projects.requireActive(projectKey);
+      return storage.threads.listForProjectWithMessageCounts(projectKey).map((thread) => {
         const participantAgentIds = [];
         const seenAgents = new Set();
         for (const message of storage.messages.listForThread(thread.id)) {
@@ -94,42 +93,15 @@ function createSqliteSessionService({
           lastAgent: thread.lastAgentId || "",
           participantAgentIds,
         };
-      })
-    );
-  }
-
-  function ensureThread(sessionId, { allowCreate = true } = {}) {
-    assertValidOpaqueId(sessionId, "sessionId");
-    let thread = storage.threads.get(sessionId);
-    if (thread) return thread;
-    if (!allowCreate) return null;
-    const createdAt = new Date().toISOString();
-    storage.threads.create({
-      id: sessionId,
-      title: "",
-      projectDir: initialProjectDir,
-      lastAgentId: null,
-      createdAt,
-      updatedAt: createdAt,
-    });
-    return storage.threads.get(sessionId);
-  }
-
-  function setSessionProjectDir(sessionId, projectDir) {
-    if (!isValidOpaqueId(sessionId)) return null;
-    return attempt("set project dir", () => {
-      const existing = storage.threads.get(sessionId);
-      if (!existing) return null;
-      storage.threads.upsert({
-        id: sessionId,
-        title: existing.title,
-        projectDir: projectDir || "",
-        lastAgentId: existing.lastAgentId,
-        createdAt: existing.createdAt,
-        updatedAt: new Date().toISOString(),
       });
-      return toSession(storage.threads.get(sessionId));
     });
+  }
+
+  function ensureThread(sessionId) {
+    assertValidOpaqueId(sessionId, "sessionId");
+    const thread = storage.threads.get(sessionId);
+    if (!thread?.projectKey || !storage.projects.get(thread.projectKey)) return null;
+    return thread;
   }
 
   function setSessionWorktree(sessionId, worktree) {
@@ -151,7 +123,6 @@ function createSqliteSessionService({
       storage.threads.upsert({
         id: sessionId,
         title: existing.title,
-        projectDir: existing.projectDir,
         lastAgentId: agentId,
         createdAt: existing.createdAt,
         updatedAt: new Date().toISOString(),
@@ -169,9 +140,8 @@ function createSqliteSessionService({
   function appendToSession(sessionId, message, options = {}) {
     if (!isValidOpaqueId(sessionId)) return null;
     return attempt("append message", () => {
-      const allowCreate = options.allowCreate !== false;
       return storage.transaction(() => {
-        const thread = ensureThread(sessionId, { allowCreate });
+        const thread = ensureThread(sessionId);
         if (!thread) return null;
 
         const createdAt = new Date().toISOString();
@@ -197,7 +167,6 @@ function createSqliteSessionService({
         storage.threads.upsert({
           id: sessionId,
           title,
-          projectDir: thread.projectDir || "",
           lastAgentId,
           createdAt: thread.createdAt,
           updatedAt: new Date().toISOString(),
@@ -236,7 +205,6 @@ function createSqliteSessionService({
       const message = storage.messages.findUserByClientTurnId(sessionId, clientTurnId);
       return messageFromSqlite(message);
     },
-    setSessionProjectDir,
     setSessionWorktree,
     setSessionLastAgent,
     releaseSession,

@@ -70,7 +70,6 @@ function createServerStorage(options = {}, logger = console) {
     ? createSqliteSessionService({
         storage,
         logger,
-        defaultProjectDir: options.defaultProjectDir,
       })
     : null;
   const pendingOutboxAtStart = Number(storage?.outbox?.health?.().pending || 0);

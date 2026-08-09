@@ -14,9 +14,9 @@ const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
 const { createDeliveryVerifier } = require("../worktree/delivery-verifier");
 const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
-const projectDirService = require("./project-dir");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
+const { createProjectRoutes } = require("./project-routes");
 const { createMemoryRoutes } = require("./memory-routes");
 const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
@@ -39,7 +39,6 @@ const {
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 } = skills;
-const { validateProjectDir } = projectDirService;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
 // Git root of the chat app itself, used to detect self-modification previews.
@@ -111,7 +110,6 @@ function createServer(options = {}) {
       ...options,
       memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
       auditTranscriptDir,
-      defaultProjectDir: ROOT,
     },
     logger
   );
@@ -138,18 +136,14 @@ function createServer(options = {}) {
   });
   const activeInvocations = new Map();
   const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
-  const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
+  const { buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
     runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
   });
   _previewManagers.add(worktreeManager);
 
-  function createSessionDurable() {
-    return sqliteSessionService.createSession();
-  }
-
-  function updateProjectDirDurable(sessionId, projectDir) {
-    return sqliteSessionService.setSessionProjectDir(sessionId, projectDir);
+  function createSessionDurable(input) {
+    return sqliteSessionService.createSession(input);
   }
 
   function updateWorktreeDurable(sessionId, worktree) {
@@ -174,8 +168,8 @@ function createServer(options = {}) {
     return sqliteSessionService.getSession(sessionId);
   }
 
-  function listSessionsDurable() {
-    return sqliteSessionService.listSessions();
+  function listSessionsDurable(projectKey) {
+    return sqliteSessionService.listSessions(projectKey);
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -198,19 +192,35 @@ function createServer(options = {}) {
     } catch {}
   }
 
+  function archiveProjectDurable(projectKey) {
+    for (const sessionId of activeInvocations.keys()) {
+      const thread = storageContext.storage.threads.getIncludingArchived(sessionId);
+      if (thread?.projectKey !== projectKey) continue;
+      const error = new Error(`Project ${projectKey} has an active runtime invocation.`);
+      error.code = "PROJECT_ACTIVE_INVOCATIONS";
+      error.statusCode = 409;
+      throw error;
+    }
+    return storageContext.storage.projects.archive(projectKey);
+  }
+
+  const handleProjectRoutes = createProjectRoutes({
+    projects: storageContext.storage.projects,
+    listSessions: listSessionsDurable,
+    archiveProject: archiveProjectDurable,
+    sendJson,
+    readJsonBody,
+  });
+
   const handleSessionRoutes = createSessionRoutes({
-    rootDir: ROOT,
     worktreeManager,
     cleanupSessionRuntime,
     sendJson,
     readJsonBody,
-    listSessions: listSessionsDurable,
     createSession: createSessionDurable,
     getSession: getSessionDurable,
     deleteSession: deleteSessionDurable,
     setSessionWorktree: updateWorktreeDurable,
-    validateProjectDir,
-    setSessionProjectDir: updateProjectDirDurable,
     usageStorage: storageContext.storage,
     recallService,
   });
@@ -241,7 +251,6 @@ function createServer(options = {}) {
     logger,
   });
   const handleChatRoutes = createChatRoutes({
-    rootDir: ROOT,
     selfGitRoot: SELF_GIT_ROOT,
     options,
     AGENTS,
@@ -261,7 +270,6 @@ function createServer(options = {}) {
     sendJson,
     sendSse,
     readJsonBody,
-    buildInvokeArgs,
     buildChatArgs,
     augmentPrompt,
     getMaxA2ADepth,
@@ -270,9 +278,6 @@ function createServer(options = {}) {
     runChildStream,
     spawnRunner,
     getSession: getSessionDurable,
-    createSession: createSessionDurable,
-    setSessionProjectDir: updateProjectDirDurable,
-    validateProjectDir,
     setSessionWorktree: updateWorktreeDurable,
     appendToSession: appendToSessionDurable,
     findUserMessageByClientTurnId: findUserMessageByClientTurnIdDurable,
@@ -315,6 +320,10 @@ function createServer(options = {}) {
     }
 
     if (await handleStorageRoutes(req, res, url)) {
+      return;
+    }
+
+    if (await handleProjectRoutes(req, res, url)) {
       return;
     }
 

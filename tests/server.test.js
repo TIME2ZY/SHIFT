@@ -12,12 +12,14 @@ const { createCollabTaskRegistry } = require("../src/agents/collab-task-registry
 const { hashUserGoal, hashSolutionBaseline } = require("../src/agents/outcome-evidence-gate");
 const { hashImplementationPlan } = require("../src/agents/implementation-plan-gate");
 const { createStorage } = require("../src/storage");
+const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
+const projectKeysByOrigin = new Map();
 
-function fetch(input, init = {}) {
+async function fetch(input, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Shift-UI-Token", TEST_UI_TOKEN);
   const method = String(init.method || "GET").toUpperCase();
@@ -25,6 +27,38 @@ function fetch(input, init = {}) {
   if (["POST", "PUT", "PATCH"].includes(method) && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
     if (body === undefined) body = "{}";
+  }
+  const url = new URL(String(input));
+  const projectKey = projectKeysByOrigin.get(url.origin);
+  if (projectKey && method === "GET" && url.pathname === "/api/sessions") {
+    input = `${url.origin}/api/projects/${encodeURIComponent(projectKey)}/sessions`;
+  }
+  if (projectKey && method === "POST" && url.pathname === "/api/sessions") {
+    const parsed = body ? JSON.parse(String(body)) : {};
+    body = JSON.stringify({ ...parsed, projectKey });
+  }
+  if (projectKey && method === "POST" && url.pathname === "/api/chat") {
+    const parsed = body ? JSON.parse(String(body)) : {};
+    let chatProjectKey = projectKey;
+    if (typeof parsed.projectDir === "string" && parsed.projectDir) {
+      const opened = await nativeFetch(`${url.origin}/api/projects/open`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ dir: parsed.projectDir }),
+      }).then((response) => response.json());
+      if (opened.project?.projectKey) chatProjectKey = opened.project.projectKey;
+      delete parsed.projectDir;
+    }
+    if (!parsed.sessionId) {
+      const created = await nativeFetch(`${url.origin}/api/sessions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectKey: chatProjectKey }),
+      }).then((response) => response.json());
+      body = JSON.stringify({ ...parsed, sessionId: created.session.id });
+    } else {
+      body = JSON.stringify(parsed);
+    }
   }
   return nativeFetch(input, { ...init, headers, ...(body !== undefined ? { body } : {}) });
 }
@@ -71,13 +105,16 @@ async function withServer(options, fn) {
   delete serverOptions.initialSessionIds;
   const memoryDbFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: memoryDbFile });
-  if (initialSessionIds.length > 0) {
-    const storage = createStorage({ file: memoryDbFile });
-    try {
-      for (const sessionId of initialSessionIds) storage.threads.create({ id: sessionId });
-    } finally {
-      storage.close();
+  let projectKey;
+  const storage = createStorage({ file: memoryDbFile });
+  try {
+    const project = storage.projects.openDirectory(tmpDir);
+    projectKey = project.projectKey;
+    for (const sessionId of initialSessionIds) {
+      storage.threads.create({ id: sessionId, project });
     }
+  } finally {
+    storage.close();
   }
   const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
   if (!prevTranscriptDir) {
@@ -93,11 +130,13 @@ async function withServer(options, fn) {
     ...serverOptions,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  projectKeysByOrigin.set(origin, projectKey);
 
   try {
-    const { port } = server.address();
-    await fn(`http://127.0.0.1:${port}`, { memoryDbFile });
+    await fn(origin, { memoryDbFile, projectKey });
   } finally {
+    projectKeysByOrigin.delete(origin);
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
     if (!prevTranscriptDir) {
@@ -255,68 +294,6 @@ test("chat rejects unsafe and unknown client-supplied session IDs", async () => 
       });
       assert.equal(unknown.status, 404);
       assert.equal(spawnCount, 0);
-    }
-  );
-});
-
-test("rejects unknown agent", async () => {
-  await withServer({}, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/invoke`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "unknown", prompt: "hello" }),
-    });
-    const body = await response.json();
-
-    assert.equal(response.status, 400);
-    assert.match(body.error, /Unsupported agent/);
-  });
-});
-
-test("streams child stdout and exit events", async () => {
-  const calls = [];
-  const child = createMockChild();
-
-  await withServer(
-    {
-      spawnRunner(command, args) {
-        calls.push({ command, args });
-        process.nextTick(() => {
-          child.stdout.write("hello");
-          child.stderr.write("thinking");
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/invoke`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
-      });
-      const text = await response.text();
-
-      assert.equal(response.status, 200);
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0].command, process.execPath);
-      assert.equal(
-        calls[0].args[0],
-        path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
-      );
-      assert.equal(calls[0].args[1], "--agent");
-      assert.equal(calls[0].args[2], "opencode");
-      assert.ok(
-        calls[0].args[3].endsWith("hello"),
-        `Expected last arg to end with "hello", got: ${calls[0].args[3]?.slice(-50)}`
-      );
-      assert.ok(
-        calls[0].args[3].includes("APPLICATION SKILL"),
-        "Expected augmented prompt to contain APPLICATION SKILL marker"
-      );
-      assert.match(text, /event: stdout\ndata: \{"text":"hello"\}/);
-      assert.match(text, /event: stderr\ndata: \{"text":"thinking"\}/);
-      assert.match(text, /event: exit\ndata: \{"code":0,"signal":null\}/);
     }
   );
 });
@@ -772,20 +749,20 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
   );
 });
 
-test("messages endpoint returns empty history when no sessions exist", async () => {
+test("messages endpoint requires an explicit Session scope", async () => {
   await withServer({}, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/messages`);
     const body = await response.json();
 
-    assert.equal(response.status, 200);
-    assert.deepEqual(body.messages, []);
+    assert.equal(response.status, 400);
+    assert.match(body.error, /sessionId is required/);
   });
 });
 
 // ── Session CRUD tests ─────────────────────────────────────────
 
-test("POST /api/sessions creates a new session", async () => {
-  await withServer({}, async (baseUrl) => {
+test("POST /api/sessions creates a Project-bound session", async () => {
+  await withServer({}, async (baseUrl, { projectKey }) => {
     const response = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
     const body = await response.json();
 
@@ -794,18 +771,20 @@ test("POST /api/sessions creates a new session", async () => {
     assert.equal(body.session.title, "");
     assert.deepEqual(body.session.messages, []);
     assert.equal(body.session.messageCount, 0);
-    assert.equal(body.session.projectDir, path.resolve(__dirname, ".."));
-    assert.ok(body.session.projectKey);
+    assert.equal(body.session.projectKey, projectKey);
+    assert.ok(body.session.projectDir);
   });
 });
 
-test("GET /api/sessions lists all sessions", async () => {
-  await withServer({}, async (baseUrl) => {
+test("GET /api/projects/:projectKey/sessions lists only that Project's Sessions", async () => {
+  await withServer({}, async (baseUrl, { projectKey }) => {
     // Create two sessions
     await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
     await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
 
-    const response = await fetch(`${baseUrl}/api/sessions`);
+    const response = await fetch(
+      `${baseUrl}/api/projects/${encodeURIComponent(projectKey)}/sessions`
+    );
     const body = await response.json();
 
     assert.equal(response.status, 200);
@@ -1058,7 +1037,7 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
   );
 });
 
-test("POST /api/chat rejects invalid projectDir", async () => {
+test("POST /api/chat rejects the retired projectDir override", async () => {
   await withServer(
     {
       spawnRunner() {
@@ -1071,12 +1050,19 @@ test("POST /api/chat rejects invalid projectDir", async () => {
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" }).then((response) =>
+        response.json()
+      );
+      const response = await nativeFetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
         body: JSON.stringify({
           agent: "codex",
           prompt: "hello",
+          sessionId: created.session.id,
           projectDir: path.join(os.tmpdir(), "definitely-missing-project-dir"),
         }),
       });
@@ -1084,12 +1070,12 @@ test("POST /api/chat rejects invalid projectDir", async () => {
 
       assert.equal(response.status, 400);
       const body = JSON.parse(text);
-      assert.match(body.error, /Directory not found/);
+      assert.match(body.error, /cannot be changed/);
     }
   );
 });
 
-test("chat binds an unassigned legacy session to the server project before execution", async () => {
+test("chat preserves the Project binding assigned when the Session was created", async () => {
   await withServer(
     {
       initialSessionIds: ["legacy-empty-session"],
@@ -1106,7 +1092,8 @@ test("chat binds an unassigned legacy session to the server project before execu
       const before = await fetch(`${baseUrl}/api/sessions/legacy-empty-session`).then((response) =>
         response.json()
       );
-      assert.equal(before.session.projectDir, "");
+      const originalProjectKey = before.session.projectKey;
+      assert.ok(before.session.projectDir);
 
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
@@ -1124,13 +1111,12 @@ test("chat binds an unassigned legacy session to the server project before execu
       const after = await fetch(`${baseUrl}/api/sessions/legacy-empty-session`).then((result) =>
         result.json()
       );
-      assert.equal(after.session.projectDir, path.resolve(__dirname, ".."));
-      assert.ok(after.session.projectKey);
+      assert.equal(after.session.projectKey, originalProjectKey);
     }
   );
 });
 
-test("project endpoint stores projectDir per session and chat reuses the saved directory", async () => {
+test("Project opening creates Sessions whose execution directories cannot drift", async () => {
   const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "server-project-a-"));
   const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "server-project-b-"));
   const cwds = [];
@@ -1148,52 +1134,56 @@ test("project endpoint stores projectDir per session and chat reuses the saved d
       },
     },
     async (baseUrl) => {
-      const createdA = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-      const { session: sessionA } = await createdA.json();
-      const createdB = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-      const { session: sessionB } = await createdB.json();
+      const projectA = await fetch(`${baseUrl}/api/projects/open`, {
+        method: "POST",
+        body: JSON.stringify({ dir: dirA }),
+      }).then((response) => response.json());
+      const projectB = await fetch(`${baseUrl}/api/projects/open`, {
+        method: "POST",
+        body: JSON.stringify({ dir: dirB }),
+      }).then((response) => response.json());
+      const sessionA = await nativeFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
+        body: JSON.stringify({ projectKey: projectA.project.projectKey }),
+      }).then((response) => response.json());
+      const sessionB = await nativeFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
+        body: JSON.stringify({ projectKey: projectB.project.projectKey }),
+      }).then((response) => response.json());
 
-      let response = await fetch(`${baseUrl}/api/project`, {
+      let response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionA.id, dir: dirA }),
-      });
-      assert.equal(response.status, 200);
-      assert.equal((await response.json()).dir, dirA);
-
-      response = await fetch(`${baseUrl}/api/project`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sessionB.id, dir: dirB }),
-      });
-      assert.equal(response.status, 200);
-      assert.equal((await response.json()).dir, dirB);
-
-      response = await fetch(`${baseUrl}/api/project?sessionId=${encodeURIComponent(sessionA.id)}`);
-      assert.equal(response.status, 200);
-      assert.equal((await response.json()).dir, dirA);
-
-      response = await fetch(`${baseUrl}/api/project?sessionId=${encodeURIComponent(sessionB.id)}`);
-      assert.equal(response.status, 200);
-      assert.equal((await response.json()).dir, dirB);
-
-      response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "hello A", sessionId: sessionA.id }),
-      });
-      assert.equal(response.status, 200);
-      await response.text();
-
-      response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "hello B", sessionId: sessionB.id }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "hello A",
+          sessionId: sessionA.session.id,
+        }),
       });
       assert.equal(response.status, 200);
       await response.text();
 
-      assert.deepEqual(cwds, [dirA, dirB]);
+      response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "hello B",
+          sessionId: sessionB.session.id,
+        }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+
+      assert.deepEqual(cwds, [projectA.project.canonicalPath, projectB.project.canonicalPath]);
     }
   );
 });
@@ -1229,10 +1219,10 @@ test("chat endpoint does not create a worktree by default", async () => {
 
       assert.equal(response.status, 200);
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].cwd, baseDir);
+      assert.equal(calls[0].cwd, normalizeCanonicalPath(baseDir));
       assert.equal(calls[0].env.SHIFT_WORKTREE, "0");
-      assert.equal(calls[0].env.SHIFT_BASE_DIR, baseDir);
-      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, baseDir);
+      assert.equal(calls[0].env.SHIFT_BASE_DIR, normalizeCanonicalPath(baseDir));
+      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, normalizeCanonicalPath(baseDir));
       assert.equal(calls[0].env.SHIFT_BRANCH, "");
     }
   );
@@ -1285,7 +1275,7 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       assert.equal(response.status, 200);
       const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
       assert.equal(worktreeCalls.length, 1);
-      assert.equal(worktreeCalls[0].requestedBaseDir, baseDir);
+      assert.equal(worktreeCalls[0].requestedBaseDir, normalizeCanonicalPath(baseDir));
       assert.equal(worktreeCalls[0].sessionId, sessionId);
       assert.equal(calls[0].cwd, worktreeDir);
       assert.equal(
@@ -1707,8 +1697,18 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-      const { session } = await created.json();
+      const opened = await fetch(`${baseUrl}/api/projects/open`, {
+        method: "POST",
+        body: JSON.stringify({ dir: baseDir }),
+      }).then((response) => response.json());
+      const { session } = await nativeFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
+        body: JSON.stringify({ projectKey: opened.project.projectKey }),
+      }).then((response) => response.json());
 
       for (const prompt of ["first", "second"]) {
         const response = await fetch(`${baseUrl}/api/chat`, {
@@ -1762,8 +1762,18 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-      const { session } = await created.json();
+      const opened = await fetch(`${baseUrl}/api/projects/open`, {
+        method: "POST",
+        body: JSON.stringify({ dir: baseDir }),
+      }).then((response) => response.json());
+      const { session } = await nativeFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Shift-UI-Token": TEST_UI_TOKEN,
+        },
+        body: JSON.stringify({ projectKey: opened.project.projectKey }),
+      }).then((response) => response.json());
 
       const first = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
@@ -1798,9 +1808,9 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
       assert.equal(runs[0].env.SHIFT_WORKTREE, "1");
       assert.equal(runs[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
 
-      assert.equal(runs[1].cwd, baseDir);
+      assert.equal(runs[1].cwd, normalizeCanonicalPath(baseDir));
       assert.equal(runs[1].env.SHIFT_WORKTREE, "0");
-      assert.equal(runs[1].env.SHIFT_WORKTREE_DIR, baseDir);
+      assert.equal(runs[1].env.SHIFT_WORKTREE_DIR, normalizeCanonicalPath(baseDir));
       assert.equal(runs[1].env.SHIFT_BRANCH, "");
     }
   );
@@ -1820,6 +1830,9 @@ test("chat ignores legacy session maps when switching into worktree mode", async
 
   if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
   prepareCleanEpoch({ file: memoryDbFile });
+  const seedStorage = createStorage({ file: memoryDbFile });
+  const projectKey = seedStorage.projects.openDirectory(baseDir).projectKey;
+  seedStorage.close();
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
@@ -1856,6 +1869,7 @@ test("chat ignores legacy session maps when switching into worktree mode", async
   try {
     const { port } = server.address();
     const baseUrl = `http://127.0.0.1:${port}`;
+    projectKeysByOrigin.set(baseUrl, projectKey);
     const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
     const { session } = await created.json();
 
@@ -1916,6 +1930,9 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
 
   if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
   prepareCleanEpoch({ file: memoryDbFile });
+  const seedStorage = createStorage({ file: memoryDbFile });
+  const projectKey = seedStorage.projects.openDirectory(baseDir).projectKey;
+  seedStorage.close();
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
@@ -1959,6 +1976,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   try {
     const { port } = server.address();
     const baseUrl = `http://127.0.0.1:${port}`;
+    projectKeysByOrigin.set(baseUrl, projectKey);
     const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
     const { session } = await created.json();
 
@@ -2020,9 +2038,9 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     assert.equal(runs[2].cwd, worktreeDir);
     assert.equal(runs[2].env.INVOKE_SESSION_ID, "provider-wt-1");
     assert.equal(runs[2].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
-    assert.equal(runs[3].cwd, baseDir);
+    assert.equal(runs[3].cwd, normalizeCanonicalPath(baseDir));
     assert.equal(runs[3].env.INVOKE_SESSION_ID, "provider-base-1");
-    assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${baseDir}`);
+    assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${normalizeCanonicalPath(baseDir)}`);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();

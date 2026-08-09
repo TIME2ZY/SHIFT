@@ -11,12 +11,27 @@ const { createStorage } = require("../../src/storage");
 const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 
 const UI_TOKEN = "sqlite-storage-test-token";
+const projectKeysByOrigin = new Map();
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
-  return fetch(url, { ...init, headers });
+  const parsedUrl = new URL(url);
+  const projectKey = projectKeysByOrigin.get(parsedUrl.origin);
+  let target = url;
+  let body = init.body;
+  if (projectKey && init.method === "POST" && parsedUrl.pathname === "/api/sessions") {
+    body = JSON.stringify({ ...(body ? JSON.parse(body) : {}), projectKey });
+  }
+  if (
+    projectKey &&
+    (!init.method || init.method === "GET") &&
+    parsedUrl.pathname === "/api/sessions"
+  ) {
+    target = `${parsedUrl.origin}/api/projects/${encodeURIComponent(projectKey)}/sessions`;
+  }
+  return fetch(target, { ...init, headers, ...(body !== undefined ? { body } : {}) });
 }
 
 function successfulSpawn() {
@@ -122,6 +137,7 @@ test("chat reads and writes thread state only through SQLite", async () => {
   process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
     invocationsFile: path.join(tmpDir, "invocations.json"),
@@ -134,6 +150,7 @@ test("chat reads and writes thread state only through SQLite", async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  projectKeysByOrigin.set(baseUrl, projectKey);
 
   try {
     const createdResponse = await apiFetch(`${baseUrl}/api/sessions`, {
@@ -215,6 +232,7 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   let run = 0;
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
@@ -245,6 +263,7 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  projectKeysByOrigin.set(baseUrl, projectKey);
 
   try {
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
@@ -278,6 +297,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "window-runtime-server-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const prompts = [];
   const server = createServer({
     sessionsFile: path.join(tmpDir, "sessions.json"),
@@ -293,6 +313,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  projectKeysByOrigin.set(baseUrl, projectKey);
 
   try {
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
@@ -358,6 +379,9 @@ test("default sqlite mode restores sessions after restart without legacy writes"
   const providerCalls = [];
   const firstConclusion = "结论：SQLite restart context survives。";
   prepareCleanEpoch({ file: memoryDbFile });
+  const seedStorage = createStorage({ file: memoryDbFile });
+  const projectKey = seedStorage.projects.openDirectory(tmpDir).projectKey;
+  seedStorage.close();
 
   function startServer() {
     const server = createServer({
@@ -379,6 +403,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
   try {
     firstServer = await startServer();
     const firstUrl = `http://127.0.0.1:${firstServer.address().port}`;
+    projectKeysByOrigin.set(firstUrl, projectKey);
     const { session } = await apiFetch(`${firstUrl}/api/sessions`, {
       method: "POST",
       body: "{}",
@@ -408,6 +433,7 @@ test("default sqlite mode restores sessions after restart without legacy writes"
 
     secondServer = await startServer();
     const secondUrl = `http://127.0.0.1:${secondServer.address().port}`;
+    projectKeysByOrigin.set(secondUrl, projectKey);
     const sessions = await apiFetch(`${secondUrl}/api/sessions`).then((response) =>
       response.json()
     );

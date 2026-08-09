@@ -40,6 +40,14 @@ function createThreadRepository(db) {
     GROUP BY t.id
     ORDER BY t.updated_at DESC, t.created_at DESC
   `);
+  const listForProjectWithMessageCounts = db.prepare(`
+    SELECT t.*, COUNT(m.id) AS message_count
+    FROM threads t
+    LEFT JOIN messages m ON m.thread_id = t.id
+    WHERE t.deleted_at IS NULL AND t.project_key = ?
+    GROUP BY t.id
+    ORDER BY t.updated_at DESC, t.created_at DESC
+  `);
   const softDelete = db.prepare(
     "UPDATE threads SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
   );
@@ -64,25 +72,24 @@ function createThreadRepository(db) {
 
   function applyIdentity(row, projectDir, options = {}) {
     const existing = row ? mapThread(row) : null;
-    const nextDir =
-      projectDir !== undefined ? stringOrEmpty(projectDir) : existing?.projectDir || "";
-
-    // First bind (empty → path) is allowed after L0 exists so users can attach a
-    // project after chatting. Re-binding to a different non-empty path is locked.
-    if (existing && projectDir !== undefined && projectDirChanged(existing.projectDir, nextDir)) {
-      const hadProject = Boolean(String(existing.projectDir || "").trim());
-      if (
-        hadProject &&
-        hasL0Evidence(existing.id) &&
-        options.allowProjectChange !== true
-      ) {
-        const error = new Error(
-          "Cannot change projectDir after the thread has evidence; create a new thread."
-        );
-        error.code = "PROJECT_DIR_LOCKED";
+    if (options.project) {
+      const project = normalizeProjectBinding(options.project);
+      if (existing && existing.projectKey !== project.projectKey) {
+        const error = new Error("Cannot change a thread's Project after creation.");
+        error.code = "PROJECT_BINDING_IMMUTABLE";
         error.statusCode = 409;
         throw error;
       }
+      return project;
+    }
+    const nextDir =
+      projectDir !== undefined ? stringOrEmpty(projectDir) : existing?.projectDir || "";
+
+    if (existing && projectDir !== undefined && projectDirChanged(existing.projectDir, nextDir)) {
+      const error = new Error("Cannot change a thread's Project after creation.");
+      error.code = "PROJECT_BINDING_IMMUTABLE";
+      error.statusCode = 409;
+      throw error;
     }
 
     if (existing && projectDir === undefined) {
@@ -178,6 +185,13 @@ function createThreadRepository(db) {
       }));
     },
 
+    listForProjectWithMessageCounts(projectKey) {
+      return listForProjectWithMessageCounts.all(projectKey).map((row) => ({
+        ...mapThread(row),
+        messageCount: Number(row.message_count || 0),
+      }));
+    },
+
     /** Default product delete: archive (soft). */
     archive(id, options = {}) {
       const now = options.at || new Date().toISOString();
@@ -203,12 +217,12 @@ function createThreadRepository(db) {
           metadataJson: options.metadata ? JSON.stringify(options.metadata) : null,
         });
         // Null origin on surviving project memories + their search projection.
-        db.prepare("UPDATE memory_entries SET origin_thread_id = NULL WHERE origin_thread_id = ?").run(
-          id
-        );
-        db.prepare("UPDATE memory_search SET origin_thread_id = NULL WHERE origin_thread_id = ?").run(
-          id
-        );
+        db.prepare(
+          "UPDATE memory_entries SET origin_thread_id = NULL WHERE origin_thread_id = ?"
+        ).run(id);
+        db.prepare(
+          "UPDATE memory_search SET origin_thread_id = NULL WHERE origin_thread_id = ?"
+        ).run(id);
         return hardDelete.run(id).changes > 0;
       })();
     },
@@ -237,6 +251,28 @@ function createThreadRepository(db) {
     },
 
     hasL0Evidence,
+  };
+}
+
+function normalizeProjectBinding(project) {
+  if (!project || typeof project !== "object") {
+    throw new Error("Project binding is required.");
+  }
+  const projectKey = requiredString(project.projectKey, "project key");
+  const canonicalPath = requiredString(project.canonicalPath, "project canonical path");
+  const identityKind = requiredString(project.identityKind, "project identity kind");
+  return {
+    projectDir: canonicalPath,
+    projectKey,
+    projectCanonicalPath: canonicalPath,
+    projectIdentityKind: identityKind,
+    projectIdentityJson: JSON.stringify(
+      project.metadata || {
+        projectKey,
+        canonicalPath,
+        kind: identityKind,
+      }
+    ),
   };
 }
 

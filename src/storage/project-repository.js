@@ -141,6 +141,9 @@ function createProjectRepository(db, repositoryOptions = {}) {
   }
 
   function requireActive(projectKey) {
+    if (typeof projectKey !== "string" || !projectKey.trim()) {
+      throw projectError("PROJECT_KEY_REQUIRED", "projectKey is required.", 400);
+    }
     const project = mapProject(findActive.get(projectKey));
     if (project) return project;
     const existing = findAny.get(projectKey);
