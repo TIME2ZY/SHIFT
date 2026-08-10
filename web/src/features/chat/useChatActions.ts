@@ -107,7 +107,7 @@ export function useChatActions() {
             queryClient.invalidateQueries({
               queryKey: queryKeys.sessions.usage(sessionId),
             }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
           ];
           if (memoryDirty) {
             syncs.push(

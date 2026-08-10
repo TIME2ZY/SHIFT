@@ -29,13 +29,302 @@ body {
 
 .react-sidebar {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   padding: var(--space-3);
   overflow: hidden;
   background: var(--surface-rail);
   border-right: 1px solid var(--border-subtle);
+}
+
+.react-project-rail {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-instrument-raised) 76%, transparent);
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.react-project-rail > header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 3px;
+}
+
+.react-project-rail > header > span {
+  color: var(--text-tertiary);
+  font: 650 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.react-project-rail > header > button,
+.react-project-archive {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.react-project-rail > header > button:hover,
+.react-project-rail > header > button:focus-visible {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.react-project-rail svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.react-project-current {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.react-project-signal {
+  display: grid;
+  width: 30px;
+  height: 34px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--accent-text);
+  background: var(--accent-gradient);
+  font: 700 13px/1 var(--font-brand);
+  box-shadow: 0 3px 10px -3px var(--accent-glow);
+}
+
+.react-project-current > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.react-project-current label {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.react-project-current select {
+  width: 100%;
+  min-width: 0;
+  padding: 0 18px 0 0;
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: 650 13px/1.4 var(--font-ui);
+  text-overflow: ellipsis;
+}
+
+.react-project-current code {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 9px/1.35 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-project-kind {
+  align-self: start;
+  padding: 2px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font: 9px/1.2 var(--font-mono);
+}
+
+.react-project-archive {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.react-project-current:hover .react-project-archive,
+.react-project-current:focus-within .react-project-archive {
+  opacity: 1;
+}
+
+.react-project-archive:hover,
+.react-project-archive:focus-visible {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.react-project-open {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.react-project-open label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.react-project-open input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--surface-instrument-raised);
+  font: 11px/1 var(--font-mono);
+}
+
+.react-project-open input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.react-project-open > div {
+  display: flex;
+  gap: 6px;
+}
+
+.react-project-open button,
+.react-project-archive-list button {
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.react-project-open button[type="submit"] {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.react-project-open button:disabled,
+.react-project-archive-list button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.react-project-empty {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 0 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.react-project-empty > span {
+  grid-row: 1 / 3;
+  color: var(--accent);
+  font: 300 24px/1 var(--font-ui);
+  text-align: center;
+}
+
+.react-project-empty strong {
+  font-size: 12px;
+}
+
+.react-project-empty small {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.react-project-archive-toggle {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.react-project-archive-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.react-project-archive-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.react-project-archive-list {
+  display: grid;
+  max-height: 112px;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.react-project-archive-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.react-project-archive-list span {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-project-archive-list p,
+.react-project-message,
+.react-project-error {
+  padding: 4px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.react-project-message button {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.react-project-error {
+  color: var(--danger);
 }
 
 .react-brand {
@@ -173,8 +462,10 @@ body {
 
 .react-session-list {
   display: grid;
+  align-content: start;
   min-height: 0;
   gap: var(--space-3);
+  grid-auto-rows: max-content;
   padding-bottom: var(--space-6);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2539,8 +2830,7 @@ body {
   letter-spacing: 0.08em;
 }
 
-.workspace-project-path > div,
-.workspace-project-path form {
+.workspace-project-path > div {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -2557,31 +2847,11 @@ body {
   white-space: nowrap;
 }
 
-.workspace-project-path input {
-  width: min(680px, 100%);
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-hard);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  background: var(--surface-canvas);
-  font: 11px/1.2 var(--font-mono);
-}
-
-.workspace-project-path button {
-  min-height: 34px;
-  padding: 0 var(--space-3);
+.workspace-project-path small {
+  flex: 0 0 auto;
   color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.workspace-project-path button:hover:not(:disabled) {
-  color: var(--accent);
-}
-
-.workspace-project-path button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+  font: 10px/1.2 var(--font-mono);
+  white-space: nowrap;
 }
 
 .workspace-branch-rail {
@@ -3091,6 +3361,10 @@ body {
       visibility 0s linear var(--duration);
   }
 
+  .react-project-archive {
+    opacity: 1;
+  }
+
   .react-sidebar[data-open] {
     visibility: visible;
     transform: translateX(0);
@@ -3240,8 +3514,7 @@ body {
     flex-direction: column;
   }
 
-  .workspace-project-path > div,
-  .workspace-project-path form {
+  .workspace-project-path > div {
     width: 100%;
     justify-content: flex-start;
   }

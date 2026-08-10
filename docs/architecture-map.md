@@ -32,6 +32,11 @@ HTTP createServer (src/server/index.js)
   ├─ memory-routes      → 读为主（list/search 等）
   └─ storage-routes     → 审计/运维向
 
+Web App (web/src/app/App.tsx)
+  ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
+  ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
+  └─ workspace feature → /api/sessions/:sessionId/workspace（目录绑定只读）
+
 持久化核心：
   durable-recorder  → invocations + events + (assistant-final 原子 finish)
   sqlite-session-service → threads + messages (appendToSession)
@@ -140,13 +145,13 @@ HTTP createServer (src/server/index.js)
 
 ### 3.5 Project-bound recall
 
-| 检索层                     | 权威作用域解析                                      | 查询入口                                      |
-| -------------------------- | --------------------------------------------------- | --------------------------------------------- |
-| Product Memory             | 活跃 Project 守卫 + 当前 `thread_id`                | `recall-service` → memory search              |
-| Message / Invocation       | 活跃 Project 守卫 + 当前 `thread_id`                | `recall-service` → recall repository          |
-| Project document / passage | 当前 Thread → active Project → `project_key`        | `projectEvidence.search(projectKey, query)`   |
+| 检索层                     | 权威作用域解析                                        | 查询入口                                    |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------------- |
+| Product Memory             | 活跃 Project 守卫 + 当前 `thread_id`                  | `recall-service` → memory search            |
+| Message / Invocation       | 活跃 Project 守卫 + 当前 `thread_id`                  | `recall-service` → recall repository        |
+| Project document / passage | 当前 Thread → active Project → `project_key`          | `projectEvidence.search(projectKey, query)` |
 | Vector                     | `thread:<threadId>`；project-doc 追加可信 Project key | `embeddingRuntime.search(query, scopeKeys)` |
-| Project 文档重建           | Project 表中的 active canonical path                | `reindexThreadProject`                        |
+| Project 文档重建           | Project 表中的 active canonical path                  | `reindexThreadProject`                      |
 
 **结论（recall）— Project 隔离已落地（2026-08-10）：**
 
@@ -157,7 +162,20 @@ HTTP createServer (src/server/index.js)
 
 ---
 
-### 3.6 协作交付证据
+### 3.6 Project-first UI
+
+- `App` 从 Project 列表解析当前 UI 偏好；会话查询 key 固定包含 `projectKey`，切换 Project
+  会重置当前会话选择。
+- `ProjectRail` 统一承载打开已有目录、切换、可恢复归档与恢复；归档文案明确不删除本地目录
+  或历史对话。
+- 新建会话只提交当前 `projectKey`；前端不再调用全局 `GET /api/sessions`，也不再提交
+  `projectDir`。
+- Workspace 通过 `/api/sessions/:sessionId/workspace` 显示后端解析的只读 Project 绑定；
+  `/api/project` 与会话创建后修改目录的 UI 已删除。
+
+---
+
+### 3.7 协作交付证据
 
 | 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                 |
 | --------------------- | ----------------------------------------------------- | ----------------------------- | ---------------------------------------------------- |
@@ -200,13 +218,13 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 ### 5.1 在线热路径（`npm start` composition）
 
-| 区域     | 代表模块                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                      |
-| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                   |
+| 区域     | 代表模块                                                                                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
+| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                 |
-| worktree | manager, delivery-verifier                                                                                                                                        |
+| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                  |
+| worktree | manager, delivery-verifier                                                                                                                                         |
 
 ### 5.2 离线 / 工具（应保持出热路径）
 

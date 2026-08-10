@@ -8,6 +8,8 @@ import { useChatActions } from "../features/chat/useChatActions";
 import { MessageList } from "../features/messages/MessageList";
 import { useMessagesQuery } from "../features/messages/queries";
 import { RightPanel } from "../features/right-panel/RightPanel";
+import { ProjectRail } from "../features/projects/ProjectRail";
+import { useProjectsQuery } from "../features/projects/queries";
 import { SessionList } from "../features/sessions/SessionList";
 import { sessionDisplayTitle } from "../features/sessions/display";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
@@ -18,6 +20,7 @@ import type { RunStatus } from "../runtime/types";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running"]);
 const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
+const ACTIVE_PROJECT_KEY = "shift.active-project-key";
 
 function readAgentPreferences(): Record<string, string> {
   try {
@@ -58,7 +61,16 @@ function uniqueAgentIds(values: Array<string | undefined>): string[] {
 
 export function App() {
   const navigation = useAppNavigation();
-  const sessions = useSessionsQuery();
+  const projects = useProjectsQuery();
+  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(() =>
+    window.localStorage.getItem(ACTIVE_PROJECT_KEY)
+  );
+  const activeProject =
+    projects.data?.find((project) => project.projectKey === selectedProjectKey) ??
+    projects.data?.[0] ??
+    null;
+  const activeProjectKey = activeProject?.projectKey ?? null;
+  const sessions = useSessionsQuery(activeProjectKey);
   const agents = useAgentsQuery();
   const chat = useChatActions();
   const runStore = useSessionRunStore();
@@ -126,6 +138,12 @@ export function App() {
     window.localStorage.setItem(AGENT_PREFERENCES_KEY, JSON.stringify(agentBySession));
   }, [agentBySession]);
 
+  useEffect(() => {
+    if (activeProjectKey) window.localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectKey);
+    else window.localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    setSelectedSessionId(null);
+  }, [activeProjectKey]);
+
   function selectAgent(agentId: string) {
     if (!activeSessionId) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
@@ -140,16 +158,12 @@ export function App() {
   }
 
   function createNewSession() {
-    if (
-      activeSession &&
-      activeSession.messageCount === 0 &&
-      !running &&
-      !activeSession.worktree
-    ) {
+    if (!activeProjectKey) return;
+    if (activeSession && activeSession.messageCount === 0 && !running && !activeSession.worktree) {
       setComposerFocusRequestId((current) => current + 1);
       return;
     }
-    createSession.mutate(undefined, {
+    createSession.mutate(activeProjectKey, {
       onSuccess(session) {
         setSelectedSessionId(session.id);
       },
@@ -157,17 +171,21 @@ export function App() {
   }
 
   function removeSession(sessionId: string) {
+    if (!activeProjectKey) return;
     const session = sessions.data?.find((item) => item.id === sessionId);
     const title = sessionDisplayTitle(session);
     if (!window.confirm(`确认删除对话「${title}」？此操作不可撤销。`)) return;
-    deleteSession.mutate(sessionId, {
-      onSuccess() {
-        runStore.dispose(sessionId);
-        if (selectedSessionId === sessionId || activeSessionId === sessionId) {
-          setSelectedSessionId(null);
-        }
-      },
-    });
+    deleteSession.mutate(
+      { sessionId, projectKey: activeProjectKey },
+      {
+        onSuccess() {
+          runStore.dispose(sessionId);
+          if (selectedSessionId === sessionId || activeSessionId === sessionId) {
+            setSelectedSessionId(null);
+          }
+        },
+      }
+    );
   }
 
   return (
@@ -226,6 +244,20 @@ export function App() {
           </button>
         </nav>
 
+        <ProjectRail
+          projects={projects.data ?? []}
+          activeProject={activeProject}
+          isLoading={projects.isPending}
+          error={projects.error}
+          onSelect={setSelectedProjectKey}
+          onProjectAvailable={(project) => setSelectedProjectKey(project.projectKey)}
+          onProjectArchived={(projectKey) => {
+            const next = projects.data?.find((project) => project.projectKey !== projectKey);
+            setSelectedProjectKey(next?.projectKey ?? null);
+          }}
+          onRetry={() => void projects.refetch()}
+        />
+
         <div className="react-sidebar-title">
           <span>最近会话</span>
           {sessions.isFetching ? <span className="react-sync-label">同步中</span> : null}
@@ -235,11 +267,12 @@ export function App() {
           sessions={sessions.data ?? []}
           agents={agents.data ?? []}
           activeSessionId={activeSessionId}
-          isLoading={sessions.isPending}
+          isLoading={Boolean(activeProjectKey) && sessions.isPending}
           error={sessions.error}
           isCreating={createSession.isPending}
-          deletingSessionId={deleteSession.isPending ? deleteSession.variables : null}
-          onCreate={createNewSession}
+          deletingSessionId={deleteSession.isPending ? deleteSession.variables?.sessionId : null}
+          emptyMessage={activeProject ? "这个项目还没有对话。" : "先打开一个项目，再创建对话。"}
+          onCreate={activeProjectKey ? createNewSession : undefined}
           onDelete={removeSession}
           onSelect={(sessionId) => {
             setSelectedSessionId(sessionId);

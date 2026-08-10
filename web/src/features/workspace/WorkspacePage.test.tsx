@@ -52,17 +52,19 @@ afterEach(() => {
 describe("WorkspacePage", () => {
   it("shows branch metadata, summary, and selectable file diffs", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string) => {
-      if (input.startsWith("/api/project?")) {
-        return Promise.resolve(new Response(JSON.stringify({ dir: "C:/projects/shift" })));
-      }
-      if (input.endsWith("/worktree/status")) {
+      if (input.endsWith("/workspace")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              branch: "shift/session-1",
-              baseDir: "C:/projects/shift",
-              clean: false,
-              previewUrl: "http://localhost:4173",
+              sessionId: "session-1",
+              projectKey: "dir:shift",
+              projectDir: "C:/projects/shift",
+              worktree: {
+                branch: "shift/session-1",
+                baseDir: "C:/projects/shift",
+                clean: false,
+                previewUrl: "http://localhost:4173",
+              },
             })
           )
         );
@@ -94,16 +96,19 @@ describe("WorkspacePage", () => {
     expect(screen.getByLabelText("src/beta.ts Diff")).toHaveTextContent("export const beta = 2");
   });
 
-  it("supports project editing before a worktree exists", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      if (input === "/api/project" && init?.method === "POST") {
-        return Promise.resolve(new Response(JSON.stringify({ dir: "D:/next-project" })));
-      }
-      if (input.startsWith("/api/project?")) {
-        return Promise.resolve(new Response(JSON.stringify({ dir: "C:/projects/shift" })));
-      }
-      if (input.endsWith("/worktree/status")) {
-        return Promise.resolve(new Response(JSON.stringify({ error: "missing" }), { status: 404 }));
+  it("shows the immutable Project binding before a worktree exists", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input.endsWith("/workspace")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sessionId: "session-1",
+              projectKey: "dir:shift",
+              projectDir: "C:/projects/shift",
+              worktree: null,
+            })
+          )
+        );
       }
       throw new Error(`Unexpected request: ${input}`);
     });
@@ -111,18 +116,9 @@ describe("WorkspacePage", () => {
 
     const { onOpenChat } = renderPage();
     expect(await screen.findByText("这个会话还没有隔离工作区")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
-    await userEvent.clear(screen.getByRole("textbox", { name: "项目目录" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "项目目录" }), "D:/next-project");
-    await userEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/project",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ sessionId: "session-1", dir: "D:/next-project" }),
-      })
-    );
+    expect(screen.getAllByText("C:/projects/shift")).toHaveLength(2);
+    expect(screen.getByText("由 Project 绑定")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "返回对话" }));
     expect(onOpenChat).toHaveBeenCalledOnce();
   });
@@ -130,20 +126,22 @@ describe("WorkspacePage", () => {
   it("requires confirmation before discarding the worktree", async () => {
     let discarded = false;
     const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
-      if (input.startsWith("/api/project?")) {
-        return Promise.resolve(new Response(JSON.stringify({ dir: "C:/projects/shift" })));
-      }
-      if (input.endsWith("/worktree/status")) {
+      if (input.endsWith("/workspace")) {
         return Promise.resolve(
-          discarded
-            ? new Response(JSON.stringify({ error: "missing" }), { status: 404 })
-            : new Response(
-                JSON.stringify({
-                  branch: "shift/session-1",
-                  baseDir: "C:/projects/shift",
-                  clean: false,
-                })
-              )
+          new Response(
+            JSON.stringify({
+              sessionId: "session-1",
+              projectKey: "dir:shift",
+              projectDir: "C:/projects/shift",
+              worktree: discarded
+                ? null
+                : {
+                    branch: "shift/session-1",
+                    baseDir: "C:/projects/shift",
+                    clean: false,
+                  },
+            })
+          )
         );
       }
       if (input.endsWith("/worktree/diff")) {
