@@ -62,12 +62,13 @@ describe("ProjectRail", () => {
     vi.stubGlobal("fetch", fetchMock);
     const props = renderRail();
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "当前项目" }), "dir:beta");
+    await userEvent.click(screen.getByRole("button", { name: "切换项目，当前 alpha" }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "切换到项目 beta" }));
     expect(props.onSelect).toHaveBeenCalledWith("dir:beta");
 
     await userEvent.click(screen.getByRole("button", { name: "打开项目" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "已有目录" }), "D:/work/beta");
-    await userEvent.click(screen.getByRole("button", { name: "绑定目录" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "文件夹路径" }), "D:/work/beta");
+    await userEvent.click(screen.getByRole("button", { name: "打开" }));
 
     await waitFor(() => expect(props.onProjectAvailable).toHaveBeenCalledWith(beta));
     expect(fetchMock).toHaveBeenCalledWith(
@@ -99,14 +100,30 @@ describe("ProjectRail", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const props = renderRail();
 
-    await userEvent.click(screen.getByRole("button", { name: "移除项目 alpha" }));
+    await userEvent.click(screen.getByRole("button", { name: "切换项目，当前 alpha" }));
+    await userEvent.click(screen.getByRole("button", { name: "从列表移除 alpha" }));
     expect(window.confirm).toHaveBeenCalledWith(
-      "从侧边栏移除「alpha」？本地目录和历史对话都会保留。"
+      "从项目列表移除「alpha」？本地文件和历史对话都会保留。"
     );
     await waitFor(() => expect(props.onProjectArchived).toHaveBeenCalledWith("dir:alpha"));
 
-    await userEvent.click(screen.getByRole("button", { name: "查看已移除项目" }));
+    await userEvent.click(screen.getByRole("button", { name: "切换项目，当前 alpha" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "已移除的项目" }));
     await userEvent.click(await screen.findByRole("button", { name: "恢复" }));
     await waitFor(() => expect(props.onProjectAvailable).toHaveBeenCalledWith(beta));
+  });
+
+  it("closes the Project menu with Escape or an outside click", async () => {
+    renderRail();
+    const trigger = screen.getByRole("button", { name: "切换项目，当前 alpha" });
+
+    await userEvent.click(trigger);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu", { name: "切换项目" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await userEvent.click(trigger);
+    await userEvent.click(document.body);
+    expect(screen.queryByRole("menu", { name: "切换项目" })).not.toBeInTheDocument();
   });
 });
