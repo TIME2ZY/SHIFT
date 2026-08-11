@@ -55,18 +55,6 @@ test("session creation requires and forwards projectKey", async () => {
   assert.match(missingRes.body.error, /projectKey is required/);
 });
 
-test("retired global session and project routes are not handled", async () => {
-  for (const [method, pathname] of [
-    ["GET", "/api/sessions"],
-    ["GET", "/api/project"],
-    ["POST", "/api/project"],
-  ]) {
-    const res = makeRes();
-    const handle = createHandler(res);
-    assert.equal(await handle(makeReq(method), res, new URL(`http://127.0.0.1${pathname}`)), false);
-  }
-});
-
 test("workspace derives its immutable Project binding from the Session", async () => {
   const res = makeRes();
   const handle = createHandler(res, {

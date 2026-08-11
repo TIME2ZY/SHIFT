@@ -75,8 +75,9 @@ active 产品记忆写入或注入。
 - `superseded`：写入新值并替代旧值。
 - `rejected`：输入或证据不满足契约。
 
-不支持 MCP 的 Provider 可临时使用 deprecated `memory-upsert` callback；它必须完整
-委托 `writeMemoryCandidate`，且不能扩大输入或状态语义。
+不支持 MCP 的 Provider 使用 `memory-write` callback；MCP 与 callback 必须完整委托
+`writeMemoryCandidate`，且不能扩大输入或状态语义。`memory-upsert` 兼容入口已经删除，
+不得重新引入平行写路径。
 
 ## 4. 持久化约束
 

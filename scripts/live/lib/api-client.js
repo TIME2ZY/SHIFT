@@ -40,10 +40,22 @@ function createApiClient({ baseUrl, uiToken }) {
     return { status: response.status, ok: response.ok, body: parsed, text };
   }
 
-  async function createSession() {
-    const result = await postJson("/api/sessions", {});
+  async function openProject(dir) {
+    const result = await postJson("/api/projects/open", { dir });
     if (!result.ok) {
-      throw new Error(`createSession failed (${result.status}): ${result.text || JSON.stringify(result.body)}`);
+      throw new Error(
+        `openProject failed (${result.status}): ${result.text || JSON.stringify(result.body)}`
+      );
+    }
+    return result.body.project;
+  }
+
+  async function createSession(projectKey) {
+    const result = await postJson("/api/sessions", { projectKey });
+    if (!result.ok) {
+      throw new Error(
+        `createSession failed (${result.status}): ${result.text || JSON.stringify(result.body)}`
+      );
     }
     return result.body.session;
   }
@@ -56,16 +68,6 @@ function createApiClient({ baseUrl, uiToken }) {
     return result.body.session;
   }
 
-  async function setProjectDir(sessionId, dir) {
-    const result = await postJson("/api/project", { sessionId, dir });
-    if (!result.ok) {
-      throw new Error(
-        `setProjectDir failed (${result.status}): ${result.text || JSON.stringify(result.body)}`
-      );
-    }
-    return result.body.dir;
-  }
-
   async function listMemories(sessionId, { includeRetired = true } = {}) {
     const q = new URLSearchParams({
       sessionId,
@@ -73,9 +75,7 @@ function createApiClient({ baseUrl, uiToken }) {
     });
     const result = await getJson(`/api/memories?${q}`);
     if (!result.ok) {
-      throw new Error(
-        `listMemories failed (${result.status}): ${JSON.stringify(result.body)}`
-      );
+      throw new Error(`listMemories failed (${result.status}): ${JSON.stringify(result.body)}`);
     }
     return result.body;
   }
@@ -105,11 +105,14 @@ function createApiClient({ baseUrl, uiToken }) {
    * Full chat turn: read SSE until connection ends.
    * @returns {Promise<{ status, text, events, assistantText, summary, durationMs }>}
    */
-  async function chat({ sessionId, agent, prompt, projectDir, useWorktree, signal, timeoutMs }) {
+  async function chat({ sessionId, agent, prompt, useWorktree, signal, timeoutMs }) {
     const controller = new AbortController();
     const timer =
       timeoutMs > 0
-        ? setTimeout(() => controller.abort(new Error(`turn timeout after ${timeoutMs}ms`)), timeoutMs)
+        ? setTimeout(
+            () => controller.abort(new Error(`turn timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          )
         : null;
     if (signal) {
       if (signal.aborted) controller.abort(signal.reason);
@@ -119,7 +122,6 @@ function createApiClient({ baseUrl, uiToken }) {
     const started = Date.now();
     try {
       const body = { sessionId, agent, prompt };
-      if (projectDir) body.projectDir = projectDir;
       if (useWorktree === true) body.useWorktree = true;
 
       const response = await apiFetch("/api/chat", {
@@ -149,9 +151,9 @@ function createApiClient({ baseUrl, uiToken }) {
     apiFetch,
     getJson,
     postJson,
+    openProject,
     createSession,
     getSession,
-    setProjectDir,
     listMemories,
     getMessages,
     getUsage,

@@ -345,16 +345,16 @@ function postMessage(
  * SHIFT_THREAD_ID env var so agents never need to hard-code it.
  */
 function buildCallbackInstructions(_apiUrl, _sessionId, options = {}) {
-  const memoryCompatibility = options.supportsMemoryMcp
+  const memoryCallback = options.supportsMemoryMcp
     ? ""
     : `
-Provider 暂不支持 \`memory_write\` 时，才使用已弃用的兼容命令：
+Provider 暂不支持 \`memory_write\` MCP 工具时，使用同一权威写入口的 callback 命令：
 
 \`\`\`text
-node scripts/callback-client.js memory-upsert --kind decision --topic storage.authoritative --content "在线读写以 SQLite 为权威来源"
+node scripts/callback-client.js memory-write --kind decision --topic storage.authoritative --content "在线读写以 SQLite 为权威来源"
 \`\`\`
 
-多行内容用 \`--content-file <路径>\`。兼容入口只接受 decision / constraint / fact。`;
+多行内容用 \`--content-file <路径>\`。入口只接受 decision / constraint / fact。`;
   // The Node client avoids shell-specific curl aliases, JSON quoting, and
   // Windows PowerShell encoding behavior.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
@@ -445,7 +445,7 @@ node scripts/callback-client.js session-search --query "redis 端口" --limit 10
 }
 \`\`\`
 
-${memoryCompatibility}
+${memoryCallback}
 
 参数：
 - \`--kind\`：\`decision\`（拍板）| \`constraint\`（禁止/必须）| \`fact\`（可核对事实）

@@ -17,7 +17,7 @@ const { spawnSync } = require("node:child_process");
 const { ENV } = require("../../src/shared/brand");
 const { DEFAULT_MEMORY_DB_FILE } = require("../../src/shared/runtime-paths");
 const { parseArgs } = require("./lib/parse-args");
-const { startHarness, resolveProjectDir } = require("./lib/harness");
+const { startHarness, resolveProjectDir, sameProjectDir } = require("./lib/harness");
 const { createDumpDir, dumpTurn, writeReport, writeJson } = require("./lib/live-dump");
 const { buildTurnTrace, aggregateTrace } = require("./lib/multi-trace");
 const { evaluateMultiCollab } = require("./lib/multi-assert");
@@ -221,7 +221,7 @@ async function main() {
   try {
     harness = await startHarness(opts, { dumpDir });
     const { api } = harness;
-    const projectDir = resolveProjectDir(opts);
+    let projectDir = resolveProjectDir(opts);
 
     const health = await api.health();
     if (!health.ok) {
@@ -229,20 +229,23 @@ async function main() {
     }
 
     if (!sessionId) {
-      const session = await api.createSession();
+      const project = await api.openProject(projectDir);
+      const session = await api.createSession(project.projectKey);
       sessionId = session.id;
+      projectDir = session.projectDir;
+      console.log(`[live] opened Project ${project.projectKey}`);
       console.log(`[live] created session ${sessionId}`);
     } else {
-      await api.getSession(sessionId);
+      const session = await api.getSession(sessionId);
+      if (opts.projectDir && !sameProjectDir(session.projectDir, projectDir)) {
+        throw new Error(
+          `session ${sessionId} belongs to ${session.projectDir}, not requested ${projectDir}`
+        );
+      }
+      projectDir = session.projectDir;
       console.log(`[live] continuing session ${sessionId}`);
     }
-
-    try {
-      await api.setProjectDir(sessionId, projectDir);
-      console.log(`[live] projectDir=${projectDir}`);
-    } catch (error) {
-      console.warn(`[live] setProjectDir: ${error.message}`);
-    }
+    console.log(`[live] projectDir=${projectDir}`);
 
     writeJson(path.join(dumpDir, "meta.json"), {
       scenarioId: scenario.SCENARIO_ID,

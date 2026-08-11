@@ -296,12 +296,6 @@ function createServer(options = {}) {
       return;
     }
 
-    if (req.method === "GET" && ["/react", "/react/"].includes(url.pathname)) {
-      res.writeHead(308, { location: "/" });
-      res.end();
-      return;
-    }
-
     if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
       serveStatic(res, url.pathname, webDistDir, sendJson);
       return;

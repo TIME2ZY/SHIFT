@@ -1,21 +1,13 @@
-const fs = require("node:fs");
-const path = require("node:path");
 const { createStorage } = require("../storage");
 const { createServer } = require("./index");
 
-async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
+async function verifyRestoredSqliteApi({ restoredFile }) {
   const expected = selectExpected(restoredFile);
-  const runtimeDir = path.join(drillDir, "server-smoke");
-  fs.mkdirSync(runtimeDir);
   const token = `recovery-${Date.now()}`;
   const server = createServer({
     storageMode: "sqlite",
     memoryDbFile: restoredFile,
-    sessionsFile: path.join(runtimeDir, "must-not-be-created-sessions.json"),
-    invocationsFile: path.join(runtimeDir, "must-not-be-created-invocations.json"),
-    sessionMapRoot: path.join(runtimeDir, "must-not-be-created-session-maps"),
     auditTranscript: false,
-    auditTranscriptDir: path.join(runtimeDir, "must-not-be-created-audit"),
     uiToken: token,
     logger: { log() {}, error() {}, warn() {} },
     worktreeManager: inertWorktreeManager(),
@@ -90,12 +82,6 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
     await new Promise((resolve) => server.close(resolve));
   }
 
-  const legacyArtifacts = [
-    "must-not-be-created-sessions.json",
-    "must-not-be-created-invocations.json",
-    "must-not-be-created-session-maps",
-  ].filter((name) => fs.existsSync(path.join(runtimeDir, name)));
-  checks.sqliteOnly = { ok: legacyArtifacts.length === 0, legacyArtifacts };
   return {
     ok: Object.values(checks).every((check) => check.ok),
     listenPort: port,

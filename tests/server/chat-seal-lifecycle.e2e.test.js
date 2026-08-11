@@ -18,17 +18,12 @@ const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 
 const UI_TOKEN = "seal-lifecycle-token";
-let activeProjectKey = "";
 
 function apiFetch(url, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
-  let body = init.body;
-  if (init.method === "POST" && new URL(url).pathname === "/api/sessions") {
-    body = JSON.stringify({ ...(body ? JSON.parse(body) : {}), projectKey: activeProjectKey });
-  }
-  return fetch(url, { ...init, headers, ...(body !== undefined ? { body } : {}) });
+  return fetch(url, { ...init, headers });
 }
 
 function spawnText(text, opts = {}) {
@@ -72,10 +67,8 @@ async function withSealServer(spawnRunner, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seal-life-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
-  activeProjectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
-    invocationsFile: path.join(tmpDir, "invocations.json"),
     storageMode: "sqlite",
     storage,
     spawnRunner,
@@ -86,12 +79,11 @@ async function withSealServer(spawnRunner, fn) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   try {
-    await fn({ baseUrl, storage, tmpDir });
+    await fn({ baseUrl, storage, tmpDir, projectKey });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
     storage.close();
-    activeProjectKey = "";
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
     else process.env.SHIFT_TEST_CAPACITY = prevCapacity;
@@ -107,10 +99,10 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
       prompts.push(args[args.length - 1]);
       return spawnText("answer after rotate on fresh window");
     },
-    async ({ baseUrl, storage }) => {
+    async ({ baseUrl, storage, projectKey }) => {
       const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ projectKey }),
       }).then((r) => r.json());
 
       // Fill open window near capacity so projected (prompt+reserve) cannot fit.
@@ -192,10 +184,10 @@ test("POST soft seal: complete answer then seal, no mid-stream kill required", a
       // Moderate output under physical kill, but enough with prior usage for soft seal after turn.
       return spawnText("complete answer that should persist before soft seal ".repeat(20));
     },
-    async ({ baseUrl, storage }) => {
+    async ({ baseUrl, storage, projectKey }) => {
       const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
         method: "POST",
-        body: "{}",
+        body: JSON.stringify({ projectKey }),
       }).then((r) => r.json());
 
       await apiFetch(`${baseUrl}/api/chat`, {
@@ -237,11 +229,9 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "seal-tiny-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
-  activeProjectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   let spawns = 0;
   const server = createServer({
-    sessionsFile: path.join(tmpDir, "sessions.json"),
-    invocationsFile: path.join(tmpDir, "invocations.json"),
     storageMode: "sqlite",
     storage,
     spawnRunner() {
@@ -257,7 +247,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify({ projectKey }),
     }).then((r) => r.json());
     const text = await apiFetch(`${baseUrl}/api/chat`, {
       method: "POST",
@@ -278,7 +268,6 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
     storage.close();
-    activeProjectKey = "";
     fs.rmSync(tmpDir, { recursive: true, force: true });
     if (prevCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
     else process.env.SHIFT_TEST_CAPACITY = prevCapacity;

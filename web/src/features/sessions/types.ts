@@ -6,7 +6,6 @@ export interface SessionSummary {
   messageCount: number;
   lastAgent?: string;
   participantAgentIds?: string[];
-  projectDir?: string;
   projectKey?: string | null;
   worktree?: {
     branch?: string;

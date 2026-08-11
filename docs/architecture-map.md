@@ -172,6 +172,11 @@ Web App (web/src/app/App.tsx)
   `projectDir`。
 - Workspace 通过 `/api/sessions/:sessionId/workspace` 显示后端解析的只读 Project 绑定；
   `/api/project` 与会话创建后修改目录的 UI 已删除。
+- live 场景与 Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
+  不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
+- 产品 Memory 的 HTTP callback 只公开 `/api/callbacks/memory-write`；已删除
+  `/api/callbacks/memory-upsert` 兼容别名及其 CLI/测试入口。
+- Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
 
 ---
 

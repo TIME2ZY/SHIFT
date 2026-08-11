@@ -28,39 +28,37 @@ async function fetch(input, init = {}) {
     headers.set("content-type", "application/json");
     if (body === undefined) body = "{}";
   }
-  const url = new URL(String(input));
-  const projectKey = projectKeysByOrigin.get(url.origin);
-  if (projectKey && method === "GET" && url.pathname === "/api/sessions") {
-    input = `${url.origin}/api/projects/${encodeURIComponent(projectKey)}/sessions`;
-  }
-  if (projectKey && method === "POST" && url.pathname === "/api/sessions") {
-    const parsed = body ? JSON.parse(String(body)) : {};
-    body = JSON.stringify({ ...parsed, projectKey });
-  }
-  if (projectKey && method === "POST" && url.pathname === "/api/chat") {
-    const parsed = body ? JSON.parse(String(body)) : {};
-    let chatProjectKey = projectKey;
-    if (typeof parsed.projectDir === "string" && parsed.projectDir) {
-      const opened = await nativeFetch(`${url.origin}/api/projects/open`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ dir: parsed.projectDir }),
-      }).then((response) => response.json());
-      if (opened.project?.projectKey) chatProjectKey = opened.project.projectKey;
-      delete parsed.projectDir;
-    }
-    if (!parsed.sessionId) {
-      const created = await nativeFetch(`${url.origin}/api/sessions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ projectKey: chatProjectKey }),
-      }).then((response) => response.json());
-      body = JSON.stringify({ ...parsed, sessionId: created.session.id });
-    } else {
-      body = JSON.stringify(parsed);
-    }
-  }
   return nativeFetch(input, { ...init, headers, ...(body !== undefined ? { body } : {}) });
+}
+
+async function createProjectSession(baseUrl, input = {}) {
+  const projectKey = projectKeysByOrigin.get(new URL(baseUrl).origin);
+  assert.ok(projectKey, `No Project fixture registered for ${baseUrl}`);
+  return fetch(`${baseUrl}/api/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ ...input, projectKey }),
+  });
+}
+
+async function openProjectSession(baseUrl, projectDir) {
+  const opened = await fetch(`${baseUrl}/api/projects/open`, {
+    method: "POST",
+    body: JSON.stringify({ dir: projectDir }),
+  }).then((response) => response.json());
+  return fetch(`${baseUrl}/api/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ projectKey: opened.project.projectKey }),
+  });
+}
+
+async function chatInNewProjectSession(baseUrl, init = {}) {
+  const body = init.body ? JSON.parse(String(init.body)) : {};
+  assert.equal(body.sessionId, undefined, "chat fixture already has a Session");
+  const created = await createProjectSession(baseUrl).then((response) => response.json());
+  return fetch(`${baseUrl}/api/chat`, {
+    ...init,
+    body: JSON.stringify({ ...body, sessionId: created.session.id }),
+  });
 }
 
 function createMockChild() {
@@ -97,7 +95,6 @@ function createPassthroughWorktreeManager() {
 
 async function withServer(options, fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "invoke-server-test-"));
-  const sessionsFile = path.join(tmpDir, "sessions.json");
   const initialSessionIds = Array.isArray(options.initialSessionIds)
     ? options.initialSessionIds
     : [];
@@ -121,11 +118,8 @@ async function withServer(options, fn) {
     process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
   const server = createServer({
-    sessionsFile,
     memoryDbFile,
     worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
-    invocationsFile: path.join(tmpDir, "invocations.json"),
-    sessionMapRoot: path.join(tmpDir, "session-maps"),
     uiToken: TEST_UI_TOKEN,
     ...serverOptions,
   });
@@ -212,10 +206,6 @@ test("serves React at the root without a legacy UI fallback", async () => {
       const assetResponse = await nativeFetch(`${baseUrl}/assets/app.js`);
       assert.equal(assetResponse.status, 200);
       assert.match(assetResponse.headers.get("content-type"), /javascript/);
-
-      const reactRedirect = await nativeFetch(`${baseUrl}/react/`, { redirect: "manual" });
-      assert.equal(reactRedirect.status, 308);
-      assert.equal(reactRedirect.headers.get("location"), "/");
 
       const legacyResponse = await nativeFetch(`${baseUrl}/legacy/`);
       assert.equal(legacyResponse.status, 404);
@@ -343,7 +333,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
@@ -421,7 +411,7 @@ test("chat endpoint defaults to codex when agent field is omitted", async () => 
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: "hello without agent" }),
@@ -471,7 +461,7 @@ test("chat endpoint emits canonical agent-event SSE frames", async () => {
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
@@ -537,7 +527,7 @@ test("chat history excludes commentary and stores only final text.delta", async 
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
@@ -588,7 +578,7 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "opencode", prompt: "hello chunks" }),
@@ -661,7 +651,7 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "codex", prompt: "@Codex hello" }),
@@ -711,7 +701,7 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "codex", prompt: "build feature" }),
@@ -763,7 +753,7 @@ test("messages endpoint requires an explicit Session scope", async () => {
 
 test("POST /api/sessions creates a Project-bound session", async () => {
   await withServer({}, async (baseUrl, { projectKey }) => {
-    const response = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const response = await createProjectSession(baseUrl);
     const body = await response.json();
 
     assert.equal(response.status, 201);
@@ -779,8 +769,8 @@ test("POST /api/sessions creates a Project-bound session", async () => {
 test("GET /api/projects/:projectKey/sessions lists only that Project's Sessions", async () => {
   await withServer({}, async (baseUrl, { projectKey }) => {
     // Create two sessions
-    await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-    await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    await createProjectSession(baseUrl);
+    await createProjectSession(baseUrl);
 
     const response = await fetch(
       `${baseUrl}/api/projects/${encodeURIComponent(projectKey)}/sessions`
@@ -795,7 +785,7 @@ test("GET /api/projects/:projectKey/sessions lists only that Project's Sessions"
 
 test("GET /api/sessions/:id returns a specific session", async () => {
   await withServer({}, async (baseUrl) => {
-    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const created = await createProjectSession(baseUrl);
     const { session } = await created.json();
 
     const response = await fetch(`${baseUrl}/api/sessions/${session.id}`);
@@ -816,7 +806,7 @@ test("GET /api/sessions/:id returns 404 for unknown session", async () => {
 
 test("DELETE /api/sessions/:id deletes a session", async () => {
   await withServer({}, async (baseUrl) => {
-    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const created = await createProjectSession(baseUrl);
     const { session } = await created.json();
 
     const response = await fetch(`${baseUrl}/api/sessions/${session.id}`, { method: "DELETE" });
@@ -870,13 +860,16 @@ test("DELETE /api/sessions/:id discards an attached worktree", async () => {
     },
     async (baseUrl) => {
       const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-delete-worktree-"));
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           agent: "opencode",
           prompt: "hello",
-          projectDir: baseDir,
+          sessionId: session.id,
           useWorktree: true,
         }),
       });
@@ -913,7 +906,7 @@ test("DELETE /api/sessions/:id does not let a still-running chat recreate the se
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       const chatPromise = fetch(`${baseUrl}/api/chat`, {
@@ -955,7 +948,7 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
     },
     async (baseUrl) => {
       // Create session first
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       // Chat into that session (consume body to wait for stream completion)
@@ -988,7 +981,7 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       async function sendTurn(clientTurnId) {
@@ -1050,9 +1043,7 @@ test("POST /api/chat rejects the retired projectDir override", async () => {
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" }).then((response) =>
-        response.json()
-      );
+      const created = await createProjectSession(baseUrl).then((response) => response.json());
       const response = await nativeFetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: {
@@ -1210,10 +1201,17 @@ test("chat endpoint does not create a worktree by default", async () => {
       },
     },
     async (baseUrl) => {
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "@Gemini hello", projectDir: baseDir }),
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "@Gemini hello",
+          sessionId: session.id,
+        }),
       });
       await response.text();
 
@@ -1260,13 +1258,16 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       },
     },
     async (baseUrl) => {
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           agent: "opencode",
           prompt: "@Gemini hello",
-          projectDir: baseDir,
+          sessionId: session.id,
           useWorktree: true,
         }),
       });
@@ -1418,13 +1419,16 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
       },
     },
     async (baseUrl) => {
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           agent: "grok",
           prompt: "implement and request review",
-          projectDir: baseDir,
+          sessionId: session.id,
           useWorktree: true,
         }),
       });
@@ -1638,13 +1642,16 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       },
     },
     async (baseUrl) => {
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           agent: "codex",
           prompt: userPrompt,
-          projectDir: baseDir,
+          sessionId: session.id,
           useWorktree: true,
         }),
       });
@@ -1718,7 +1725,6 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
             agent: "opencode",
             prompt,
             sessionId: session.id,
-            projectDir: baseDir,
             useWorktree: true,
           }),
         });
@@ -1782,7 +1788,6 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
           agent: "opencode",
           prompt: "first",
           sessionId: session.id,
-          projectDir: baseDir,
           useWorktree: true,
         }),
       });
@@ -1796,7 +1801,6 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
           agent: "opencode",
           prompt: "second",
           sessionId: session.id,
-          projectDir: baseDir,
           useWorktree: false,
         }),
       });
@@ -1816,111 +1820,8 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
   );
 });
 
-test("chat ignores legacy session maps when switching into worktree mode", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-"));
-  const sessionsFile = path.join(tmpDir, "sessions.json");
-  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
-  const invocationsFile = path.join(tmpDir, "invocations.json");
-  const sessionMapRoot = path.join(tmpDir, "session-maps");
-  const transcriptsDir = path.join(tmpDir, "transcripts");
-  const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-resume-base-"));
-  const worktreeDir = path.join(os.tmpdir(), "server-worktree-resume-session");
-  const runs = [];
-
-  if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
-  prepareCleanEpoch({ file: memoryDbFile });
-  const seedStorage = createStorage({ file: memoryDbFile });
-  const projectKey = seedStorage.projects.openDirectory(baseDir).projectKey;
-  seedStorage.close();
-
-  const server = createServer({
-    uiToken: TEST_UI_TOKEN,
-    sessionsFile,
-    memoryDbFile,
-    invocationsFile,
-    sessionMapRoot,
-    storageMode: "sqlite",
-    worktreeManager: {
-      ensureWorktree({ sessionId }) {
-        return {
-          sessionId,
-          baseDir,
-          worktreeDir,
-          branch: `codex/session-${sessionId}`,
-          status: "active",
-          createdAt: "2026-07-02T00:00:00.000Z",
-        };
-      },
-    },
-    spawnRunner(command, args, options) {
-      runs.push({ cwd: options.cwd, env: options.env, args });
-      const child = createMockChild();
-      process.nextTick(() => {
-        child.stdout.end();
-        child.emit("close", 0, null);
-      });
-      return child;
-    },
-  });
-
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-
-  try {
-    const { port } = server.address();
-    const baseUrl = `http://127.0.0.1:${port}`;
-    projectKeysByOrigin.set(baseUrl, projectKey);
-    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
-    const { session } = await created.json();
-
-    const sessionMapDir = path.join(sessionMapRoot, session.id);
-    fs.mkdirSync(sessionMapDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sessionMapDir, "sessions.json"),
-      JSON.stringify(
-        {
-          opencode: {
-            sessionId: "readonly-session-1",
-            workspaceKey: `base:${baseDir}`,
-            updatedAt: "2026-07-02T00:00:00.000Z",
-          },
-        },
-        null,
-        2
-      )
-    );
-
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        agent: "opencode",
-        prompt: "switch to worktree",
-        sessionId: session.id,
-        projectDir: baseDir,
-        useWorktree: true,
-      }),
-    });
-    assert.equal(response.status, 200);
-    await response.text();
-
-    assert.equal(runs.length, 1);
-    assert.equal(runs[0].cwd, worktreeDir);
-    assert.equal(runs[0].env.INVOKE_SESSION_ID, "");
-    assert.equal(runs[0].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await server.closeStorageContext?.();
-    if (!prevTranscriptDir) {
-      delete process.env.SHIFT_TRANSCRIPT_DIR;
-    }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
 test("chat endpoint resumes the matching provider session after base↔worktree round-trip", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-"));
-  const sessionsFile = path.join(tmpDir, "sessions.json");
   const memoryDbFile = path.join(tmpDir, "shift.sqlite");
   const transcriptsDir = path.join(tmpDir, "transcripts");
   const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
@@ -1936,7 +1837,6 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
 
   const server = createServer({
     uiToken: TEST_UI_TOKEN,
-    sessionsFile,
     memoryDbFile,
     storageMode: "sqlite",
     worktreeManager: {
@@ -1976,8 +1876,10 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   try {
     const { port } = server.address();
     const baseUrl = `http://127.0.0.1:${port}`;
-    projectKeysByOrigin.set(baseUrl, projectKey);
-    const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+    const created = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    });
     const { session } = await created.json();
 
     const initialBaseChat = await fetch(`${baseUrl}/api/chat`, {
@@ -1986,7 +1888,6 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
         agent: "opencode",
         prompt: "initial base turn",
         sessionId: session.id,
-        projectDir: baseDir,
         useWorktree: false,
       }),
     });
@@ -1999,7 +1900,6 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
         agent: "opencode",
         prompt: "worktree turn",
         sessionId: session.id,
-        projectDir: baseDir,
         useWorktree: true,
       }),
     });
@@ -2012,7 +1912,6 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
         agent: "opencode",
         prompt: "worktree turn again",
         sessionId: session.id,
-        projectDir: baseDir,
         useWorktree: true,
       }),
     });
@@ -2025,7 +1924,6 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
         agent: "opencode",
         prompt: "base turn again",
         sessionId: session.id,
-        projectDir: baseDir,
         useWorktree: false,
       }),
     });
@@ -2076,7 +1974,7 @@ test("worktree status, diff, and discard endpoints delegate to manager", async (
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       const statusResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/worktree/status`);
@@ -2121,7 +2019,7 @@ test("worktree diff endpoint truncates oversized payloads", async () => {
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       const diffResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/worktree/diff`);
@@ -2189,7 +2087,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
     },
     async (baseUrl, { memoryDbFile }) => {
       // Create a session explicitly so both chats target the same id.
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       // Start first long-running chat.
@@ -2273,7 +2171,7 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       },
     },
     async (baseUrl) => {
-      const created = await fetch(`${baseUrl}/api/sessions`, { method: "POST" });
+      const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
       const firstPromise = fetch(`${baseUrl}/api/chat`, {
@@ -2619,7 +2517,6 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map(),
   };
   callbacks.registerThread(sessionId, threadCtx);
@@ -2654,7 +2551,6 @@ test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map(),
   };
   callbacks.registerThread(sessionId, threadCtx);
@@ -2690,7 +2586,6 @@ test("validateToken rejects expired tokens and lazily cleans them up", () => {
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map([
       [
         invocationId,
@@ -2726,7 +2621,6 @@ test("validateToken accepts non-expiring legacy tokens (backward compat)", () =>
     worklist: ["codex"],
     controller: new AbortController(),
     a2aCount: 0,
-    sessionsFile: "/tmp/sessions.json",
     tokens: new Map([[invocationId, { agentId: "codex", callbackToken }]]), // no expiresAt
   };
   callbacks.registerThread(sessionId, threadCtx);
@@ -2855,7 +2749,7 @@ test("chat endpoint emits context-warning when fillRatio crosses warn threshold"
         },
       },
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
+        const response = await chatInNewProjectSession(baseUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ agent: "opencode", prompt: "hi" }),
@@ -2910,7 +2804,7 @@ test("chat endpoint terminates the chain with sealed event when action threshold
         },
       },
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
+        const response = await chatInNewProjectSession(baseUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ agent: "codex", prompt: "start" }),
@@ -3336,7 +3230,7 @@ test("buildCallbackInstructions mentions recall and memory-write commands", () =
   assert.match(tpl, /callback-client\.js list-invocations/);
   assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
-  assert.match(tpl, /callback-client\.js memory-upsert/);
+  assert.match(tpl, /callback-client\.js memory-write/);
   assert.match(tpl, /memory_write/);
   assert.doesNotMatch(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
@@ -3685,7 +3579,7 @@ test("buildCallbackInstructions includes SHIFT context and recall commands", () 
   assert.match(instructions, /callback-client\.js list-invocations/);
   assert.match(instructions, /callback-client\.js session-search/);
   assert.match(instructions, /callback-client\.js read-invocation/);
-  assert.match(instructions, /callback-client\.js memory-upsert/);
+  assert.match(instructions, /callback-client\.js memory-write/);
   assert.match(instructions, /layer=memory/);
   assert.match(instructions, /Active Memories/);
   assert.match(instructions, /--layers memory,message,evidence/);
@@ -3712,7 +3606,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       },
     },
     async (baseUrl) => {
-      const chat = await fetch(`${baseUrl}/api/chat`, {
+      const chat = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ agent: "opencode", prompt: "remember this" }),

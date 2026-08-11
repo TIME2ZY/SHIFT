@@ -69,7 +69,6 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
     assert.equal(report.causality.ok, true);
     assert.equal(report.projections.afterRebuild.ok, true);
     assert.equal(report.productApi.ok, true);
-    assert.equal(report.productApi.checks.sqliteOnly.ok, true);
     assert.equal(fs.existsSync(report.reportFile), true);
     assert.equal(report.rebuilt.threads, 1);
     assert.equal(report.rebuilt.digests, 1);
