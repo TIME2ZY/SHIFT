@@ -326,7 +326,8 @@ test("invoke-cli entry stays free of provider special cases and server imports",
 });
 
 test("server entry does not hardcode grok proxy resolution", () => {
-  const source = fs.readFileSync(path.join(__dirname, "../../src/server/index.js"), "utf8");
-  assert.doesNotMatch(source, /resolveProviderProxy\(\s*["']grok["']\s*\)/);
-  assert.match(source, /collectProviderStartupDiagnostics/);
+  const serverSource = fs.readFileSync(path.join(__dirname, "../../src/server/index.js"), "utf8");
+  const mainSource = fs.readFileSync(path.join(__dirname, "../../src/server/main.js"), "utf8");
+  assert.doesNotMatch(serverSource, /resolveProviderProxy\(\s*["']grok["']\s*\)/);
+  assert.match(mainSource, /collectProviderStartupDiagnostics/);
 });

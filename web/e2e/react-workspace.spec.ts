@@ -41,7 +41,28 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
-    if (url.pathname === "/api/sessions" && method === "GET") {
+    if (url.pathname === "/api/projects" && method === "GET") {
+      await route.fulfill({
+        json: {
+          projects: [
+            {
+              projectKey: "dir:shift",
+              identityKind: "git-worktree",
+              canonicalPath: state.projectDir,
+              displayName: "shift",
+              createdAt: "2026-08-10T00:00:00.000Z",
+              updatedAt: "2026-08-10T00:00:00.000Z",
+              lastOpenedAt: "2026-08-10T00:00:00.000Z",
+              archivedAt: null,
+              threadCount: 1,
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/projects/dir%3Ashift/sessions" && method === "GET") {
       await route.fulfill({
         json: {
           sessions: [
@@ -49,6 +70,8 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
               id: "session-1",
               title: "React E2E",
               lastAgent: "codex",
+              messageCount: state.chatCompleted ? 2 : 0,
+              projectKey: "dir:shift",
               projectDir: state.projectDir,
               worktree: state.worktreeAttached
                 ? {
@@ -79,18 +102,6 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
             : [],
         },
       });
-      return;
-    }
-
-    if (url.pathname === "/api/project" && method === "GET") {
-      await route.fulfill({ json: { dir: state.projectDir } });
-      return;
-    }
-
-    if (url.pathname === "/api/project" && method === "POST") {
-      const body = request.postDataJSON() as { dir?: string };
-      state.projectDir = body.dir || state.projectDir;
-      await route.fulfill({ json: { dir: state.projectDir } });
       return;
     }
 
@@ -136,15 +147,22 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
-    if (url.pathname === "/api/sessions/session-1/worktree/status" && method === "GET") {
+    if (url.pathname === "/api/sessions/session-1/workspace" && method === "GET") {
       await route.fulfill({
         json: {
-          branch: "shift/session-1",
-          worktreeDir: "C:/projects/shift.worktrees/session-1",
-          baseDir: state.projectDir,
-          clean: false,
-          porcelain: [" M web/src/app/App.tsx"],
-          previewUrl: "http://localhost:4173",
+          sessionId: "session-1",
+          projectKey: "dir:shift",
+          projectDir: state.projectDir,
+          worktree: state.worktreeAttached
+            ? {
+                branch: "shift/session-1",
+                worktreeDir: "C:/projects/shift.worktrees/session-1",
+                baseDir: state.projectDir,
+                clean: false,
+                porcelain: [" M web/src/app/App.tsx"],
+                previewUrl: "http://localhost:4173",
+              }
+            : null,
         },
       });
       return;
@@ -202,7 +220,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         body: [
           'event: session\ndata: {"sessionId":"session-1"}\n\n',
           'event: agent-start\ndata: {"agent":"gemini","invocationId":"invocation-1"}\n\n',
-          'event: agent-event\ndata: {"type":"text.delta","agent":"gemini","text":"工作区改动已完成。"}\n\n',
+          'event: agent-event\ndata: {"type":"text.delta","agent":"gemini","invocationId":"invocation-1","text":"工作区改动已完成。"}\n\n',
           'event: memory-inject\ndata: {"sessionId":"session-1","count":1,"items":[{"id":"memory-1","kind":"decision","topic":"React 迁移","content":"工作区流程已经通过浏览器验证。"}]}\n\n',
           'event: memory\ndata: {"sessionId":"session-1","action":"upsert"}\n\n',
           'event: memory-metrics\ndata: {"threadId":"session-1","totalWrites":1}\n\n',
@@ -222,22 +240,21 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
   return state;
 }
 
-test("edits the project directory and completes a worktree chat run", async ({ page }) => {
+test("uses the Project-bound directory and completes a worktree chat run", async ({ page }) => {
   const state = await mockShiftApi(page);
 
   await page.goto("./");
   await expect(page.locator("#main-content").getByText("React E2E")).toBeVisible();
 
   await page.getByRole("button", { name: "工作区", exact: true }).click();
-  await expect(page.getByRole("code").filter({ hasText: "C:/projects/shift" })).toBeVisible();
-  await page.getByRole("button", { name: "编辑" }).click();
-  await page.getByRole("textbox", { name: "项目目录" }).fill("D:/projects/shift-next");
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByRole("code").filter({ hasText: "D:/projects/shift-next" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "项目与分支" }).getByRole("code")).toHaveText(
+    "C:/projects/shift"
+  );
+  await expect(page.getByText("由 Project 绑定")).toBeVisible();
 
   await page.getByRole("button", { name: "对话", exact: true }).click();
-  await expect(page.getByText("只读讨论 · Enter 发送")).toBeVisible();
-  await page.getByRole("checkbox", { name: "改代码" }).check();
+  await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
+  await page.getByText("隔离改代码", { exact: true }).click();
   await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
 
   await page.getByRole("textbox", { name: "消息" }).fill("@Gemini 实现工作区功能");
@@ -245,8 +262,6 @@ test("edits the project directory and completes a worktree chat run", async ({ p
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
-  await expect(page.getByText("累计用量 321 tokens")).toBeVisible();
-  await expect(page.getByText("10% · 充足")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
   await page.getByRole("tab", { name: "记忆" }).click();

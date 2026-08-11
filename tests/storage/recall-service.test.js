@@ -6,7 +6,7 @@ const { createRecallService } = require("../../src/storage/recall-service");
 
 function createFixture(fileOverrides = {}) {
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
@@ -61,6 +61,21 @@ function createFixture(fileOverrides = {}) {
     ...fileOverrides,
   };
   return { storage, service: createRecallService({ storage, transcript }) };
+}
+
+function withActiveProjectScope(storage = {}) {
+  return {
+    ...storage,
+    threads: {
+      get: () => ({ id: "thread-1", projectKey: "project-1" }),
+      ...storage.threads,
+    },
+    projects: {
+      get: (projectKey) =>
+        projectKey === "project-1" ? { projectKey, canonicalPath: process.cwd() } : null,
+      ...storage.projects,
+    },
+  };
 }
 
 test("recall search uses the SQLite-owned search projection", async () => {
@@ -129,7 +144,7 @@ test("recall skips transcript scans when SQLite search is healthy", async () => 
 test("sqlite recall uses SQLite when transcript reads fail", async () => {
   const errors = [];
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   storage.windows.create({
     id: "window-1",
     threadId: "thread-1",
@@ -249,7 +264,7 @@ test("sqlite invocation reads surface database failures without transcript fallb
   };
   const service = createRecallService({
     mode: "sqlite",
-    storage: {
+    storage: withActiveProjectScope({
       invocations: {
         listForThreadWithMeta() {
           throw new Error("sqlite unavailable");
@@ -258,7 +273,7 @@ test("sqlite invocation reads surface database failures without transcript fallb
           throw new Error("sqlite unavailable");
         },
       },
-    },
+    }),
     transcript: {
       listInvocationsWithMeta: failTranscript,
       searchTranscript: failTranscript,
@@ -279,13 +294,13 @@ test("sqlite search reports unavailable without scanning transcripts on database
   let transcriptCalls = 0;
   const service = createRecallService({
     mode: "sqlite",
-    storage: {
+    storage: withActiveProjectScope({
       recall: {
         search() {
           throw new Error("sqlite unavailable");
         },
       },
-    },
+    }),
     transcript: {
       async searchTranscript() {
         transcriptCalls += 1;
@@ -333,13 +348,13 @@ test("FTS results preserve repository BM25 order instead of reversing negative r
   ];
   const service = createRecallService({
     mode: "sqlite",
-    storage: {
+    storage: withActiveProjectScope({
       recall: {
         search() {
           return rows;
         },
       },
-    },
+    }),
     logger: { error() {}, info() {} },
   });
 
@@ -400,7 +415,7 @@ test("hybrid fusion ranks by RRF score instead of preserving keyword order", asy
   const service = createRecallService({
     mode: "sqlite",
     recallMode: "hybrid",
-    storage: {
+    storage: withActiveProjectScope({
       recall: {
         search() {
           return keywordRows;
@@ -414,7 +429,7 @@ test("hybrid fusion ranks by RRF score instead of preserving keyword order", asy
           return embeddingRows.filter((row) => ids.includes(row.id));
         },
       },
-    },
+    }),
     embeddingRuntime: {
       available: true,
       index: { generation: "hybrid-test" },
@@ -440,6 +455,58 @@ test("hybrid fusion ranks by RRF score instead of preserving keyword order", asy
   assert.equal(result.hits[0].sourceId, "hybrid-winner");
   assert.deepEqual(result.hits[0].ranks, { fts: 2, vector: 1 });
   assert.deepEqual(result.hits[0].matchChannels, ["fts", "vector"]);
+});
+
+test("hybrid project-doc search uses only the trusted Thread Project vector scope", async () => {
+  const searchedScopes = [];
+  const service = createRecallService({
+    recallMode: "hybrid",
+    storage: withActiveProjectScope({
+      recall: { search: () => [] },
+      projectEvidence: { search: () => [] },
+      embeddings: { getReadyByIds: () => [] },
+    }),
+    embeddingRuntime: {
+      available: true,
+      index: { generation: "project-scope-test" },
+      async search(_query, scopeKeys) {
+        searchedScopes.push(scopeKeys);
+        return { state: "available", hits: [] };
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  await service.searchSession("thread-1", "project architecture", {
+    layers: ["project-doc"],
+  });
+
+  assert.deepEqual(searchedScopes, [["thread:thread-1", "project:project-1"]]);
+});
+
+test("missing Project scope fails closed before any recall query", async () => {
+  let searches = 0;
+  const service = createRecallService({
+    storage: {
+      threads: { get: () => ({ id: "thread-1", projectKey: null }) },
+      projects: { get: () => null },
+      recall: {
+        search() {
+          searches += 1;
+          return [];
+        },
+      },
+    },
+    logger: { error() {}, info() {} },
+  });
+
+  const result = await service.searchSession("thread-1", "private project data");
+  assert.deepEqual(result.hits, []);
+  assert.deepEqual(result.availability, {
+    state: "unavailable",
+    reason: "project_scope_unavailable",
+  });
+  assert.equal(searches, 0);
 });
 
 test("sqlite mode skips transcript search after filling the requested limit", async () => {
@@ -546,7 +613,7 @@ test("search filters retired memories by default", async () => {
 test("searchSession empty query returns recency-only memory hits with layer stats", async () => {
   const logs = [];
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   const service = createRecallService({
     storage,
     transcript: {

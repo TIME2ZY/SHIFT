@@ -7,11 +7,11 @@ export function useCreateSessionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: createSession,
-    onSuccess: (session) => {
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions.list, (current = []) => [
-        session,
-        ...current.filter((item) => item.id !== session.id),
-      ]);
+    onSuccess: (session, projectKey) => {
+      queryClient.setQueryData<SessionSummary[]>(
+        queryKeys.sessions.list(projectKey),
+        (current = []) => [session, ...current.filter((item) => item.id !== session.id)]
+      );
     },
   });
 }
@@ -19,10 +19,12 @@ export function useCreateSessionMutation() {
 export function useDeleteSessionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: deleteSession,
-    onSuccess: (_data, sessionId) => {
-      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions.list, (current = []) =>
-        current.filter((session) => session.id !== sessionId)
+    mutationFn: ({ sessionId }: { sessionId: string; projectKey: string }) =>
+      deleteSession(sessionId),
+    onSuccess: (_data, { sessionId, projectKey }) => {
+      queryClient.setQueryData<SessionSummary[]>(
+        queryKeys.sessions.list(projectKey),
+        (current = []) => current.filter((session) => session.id !== sessionId)
       );
       queryClient.removeQueries({ queryKey: queryKeys.sessions.detail(sessionId) });
     },

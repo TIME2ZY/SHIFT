@@ -36,9 +36,10 @@ scopeKey = thread:<ownerThreadId>
 - `memory_write` 若传入 `scope: "project"` 必须 **rejected**（project Memory 已废除）。
 - 替代只发生在同一 thread 的 `scopeKey + topic` 内，且不受 `kind` 变化影响。
 
-**跨会话的项目真相**不写入 `memory_entries`，而写入仓库文档（优先
-`docs/decisions/`），经 project evidence 索引后通过 `recall_search` 的
-`project-doc` 层检索。Active Memory Card **不**自动注入项目文档。
+**跨会话的项目真相**不写入 `memory_entries`，而写入项目已有的仓库文档体系（例如
+`README.md`、`AGENTS.md` 或项目采用的 decision 目录），经 project evidence 索引后通过
+`recall_search` 的 `project-doc` 层检索。`docs/**` 只是默认只读发现候选，SHIFT 不拥有、
+自动创建或覆盖该目录。Active Memory Card **不**自动注入项目文档。
 
 历史数据中可能仍存在 `scope = project` 的已 supersede 行，仅供审计；不得再作为
 active 产品记忆写入或注入。
@@ -74,8 +75,9 @@ active 产品记忆写入或注入。
 - `superseded`：写入新值并替代旧值。
 - `rejected`：输入或证据不满足契约。
 
-不支持 MCP 的 Provider 可临时使用 deprecated `memory-upsert` callback；它必须完整
-委托 `writeMemoryCandidate`，且不能扩大输入或状态语义。
+不支持 MCP 的 Provider 使用 `memory-write` callback；MCP 与 callback 必须完整委托
+`writeMemoryCandidate`，且不能扩大输入或状态语义。`memory-upsert` 兼容入口已经删除，
+不得重新引入平行写路径。
 
 ## 4. 持久化约束
 
@@ -127,6 +129,12 @@ scope = thread 且 owner 为当前 thread
 跨会话项目知识使用 `project-doc` 层（`docs/**` 等仓库文件），不进入 Active Memory
 被动注入。退役 Memory 导出不得放在 `docs/**` 可索引路径（使用
 `archive/memory-exports/`，且 basename `legacy-from-memory*` 被 project-evidence 排除）。
+
+Project 隔离必须在服务端完成：调用方从当前可信 Thread 派生 `project_key`，并验证所属
+Project 未归档；不得仅相信客户端提交的 Project 标识。project-doc、project passage、FTS
+和 vector Project 候选都必须先按该 `project_key` 分区。缺少有效 Thread/Project 时返回空
+结果或明确不可用，禁止退化为跨 Project 全库检索。归档 Project 的投影可以保留以便恢复，
+但不参与正常 Agent recall。
 
 召回流程：
 

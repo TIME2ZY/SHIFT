@@ -25,11 +25,17 @@
 
 ```text
 HTTP createServer (src/server/index.js)
-  ├─ session-routes     → sqlite-session-service (thread CRUD / list)
+  ├─ project-routes     → project-repository (open / list / archive / restore)
+  ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD)
   ├─ chat-routes        → start/stream/finish invocation + finalize A2A
-  ├─ callback-routes    → mid-run postMessage / memory_write / (A2A finalize)
+  ├─ callback-routes    → mid-run postMessage / memory_write / recall / (A2A finalize)
   ├─ memory-routes      → 读为主（list/search 等）
   └─ storage-routes     → 审计/运维向
+
+Web App (web/src/app/App.tsx)
+  ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
+  ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
+  └─ workspace feature → /api/sessions/:sessionId/workspace（目录绑定只读）
 
 持久化核心：
   durable-recorder  → invocations + events + (assistant-final 原子 finish)
@@ -38,18 +44,20 @@ HTTP createServer (src/server/index.js)
   event-store → invocation_events + outbox(JSONL 审计)
   memory-service → memories 表（产品记忆）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
+  recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
 
 | 主链路步骤         | 主要代码                                                       |
 | ------------------ | -------------------------------------------------------------- |
-| 1 建 thread        | `sqlite-session-service.createSession` ← session-routes        |
-| 2 用户消息         | `appendToSession` ← chat-routes                                |
-| 3 start invocation | `durable.startInvocation` ← chat-routes                        |
-| 4 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent` |
-| 5 终态             | **见 §3.1**（多出口）                                          |
-| 6 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage       |
-| 7 恢复             | SQLite threads/messages/invocations（session get）             |
-| 8 handoff          | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）      |
+| 1 打开 Project     | `project-repository.openDirectory` ← project-routes            |
+| 2 建 thread        | `sqlite-session-service.createSession({ projectKey })`         |
+| 3 用户消息         | `appendToSession` ← chat-routes                                |
+| 4 start invocation | `durable.startInvocation` ← chat-routes                        |
+| 5 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent` |
+| 6 终态             | **见 §3.1**（多出口）                                          |
+| 7 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage       |
+| 8 恢复             | 按活跃 Project 读取 SQLite threads/messages/invocations        |
+| 9 handoff          | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）      |
 
 ---
 
@@ -135,7 +143,44 @@ HTTP createServer (src/server/index.js)
 
 ---
 
-### 3.5 协作交付证据
+### 3.5 Project-bound recall
+
+| 检索层                     | 权威作用域解析                                        | 查询入口                                    |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------------- |
+| Product Memory             | 活跃 Project 守卫 + 当前 `thread_id`                  | `recall-service` → memory search            |
+| Message / Invocation       | 活跃 Project 守卫 + 当前 `thread_id`                  | `recall-service` → recall repository        |
+| Project document / passage | 当前 Thread → active Project → `project_key`          | `projectEvidence.search(projectKey, query)` |
+| Vector                     | `thread:<threadId>`；project-doc 追加可信 Project key | `embeddingRuntime.search(query, scopeKeys)` |
+| Project 文档重建           | Project 表中的 active canonical path                  | `reindexThreadProject`                      |
+
+**结论（recall）— Project 隔离已落地（2026-08-10）：**
+
+- `searchSession`、Agent recall、Memory 注入、Invocation evidence 读取均先解析可信 Thread 的
+  活跃 Project；缺失或归档作用域返回空结果或明确 unavailable，不退化为全库查询。
+- project-doc FTS 与 vector 只接收从 Thread 绑定推导出的 `project_key`，不接受调用方选择 Project。
+- 归档 Project 保留全部投影，恢复后重新可见；正常 recall 和 reindex 均排除归档 Project。
+
+---
+
+### 3.6 Project-first UI
+
+- `App` 从 Project 列表解析当前 UI 偏好；会话查询 key 固定包含 `projectKey`，切换 Project
+  会重置当前会话选择。
+- `ProjectRail` 统一承载打开已有目录、切换、可恢复归档与恢复；归档文案明确不删除本地目录
+  或历史对话。
+- 新建会话只提交当前 `projectKey`；前端不再调用全局 `GET /api/sessions`，也不再提交
+  `projectDir`。
+- Workspace 通过 `/api/sessions/:sessionId/workspace` 显示后端解析的只读 Project 绑定；
+  `/api/project` 与会话创建后修改目录的 UI 已删除。
+- live 场景与 Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
+  不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
+- 产品 Memory 的 HTTP callback 只公开 `/api/callbacks/memory-write`；已删除
+  `/api/callbacks/memory-upsert` 兼容别名及其 CLI/测试入口。
+- Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
+
+---
+
+### 3.7 协作交付证据
 
 | 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                 |
 | --------------------- | ----------------------------------------------------- | ----------------------------- | ---------------------------------------------------- |
@@ -178,13 +223,13 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 ### 5.1 在线热路径（`npm start` composition）
 
-| 区域     | 代表模块                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| server   | `index.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                                            |
-| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                   |
-| storage  | `server-storage`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories, `schema`/`database` |
-| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                 |
-| worktree | manager, delivery-verifier                                                                                                                                        |
+| 区域     | 代表模块                                                                                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
+| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
+| storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
+| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                  |
+| worktree | manager, delivery-verifier                                                                                                                                         |
 
 ### 5.2 离线 / 工具（应保持出热路径）
 
@@ -238,5 +283,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-09。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-08-10。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

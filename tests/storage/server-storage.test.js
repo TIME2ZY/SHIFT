@@ -26,28 +26,19 @@ test("epoch audit directory rejects dot segments and remains inside its root", a
   assert.throws(() => safeEpochDirectory("."), /Unsafe storage epoch id/);
   assert.throws(() => safeEpochDirectory(".."), /Unsafe storage epoch id/);
   assert.throws(() => safeEpochDirectory("../escape"), /Unsafe storage epoch id/);
-  assert.equal(
-    resolveEpochAuditDirectory(root, "epoch-safe_1"),
-    path.join(root, "epoch-safe_1")
-  );
+  assert.equal(resolveEpochAuditDirectory(root, "epoch-safe_1"), path.join(root, "epoch-safe_1"));
 });
 
 test("online storage rejects retired files and dual modes", async () => {
-  assert.throws(
-    () => createServerStorage({ storageMode: "files" }, "sessions.json"),
-    /only accepts sqlite/
-  );
-  assert.throws(
-    () => createServerStorage({ storageMode: "dual" }, "sessions.json"),
-    /only accepts sqlite/
-  );
+  assert.throws(() => createServerStorage({ storageMode: "files" }), /only accepts sqlite/);
+  assert.throws(() => createServerStorage({ storageMode: "dual" }), /only accepts sqlite/);
 });
 
-test("default storage mode uses an activated SQLite database beside a custom sessions file", async () => {
+test("default storage mode uses the explicitly resolved runtime database", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-"));
   const databaseFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: databaseFile });
-  const context = createServerStorage({}, path.join(tmpDir, "sessions.json"));
+  const context = createServerStorage({ memoryDbFile: databaseFile });
   try {
     assert.equal(context.mode, "sqlite");
     assert.equal(context.recorder.enabled, true);
@@ -62,10 +53,7 @@ test("sqlite storage mode opens the durable database", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-"));
   const databaseFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: databaseFile });
-  const context = createServerStorage(
-    { storageMode: "sqlite", memoryDbFile: databaseFile },
-    path.join(tmpDir, "sessions.json")
-  );
+  const context = createServerStorage({ storageMode: "sqlite", memoryDbFile: databaseFile });
   try {
     assert.equal(context.mode, "sqlite");
     assert.equal(context.recorder.enabled, true);
@@ -228,12 +216,7 @@ test("disabling new audit writes still drains previously committed outbox rows",
 test("sqlite storage mode fails hard when SQLite initialization fails", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-sqlite-fail-"));
   assert.throws(
-    () =>
-      createServerStorage(
-        { storageMode: "sqlite", memoryDbFile: tmpDir },
-        path.join(tmpDir, "sessions.json"),
-        { error() {} }
-      ),
+    () => createServerStorage({ storageMode: "sqlite", memoryDbFile: tmpDir }, { error() {} }),
     /SHIFT_STORAGE_MODE=sqlite requires a working database/
   );
   fs.rmSync(tmpDir, { recursive: true, force: true });

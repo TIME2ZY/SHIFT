@@ -1,7 +1,7 @@
-import { type FormEvent, type RefObject, useEffect, useMemo, useState } from "react";
+import { type RefObject, useMemo, useState } from "react";
 import { useToast } from "../notifications/ToastProvider";
 import { parseUnifiedDiff, summarizeDiff, type WorkspaceDiffFile } from "./diff";
-import { useDiscardWorktreeMutation, useUpdateProjectDirMutation } from "./mutations";
+import { useDiscardWorktreeMutation } from "./mutations";
 import { useWorkspaceDetailQuery } from "./queries";
 
 interface WorkspacePageProps {
@@ -80,38 +80,12 @@ export function WorkspacePage({
   sessionTriggerRef,
 }: WorkspacePageProps) {
   const workspace = useWorkspaceDetailQuery(sessionId, true);
-  const updateProjectDir = useUpdateProjectDirMutation();
   const discardWorktree = useDiscardWorktreeMutation();
   const toast = useToast();
   const [selectedPath, setSelectedPath] = useState("");
-  const [editingProject, setEditingProject] = useState(false);
-  const [projectDraft, setProjectDraft] = useState("");
   const files = useMemo(() => parseUnifiedDiff(workspace.data?.diff || ""), [workspace.data?.diff]);
   const summary = useMemo(() => summarizeDiff(files), [files]);
   const selectedFile = files.find((file) => file.path === selectedPath) || files[0] || null;
-
-  useEffect(() => {
-    setEditingProject(false);
-    setProjectDraft(workspace.data?.projectDir || "");
-  }, [sessionId, workspace.data?.projectDir]);
-
-  function saveProjectDir(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const dir = projectDraft.trim();
-    if (!sessionId || !dir || updateProjectDir.isPending) return;
-    updateProjectDir.mutate(
-      { sessionId, dir },
-      {
-        onSuccess() {
-          setEditingProject(false);
-          toast.show("项目目录已更新", { variant: "ok" });
-        },
-        onError(error) {
-          toast.show(error.message, { variant: "error" });
-        },
-      }
-    );
-  }
 
   function discard() {
     if (!sessionId || discardWorktree.isPending) return;
@@ -200,44 +174,10 @@ export function WorkspacePage({
           <section className="workspace-project-strip" aria-label="项目与分支">
             <div className="workspace-project-path">
               <span>项目目录</span>
-              {editingProject ? (
-                <form onSubmit={saveProjectDir}>
-                  <label className="sr-only" htmlFor="workspace-project-dir">
-                    项目目录
-                  </label>
-                  <input
-                    id="workspace-project-dir"
-                    value={projectDraft}
-                    autoFocus
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(event) => setProjectDraft(event.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!projectDraft.trim() || updateProjectDir.isPending}
-                  >
-                    保存
-                  </button>
-                  <button type="button" onClick={() => setEditingProject(false)}>
-                    取消
-                  </button>
-                </form>
-              ) : (
-                <div>
-                  <code>{workspace.data.projectDir || "未设置"}</code>
-                  <button
-                    type="button"
-                    onClick={() => setEditingProject(true)}
-                    disabled={Boolean(workspace.data.worktree)}
-                    title={
-                      workspace.data.worktree ? "已有 worktree 时不能更改项目目录" : "更改项目目录"
-                    }
-                  >
-                    编辑
-                  </button>
-                </div>
-              )}
+              <div>
+                <code>{workspace.data.projectDir}</code>
+                <small>由 Project 绑定</small>
+              </div>
             </div>
             <div
               className="workspace-branch-rail"

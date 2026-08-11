@@ -1,8 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { DEFAULT_TRANSCRIPT_DIR } = require("../shared/runtime-paths");
+const { createRuntimePaths } = require("../shared/runtime-paths");
 const { isValidOpaqueId, resolveInside } = require("../server/id-policy");
-const { ENV } = require("../shared/brand");
 const { limitCanonicalEvent, truncateUtf8, utf8Bytes } = require("../agents/event-size-policy");
 const MAX_LINE_BYTES = 256 * 1024;
 
@@ -13,13 +12,14 @@ let writeChain = Promise.resolve();
 const deletedSessions = new Set();
 const canonicalIdsByFile = new Map();
 const canonicalFilesLoaded = new Set();
+let transcriptDirOverride = null;
 
 function getTranscriptDir() {
-  return process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR;
+  return transcriptDirOverride || createRuntimePaths().transcriptDir;
 }
 
 function setTranscriptDir(dir) {
-  process.env[ENV.TRANSCRIPT_DIR] = dir;
+  transcriptDirOverride = typeof dir === "string" && dir.trim() ? path.resolve(dir) : null;
 }
 
 function sanitizeId(id) {

@@ -74,43 +74,40 @@ test("callback client validates required environment and arguments", () => {
   });
 });
 
-test("callback client builds the deprecated memory-upsert compatibility request", () => {
-  const upsert = callbackClient.buildRequest(
-    "memory-upsert",
+test("callback client builds the authoritative memory-write request", () => {
+  const write = callbackClient.buildRequest(
+    "memory-write",
     {
       kind: "decision",
       topic: "storage-primary",
       content: "SQLite is primary",
-      "supersession-key": "decision:storage-primary",
     },
     ENV
   );
-  assert.equal(upsert.url.href, "http://127.0.0.1:8787/api/callbacks/memory-upsert");
-  assert.equal(upsert.init.method, "POST");
-  assert.deepEqual(JSON.parse(upsert.init.body), {
+  assert.equal(write.url.href, "http://127.0.0.1:8787/api/callbacks/memory-write");
+  assert.equal(write.init.method, "POST");
+  assert.deepEqual(JSON.parse(write.init.body), {
     sessionId: "thread-中文",
     invocationId: "inv-1",
     callbackToken: "secret",
     kind: "decision",
     topic: "storage-primary",
     content: "SQLite is primary",
-    supersessionKey: "decision:storage-primary",
   });
 
   assert.throws(
-    () => callbackClient.buildRequest("memory-upsert", { kind: "decision", content: "x" }, ENV),
+    () => callbackClient.buildRequest("memory-write", { kind: "decision", content: "x" }, ENV),
     /requires --topic/
   );
   assert.throws(
     () =>
       callbackClient.buildRequest(
-        "memory-upsert",
+        "memory-write",
         { kind: "decision", topic: "t" },
         ENV
       ),
     /requires --content/
   );
-
 });
 
 test("callback client exit codes distinguish delivery from handoff acceptance", () => {

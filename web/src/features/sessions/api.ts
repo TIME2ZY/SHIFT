@@ -1,16 +1,22 @@
 import { apiRequest } from "../../shared/api/client";
 import type { SessionSummary, SessionsResponse } from "./types";
 
-export async function listSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
-  const response = await apiRequest<SessionsResponse>("/api/sessions", { signal });
+export async function listSessions(
+  projectKey: string,
+  signal?: AbortSignal
+): Promise<SessionSummary[]> {
+  const response = await apiRequest<SessionsResponse>(
+    `/api/projects/${encodeURIComponent(projectKey)}/sessions`,
+    { signal }
+  );
   return Array.isArray(response.sessions) ? response.sessions : [];
 }
 
-export async function createSession(): Promise<SessionSummary> {
+export async function createSession(projectKey: string): Promise<SessionSummary> {
   const response = await apiRequest<{ session: SessionSummary }>("/api/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({ projectKey }),
   });
   return response.session;
 }

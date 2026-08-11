@@ -79,7 +79,7 @@ function appendMemoryCapturedEvent(eventStore, sessionId, invocationId, memory, 
       createdAt: memory.createdAt,
       persisted: true,
       created: Boolean(created),
-      source: "callback:memory-upsert",
+      source: "callback:memory-write",
     },
   });
 }
@@ -418,10 +418,7 @@ function createCallbackRoutes({
       return true;
     }
 
-    if (
-      req.method === "POST" &&
-      new Set(["/api/callbacks/memory-write", "/api/callbacks/memory-upsert"]).has(url.pathname)
-    ) {
+    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-write") {
       let body;
       try {
         body = await readJsonBody(req);
@@ -463,7 +460,7 @@ function createCallbackRoutes({
         return true;
       }
       if (!topic) {
-        sendJson(res, 400, { error: "topic is required for memory-upsert." });
+        sendJson(res, 400, { error: "topic is required." });
         return true;
       }
       if (!content) {
@@ -479,8 +476,8 @@ function createCallbackRoutes({
 
       const agentId = resolveAgentId(callbacks, sessionId, invocationId);
       try {
-        // callbackToken validation above makes this a trusted compatibility
-        // context. The unified service derives ownership and authority from it.
+        // callbackToken validation makes this a trusted callback context. The
+        // unified service derives ownership and authority from it.
         const outcome = memoryService.writeMemoryCandidate(
           {
             kind,
@@ -495,7 +492,7 @@ function createCallbackRoutes({
             threadId: sessionId,
             invocationId,
             agentId,
-            source: "callback:memory-upsert",
+            source: "callback:memory-write",
             // Some providers call back before the invocation mirror is durable.
             // Keep this rollout exception isolated to the token-authenticated route.
             allowUnmirroredInvocation: true,
@@ -511,7 +508,7 @@ function createCallbackRoutes({
             outcome.created
           );
         } catch (error) {
-          logger.error?.(`[memory-upsert] event append failed: ${error.message}`);
+          logger.error?.(`[memory-write] event append failed: ${error.message}`);
         }
 
         const payload = {
@@ -550,8 +547,6 @@ function createCallbackRoutes({
 
         sendJson(res, 200, {
           ok: true,
-          deprecated: true,
-          replacement: "memory_write",
           outcome: outcome.outcome,
           memoryId: outcome.memoryId,
           replacedMemoryId: outcome.replacedMemoryId,
@@ -562,7 +557,7 @@ function createCallbackRoutes({
           superseded: outcome.superseded,
         });
       } catch (error) {
-        logger.error?.(`[memory-upsert] failed: ${error.message}`);
+        logger.error?.(`[memory-write] failed: ${error.message}`);
         bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
         sendJson(res, 400, {
           outcome: "rejected",

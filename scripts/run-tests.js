@@ -31,7 +31,8 @@ function assertNoRealRuntimeDependencies(testFiles) {
     const source = fs.readFileSync(file, "utf8");
     if (directRuntimePath.test(source)) violations.push(`${file}: direct data/runtime path`);
     if (runtimeConstant.test(source)) violations.push(`${file}: default runtime path constant`);
-    if (defaultServer.test(source)) violations.push(`${file}: createServer() without isolated paths`);
+    if (defaultServer.test(source))
+      violations.push(`${file}: createServer() without isolated paths`);
   }
   if (violations.length > 0) {
     throw new Error(
@@ -45,14 +46,13 @@ const testFiles = collectTests(TESTS_DIR);
 assertNoRealRuntimeDependencies(testFiles);
 
 const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shift-tests-"));
-const transcriptDir = path.join(runtimeRoot, "transcripts");
 
 try {
   const result = spawnSync(process.execPath, ["--test", ...testFiles], {
     cwd: ROOT,
     env: {
       ...process.env,
-      SHIFT_TRANSCRIPT_DIR: transcriptDir,
+      SHIFT_HOME: runtimeRoot,
     },
     stdio: "inherit",
   });

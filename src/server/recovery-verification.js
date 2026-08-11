@@ -1,21 +1,13 @@
-const fs = require("node:fs");
-const path = require("node:path");
 const { createStorage } = require("../storage");
 const { createServer } = require("./index");
 
-async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
+async function verifyRestoredSqliteApi({ restoredFile }) {
   const expected = selectExpected(restoredFile);
-  const runtimeDir = path.join(drillDir, "server-smoke");
-  fs.mkdirSync(runtimeDir);
   const token = `recovery-${Date.now()}`;
   const server = createServer({
     storageMode: "sqlite",
     memoryDbFile: restoredFile,
-    sessionsFile: path.join(runtimeDir, "must-not-be-created-sessions.json"),
-    invocationsFile: path.join(runtimeDir, "must-not-be-created-invocations.json"),
-    sessionMapRoot: path.join(runtimeDir, "must-not-be-created-session-maps"),
     auditTranscript: false,
-    auditTranscriptDir: path.join(runtimeDir, "must-not-be-created-audit"),
     uiToken: token,
     logger: { log() {}, error() {}, warn() {} },
     worktreeManager: inertWorktreeManager(),
@@ -40,12 +32,30 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
       epochId: health.body.storage?.epoch?.epochId || null,
     };
 
-    const sessions = await getJson(`${baseUrl}/api/sessions`, token);
+    const projects = await getJson(`${baseUrl}/api/projects`, token);
+    const sessionResponses = [];
+    for (const project of projects.body.projects || []) {
+      sessionResponses.push(
+        await getJson(
+          `${baseUrl}/api/projects/${encodeURIComponent(project.projectKey)}/sessions`,
+          token
+        )
+      );
+    }
+    const sessions = sessionResponses.flatMap((response) => response.body.sessions || []);
+    checks.projects = {
+      ok: projects.status === 200 && projects.body.projects?.length === expected.projectCount,
+      status: projects.status,
+      expected: expected.projectCount,
+      actual: projects.body.projects?.length ?? null,
+    };
     checks.sessions = {
-      ok: sessions.status === 200 && sessions.body.sessions?.length === expected.threadCount,
-      status: sessions.status,
+      ok:
+        sessionResponses.every((response) => response.status === 200) &&
+        sessions.length === expected.threadCount,
+      status: sessionResponses.map((response) => response.status),
       expected: expected.threadCount,
-      actual: sessions.body.sessions?.length ?? null,
+      actual: sessions.length,
     };
 
     if (expected.threadId) {
@@ -53,8 +63,7 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
       const messages = await getJson(`${baseUrl}/api/messages?sessionId=${encoded}`, token);
       checks.messages = {
         ok:
-          messages.status === 200 &&
-          messages.body.messages?.length === expected.threadMessageCount,
+          messages.status === 200 && messages.body.messages?.length === expected.threadMessageCount,
         status: messages.status,
         threadId: expected.threadId,
         expected: expected.threadMessageCount,
@@ -73,12 +82,6 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
     await new Promise((resolve) => server.close(resolve));
   }
 
-  const legacyArtifacts = [
-    "must-not-be-created-sessions.json",
-    "must-not-be-created-invocations.json",
-    "must-not-be-created-session-maps",
-  ].filter((name) => fs.existsSync(path.join(runtimeDir, name)));
-  checks.sqliteOnly = { ok: legacyArtifacts.length === 0, legacyArtifacts };
   return {
     ok: Object.values(checks).every((check) => check.ok),
     listenPort: port,
@@ -89,27 +92,48 @@ async function verifyRestoredSqliteApi({ restoredFile, drillDir }) {
 function selectExpected(file) {
   const storage = createStorage({ file });
   try {
+    const projectCount = Number(
+      storage.db.prepare("SELECT COUNT(*) AS count FROM projects WHERE archived_at IS NULL").get()
+        .count
+    );
+    const threadCount = Number(
+      storage.db
+        .prepare(
+          `
+          SELECT COUNT(*) AS count
+          FROM threads t
+          JOIN projects p ON p.project_key = t.project_key
+          WHERE p.archived_at IS NULL AND t.deleted_at IS NULL
+        `
+        )
+        .get().count
+    );
     const thread = storage.db
-      .prepare(`
+      .prepare(
+        `
         SELECT t.id,
                (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS message_count,
                (SELECT COUNT(*) FROM memory_entries memory
                 WHERE memory.owner_thread_id = t.id OR memory.origin_thread_id = t.id) AS memory_count
         FROM threads t
+        JOIN projects p ON p.project_key = t.project_key AND p.archived_at IS NULL
         ORDER BY memory_count DESC, message_count DESC, t.created_at DESC, t.id
         LIMIT 1
-      `)
+      `
+      )
       .get();
     if (!thread) {
       return {
         epochId: storage.metadata.getCurrent().epochId,
-        threadCount: 0,
+        projectCount,
+        threadCount,
         threadId: null,
       };
     }
     return {
       epochId: storage.metadata.getCurrent().epochId,
-      threadCount: Number(storage.db.prepare("SELECT COUNT(*) AS count FROM threads").get().count),
+      projectCount,
+      threadCount,
       threadId: thread.id,
       threadMessageCount: Number(thread.message_count),
       memoryCount: Number(thread.memory_count),

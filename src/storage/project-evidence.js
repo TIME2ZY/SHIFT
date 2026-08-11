@@ -599,18 +599,15 @@ function reindexThreadProject(storage, threadId, options = {}) {
   if (!thread?.projectKey) {
     return { skipped: true, reason: "no_project_identity" };
   }
-  const root =
-    thread.projectCanonicalPath ||
-    thread.projectDir ||
-    thread.projectIdentityJson?.canonicalPath;
-  if (!root) {
-    return { skipped: true, reason: "no_canonical_path" };
+  const project = storage.projects?.get?.(thread.projectKey);
+  if (!project) {
+    return { skipped: true, reason: "project_scope_unavailable" };
   }
   return storage.projectEvidence.reindexProject({
-    projectKey: thread.projectKey,
-    rootDir: root,
-    identityKind: thread.projectIdentityKind || "directory",
     ...options,
+    projectKey: project.projectKey,
+    rootDir: project.canonicalPath,
+    identityKind: project.identityKind,
   });
 }
 

@@ -392,6 +392,16 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
 test("database exceptions stay visible without transcript fallback", async () => {
   const errors = [];
   const brokenStorage = {
+    threads: {
+      get() {
+        return { id: "thread-1", projectKey: "project-1" };
+      },
+    },
+    projects: {
+      get() {
+        return { projectKey: "project-1", canonicalPath: process.cwd() };
+      },
+    },
     invocations: {
       listForThreadWithMeta() {
         throw new Error("sqlite busy");

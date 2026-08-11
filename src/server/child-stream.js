@@ -7,6 +7,7 @@ const { createEncodingTracker } = require("../shared/encoding-guard");
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000;
 const SERVER_ONLY_AGENT_ENV_KEYS = Object.freeze([
+  "SHIFT_HOME",
   "SHIFT_MEMORY_DB",
   "SHIFT_TRANSCRIPT_DIR",
   "SHIFT_AUDIT_TRANSCRIPT_DIR",

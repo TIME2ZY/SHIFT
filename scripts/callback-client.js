@@ -9,7 +9,7 @@ const COMMANDS = new Set([
   "list-invocations",
   "session-search",
   "read-invocation",
-  "memory-upsert",
+  "memory-write",
 ]);
 
 function parseArgs(argv) {
@@ -92,9 +92,9 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
     };
   }
 
-  if (command === "memory-upsert") {
-    if (!options.kind) throw new Error("memory-upsert requires --kind");
-    if (!options.topic) throw new Error("memory-upsert requires --topic");
+  if (command === "memory-write") {
+    if (!options.kind) throw new Error("memory-write requires --kind");
+    if (!options.topic) throw new Error("memory-write requires --topic");
     headers["Content-Type"] = "application/json; charset=utf-8";
     const body = {
       sessionId: context.sessionId,
@@ -102,9 +102,8 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
       callbackToken: context.callbackToken,
       kind: options.kind,
       topic: options.topic,
-      content: readMessageContent(options, cwd, "memory-upsert"),
+      content: readMessageContent(options, cwd, "memory-write"),
     };
-    if (options["supersession-key"]) body.supersessionKey = options["supersession-key"];
     return {
       url,
       init: {

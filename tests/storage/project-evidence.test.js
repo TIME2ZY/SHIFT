@@ -161,6 +161,90 @@ test("session-search can hit project-doc layer after reindex", async () => {
   }
 });
 
+test("session-search isolates project-doc passages by the trusted Thread Project", async () => {
+  const firstRoot = writeProjectFixture();
+  const secondRoot = writeProjectFixture();
+  fs.writeFileSync(
+    path.join(firstRoot, "docs", "boundary.md"),
+    "# Boundary\n\nshared-isolation-token belongs only to project alpha.\n",
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(secondRoot, "docs", "boundary.md"),
+    "# Boundary\n\nshared-isolation-token belongs only to project beta.\n",
+    "utf8"
+  );
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.threads.create({ id: "thread-alpha", projectDir: firstRoot });
+    storage.threads.create({ id: "thread-beta", projectDir: secondRoot });
+    const alphaProjectKey = storage.threads.get("thread-alpha").projectKey;
+    const betaProjectKey = storage.threads.get("thread-beta").projectKey;
+    storage.reindexProjectEvidence("thread-alpha");
+    storage.reindexProjectEvidence("thread-beta");
+    const service = createRecallService({ storage, logger: { error() {}, info() {} } });
+
+    const alpha = await service.searchSession("thread-alpha", "shared-isolation-token", {
+      layers: ["project-doc"],
+      limit: 10,
+    });
+    const beta = await service.searchSession("thread-beta", "shared-isolation-token", {
+      layers: ["project-doc"],
+      limit: 10,
+    });
+
+    assert.ok(alpha.hits.length >= 1);
+    assert.ok(alpha.hits.every((hit) => /project alpha/.test(hit.content)));
+    assert.ok(beta.hits.length >= 1);
+    assert.ok(beta.hits.every((hit) => /project beta/.test(hit.content)));
+
+    const trustedReindex = storage.reindexProjectEvidence("thread-alpha", {
+      projectKey: betaProjectKey,
+      rootDir: secondRoot,
+    });
+    assert.equal(trustedReindex.projectKey, alphaProjectKey);
+    assert.equal(path.resolve(trustedReindex.rootDir), path.resolve(firstRoot));
+  } finally {
+    storage.close();
+    fs.rmSync(firstRoot, { recursive: true, force: true });
+    fs.rmSync(secondRoot, { recursive: true, force: true });
+  }
+});
+
+test("archived Projects are excluded from recall and reindex until restored", async () => {
+  const root = writeProjectFixture();
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.threads.create({ id: "thread-1", projectDir: root });
+    const projectKey = storage.threads.get("thread-1").projectKey;
+    storage.reindexProjectEvidence("thread-1");
+    const service = createRecallService({ storage, logger: { error() {}, info() {} } });
+
+    storage.projects.archive(projectKey);
+    const archived = await service.searchSession("thread-1", "worktree isolation", {
+      layers: ["project-doc"],
+    });
+    assert.deepEqual(archived.hits, []);
+    assert.deepEqual(archived.availability, {
+      state: "unavailable",
+      reason: "project_scope_unavailable",
+    });
+    assert.deepEqual(storage.reindexProjectEvidence("thread-1"), {
+      skipped: true,
+      reason: "project_scope_unavailable",
+    });
+
+    storage.projects.restore(projectKey);
+    const restored = await service.searchSession("thread-1", "worktree isolation", {
+      layers: ["project-doc"],
+    });
+    assert.ok(restored.hits.some((hit) => hit.layer === "project-doc"));
+  } finally {
+    storage.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("deleted allowlisted file is removed on reindex", () => {
   const root = writeProjectFixture();
   const storage = createStorage({ file: ":memory:" });

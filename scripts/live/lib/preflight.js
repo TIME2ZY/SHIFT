@@ -61,7 +61,7 @@ async function preflight(opts, { api = null } = {}) {
   }
 
   if (opts.mode === "spawn") {
-    const dbFile = process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE;
+    const dbFile = DEFAULT_MEMORY_DB_FILE;
     if (dbFile !== ":memory:" && !fs.existsSync(dbFile)) {
       errors.push(
         `runtime DB missing: ${dbFile}. Create with: npm run prepare:storage:epoch -- --db ${dbFile}`
@@ -108,7 +108,9 @@ function resolveGrokBinary() {
     return {
       ok: true,
       path: "grok",
-      detail: String(ver.stdout || ver.stderr || "grok --version ok").trim().slice(0, 120),
+      detail: String(ver.stdout || ver.stderr || "grok --version ok")
+        .trim()
+        .slice(0, 120),
     };
   }
 

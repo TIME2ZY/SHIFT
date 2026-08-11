@@ -38,7 +38,7 @@ function provider() {
 
 test("embedding runtime indexes authoritative writes and enables semantic recall", async () => {
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   const runtime = createEmbeddingRuntime({
     storage,
     config: config(),
@@ -101,7 +101,7 @@ test("embedding runtime indexes authoritative writes and enables semantic recall
 
 test("vector query failure degrades to FTS without failing recall", async () => {
   const storage = createStorage({ file: ":memory:" });
-  storage.threads.create({ id: "thread-1" });
+  storage.threads.create({ id: "thread-1", projectDir: process.cwd() });
   const runtime = createEmbeddingRuntime({
     storage,
     config: config(),

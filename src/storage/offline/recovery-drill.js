@@ -17,6 +17,8 @@ const SOURCE_TABLES = Object.freeze([
   "memory_events",
   "legacy_memory_archive",
   "purged_threads",
+  "collaboration_tasks",
+  "collaboration_task_events",
   "storage_outbox",
 ]);
 
@@ -73,11 +75,7 @@ async function runSqliteRecoveryDrill({
     const mismatches = compareSnapshots(sourceSnapshot, restoredSnapshot);
     report = {
       ok:
-        integrity.ok &&
-        audit.ok &&
-        causality.ok &&
-        projectionsAfter.ok &&
-        mismatches.length === 0,
+        integrity.ok && audit.ok && causality.ok && projectionsAfter.ok && mismatches.length === 0,
       sourceFile: source,
       drillDir: root,
       completedAt: new Date().toISOString(),
@@ -171,60 +169,90 @@ function compareSnapshots(source, restored) {
 
 function inspectCausality(db) {
   const checks = [
-    ["invocation-window-thread", `
+    [
+      "invocation-window-thread",
+      `
       SELECT COUNT(*) AS count FROM invocations i
       JOIN context_windows w ON w.id = i.window_id
       WHERE i.thread_id <> w.thread_id
-    `],
-    ["message-window-thread", `
+    `,
+    ],
+    [
+      "message-window-thread",
+      `
       SELECT COUNT(*) AS count FROM messages m
       JOIN context_windows w ON w.id = m.window_id
       WHERE m.thread_id <> w.thread_id
-    `],
-    ["message-invocation-thread", `
+    `,
+    ],
+    [
+      "message-invocation-thread",
+      `
       SELECT COUNT(*) AS count FROM messages m
       JOIN invocations i ON i.id = m.invocation_id
       WHERE m.thread_id <> i.thread_id
-    `],
-    ["invocation-parent-thread", `
+    `,
+    ],
+    [
+      "invocation-parent-thread",
+      `
       SELECT COUNT(*) AS count FROM invocations child
       JOIN invocations parent ON parent.id = child.parent_invocation_id
       WHERE child.thread_id <> parent.thread_id
-    `],
-    ["invocation-trigger-thread", `
+    `,
+    ],
+    [
+      "invocation-trigger-thread",
+      `
       SELECT COUNT(*) AS count FROM invocations i
       JOIN messages m ON m.id = i.trigger_message_id
       WHERE i.thread_id <> m.thread_id
-    `],
-    ["memory-message-thread", `
+    `,
+    ],
+    [
+      "memory-message-thread",
+      `
       SELECT COUNT(*) AS count FROM memory_entries memory
       JOIN messages m ON m.id = memory.source_message_id
       WHERE COALESCE(memory.owner_thread_id, memory.origin_thread_id) IS NOT NULL
         AND COALESCE(memory.owner_thread_id, memory.origin_thread_id) <> m.thread_id
-    `],
-    ["memory-invocation-thread", `
+    `,
+    ],
+    [
+      "memory-invocation-thread",
+      `
       SELECT COUNT(*) AS count FROM memory_entries memory
       JOIN invocations i ON i.id = memory.source_invocation_id
       WHERE COALESCE(memory.owner_thread_id, memory.origin_thread_id) IS NOT NULL
         AND COALESCE(memory.owner_thread_id, memory.origin_thread_id) <> i.thread_id
-    `],
-    ["outbox-invocation-thread", `
+    `,
+    ],
+    [
+      "outbox-invocation-thread",
+      `
       SELECT COUNT(*) AS count FROM storage_outbox o
       JOIN invocations i ON i.id = o.invocation_id
       WHERE o.thread_id <> i.thread_id
-    `],
-    ["thread-message-sequence", `
+    `,
+    ],
+    [
+      "thread-message-sequence",
+      `
       SELECT COUNT(*) AS count FROM threads t
       WHERE t.next_message_sequence <> COALESCE(
         (SELECT MAX(m.sequence_no) + 1 FROM messages m WHERE m.thread_id = t.id), 0
       )
-    `],
-    ["invocation-event-sequence", `
+    `,
+    ],
+    [
+      "invocation-event-sequence",
+      `
       SELECT COUNT(*) AS count FROM invocations i
       WHERE i.next_event_sequence <> COALESCE(
         (SELECT MAX(e.sequence_no) + 1 FROM invocation_events e WHERE e.invocation_id = i.id), 0
       )
-    `],
+    `,
+    ],
   ];
   const results = {};
   for (const [name, sql] of checks) {
