@@ -3,11 +3,12 @@ title: "ADR-001: Storage Truth Boundary"
 status: accepted
 decision_id: ADR-001
 created: 2026-07-26
-amended: 2026-08-09
-scope: sessions, messages, invocations, memory, transcripts, project knowledge, and search projections
+amended: 2026-08-12
+scope: sessions, messages, invocations, handoffs, traces, memory, transcripts, project knowledge, and search projections
 supersedes: []
 related:
   - ../memory-data-contract.md
+  - 002-multi-agent-reliability-contracts.md
   - 006-project-first-runtime-home.md
 ---
 
@@ -25,6 +26,10 @@ thread/message/invocation、provider resume、memory 和 recall 均不再读写 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
 评审文档，不允许实现自行选择。
+
+2026-08-12 增补的 Trace/Handoff 行描述 Phase 0B 的目标权威边界；当前实现仍以
+`docs/architecture-map.md` 为准。在 0B 完成前，Handoff route registry 仍是进程内实现，
+不得把目标表述误读为已完成持久化，也不得据此生成历史成功率。
 
 ## 2. 背景
 
@@ -77,7 +82,9 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | Project 存在性、目录绑定和归档状态      | SQLite `projects`                | UI 当前选择、最近项目缓存             |
 | Thread 存在性、标题、项目绑定、归档状态 | SQLite `threads`                 | UI cache、导出 JSON                   |
 | 正式用户/Agent 消息                     | SQLite `messages`                | JSONL audit、recall/FTS               |
+| Chat request/Trace 生命周期（0B 目标）  | SQLite trace source tables       | Trace read model、UI runtime          |
 | Invocation 生命周期和终态               | SQLite `invocations`             | JSONL audit、UI runtime               |
+| Handoff 路由、绑定和终态（0B 目标）     | SQLite handoff source tables     | Trace read model、进程内 cache        |
 | 可回放的规范化 durable events           | SQLite invocation event tables   | canonical JSONL                       |
 | Provider 原始事件                       | raw JSONL diagnostic log         | 不得成为 message/memory 真相          |
 | Context window、generation、usage       | SQLite context/window tables     | usage summary                         |
@@ -91,6 +98,7 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | Agent identity                          | `src/agents/identities/*.md`     | 解析后的内存/API 数据                 |
 | Skill 定义                              | `skills/*.md`                    | 解析后的内存/API 数据                 |
 | Recall/FTS/passages                     | SQLite 派生投影                  | 可重建，不可反向成为真相              |
+| Trace spans、links、聚合指标            | SQLite 派生投影                  | 可重建，不可反向成为业务状态          |
 | Digest/summary/injection card           | SQLite 派生投影或运行时结果      | 导航信息，不是原始证据                |
 | 环境配置                                | 进程环境、`.env`、明确的配置文件 | 进程内解析对象                        |
 
@@ -107,7 +115,9 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 
 - session/thread list、get、create、update、archive/delete；
 - message history；
+- chat request/trace 生命周期；
 - invocation list、detail、state；
+- handoff route、target binding、terminal outcome 和幂等键；
 - context window 和 usage；
 - memory list、confirm、invalidate、supersede；
 - recall/search 的 source rows 和派生投影；
@@ -274,6 +284,10 @@ Raw JSONL 保存 Codex、Grok、OpenCode、Antigravity 等 provider 的原始协
 JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什么”。例如 JSONL 中存在旧
 `memory-captured` 事件，不表示一个已经在 SQLite 中 `invalidated` 的 memory 仍然有效。
 
+Trace 与审计也不是同一概念：Trace 是面向定位和分析的可查询因果投影，可以重建、采样或
+按保留策略删除 payload；canonical audit 是从权威事务 outbox 生成的追加式历史记录。
+Trace 不得反向修正业务状态，audit 也不得作为在线 trace/handoff 恢复来源。
+
 ## 8. 普通 JSON 的职责
 
 普通 JSON 可以用于：
@@ -308,6 +322,11 @@ JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什�
 - digest 和 usage summary；
 - Active Memory Card；
 - embedding/vector index（未来）。
+- trace spans、span links 和时间窗口聚合指标。
+
+Trace 投影只能组合已有权威事实和明确标注为 best-effort 的诊断事实。SSE、进程内计数器、
+raw provider log 或写入完整度未知的 telemetry 不得单独作为成功率分母。指标必须同时暴露
+样本资格与数据完整度，不能把 `unavailable`、`pending` 或 `unknown` 静默归为失败或空结果。
 
 投影必须满足：
 
