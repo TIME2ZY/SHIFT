@@ -3087,65 +3087,12 @@ async function withActiveChat(fn) {
   }
 }
 
-test("/api/callbacks/session-search rejects without X-Callback-Token", async () => {
+test("retired Memory callback routes are not exposed", async () => {
   await withServer({}, async (baseUrl) => {
-    const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=x&invocationId=y&query=z`
-    );
-    assert.equal(resp.status, 400);
-  });
-});
-
-test("/api/callbacks/session-search rejects invalid token with 401", async () => {
-  await withServer({}, async (baseUrl) => {
-    const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=x&invocationId=y&query=z`,
-      { headers: { "X-Callback-Token": "wrong" } }
-    );
-    assert.equal(resp.status, 401);
-  });
-});
-
-test("/api/callbacks/session-search empty query returns recency payload shape", async () => {
-  await withActiveChat(async (baseUrl, sid, captured) => {
-    const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&invocationId=${captured.env.SHIFT_INVOCATION_ID}`,
-      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
-    );
-    assert.equal(resp.status, 200);
-    const body = await resp.json();
-    assert.ok(Array.isArray(body.hits));
-    assert.ok(body.layers);
-    assert.equal(typeof body.layers.memory, "number");
-    assert.equal(typeof body.truncated, "boolean");
-  });
-});
-
-test("/api/callbacks/session-search returns hits during active chat", async () => {
-  await withActiveChat(async (baseUrl, sid, captured) => {
-    const invId = captured.env.SHIFT_INVOCATION_ID;
-    const token = captured.env.SHIFT_CALLBACK_TOKEN;
-
-    // Give the user-prompt transcript event time to flush
-    await new Promise((r) => setTimeout(r, 200));
-
-    const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?` +
-        `sessionId=${encodeURIComponent(sid)}&` +
-        `invocationId=${encodeURIComponent(invId)}&` +
-        `query=${encodeURIComponent("redis clustering")}&` +
-        `limit=10`,
-      { headers: { "X-Callback-Token": token } }
-    );
-    assert.equal(resp.status, 200);
-    const body = await resp.json();
-    assert.equal(body.query, "redis clustering");
-    assert.equal(body.limit, 10);
-    assert.ok(body.hits.length >= 1, `expected at least one hit, got ${JSON.stringify(body.hits)}`);
-    assert.match(body.hits[0].snippet, /redis clustering/);
-    assert.ok(body.layers);
-    assert.ok(typeof body.hits[0].layer === "string");
-    assert.ok(typeof body.hits[0].score === "number");
+    for (const pathname of ["session-search", "memory-upsert"]) {
+      const resp = await fetch(`${baseUrl}/api/callbacks/${pathname}`);
+      assert.equal(resp.status, 404);
+    }
   });
 });
 
@@ -3192,21 +3139,6 @@ test("/api/callbacks/recall-search rejects an invalid callback token", async () 
       }),
     });
     assert.equal(resp.status, 401);
-  });
-});
-
-test("/api/callbacks/session-search caps limit at 200", async () => {
-  await withActiveChat(async (baseUrl, sid, captured) => {
-    const resp = await fetch(
-      `${baseUrl}/api/callbacks/session-search?` +
-        `sessionId=${encodeURIComponent(sid)}&` +
-        `invocationId=${encodeURIComponent(captured.env.SHIFT_INVOCATION_ID)}&` +
-        `query=redis&limit=99999`,
-      { headers: { "X-Callback-Token": captured.env.SHIFT_CALLBACK_TOKEN } }
-    );
-    assert.equal(resp.status, 200);
-    const body = await resp.json();
-    assert.ok(body.limit <= 200, `limit should be capped at 200, got ${body.limit}`);
   });
 });
 
@@ -3312,14 +3244,13 @@ test("/api/callbacks/read-invocation pagination slices correctly", async () => {
   });
 });
 
-test("buildCallbackInstructions mentions recall and memory-write commands", () => {
+test("buildCallbackInstructions exposes MCP-only Memory commands", () => {
   const tpl = callbacks.buildCallbackInstructions("http://127.0.0.1:8787");
   assert.match(tpl, /recall_search/);
   assert.match(tpl, /callback-client\.js list-invocations/);
-  assert.match(tpl, /callback-client\.js session-search/);
   assert.match(tpl, /callback-client\.js read-invocation/);
-  assert.match(tpl, /callback-client\.js memory-upsert/);
   assert.match(tpl, /memory_write/);
+  assert.doesNotMatch(tpl, /callback-client\.js (?:session-search|memory-upsert)/);
   assert.doesNotMatch(tpl, /callback-client\.js memory-invalidate/);
   assert.match(tpl, /不要凭印象猜/);
 });
@@ -3665,12 +3596,9 @@ test("buildCallbackInstructions includes SHIFT context and recall commands", () 
   assert.match(instructions, /recall_search/);
   assert.match(instructions, /callback-client\.js post-message/);
   assert.match(instructions, /callback-client\.js list-invocations/);
-  assert.match(instructions, /callback-client\.js session-search/);
   assert.match(instructions, /callback-client\.js read-invocation/);
-  assert.match(instructions, /callback-client\.js memory-upsert/);
-  assert.match(instructions, /layer=memory/);
+  assert.doesNotMatch(instructions, /callback-client\.js (?:session-search|memory-upsert)/);
   assert.match(instructions, /Active Memories/);
-  assert.match(instructions, /--layers memory,message,evidence/);
 });
 
 test("chat records invocation events and recall routes expose them (no token = frontend path)", async () => {
@@ -3733,14 +3661,6 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.ok(kinds.includes("text.delta"));
       assert.ok(kinds.includes("stderr"));
       assert.ok(kinds.includes("invocation-end"));
-
-      const searchRes = await fetch(
-        `${baseUrl}/api/callbacks/session-search?sessionId=${sid}&query=hello%20recall`
-      );
-      const search = await searchRes.json();
-      assert.equal(searchRes.status, 200);
-      assert.ok(search.hits.length >= 1);
-      assert.equal(search.hits[0].invocationId, invId);
 
       const histRes = await fetch(`${baseUrl}/api/messages?sessionId=${sid}`);
       const hist = await histRes.json();

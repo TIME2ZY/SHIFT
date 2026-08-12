@@ -309,11 +309,7 @@ try {
         )
       );
     }
-    promptParts.push(
-      callbacks.buildCallbackInstructions(apiUrl, sessionId, {
-        supportsMemoryMcp: agent === "codex",
-      })
-    );
+    promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
     let promptForAgent = promptParts.filter(Boolean).join("\n\n");
 
     // Tracker from open window *before* this prompt (for PRE projection).

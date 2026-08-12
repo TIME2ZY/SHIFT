@@ -3,6 +3,7 @@ const {
   createProviderRuntime,
   buildProviderInvocation,
   buildProviderTransportInvocation,
+  buildProviderTransportMcpServers,
   buildProviderEnvironment,
   getProviderDiagnostics,
 } = require("./providers");
@@ -195,6 +196,7 @@ function invoke(cli, prompt, options = {}) {
     runOptions,
     process.env
   );
+  const mcpServers = buildProviderTransportMcpServers(config, childEnv, transport);
 
   const rawLogger = createRawEventLogger({
     invocationId,
@@ -213,6 +215,7 @@ function invoke(cli, prompt, options = {}) {
       args,
       env: childEnv,
       cwd: workspaceCwd,
+      mcpServers,
       eventContext: {
         agent: config.id || providerId,
         invocationId,

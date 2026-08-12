@@ -10,7 +10,12 @@ const {
 } = require("../../src/agents/providers/grok");
 const { AGENTS, getAgentModelProfile } = require("../../src/agents/catalog");
 const { buildInvocation } = require("../../src/agents/invoke-cli");
-const { createProviderRuntime, listSupportedProviders } = require("../../src/agents/providers");
+const {
+  createProviderRuntime,
+  listSupportedProviders,
+  buildProviderTransportInvocation,
+  buildProviderTransportMcpServers,
+} = require("../../src/agents/providers");
 
 test("provider registry includes grok", () => {
   assert.ok(listSupportedProviders().includes("grok"));
@@ -62,6 +67,28 @@ test("buildInvocation can disable subagents via providerOptions.noSubagents=true
     "x"
   );
   assert.ok(inv.args.includes("--no-subagents"));
+});
+
+test("Grok ACP injects Shift MCP through the session descriptor", () => {
+  const inv = buildProviderTransportInvocation(AGENTS.grok, "probe", "acp");
+  assert.ok(inv.args.includes("--no-leader"));
+  assert.ok(!inv.args.includes("--plugin-dir"));
+  const env = {
+    SHIFT_API_URL: "http://127.0.0.1:8787",
+    SHIFT_THREAD_ID: "thread-1",
+    SHIFT_INVOCATION_ID: "inv-1",
+    SHIFT_CALLBACK_TOKEN: "token-1",
+  };
+  const [server] = buildProviderTransportMcpServers(AGENTS.grok, env, "acp");
+  assert.equal(server.name, "shift_context");
+  assert.equal(server.command, process.execPath);
+  assert.match(server.args[0], /shift-context-mcp\.js$/);
+  assert.deepEqual(server.env, [
+    { name: "SHIFT_API_URL", value: env.SHIFT_API_URL },
+    { name: "SHIFT_THREAD_ID", value: env.SHIFT_THREAD_ID },
+    { name: "SHIFT_INVOCATION_ID", value: env.SHIFT_INVOCATION_ID },
+    { name: "SHIFT_CALLBACK_TOKEN", value: env.SHIFT_CALLBACK_TOKEN },
+  ]);
 });
 
 test("buildInvocation for grok resumes with -r session id", () => {

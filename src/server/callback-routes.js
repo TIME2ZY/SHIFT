@@ -17,15 +17,6 @@ function bumpThreadWriteStat(callbacks, sessionId, field, amount = 1) {
   return { ...thread.memoryWriteStats };
 }
 
-function countHitLayers(hits) {
-  const layers = { memory: 0, message: 0, evidence: 0, "project-doc": 0 };
-  for (const hit of hits || []) {
-    const layer = hit.layer || "evidence";
-    if (layers[layer] !== undefined) layers[layer] += 1;
-  }
-  return layers;
-}
-
 function validateOptionalCallbackAuth({
   sessionId,
   invocationId,
@@ -79,7 +70,7 @@ function appendMemoryCapturedEvent(eventStore, sessionId, invocationId, memory, 
       createdAt: memory.createdAt,
       persisted: true,
       created: Boolean(created),
-      source: "callback:memory-upsert",
+      source: "mcp:memory-write",
     },
   });
 }
@@ -264,67 +255,6 @@ function createCallbackRoutes({
       return true;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/callbacks/session-search") {
-      const sessionId = url.searchParams.get("sessionId") || "";
-      const invocationId = url.searchParams.get("invocationId") || "";
-      const callbackToken = req.headers["x-callback-token"] || "";
-      const query = url.searchParams.get("query") || "";
-      const limitRaw = url.searchParams.get("limit");
-      const limit = limitRaw ? Math.max(1, Math.min(200, parseInt(limitRaw, 10) || 20)) : 20;
-      const layers = url.searchParams.get("layers") || "";
-      const includeRetired = ["1", "true", "yes"].includes(
-        String(url.searchParams.get("includeRetired") || "").toLowerCase()
-      );
-      const includeThinking = ["1", "true", "yes"].includes(
-        String(url.searchParams.get("includeThinking") || "").toLowerCase()
-      );
-
-      if (!sessionId) {
-        sendJson(res, 400, { error: "sessionId is required." });
-        return true;
-      }
-      if (
-        !validateOptionalCallbackAuth({
-          sessionId,
-          invocationId,
-          callbackToken,
-          callbacks,
-          sendJson,
-          res,
-        })
-      ) {
-        return true;
-      }
-
-      const scopeRaw = String(
-        url.searchParams.get("scope") || url.searchParams.get("memoryScope") || ""
-      )
-        .trim()
-        .toLowerCase();
-      const searchOptions = { limit, includeRetired, includeThinking };
-      if (layers) searchOptions.layers = layers;
-      if (scopeRaw === "thread" || scopeRaw === "project" || scopeRaw === "all") {
-        searchOptions.memoryScope = scopeRaw;
-      }
-
-      // Empty/weak query → recency-only (Wave R1). Prefer searchSession when available.
-      let body;
-      if (typeof recall.searchSession === "function") {
-        body = await recall.searchSession(sessionId, query, searchOptions);
-      } else {
-        const hits = await recall.searchTranscript(sessionId, query || " ", searchOptions);
-        body = {
-          hits,
-          query,
-          limit,
-          layers: countHitLayers(hits),
-          truncated: Array.isArray(hits) && hits.length >= limit,
-        };
-      }
-      sendJson(res, 200, body);
-      return true;
-    }
-
     if (req.method === "GET" && url.pathname === "/api/callbacks/read-invocation") {
       const sessionId = url.searchParams.get("sessionId") || "";
       const invocationId = url.searchParams.get("invocationId") || "";
@@ -418,10 +348,7 @@ function createCallbackRoutes({
       return true;
     }
 
-    if (
-      req.method === "POST" &&
-      new Set(["/api/callbacks/memory-write", "/api/callbacks/memory-upsert"]).has(url.pathname)
-    ) {
+    if (req.method === "POST" && url.pathname === "/api/callbacks/memory-write") {
       let body;
       try {
         body = await readJsonBody(req);
@@ -463,7 +390,7 @@ function createCallbackRoutes({
         return true;
       }
       if (!topic) {
-        sendJson(res, 400, { error: "topic is required for memory-upsert." });
+        sendJson(res, 400, { error: "topic is required for memory_write." });
         return true;
       }
       if (!content) {
@@ -479,8 +406,8 @@ function createCallbackRoutes({
 
       const agentId = resolveAgentId(callbacks, sessionId, invocationId);
       try {
-        // callbackToken validation above makes this a trusted compatibility
-        // context. The unified service derives ownership and authority from it.
+        // The invocation token binds trusted MCP context. The unified service
+        // derives ownership and authority from it.
         const outcome = memoryService.writeMemoryCandidate(
           {
             kind,
@@ -495,7 +422,7 @@ function createCallbackRoutes({
             threadId: sessionId,
             invocationId,
             agentId,
-            source: "callback:memory-upsert",
+            source: "mcp:memory-write",
             // Some providers call back before the invocation mirror is durable.
             // Keep this rollout exception isolated to the token-authenticated route.
             allowUnmirroredInvocation: true,
@@ -511,7 +438,7 @@ function createCallbackRoutes({
             outcome.created
           );
         } catch (error) {
-          logger.error?.(`[memory-upsert] event append failed: ${error.message}`);
+          logger.error?.(`[memory-write] event append failed: ${error.message}`);
         }
 
         const payload = {
@@ -535,7 +462,7 @@ function createCallbackRoutes({
         broadcastMemoryEvent(callbacks, sessionId, payload);
         const liveStats = bumpThreadWriteStat(callbacks, sessionId, "upsertCallback", 1);
         const writeMetrics = buildMemoryWriteMetrics({
-          source: "callback",
+          source: "mcp",
           threadId: sessionId,
           invocationId,
           agent: agentId,
@@ -562,7 +489,7 @@ function createCallbackRoutes({
           superseded: outcome.superseded,
         });
       } catch (error) {
-        logger.error?.(`[memory-upsert] failed: ${error.message}`);
+        logger.error?.(`[memory-write] failed: ${error.message}`);
         bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
         sendJson(res, 400, {
           outcome: "rejected",

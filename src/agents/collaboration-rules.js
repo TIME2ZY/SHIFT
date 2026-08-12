@@ -84,7 +84,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS, options = {})
 - 跨 Agent **只用**行首 \`@队友\` + 共用 \`\`\`handoff\`\`\`
 - 本 CLI 内 subagent/工具可自行使用（显示为工具卡片）；勿用其代替 @ 其它 SHIFT Agent
 - 禁止 @ 自己（你是 ${selfLabel} / ${selfId || "unknown"}）
-- 入站：优先 Structured Handoff + Active Memories；缺项先 recall_search（不可用时用 session-search），勿表演性附和
+- 入站：优先 Structured Handoff + Active Memories；缺项先 recall_search，勿表演性附和
 - 出站示例目标：@${example.label}
 
 <!-- /Collaboration Rules -->`;
@@ -94,7 +94,7 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS, options = {})
 
 - 跨 Agent **只用**行首 \`@队友\` + 共用 \`\`\`handoff\`\`\`；勿用 CLI 内嵌 subagent 代替跨 Agent 路由
 - 禁止 @ 自己（你是 ${selfLabel} / ${selfId || "unknown"}）
-- 入站：优先 Structured Handoff + Active Memories；缺项先 recall_search（不可用时用 session-search），勿表演性附和
+- 入站：优先 Structured Handoff + Active Memories；缺项先 recall_search，勿表演性附和
 - 出站示例目标：@${example.label}
 
 <!-- /Collaboration Rules -->`;

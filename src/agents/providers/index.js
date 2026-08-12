@@ -298,6 +298,20 @@ function buildProviderTransportInvocation(
   return adapter.buildInvocation(config, prompt, context);
 }
 
+function buildProviderTransportMcpServers(
+  config,
+  env,
+  transport = config?.transport || "cli"
+) {
+  const adapter = getProviderTransportAdapter(config, transport);
+  if (typeof adapter.buildMcpServers !== "function") return [];
+  const servers = adapter.buildMcpServers(config, env);
+  if (!Array.isArray(servers)) {
+    throw new Error(`Provider transport "${adapter.id}" buildMcpServers() must return an array.`);
+  }
+  return servers;
+}
+
 function resolveProviderRunOptions(config, options = {}, env = process.env) {
   const { adapter } = validateProviderConfig(config);
   const proxy =
@@ -364,6 +378,7 @@ module.exports = {
   createProviderRuntime,
   buildProviderInvocation,
   buildProviderTransportInvocation,
+  buildProviderTransportMcpServers,
   getProviderTransportAdapter,
   resolveProviderRunOptions,
   buildProviderEnvironment,

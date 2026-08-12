@@ -319,7 +319,7 @@ test("handleCallbackRoutes lists only successful current-invocation memory evide
   ]);
 });
 
-test("handleCallbackRoutes memory-write and legacy memory-upsert share one path", async () => {
+test("handleCallbackRoutes memory-write is the single product-memory HTTP bridge", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
   try {
@@ -371,7 +371,7 @@ test("handleCallbackRoutes memory-write and legacy memory-upsert share one path"
     await second.handle(
       makeReq("POST"),
       res2,
-      new URL("http://127.0.0.1/api/callbacks/memory-upsert")
+      new URL("http://127.0.0.1/api/callbacks/memory-write")
     );
     assert.equal(res2.statusCode, 200);
     assert.equal(res2.body.created, true);
@@ -381,7 +381,7 @@ test("handleCallbackRoutes memory-write and legacy memory-upsert share one path"
     storage.close();
   }
 });
-test("handleCallbackRoutes memory-upsert validates topic and availability", async () => {
+test("handleCallbackRoutes memory-write validates topic and availability", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
   try {
@@ -399,7 +399,7 @@ test("handleCallbackRoutes memory-upsert validates topic and availability", asyn
     await handle(
       makeReq("POST"),
       missingTopic,
-      new URL("http://127.0.0.1/api/callbacks/memory-upsert")
+      new URL("http://127.0.0.1/api/callbacks/memory-write")
     );
     assert.equal(missingTopic.statusCode, 400);
     assert.match(missingTopic.body.error, /topic/i);
@@ -424,7 +424,7 @@ test("handleCallbackRoutes memory-upsert validates topic and availability", asyn
     await noService(
       makeReq("POST"),
       unavailable,
-      new URL("http://127.0.0.1/api/callbacks/memory-upsert")
+      new URL("http://127.0.0.1/api/callbacks/memory-write")
     );
     assert.equal(unavailable.statusCode, 503);
   } finally {

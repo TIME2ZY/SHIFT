@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
+const { createCodexShiftContextArgs } = require("../shift-context-mcp-config");
 const {
   toolNameFromItem,
   toolArgsFromItem,
@@ -18,21 +19,7 @@ function buildCodexEnvironment(_options = {}, env = process.env) {
 }
 
 function shiftContextMcpConfigArgs() {
-  const serverScript = path.resolve(__dirname, "../../../scripts/shift-context-mcp.js");
-  return [
-    "-c",
-    `mcp_servers.shift_context.command=${JSON.stringify(process.execPath)}`,
-    "-c",
-    `mcp_servers.shift_context.args=[${JSON.stringify(serverScript)}]`,
-    "-c",
-    'mcp_servers.shift_context.env_vars=["SHIFT_API_URL","SHIFT_THREAD_ID","SHIFT_INVOCATION_ID","SHIFT_CALLBACK_TOKEN"]',
-    "-c",
-    'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search"]',
-    "-c",
-    'mcp_servers.shift_context.default_tools_approval_mode="auto"',
-    "-c",
-    "mcp_servers.shift_context.required=false",
-  ];
+  return createCodexShiftContextArgs();
 }
 
 function codexDiagnostic(code, severity, message, options = {}) {

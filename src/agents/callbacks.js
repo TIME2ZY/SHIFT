@@ -337,24 +337,14 @@ function postMessage(
 }
 
 /**
- * Build the HTTP callback instruction block that gets injected into agent prompts.
- * This teaches agents without native dynamic MCP support (Codex, opencode, etc.)
- * how to call back into the Shift server through the cross-platform Node client.
+ * Build the collaboration callback instructions injected into agent prompts.
+ * Product memory and recall are MCP-only; this client remains for messaging and
+ * diagnostic invocation reads that are not product-memory writes.
  *
  * sessionId is the active chat thread id. The client reads it from the
  * SHIFT_THREAD_ID env var so agents never need to hard-code it.
  */
-function buildCallbackInstructions(_apiUrl, _sessionId, options = {}) {
-  const memoryCompatibility = options.supportsMemoryMcp
-    ? ""
-    : `
-Provider 暂不支持 \`memory_write\` 时，才使用已弃用的兼容命令：
-
-\`\`\`text
-node scripts/callback-client.js memory-upsert --kind decision --topic storage.authoritative --content "在线读写以 SQLite 为权威来源"
-\`\`\`
-
-多行内容用 \`--content-file <路径>\`。兼容入口只接受 decision / constraint / fact。`;
+function buildCallbackInstructions(_apiUrl, _sessionId) {
   // The Node client avoids shell-specific curl aliases, JSON quoting, and
   // Windows PowerShell encoding behavior.
   return `<!-- ═══════════════════════════════════════════════════════════ -->
@@ -407,26 +397,11 @@ node scripts/callback-client.js list-invocations
 
 返回：\`{ invocations: [{ invocationId, agent, startedAt, endedAt, state, eventCount }] }\`
 
-## 搜索本会话历史（分层：memory / message / evidence）
-
-\`\`\`text
-node scripts/callback-client.js session-search --query "redis 端口" --limit 10 --layers memory,message,evidence
-\`\`\`
-
-这是未暴露 \`recall_search\` MCP 时的兼容调试入口；工具可用时必须优先调用工具。
-
-返回：\`{ query, limit, layers: { memory, message, evidence }, truncated, hits: [{ layer, score, snippet, sourceKind, sourceId, kind, invocationId, eventNo, memoryId? }] }\`。
-
-要点：
-- **优先阅读 \`layer=memory\`** 的 hit；evidence 只用于下钻核对
-- 空 query 或仅“继续” → 只返回最近活跃记忆（recency-only），不会扫全量日志
-- 可选 \`includeRetired=1\` 查看已 superseded 的旧记忆；默认不返回
-
 ## 写入结构化记忆（L3 product memory）
 
 当确认了「后续 turn 还应遵守」的结论时，立即写入（不要等本轮结束）：
 
-\`memory_write\` 工具可用时，必须优先调用该工具，只提交：
+必须调用 \`memory_write\` MCP 工具，只提交：
 
 - \`kind\`：\`decision\` | \`constraint\` | \`fact\`
 - \`topic\`：小写 ASCII 稳定主题，可用点号或连字符分段
@@ -444,13 +419,6 @@ node scripts/callback-client.js session-search --query "redis 端口" --limit 10
   "scope": "project"
 }
 \`\`\`
-
-${memoryCompatibility}
-
-参数：
-- \`--kind\`：\`decision\`（拍板）| \`constraint\`（禁止/必须）| \`fact\`（可核对事实）
-- \`--topic\`：**必填**；同一结论更新必须复用同一 topic，系统自动 supersede
-- \`--content\`：一句话结论；必要细节可两行，勿贴大段日志
 
 写入规则：
 1. 用户拍板 / 架构约束 / 已核实的关键事实 → **写**

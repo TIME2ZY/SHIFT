@@ -134,7 +134,7 @@ test("reindex + search returns untrusted project-doc passages", () => {
   }
 });
 
-test("session-search can hit project-doc layer after reindex", async () => {
+test("recall search can hit project-doc layer after reindex", async () => {
   const root = writeProjectFixture();
   const storage = createStorage({ file: ":memory:" });
   try {

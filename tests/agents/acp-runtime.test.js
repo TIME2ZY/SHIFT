@@ -6,6 +6,7 @@ const {
   decideAcpPermission,
   isAcpReadOnlyToolCall,
   shouldLoadAcpSession,
+  buildAcpSessionParams,
 } = require("../../src/agents/invoke-acp");
 const { AGENTS } = require("../../src/agents/catalog");
 const { ENV } = require("../../src/shared/brand");
@@ -17,6 +18,8 @@ test("Grok ACP invocation uses the native stdio agent", () => {
   const invocation = buildProviderTransportInvocation(AGENTS.grok, "ignored", "acp");
   assert.match(String(invocation.command), /grok(\.exe)?$/i);
   assert.deepEqual(invocation.args.slice(0, 1), ["agent"]);
+  assert.ok(invocation.args.includes("--no-leader"));
+  assert.ok(!invocation.args.includes("--plugin-dir"));
   assert.ok(invocation.args.includes("stdio"));
   assert.ok(invocation.args.includes("--always-approve"));
   assert.ok(!invocation.args.includes("--output-format"));
@@ -341,4 +344,17 @@ test("ACP session reuse selects session/load only when both id and capability ex
     shouldLoadAcpSession({}, { agentCapabilities: { loadSession: true } }),
     false
   );
+});
+
+test("ACP new and load requests carry the same current MCP descriptors", () => {
+  const mcpServers = [{ name: "shift_context", command: "node", args: [], env: [] }];
+  assert.deepEqual(buildAcpSessionParams("C:/workspace", mcpServers), {
+    cwd: "C:/workspace",
+    mcpServers,
+  });
+  assert.deepEqual(buildAcpSessionParams("C:/workspace", mcpServers, "session-1"), {
+    sessionId: "session-1",
+    cwd: "C:/workspace",
+    mcpServers,
+  });
 });

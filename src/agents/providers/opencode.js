@@ -3,6 +3,7 @@ const { makeUsageEvent } = require("../usage");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveProxy } = require("../proxy");
+const { createOpencodeShiftContextConfig } = require("../shift-context-mcp-config");
 const {
   toolNameFromItem,
   toolArgsFromItem,
@@ -493,6 +494,12 @@ function createOpencodeRuntime(cli) {
 
 const OPENCODE_GO_MODEL_PREFIX = "opencode-go/";
 
+function buildOpencodeEnvironment(_options = {}, env = process.env) {
+  return {
+    OPENCODE_CONFIG_CONTENT: createOpencodeShiftContextConfig(env.OPENCODE_CONFIG_CONTENT),
+  };
+}
+
 function resolveOpencodeCommand() {
   if (process.platform !== "win32") return "opencode";
   const pathEntries = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
@@ -516,6 +523,7 @@ const opencodeProvider = {
   allowedProviderOptions: ["thinking", "modelPrefix", "autoApprove", "variant"],
   createRuntime: createOpencodeRuntime,
   resolveProxy,
+  buildEnvironment: buildOpencodeEnvironment,
   buildInvocation(config, prompt) {
     const providerOptions = config.providerOptions || {};
     const args = ["run", "--format", "json"];
@@ -549,4 +557,5 @@ module.exports = {
   resolveOpencodeCommand,
   normalizeToolArgs,
   sessionIdFromEvent,
+  buildOpencodeEnvironment,
 };

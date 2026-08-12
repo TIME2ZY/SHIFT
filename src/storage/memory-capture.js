@@ -221,7 +221,7 @@ function renderWindowSealMemory(input) {
         `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=true`,
         "中断快照:",
         snapshot,
-        "说明: provider session 已放弃；后续请以结构化记忆与 session-search 为准。",
+        "说明: provider session 已放弃；后续请以结构化记忆与 recall_search 为准。",
       ].join("\n"),
       MAX_MEMORY_CONTENT_CHARS
     );
@@ -231,7 +231,7 @@ function renderWindowSealMemory(input) {
       `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=false`,
       "完整轮次快照:",
       snapshot,
-      "说明: 窗口已正常轮换；后续请以结构化记忆与 session-search 为准。",
+      "说明: 窗口已正常轮换；后续请以结构化记忆与 recall_search 为准。",
     ].join("\n"),
     MAX_MEMORY_CONTENT_CHARS
   );

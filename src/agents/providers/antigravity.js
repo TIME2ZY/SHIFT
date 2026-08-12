@@ -3,6 +3,7 @@ const path = require("node:path");
 const { makeEvent } = require("../event-protocol");
 const { makeUsageEvent } = require("../usage");
 const { resolveProxy } = require("../proxy");
+const { ensureAntigravityShiftContextConfig } = require("../shift-context-mcp-config");
 
 /**
  * Google Antigravity CLI provider (`agy`).
@@ -76,6 +77,11 @@ function resolveAgyCommand(env = process.env) {
     }
   }
   return "agy";
+}
+
+function buildAntigravityEnvironment(_options = {}, env = process.env) {
+  ensureAntigravityShiftContextConfig(env);
+  return {};
 }
 
 /**
@@ -472,6 +478,7 @@ const antigravityProvider = {
   ],
   createRuntime: createAntigravityRuntime,
   resolveProxy,
+  buildEnvironment: buildAntigravityEnvironment,
   validate(config) {
     const effort = config.reasoningEffort || "high";
     if (effort && !SUPPORTED_EFFORTS.has(effort)) {
@@ -546,5 +553,6 @@ module.exports = {
   sessionIdFromEvent,
   normalizeToolArgs,
   createAntigravityRuntime,
+  buildAntigravityEnvironment,
   antigravityProvider,
 };

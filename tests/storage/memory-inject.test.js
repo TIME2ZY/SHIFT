@@ -41,7 +41,7 @@ test("empty active-memory card provides the search fallback", () => {
   assert.match(card, /<!-- Active Memories \(0\) -->/);
   assert.match(card, /尚无结构化记忆/);
   assert.match(card, /recall_search/);
-  assert.match(card, /session-search/);
+  assert.doesNotMatch(card, /session-search/);
   assert.match(card, /<!-- \/Active Memories -->/);
 });
 
