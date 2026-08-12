@@ -17,13 +17,8 @@ const { spawnSync } = require("node:child_process");
 const { ENV } = require("../../src/shared/brand");
 const { DEFAULT_MEMORY_DB_FILE } = require("../../src/shared/runtime-paths");
 const { parseArgs } = require("./lib/parse-args");
-const { startHarness, resolveProjectDir } = require("./lib/harness");
-const {
-  createDumpDir,
-  dumpTurn,
-  writeReport,
-  writeJson,
-} = require("./lib/live-dump");
+const { startHarness, resolveProjectDir, sameProjectDir } = require("./lib/harness");
+const { createDumpDir, dumpTurn, writeReport, writeJson } = require("./lib/live-dump");
 const { buildTurnTrace, aggregateTrace } = require("./lib/multi-trace");
 const { evaluateMultiCollab } = require("./lib/multi-assert");
 const scenario = require("./scenarios/multi-auth-collab");
@@ -113,7 +108,9 @@ function preflightMulti(opts) {
   const notes = [];
   const errors = [];
   notes.push(`mode=${opts.mode}`);
-  notes.push(`discuss capacity=${opts.discussCapacity} implement capacity=${opts.implementCapacity}`);
+  notes.push(
+    `discuss capacity=${opts.discussCapacity} implement capacity=${opts.implementCapacity}`
+  );
   notes.push(`scenario=${scenario.SCENARIO_ID}`);
   for (const name of scenario.REQUIRED_CLIS || []) {
     const c = checkCli(name);
@@ -123,7 +120,7 @@ function preflightMulti(opts) {
   if (opts.mode === "attach" && !opts.uiToken) {
     errors.push("attach mode requires --ui-token or SHIFT_UI_TOKEN");
   }
-  const db = process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE;
+  const db = DEFAULT_MEMORY_DB_FILE;
   notes.push(`runtime DB default: ${db}`);
   return { ok: errors.length === 0, notes, errors };
 }
@@ -136,7 +133,9 @@ async function chatWithRetry(api, args) {
     if (last.ok) return last;
     if (last.status < 500 || i === retries) return last;
     const wait = 1500 * i;
-    console.warn(`  [retry ${i}/${retries}] ${args.label || ""} http=${last.status} wait ${wait}ms`);
+    console.warn(
+      `  [retry ${i}/${retries}] ${args.label || ""} http=${last.status} wait ${wait}ms`
+    );
     await new Promise((r) => setTimeout(r, wait));
   }
   return last;
@@ -145,7 +144,7 @@ async function chatWithRetry(api, args) {
 function snapshotWindows(sessionId) {
   try {
     const { createStorage } = require("../../src/storage");
-    const file = process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE;
+    const file = DEFAULT_MEMORY_DB_FILE;
     const storage = createStorage({ file });
     try {
       return storage.windows.listForThread(sessionId).map((w) => ({
@@ -190,8 +189,7 @@ async function main() {
 
   if (opts.dryRun) {
     for (const phase of scenario.PHASES) {
-      const cap =
-        phase.id === "discuss" ? opts.discussCapacity : opts.implementCapacity;
+      const cap = phase.id === "discuss" ? opts.discussCapacity : opts.implementCapacity;
       console.log(
         `\n[phase ${phase.id}] capacity=${cap} worktree=${Boolean(phase.useWorktree)} turns=${phase.turns.length}`
       );
@@ -223,7 +221,7 @@ async function main() {
   try {
     harness = await startHarness(opts, { dumpDir });
     const { api } = harness;
-    const projectDir = resolveProjectDir(opts);
+    let projectDir = resolveProjectDir(opts);
 
     const health = await api.health();
     if (!health.ok) {
@@ -231,20 +229,23 @@ async function main() {
     }
 
     if (!sessionId) {
-      const session = await api.createSession();
+      const project = await api.openProject(projectDir);
+      const session = await api.createSession(project.projectKey);
       sessionId = session.id;
+      projectDir = session.projectDir;
+      console.log(`[live] opened Project ${project.projectKey}`);
       console.log(`[live] created session ${sessionId}`);
     } else {
-      await api.getSession(sessionId);
+      const session = await api.getSession(sessionId);
+      if (opts.projectDir && !sameProjectDir(session.projectDir, projectDir)) {
+        throw new Error(
+          `session ${sessionId} belongs to ${session.projectDir}, not requested ${projectDir}`
+        );
+      }
+      projectDir = session.projectDir;
       console.log(`[live] continuing session ${sessionId}`);
     }
-
-    try {
-      await api.setProjectDir(sessionId, projectDir);
-      console.log(`[live] projectDir=${projectDir}`);
-    } catch (error) {
-      console.warn(`[live] setProjectDir: ${error.message}`);
-    }
+    console.log(`[live] projectDir=${projectDir}`);
 
     writeJson(path.join(dumpDir, "meta.json"), {
       scenarioId: scenario.SCENARIO_ID,

@@ -875,6 +875,27 @@ const MIGRATIONS = Object.freeze([
         AND capacity_tokens = 272000;
     `,
   },
+  {
+    version: 23,
+    name: "project_lifecycle",
+    sql: `
+      ALTER TABLE projects
+        ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+      ALTER TABLE projects
+        ADD COLUMN last_opened_at TEXT;
+      ALTER TABLE projects
+        ADD COLUMN archived_at TEXT;
+
+      UPDATE projects
+      SET last_opened_at = updated_at
+      WHERE last_opened_at IS NULL;
+
+      CREATE INDEX projects_archived_opened
+        ON projects(archived_at, last_opened_at DESC, created_at DESC);
+      CREATE INDEX threads_project_updated
+        ON threads(project_key, deleted_at, updated_at DESC);
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

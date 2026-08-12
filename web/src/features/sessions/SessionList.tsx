@@ -12,6 +12,7 @@ interface SessionListProps {
   error: Error | null;
   isCreating?: boolean;
   deletingSessionId?: string | null;
+  emptyMessage?: string;
   onCreate?(): void;
   onDelete?(sessionId: string): void;
   onSelect(sessionId: string): void;
@@ -55,6 +56,7 @@ export function SessionList({
   error,
   isCreating,
   deletingSessionId,
+  emptyMessage = "还没有对话。",
   onCreate,
   onDelete,
   onSelect,
@@ -134,7 +136,7 @@ export function SessionList({
         </div>
       ) : null}
       {!isLoading && !error && sessions.length === 0 ? (
-        <p className="react-sidebar-message">还没有对话。</p>
+        <p className="react-sidebar-message">{emptyMessage}</p>
       ) : null}
       {!isLoading && !error && sessions.length > 0 ? (
         <nav className="react-session-list" aria-label="已有对话">

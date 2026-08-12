@@ -29,7 +29,6 @@ const NOOP_MEMORY_CAPTURE = Object.freeze({
 });
 
 function createChatRoutes({
-  rootDir,
   selfGitRoot,
   options,
   AGENTS,
@@ -49,7 +48,6 @@ function createChatRoutes({
   sendJson,
   sendSse,
   readJsonBody,
-  buildInvokeArgs,
   buildChatArgs,
   augmentPrompt,
   getMaxA2ADepth,
@@ -58,9 +56,6 @@ function createChatRoutes({
   runChildStream,
   spawnRunner,
   getSession,
-  createSession,
-  setSessionProjectDir,
-  validateProjectDir,
   setSessionWorktree,
   appendToSession,
   findUserMessageByClientTurnId,
@@ -75,44 +70,6 @@ function createChatRoutes({
   const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
   const log = logger || options?.logger || console;
   return async function handleChatRoutes(req, res, url) {
-    if (req.method === "POST" && url.pathname === "/api/invoke") {
-      let args;
-      try {
-        const body = await readJsonBody(req);
-        const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-        const { augmentedPrompt } = augmentPrompt(rawPrompt);
-        args = buildInvokeArgs(body, augmentedPrompt);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
-      }
-
-      res.writeHead(200, {
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control": "no-store",
-        connection: "keep-alive",
-      });
-
-      runChildStream({
-        spawnRunner,
-        args,
-        res,
-        cwd: rootDir,
-        killGraceMs: options.killGraceMs,
-        onStdout(text) {
-          sendSse(res, "stdout", { text });
-        },
-        onStderr(text) {
-          sendSse(res, "stderr", { text });
-        },
-      }).then(({ code, signal }) => {
-        sendSse(res, "exit", { code, signal });
-        res.end();
-      });
-
-      return true;
-    }
-
     if (req.method !== "POST" || url.pathname !== "/api/chat") {
       return false;
     }
@@ -129,7 +86,7 @@ function createChatRoutes({
     const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const useWorktree = body.useWorktree === true;
     let clientTurnId = null;
-    let sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
+    const sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
 
     if (!AGENTS[requestedAgent]) {
       sendJson(res, 400, { error: `Unsupported agent "${requestedAgent}".` });
@@ -137,6 +94,16 @@ function createChatRoutes({
     }
     if (!rawPrompt) {
       sendJson(res, 400, { error: "Prompt is required." });
+      return true;
+    }
+    if (!sessionId) {
+      sendJson(res, 400, { error: "sessionId is required." });
+      return true;
+    }
+    if (body.projectDir !== undefined) {
+      sendJson(res, 400, {
+        error: "projectDir is bound by the Session Project and cannot be changed.",
+      });
       return true;
     }
     if (body.clientTurnId !== undefined && body.clientTurnId !== null) {
@@ -148,47 +115,18 @@ function createChatRoutes({
       }
     }
 
-    let session;
-    if (!sessionId) {
-      session = createSession();
-      sessionId = session.id;
-    } else {
-      try {
-        assertValidOpaqueId(sessionId, "sessionId");
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
-      }
-      session = getSession(sessionId);
-      if (!session) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
+    try {
+      assertValidOpaqueId(sessionId, "sessionId");
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+      return true;
     }
-    if (typeof body.projectDir === "string" && body.projectDir.trim()) {
-      let resolvedProjectDir;
-      try {
-        resolvedProjectDir = validateProjectDir(body.projectDir);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
-      }
-      try {
-        session = setSessionProjectDir(sessionId, resolvedProjectDir);
-      } catch (error) {
-        sendJson(res, error.statusCode || 400, { error: error.message });
-        return true;
-      }
+    let session = getSession(sessionId);
+    if (!session) {
+      sendJson(res, 404, { error: "Session not found or its Project is archived." });
+      return true;
     }
-    if (!session.projectDir) {
-      try {
-        session = setSessionProjectDir(sessionId, rootDir);
-      } catch (error) {
-        sendJson(res, error.statusCode || 400, { error: error.message });
-        return true;
-      }
-    }
-    const sessionProjectDir = session && session.projectDir ? session.projectDir : rootDir;
+    const sessionProjectDir = session.projectDir;
     const existingUserMessage =
       clientTurnId && typeof findUserMessageByClientTurnId === "function"
         ? findUserMessageByClientTurnId(sessionId, clientTurnId)

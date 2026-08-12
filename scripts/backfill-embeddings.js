@@ -15,7 +15,7 @@ loadProjectEnv(ROOT);
 
 async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const file = path.resolve(args.db || process.env.SHIFT_MEMORY_DB || DEFAULT_MEMORY_DB_FILE);
+  const file = path.resolve(args.db || DEFAULT_MEMORY_DB_FILE);
   const storage = createStorage({ file });
   const runtime = createEmbeddingRuntime({
     storage,

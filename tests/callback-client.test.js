@@ -61,6 +61,7 @@ test("callback client validates required environment and arguments", () => {
     options: { content: "你好" },
   });
   assert.throws(() => callbackClient.parseArgs(["session-search"]), /Unknown callback command/);
+  assert.throws(() => callbackClient.parseArgs(["memory-write"]), /Unknown callback command/);
   assert.throws(() => callbackClient.parseArgs(["memory-upsert"]), /Unknown callback command/);
 });
 

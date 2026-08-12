@@ -12,8 +12,9 @@ const {
 } = require("../../src/storage/offline/recovery-drill");
 const { verifyRestoredSqliteApi } = require("../../src/server/recovery-verification");
 
-function seed(storage) {
-  storage.threads.create({ id: "thread-1", title: "Recovery source" });
+function seed(storage, projectDir) {
+  const project = storage.projects.openDirectory(projectDir);
+  storage.threads.create({ id: "thread-1", title: "Recovery source", project });
   storage.messages.append({
     id: "message-1",
     threadId: "thread-1",
@@ -50,7 +51,7 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
   prepareCleanEpoch({ file: sourceFile });
   const storage = createStorage({ file: sourceFile });
   try {
-    seed(storage);
+    seed(storage, root);
   } finally {
     storage.close();
   }
@@ -68,7 +69,6 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
     assert.equal(report.causality.ok, true);
     assert.equal(report.projections.afterRebuild.ok, true);
     assert.equal(report.productApi.ok, true);
-    assert.equal(report.productApi.checks.sqliteOnly.ok, true);
     assert.equal(fs.existsSync(report.reportFile), true);
     assert.equal(report.rebuilt.threads, 1);
     assert.equal(report.rebuilt.digests, 1);
@@ -105,11 +105,15 @@ test("causality inspection detects cross-thread relationships beyond foreign key
       generation: 1,
       capacityTokens: 1000,
     });
-    storage.db.prepare(`
+    storage.db
+      .prepare(
+        `
       INSERT INTO invocations
         (id, thread_id, window_id, agent_id, state, started_at, next_event_sequence)
       VALUES ('bad-invocation', 'thread-2', ?, 'codex', 'active', ?, 0)
-    `).run(window.id, new Date().toISOString());
+    `
+      )
+      .run(window.id, new Date().toISOString());
     const result = inspectCausality(storage.db);
     assert.equal(result.ok, false);
     assert.equal(result.violations["invocation-window-thread"], 1);

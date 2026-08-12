@@ -1,10 +1,9 @@
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
-const { loadProjectEnv } = require("../shared/load-env");
 const { ENV } = require("../shared/brand");
 const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
-const { getProviderAdapter, collectProviderStartupDiagnostics } = require("../agents/providers");
+const { getProviderAdapter } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
 const agentHandoff = require("../agents/handoff");
@@ -14,10 +13,10 @@ const sessionSealer = require("../session/sealer");
 const sessionBootstrap = require("../session/bootstrap");
 const worktreeManagerModule = require("../worktree/manager");
 const { createDeliveryVerifier } = require("../worktree/delivery-verifier");
-const runtimePaths = require("../shared/runtime-paths");
-const projectDirService = require("./project-dir");
+const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
 const uiSecurity = require("./ui-security");
 const { createSessionRoutes } = require("./session-routes");
+const { createProjectRoutes } = require("./project-routes");
 const { createMemoryRoutes } = require("./memory-routes");
 const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
@@ -32,20 +31,6 @@ const { createServerStorage } = require("../storage/server-storage");
 const { createMemoryCapture } = require("../storage/memory-capture");
 const { createRecallService } = require("../storage/recall-service");
 const {
-  ROOT,
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_AUDIT_TRANSCRIPT_DIR,
-  DEFAULT_WORKTREE_STATE_FILE,
-} = runtimePaths;
-
-// When started as the main process (npm start), load project .env so local
-// knobs like INVOKE_CLI_PROXY / INVOKE_CODEX_HOME persist without shell export.
-// Tests require this module as a library and skip file loading.
-if (require.main === module) {
-  loadProjectEnv(ROOT);
-}
-const {
   getSkills,
   publicSkills,
   matchSkills,
@@ -54,10 +39,8 @@ const {
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 } = skills;
-const { validateProjectDir } = projectDirService;
 const { createCallbackRoutes } = callbackRoutes;
 const { createChatRoutes } = chatRoutes;
-const DEFAULT_PORT = Number(process.env.PORT || 8787);
 // Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
   try {
@@ -105,37 +88,29 @@ function createServer(options = {}) {
   // Surface missing identity packs early so new agents aren't silent no-ops.
   agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const uiToken = uiSecurity.createUiToken(options.uiToken);
+  const appPaths =
+    options.runtimePaths ||
+    createRuntimePaths({ env: options.env || process.env, homeDir: options.homeDir });
   const webDistDir = options.webDistDir || path.join(ROOT, "dist", "web");
   const webIndexPath = options.webIndexPath || path.join(webDistDir, "index.html");
   const spawnRunner = options.spawnRunner || spawn;
-  const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
   const worktreeManager =
     options.worktreeManager ||
     worktreeManagerModule.createWorktreeManager({
       rootDir: ROOT,
-      stateFile: DEFAULT_WORKTREE_STATE_FILE,
+      stateFile: options.worktreeStateFile || appPaths.worktreeStateFile,
     });
   const deliveryVerifier = options.deliveryVerifier || createDeliveryVerifier();
   const logger = options.logger || console;
   const auditTranscriptDir = path.resolve(
-    options.auditTranscriptDir ||
-      process.env[ENV.AUDIT_TRANSCRIPT_DIR] ||
-      (options.sessionsFile
-        ? path.join(path.dirname(sessionsFile), "audit-transcripts")
-        : DEFAULT_AUDIT_TRANSCRIPT_DIR)
+    options.auditTranscriptDir || appPaths.auditTranscriptDir
   );
-  const legacyTranscriptDir = path.resolve(
-    process.env[ENV.TRANSCRIPT_DIR] || DEFAULT_TRANSCRIPT_DIR
-  );
-  if (runtimePaths.pathsOverlap(legacyTranscriptDir, auditTranscriptDir)) {
-    throw new Error(
-      `SQLite canonical audit directory must not overlap legacy transcripts: ` +
-        `${auditTranscriptDir} <> ${legacyTranscriptDir}`
-    );
-  }
   const storageContext = createServerStorage(
-    { ...options, auditTranscriptDir, defaultProjectDir: ROOT },
-    sessionsFile,
+    {
+      ...options,
+      memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
+      auditTranscriptDir,
+    },
     logger
   );
   const durableRecorder = storageContext.recorder;
@@ -161,18 +136,14 @@ function createServer(options = {}) {
   });
   const activeInvocations = new Map();
   const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
-  const { buildInvokeArgs, buildChatArgs } = createInvokeArgsBuilder({
+  const { buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
     runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
   });
   _previewManagers.add(worktreeManager);
 
-  function createSessionDurable() {
-    return sqliteSessionService.createSession();
-  }
-
-  function updateProjectDirDurable(sessionId, projectDir) {
-    return sqliteSessionService.setSessionProjectDir(sessionId, projectDir);
+  function createSessionDurable(input) {
+    return sqliteSessionService.createSession(input);
   }
 
   function updateWorktreeDurable(sessionId, worktree) {
@@ -197,8 +168,8 @@ function createServer(options = {}) {
     return sqliteSessionService.getSession(sessionId);
   }
 
-  function listSessionsDurable() {
-    return sqliteSessionService.listSessions();
+  function listSessionsDurable(projectKey) {
+    return sqliteSessionService.listSessions(projectKey);
   }
 
   async function cleanupSessionRuntime(sessionId) {
@@ -221,19 +192,35 @@ function createServer(options = {}) {
     } catch {}
   }
 
+  function archiveProjectDurable(projectKey) {
+    for (const sessionId of activeInvocations.keys()) {
+      const thread = storageContext.storage.threads.getIncludingArchived(sessionId);
+      if (thread?.projectKey !== projectKey) continue;
+      const error = new Error(`Project ${projectKey} has an active runtime invocation.`);
+      error.code = "PROJECT_ACTIVE_INVOCATIONS";
+      error.statusCode = 409;
+      throw error;
+    }
+    return storageContext.storage.projects.archive(projectKey);
+  }
+
+  const handleProjectRoutes = createProjectRoutes({
+    projects: storageContext.storage.projects,
+    listSessions: listSessionsDurable,
+    archiveProject: archiveProjectDurable,
+    sendJson,
+    readJsonBody,
+  });
+
   const handleSessionRoutes = createSessionRoutes({
-    rootDir: ROOT,
     worktreeManager,
     cleanupSessionRuntime,
     sendJson,
     readJsonBody,
-    listSessions: listSessionsDurable,
     createSession: createSessionDurable,
     getSession: getSessionDurable,
     deleteSession: deleteSessionDurable,
     setSessionWorktree: updateWorktreeDurable,
-    validateProjectDir,
-    setSessionProjectDir: updateProjectDirDurable,
     usageStorage: storageContext.storage,
     recallService,
   });
@@ -264,7 +251,6 @@ function createServer(options = {}) {
     logger,
   });
   const handleChatRoutes = createChatRoutes({
-    rootDir: ROOT,
     selfGitRoot: SELF_GIT_ROOT,
     options,
     AGENTS,
@@ -284,7 +270,6 @@ function createServer(options = {}) {
     sendJson,
     sendSse,
     readJsonBody,
-    buildInvokeArgs,
     buildChatArgs,
     augmentPrompt,
     getMaxA2ADepth,
@@ -293,9 +278,6 @@ function createServer(options = {}) {
     runChildStream,
     spawnRunner,
     getSession: getSessionDurable,
-    createSession: createSessionDurable,
-    setSessionProjectDir: updateProjectDirDurable,
-    validateProjectDir,
     setSessionWorktree: updateWorktreeDurable,
     appendToSession: appendToSessionDurable,
     findUserMessageByClientTurnId: findUserMessageByClientTurnIdDurable,
@@ -311,12 +293,6 @@ function createServer(options = {}) {
 
     if (req.method === "GET" && url.pathname === "/") {
       serveIndex(res, { indexPath: webIndexPath, uiToken, sendJson });
-      return;
-    }
-
-    if (req.method === "GET" && ["/react", "/react/"].includes(url.pathname)) {
-      res.writeHead(308, { location: "/" });
-      res.end();
       return;
     }
 
@@ -338,6 +314,10 @@ function createServer(options = {}) {
     }
 
     if (await handleStorageRoutes(req, res, url)) {
+      return;
+    }
+
+    if (await handleProjectRoutes(req, res, url)) {
       return;
     }
 
@@ -394,16 +374,6 @@ function createServer(options = {}) {
   // Expose for tests / orchestrated shutdown that can await flush-before-close.
   server.closeStorageContext = closeStorageContext;
   return server;
-}
-
-if (require.main === module) {
-  const server = createServer();
-  server.listen(DEFAULT_PORT, "127.0.0.1", () => {
-    console.log(`Shift listening at http://127.0.0.1:${DEFAULT_PORT}`);
-    for (const line of collectProviderStartupDiagnostics()) {
-      console.log(line);
-    }
-  });
 }
 
 module.exports = {

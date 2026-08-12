@@ -1,10 +1,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const {
-  DEFAULT_MEMORY_DB_FILE,
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_TRANSCRIPT_DIR,
-} = require("../../shared/runtime-paths");
+  LEGACY_MEMORY_DB_FILE,
+  LEGACY_SESSIONS_FILE,
+  LEGACY_TRANSCRIPT_DIR,
+} = require("./legacy-runtime-paths");
 const { CANONICAL_EVENT_TYPES } = require("../../agents/event-protocol");
 const { createStorage } = require("../index");
 const { readLegacySessions } = require("./legacy-session-reader");
@@ -22,9 +22,9 @@ const MIRRORED_EVENT_KINDS = new Set([
  * drifted. It never repairs or changes either source.
  */
 function auditDualStorage(options = {}) {
-  const sessionsFile = options.sessionsFile || DEFAULT_SESSIONS_FILE;
-  const transcriptDir = options.transcriptDir || DEFAULT_TRANSCRIPT_DIR;
-  const memoryDbFile = options.memoryDbFile || DEFAULT_MEMORY_DB_FILE;
+  const sessionsFile = options.sessionsFile || LEGACY_SESSIONS_FILE;
+  const transcriptDir = options.transcriptDir || LEGACY_TRANSCRIPT_DIR;
+  const memoryDbFile = options.memoryDbFile || LEGACY_MEMORY_DB_FILE;
   const ownsStorage = !options.storage;
 
   if (ownsStorage && !fs.existsSync(memoryDbFile)) {

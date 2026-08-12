@@ -11,6 +11,22 @@ const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
   refetch: vi.fn(),
   sessions: [{ id: "s1", title: "新对话", messageCount: 0, worktree: null }],
+  projects: [
+    {
+      projectKey: "project-1",
+      displayName: "SHIFT",
+      canonicalPath: "C:/projects/shift",
+      identityKind: "git-worktree",
+      threadCount: 1,
+    },
+    {
+      projectKey: "project-2",
+      displayName: "BETA",
+      canonicalPath: "D:/projects/beta",
+      identityKind: "directory",
+      threadCount: 0,
+    },
+  ],
 }));
 
 vi.mock("./navigation", () => ({
@@ -44,6 +60,15 @@ vi.mock("../features/sessions/queries", () => ({
   }),
 }));
 
+vi.mock("../features/projects/queries", () => ({
+  useProjectsQuery: () => ({
+    data: mocks.projects,
+    isPending: false,
+    error: null,
+    refetch: mocks.refetch,
+  }),
+}));
+
 vi.mock("../features/sessions/mutations", () => ({
   useCreateSessionMutation: () => ({
     mutate: mocks.mutate,
@@ -71,6 +96,13 @@ vi.mock("../features/sessions/SessionList", () => ({
   SessionList: ({ onCreate }: { onCreate?(): void }) => (
     <button type="button" onClick={onCreate}>
       新建对话
+    </button>
+  ),
+}));
+vi.mock("../features/projects/ProjectRail", () => ({
+  ProjectRail: ({ onSelect }: { onSelect(projectKey: string): void }) => (
+    <button type="button" onClick={() => onSelect("project-2")}>
+      切换到 BETA
     </button>
   ),
 }));
@@ -145,5 +177,20 @@ describe("App recommended prompt integration", () => {
 
     await user.click(screen.getByRole("button", { name: "新建对话" }));
     expect(mocks.mutate).toHaveBeenCalledOnce();
+    expect(mocks.mutate).toHaveBeenCalledWith("project-1", expect.any(Object));
+  });
+
+  it("creates Sessions inside the newly selected Project", async () => {
+    mocks.sessions[0].messageCount = 2;
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "切换到 BETA" }));
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+
+    expect(mocks.mutate).toHaveBeenCalledWith("project-2", expect.any(Object));
+    await waitFor(() =>
+      expect(window.localStorage.getItem("shift.active-project-key")).toBe("project-2")
+    );
   });
 });

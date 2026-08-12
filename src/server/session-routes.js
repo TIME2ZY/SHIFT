@@ -2,18 +2,14 @@ const { buildUsageSummary } = require("../storage/usage-summary");
 const { projectInvocationProcess } = require("./invocation-process");
 
 function createSessionRoutes({
-  rootDir,
   worktreeManager,
   cleanupSessionRuntime,
   sendJson,
   readJsonBody,
-  listSessions,
   createSession,
   getSession,
   deleteSession,
   setSessionWorktree,
-  validateProjectDir,
-  setSessionProjectDir,
   getUsageSummary,
   usageStorage,
   recallService,
@@ -45,19 +41,8 @@ function createSessionRoutes({
         }
         sendJson(res, 200, { messages: session.messages });
       } else {
-        const sessions = listSessions();
-        if (sessions.length === 0) {
-          sendJson(res, 200, { messages: [] });
-          return true;
-        }
-        const session = getSession(sessions[0].id);
-        sendJson(res, 200, { messages: session ? session.messages : [] });
+        sendJson(res, 400, { error: "sessionId is required." });
       }
-      return true;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/sessions") {
-      sendJson(res, 200, { sessions: listSessions() });
       return true;
     }
 
@@ -123,7 +108,26 @@ function createSessionRoutes({
     }
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
-      sendJson(res, 201, { session: createSession() });
+      let body;
+      try {
+        body = await readJsonBody(req);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+      const projectKey = typeof body?.projectKey === "string" ? body.projectKey.trim() : "";
+      if (!projectKey) {
+        sendJson(res, 400, { error: "projectKey is required." });
+        return true;
+      }
+      try {
+        sendJson(res, 201, { session: createSession({ projectKey }) });
+      } catch (error) {
+        sendJson(res, error.statusCode || 500, {
+          error: error.statusCode ? error.message : "Internal server error.",
+          ...(error.code ? { code: error.code } : {}),
+        });
+      }
       return true;
     }
 
@@ -189,57 +193,29 @@ function createSessionRoutes({
       }
     }
 
-    if (req.method === "GET" && url.pathname === "/api/project") {
-      const sessionId = url.searchParams.get("sessionId");
-      if (!sessionId) {
-        sendJson(res, 200, { dir: rootDir });
-        return true;
-      }
+    const workspaceMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/workspace$/);
+    if (workspaceMatch && req.method === "GET") {
+      const sessionId = workspaceMatch[1];
       const session = getSession(sessionId);
       if (!session) {
         sendJson(res, 404, { error: "Session not found." });
         return true;
       }
-      sendJson(res, 200, { dir: session.projectDir || rootDir });
-      return true;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/project") {
-      let body;
+      let worktree = null;
       try {
-        body = await readJsonBody(req);
+        worktree = worktreeManager.getStatus(sessionId);
       } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
+        if (!/^No managed worktree/.test(error.message)) {
+          sendJson(res, 400, { error: error.message });
+          return true;
+        }
       }
-
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-      if (!sessionId) {
-        sendJson(res, 400, { error: "sessionId is required." });
-        return true;
-      }
-
-      const session = getSession(sessionId);
-      if (!session) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
-
-      let resolved;
-      try {
-        resolved = validateProjectDir(body.dir);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
-      }
-
-      try {
-        setSessionProjectDir(sessionId, resolved);
-      } catch (error) {
-        sendJson(res, error.statusCode || 400, { error: error.message });
-        return true;
-      }
-      sendJson(res, 200, { dir: resolved });
+      sendJson(res, 200, {
+        sessionId,
+        projectKey: session.projectKey,
+        projectDir: session.projectDir,
+        worktree,
+      });
       return true;
     }
 

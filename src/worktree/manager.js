@@ -4,7 +4,7 @@ const net = require("node:net");
 const path = require("node:path");
 const { assertValidOpaqueId, resolveInside } = require("../server/id-policy");
 const { ENV, LOCAL_STATE_DIR } = require("../shared/brand");
-const { ROOT, worktreeStateFileFor } = require("../shared/runtime-paths");
+const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
 
 function sanitizeId(id) {
   return assertValidOpaqueId(id, "sessionId");
@@ -101,7 +101,11 @@ function excludeGeneratedFiles(worktreeDir) {
   const entries = [".env.local", `${LOCAL_STATE_DIR}/`];
   const missing = entries.filter((entry) => !existing.split(/\r?\n/).includes(entry));
   if (missing.length > 0) {
-    fs.appendFileSync(excludePath, `${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${missing.join("\n")}\n`, "utf8");
+    fs.appendFileSync(
+      excludePath,
+      `${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${missing.join("\n")}\n`,
+      "utf8"
+    );
   }
 }
 
@@ -123,14 +127,18 @@ function killProcessTree(pid) {
     if (process.platform === "win32") {
       spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
     } else {
-      try { process.kill(-pid, "SIGTERM"); } catch {}
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {}
     }
   } catch {}
 }
 
 function createWorktreeManager(opts = {}) {
   const rootDir = path.resolve(opts.rootDir || ROOT);
-  const stateFile = path.resolve(opts.stateFile || worktreeStateFileFor(rootDir));
+  const stateFile = path.resolve(
+    opts.stateFile || createRuntimePaths({ env: opts.env || process.env }).worktreeStateFile
+  );
 
   function load() {
     return readState(stateFile);
@@ -202,10 +210,12 @@ function createWorktreeManager(opts = {}) {
     const parts = [];
     if (tracked) parts.push(tracked);
     for (const file of untracked) {
-      parts.push(runGit(["diff", "--no-index", "--", osNullPath(), file], meta.worktreeDir, {
-        maxBuffer: 20 * 1024 * 1024,
-        allowStatus: [1],
-      }));
+      parts.push(
+        runGit(["diff", "--no-index", "--", osNullPath(), file], meta.worktreeDir, {
+          maxBuffer: 20 * 1024 * 1024,
+          allowStatus: [1],
+        })
+      );
     }
     return parts.join("\n");
   }
@@ -213,7 +223,9 @@ function createWorktreeManager(opts = {}) {
   function discardWorktree(sessionId) {
     const safeSessionId = sanitizeId(sessionId);
     // Stop preview server before removing worktree
-    try { stopPreview(safeSessionId); } catch {}
+    try {
+      stopPreview(safeSessionId);
+    } catch {}
     const state = load();
     const meta = state.worktrees[safeSessionId];
     if (!meta) throw new Error(`No managed worktree for session ${safeSessionId}.`);
@@ -322,7 +334,9 @@ function createWorktreeManager(opts = {}) {
 
   function stopAllPreviews() {
     for (const sid of Array.from(previewProcesses.keys())) {
-      try { stopPreview(sid); } catch {}
+      try {
+        stopPreview(sid);
+      } catch {}
     }
   }
 

@@ -1,19 +1,18 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-const { archiveMixedCanonicalEvents } = require("../src/storage/offline/mixed-transcript-retirement");
+const {
+  archiveMixedCanonicalEvents,
+} = require("../src/storage/offline/mixed-transcript-retirement");
 const { ENV } = require("../src/shared/brand");
 const { loadProjectEnv } = require("../src/shared/load-env");
 const runtimePaths = require("../src/shared/runtime-paths");
+const { LEGACY_TRANSCRIPT_DIR } = require("../src/storage/offline/legacy-runtime-paths");
 
 function parseArgs(argv, env = process.env) {
   const options = {
-    authoritativeDbFile: path.resolve(
-      env[ENV.MEMORY_DB] || runtimePaths.DEFAULT_MEMORY_DB_FILE
-    ),
-    transcriptDir: path.resolve(
-      env[ENV.TRANSCRIPT_DIR] || runtimePaths.DEFAULT_TRANSCRIPT_DIR
-    ),
+    authoritativeDbFile: path.resolve(env[ENV.MEMORY_DB] || runtimePaths.DEFAULT_MEMORY_DB_FILE),
+    transcriptDir: path.resolve(env[ENV.TRANSCRIPT_DIR] || LEGACY_TRANSCRIPT_DIR),
     auditTranscriptDir: path.resolve(
       env[ENV.AUDIT_TRANSCRIPT_DIR] || runtimePaths.DEFAULT_AUDIT_TRANSCRIPT_DIR
     ),

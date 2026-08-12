@@ -10,22 +10,19 @@ const { resolveEpochAuditDirectory } = require("../src/storage/server-storage");
 const { ENV } = require("../src/shared/brand");
 const { loadProjectEnv } = require("../src/shared/load-env");
 const runtimePaths = require("../src/shared/runtime-paths");
+const legacyPaths = require("../src/storage/offline/legacy-runtime-paths");
 
 function defaultOptions(env = process.env) {
   return {
-    authoritativeDbFile: path.resolve(
-      env[ENV.MEMORY_DB] || runtimePaths.DEFAULT_MEMORY_DB_FILE
-    ),
-    legacyDbFile: runtimePaths.LEGACY_MEMORY_DB_FILE,
-    sessionsFile: runtimePaths.DEFAULT_SESSIONS_FILE,
-    invocationsFile: runtimePaths.DEFAULT_INVOCATIONS_FILE,
-    transcriptDir: path.resolve(
-      env[ENV.TRANSCRIPT_DIR] || runtimePaths.DEFAULT_TRANSCRIPT_DIR
-    ),
+    authoritativeDbFile: path.resolve(env[ENV.MEMORY_DB] || runtimePaths.DEFAULT_MEMORY_DB_FILE),
+    legacyDbFile: legacyPaths.LEGACY_MEMORY_DB_FILE,
+    sessionsFile: legacyPaths.LEGACY_SESSIONS_FILE,
+    invocationsFile: legacyPaths.LEGACY_INVOCATIONS_FILE,
+    transcriptDir: path.resolve(env[ENV.TRANSCRIPT_DIR] || legacyPaths.LEGACY_TRANSCRIPT_DIR),
     auditTranscriptDir: path.resolve(
-      env[ENV.AUDIT_TRANSCRIPT_DIR] || runtimePaths.DEFAULT_AUDIT_TRANSCRIPT_DIR
+      env[ENV.AUDIT_TRANSCRIPT_DIR] || legacyPaths.LEGACY_AUDIT_TRANSCRIPT_DIR
     ),
-    sessionMapRoot: runtimePaths.DEFAULT_SESSION_MAP_ROOT,
+    sessionMapRoot: legacyPaths.LEGACY_SESSION_MAP_ROOT,
     output: "",
   };
 }
@@ -95,10 +92,7 @@ function main() {
       epoch?.epochId && options.auditTranscriptDir
         ? resolveEpochAuditDirectory(options.auditTranscriptDir, epoch.epochId)
         : options.auditTranscriptDir;
-    const canonicalCoverage = inspectCanonicalCoverage(
-      options.transcriptDir,
-      epochAuditDir
-    );
+    const canonicalCoverage = inspectCanonicalCoverage(options.transcriptDir, epochAuditDir);
     const manifest = buildLegacyCleanupManifest({
       paths: options,
       epoch,

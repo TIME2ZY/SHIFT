@@ -477,8 +477,6 @@ function createCallbackRoutes({
 
         sendJson(res, 200, {
           ok: true,
-          deprecated: true,
-          replacement: "memory_write",
           outcome: outcome.outcome,
           memoryId: outcome.memoryId,
           replacedMemoryId: outcome.replacedMemoryId,

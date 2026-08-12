@@ -115,4 +115,12 @@ function resolveProjectDir(opts) {
   return ROOT;
 }
 
-module.exports = { startHarness, resolveProjectDir };
+function sameProjectDir(left, right) {
+  const resolvedLeft = path.resolve(left);
+  const resolvedRight = path.resolve(right);
+  return process.platform === "win32"
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
+}
+
+module.exports = { startHarness, resolveProjectDir, sameProjectDir };

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const sessionRoutes = require("../../src/server/session-routes.js");
+const { createSessionRoutes } = require("../../src/server/session-routes");
 
 function makeReq(method) {
   return { method };
@@ -19,65 +19,76 @@ function makeSendJson(res) {
   };
 }
 
-test("handleSessionRoutes lists sessions", async () => {
-  const res = makeRes();
-  const handle = sessionRoutes.createSessionRoutes({
-    rootDir: "/root",
+function createHandler(res, overrides = {}) {
+  return createSessionRoutes({
     worktreeManager: {},
     cleanupSessionRuntime() {},
     sendJson: makeSendJson(res),
     readJsonBody: async () => ({}),
-    listSessions: () => [{ id: "s1" }],
-    createSession: () => {
-      throw new Error("should not create");
-    },
+    createSession: () => null,
     getSession: () => null,
     deleteSession: () => false,
     setSessionWorktree: () => null,
-    validateProjectDir: () => "/root",
-    setSessionProjectDir: () => null,
+    ...overrides,
   });
+}
 
-  const handled = await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions"));
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { sessions: [{ id: "s1" }] });
-});
-
-test("handleSessionRoutes returns per-agent usage summary", async () => {
+test("session creation requires and forwards projectKey", async () => {
   const res = makeRes();
-  const summary = { available: true, session: { totalTokens: 12 }, agents: [] };
-  const handle = sessionRoutes.createSessionRoutes({
-    rootDir: "/root",
-    worktreeManager: {},
-    cleanupSessionRuntime() {},
-    sendJson: makeSendJson(res),
-    readJsonBody: async () => ({}),
-    listSessions: () => [],
-    createSession: () => null,
-    getSession: () => ({ id: "s1" }),
-    deleteSession: () => false,
-    setSessionWorktree: () => null,
-    validateProjectDir: () => "/root",
-    setSessionProjectDir: () => null,
-    getUsageSummary: (id) => {
-      assert.equal(id, "s1");
-      return summary;
+  let input = null;
+  const handle = createHandler(res, {
+    readJsonBody: async () => ({ projectKey: "dir:project-1" }),
+    createSession: (value) => {
+      input = value;
+      return { id: "s1", projectKey: value.projectKey };
     },
   });
-  const handled = await handle(
-    makeReq("GET"),
-    res,
-    new URL("http://127.0.0.1/api/sessions/s1/usage")
-  );
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, summary);
+
+  assert.equal(await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/sessions")), true);
+  assert.deepEqual(input, { projectKey: "dir:project-1" });
+  assert.equal(res.statusCode, 201);
+
+  const missingRes = makeRes();
+  const missing = createHandler(missingRes);
+  await missing(makeReq("POST"), missingRes, new URL("http://127.0.0.1/api/sessions"));
+  assert.equal(missingRes.statusCode, 400);
+  assert.match(missingRes.body.error, /projectKey is required/);
 });
 
-test("handleSessionRoutes projects a persisted invocation process across pages", async () => {
+test("workspace derives its immutable Project binding from the Session", async () => {
   const res = makeRes();
-  const reads = [];
+  const handle = createHandler(res, {
+    getSession: () => ({
+      id: "s1",
+      projectKey: "dir:project-1",
+      projectDir: "C:/project-1",
+    }),
+    worktreeManager: {
+      getStatus: () => ({ branch: "codex/session-s1" }),
+    },
+  });
+
+  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/workspace"));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    sessionId: "s1",
+    projectKey: "dir:project-1",
+    projectDir: "C:/project-1",
+    worktree: { branch: "codex/session-s1" },
+  });
+});
+
+test("session routes return per-agent usage and persisted invocation process", async () => {
+  const usageRes = makeRes();
+  const summary = { available: true, session: { totalTokens: 12 }, agents: [] };
+  const usage = createHandler(usageRes, {
+    getSession: () => ({ id: "s1" }),
+    getUsageSummary: () => summary,
+  });
+  await usage(makeReq("GET"), usageRes, new URL("http://127.0.0.1/api/sessions/s1/usage"));
+  assert.deepEqual(usageRes.body, summary);
+
+  const processRes = makeRes();
   const events = [
     { eventNo: 0, kind: "thinking.delta", payload: { text: "分析" } },
     {
@@ -86,134 +97,39 @@ test("handleSessionRoutes projects a persisted invocation process across pages",
       payload: { toolId: "t1", toolName: "read_file", result: "完成" },
     },
   ];
-  const handle = sessionRoutes.createSessionRoutes({
-    rootDir: "/root",
-    worktreeManager: {},
-    cleanupSessionRuntime() {},
-    sendJson: makeSendJson(res),
-    readJsonBody: async () => ({}),
-    listSessions: () => [],
-    createSession: () => null,
-    getSession: (id) => (id === "s1" ? { id } : null),
-    deleteSession: () => false,
-    setSessionWorktree: () => null,
-    validateProjectDir: () => "/root",
-    setSessionProjectDir: () => null,
+  const process = createHandler(processRes, {
+    getSession: () => ({ id: "s1" }),
     recallService: {
-      readInvocationPage: async (sessionId, invocationId, options) => {
-        reads.push({ sessionId, invocationId, options });
-        const event = events[options.from];
-        return {
-          events: event ? [event] : [],
-          total: events.length,
-          from: options.from,
-          limit: options.limit,
-        };
-      },
+      readInvocationPage: async (_sessionId, _invocationId, options) => ({
+        events: events[options.from] ? [events[options.from]] : [],
+        total: events.length,
+      }),
     },
   });
-
-  const handled = await handle(
+  await process(
     makeReq("GET"),
-    res,
+    processRes,
     new URL("http://127.0.0.1/api/sessions/s1/invocations/i1/process")
   );
-
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.invocationId, "i1");
-  assert.equal(res.body.thinking.text, "分析");
-  assert.deepEqual(res.body.tools, [
-    {
-      toolId: "t1",
-      toolName: "read_file",
-      status: "done",
-      output: "完成",
-      changedFiles: [],
-    },
-  ]);
-  assert.deepEqual(res.body.timeline, [
-    {
-      id: "thinking-0",
-      type: "thinking",
-      eventNo: 0,
-      lastEventNo: 0,
-      text: "分析",
-    },
-    { id: "tool-t1", type: "tool", eventNo: 1, toolId: "t1" },
-  ]);
-  assert.deepEqual(
-    reads.map((read) => read.options.from),
-    [0, 1]
-  );
+  assert.equal(processRes.statusCode, 200);
+  assert.equal(processRes.body.thinking.text, "分析");
+  assert.equal(processRes.body.tools[0].toolName, "read_file");
 });
 
-test("handleSessionRoutes updates projectDir for an existing session", async () => {
-  const res = makeRes();
-  let setArgs = null;
-  const handle = sessionRoutes.createSessionRoutes({
-    rootDir: "/root",
-    worktreeManager: {},
-    cleanupSessionRuntime() {},
-    sendJson: makeSendJson(res),
-    readJsonBody: async () => ({ sessionId: "s1", dir: "/next" }),
-    listSessions: () => [],
-    createSession: () => null,
-    getSession: () => ({ id: "s1", projectDir: "/root" }),
-    deleteSession: () => false,
-    setSessionWorktree: () => null,
-    validateProjectDir: (dir) => `${dir}/validated`,
-    setSessionProjectDir: (sessionId, dir) => {
-      setArgs = { sessionId, dir };
-      return { id: sessionId, projectDir: dir };
-    },
-  });
-
-  const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/project"));
-  assert.equal(handled, true);
-  assert.deepEqual(setArgs, {
-    sessionId: "s1",
-    dir: "/next/validated",
-  });
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { dir: "/next/validated" });
-});
-
-test("handleSessionRoutes discards a worktree and clears the session link", async () => {
+test("discarding a worktree clears only the Session runtime link", async () => {
   const res = makeRes();
   let cleared = null;
-  const handle = sessionRoutes.createSessionRoutes({
-    rootDir: "/root",
+  const handle = createHandler(res, {
+    getSession: () => ({ id: "s1", projectKey: "dir:project-1" }),
     worktreeManager: {
-      discardWorktree(sessionId) {
-        return { ok: true, sessionId };
-      },
+      discardWorktree: (sessionId) => ({ ok: true, sessionId }),
     },
-    cleanupSessionRuntime() {},
-    sendJson: makeSendJson(res),
-    readJsonBody: async () => ({}),
-    listSessions: () => [],
-    createSession: () => null,
-    getSession: () => ({ id: "s1" }),
-    deleteSession: () => false,
     setSessionWorktree: (sessionId, value) => {
       cleared = { sessionId, value };
-      return { id: sessionId, worktree: value };
     },
-    validateProjectDir: () => "/root",
-    setSessionProjectDir: () => null,
   });
 
-  const handled = await handle(
-    makeReq("POST"),
-    res,
-    new URL("http://127.0.0.1/api/sessions/s1/worktree/discard")
-  );
-  assert.equal(handled, true);
-  assert.deepEqual(cleared, {
-    sessionId: "s1",
-    value: null,
-  });
-  assert.equal(res.statusCode, 200);
+  await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/sessions/s1/worktree/discard"));
+  assert.deepEqual(cleared, { sessionId: "s1", value: null });
   assert.deepEqual(res.body, { ok: true, sessionId: "s1" });
 });

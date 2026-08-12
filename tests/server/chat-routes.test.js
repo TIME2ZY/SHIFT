@@ -151,7 +151,6 @@ function baseDeps(res, overrides = {}) {
     sendJson: makeSendJson(res),
     sendSse() {},
     readJsonBody: async () => ({}),
-    buildInvokeArgs: () => [],
     buildChatArgs: () => [],
     augmentPrompt: () => ({ augmentedPrompt: "", skillNames: [] }),
     getMaxA2ADepth: () => 0,
@@ -159,9 +158,6 @@ function baseDeps(res, overrides = {}) {
     filterBenignStderr: (text) => text,
     runChildStream: async () => ({ code: 0, signal: null }),
     getSession: () => ({ worktree: null, projectDir: "/root" }),
-    createSession: () => ({ id: "s1" }),
-    setSessionProjectDir: () => ({ worktree: null, projectDir: "/root" }),
-    validateProjectDir: (dir) => dir,
     setSessionWorktree: () => ({ worktree: null, projectDir: "/root" }),
     appendToSession() {},
     getSessionMapPath: () => "/tmp/session-map.json",
@@ -172,22 +168,6 @@ function baseDeps(res, overrides = {}) {
     ...overrides,
   };
 }
-
-test("handleChatRoutes returns 400 when /api/invoke body parsing fails", async () => {
-  const res = makeRes();
-  const handle = chatRoutes.createChatRoutes(
-    baseDeps(res, {
-      readJsonBody: async () => {
-        throw new Error("bad json");
-      },
-    })
-  );
-
-  const handled = await handle(makeReq("POST"), res, new URL("http://127.0.0.1/api/invoke"));
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { error: "bad json" });
-});
 
 test("handleChatRoutes rejects unsupported agents before starting chat", async () => {
   const res = makeRes();

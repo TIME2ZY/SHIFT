@@ -2,9 +2,14 @@ export const queryKeys = {
   agents: {
     all: ["agents"] as const,
   },
+  projects: {
+    all: ["projects"] as const,
+    active: ["projects", "active"] as const,
+    archived: ["projects", "archived"] as const,
+  },
   sessions: {
     all: ["sessions"] as const,
-    list: ["sessions", "list"] as const,
+    list: (projectKey: string) => ["sessions", "list", projectKey] as const,
     detail: (sessionId: string) => ["sessions", sessionId] as const,
     messages: (sessionId: string) => ["sessions", sessionId, "messages"] as const,
     usage: (sessionId: string) => ["sessions", sessionId, "usage"] as const,

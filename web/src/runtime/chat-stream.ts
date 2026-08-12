@@ -7,7 +7,6 @@ export interface ChatRequest {
   sessionId: string;
   agentId: string;
   prompt: string;
-  projectDir?: string;
   useWorktree?: boolean;
   clientTurnId?: string;
 }
@@ -116,7 +115,6 @@ export async function runChatStream(
       agent: request.agentId,
       prompt: request.prompt,
       sessionId: request.sessionId,
-      projectDir: request.projectDir,
       useWorktree: request.useWorktree === true,
       clientTurnId: request.clientTurnId,
     }),

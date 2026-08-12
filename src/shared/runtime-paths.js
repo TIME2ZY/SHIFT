@@ -1,55 +1,72 @@
+const os = require("node:os");
 const path = require("node:path");
 
-const ROOT = path.resolve(__dirname, "../..");
-const RUNTIME_DATA_DIR = path.join(ROOT, "data", "runtime");
-const DEFAULT_SESSIONS_FILE = path.join(RUNTIME_DATA_DIR, "sessions.json");
-const DEFAULT_INVOCATIONS_FILE = path.join(RUNTIME_DATA_DIR, "invocations.json");
-const DEFAULT_SESSION_MAP_ROOT = path.join(RUNTIME_DATA_DIR, "session-maps");
-const DEFAULT_TRANSCRIPT_DIR = path.join(RUNTIME_DATA_DIR, "transcripts");
-const DEFAULT_AUDIT_TRANSCRIPT_DIR = path.join(RUNTIME_DATA_DIR, "audit-transcripts");
-const DEFAULT_WORKTREE_STATE_FILE = path.join(RUNTIME_DATA_DIR, "worktrees.json");
-const DEFAULT_RAW_EVENTS_DIR = path.join(RUNTIME_DATA_DIR, "raw-events");
-const LEGACY_MEMORY_DB_FILE = path.join(RUNTIME_DATA_DIR, "memory.sqlite");
-// The authoritative database owns sessions, invocations, memory, and derived
-// projections. Keep it separate from the pre-cutover memory.sqlite validation
-// database so a default startup can never activate or reuse legacy data.
-const DEFAULT_MEMORY_DB_FILE = path.join(RUNTIME_DATA_DIR, "shift.sqlite");
+const { LOCAL_STATE_DIR } = require("./brand");
 
-/**
- * Worktree state file under a given app root (tests may use a temp root).
- * Production default equals DEFAULT_WORKTREE_STATE_FILE when rootDir is ROOT.
- */
-function worktreeStateFileFor(rootDir) {
-  return path.join(path.resolve(rootDir), "data", "runtime", "worktrees.json");
+const ROOT = path.resolve(__dirname, "../..");
+
+function resolveShiftHome(value, homeDir = os.homedir()) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const resolved = raw
+    ? path.resolve(expandHomePrefix(raw, homeDir))
+    : path.resolve(homeDir, LOCAL_STATE_DIR);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error(`SHIFT_HOME must not be a filesystem root: ${resolved}`);
+  }
+  return resolved;
+}
+
+function createRuntimePaths(options = {}) {
+  const env = options.env || process.env;
+  const shiftHome = resolveShiftHome(env.SHIFT_HOME, options.homeDir);
+  const dataDir = path.join(shiftHome, "data");
+  return Object.freeze({
+    shiftHome,
+    dataDir,
+    databaseFile: path.join(dataDir, "shift.sqlite"),
+    auditTranscriptDir: path.join(dataDir, "audit-transcripts"),
+    rawEventsDir: path.join(dataDir, "raw-events"),
+    transcriptDir: path.join(dataDir, "transcripts"),
+    worktreeStateFile: path.join(dataDir, "worktrees.json"),
+    migrationDir: path.join(dataDir, "migration"),
+    backupDir: path.join(dataDir, "backups"),
+  });
+}
+
+function expandHomePrefix(value, homeDir) {
+  if (value === "~") return path.resolve(homeDir);
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return path.join(path.resolve(homeDir), value.slice(2));
+  }
+  return value;
 }
 
 function pathsOverlap(left, right) {
-  return isSameOrAncestor(path.resolve(left), path.resolve(right)) ||
-    isSameOrAncestor(path.resolve(right), path.resolve(left));
+  return (
+    isSameOrAncestor(path.resolve(left), path.resolve(right)) ||
+    isSameOrAncestor(path.resolve(right), path.resolve(left))
+  );
 }
 
 function isSameOrAncestor(parent, child) {
   const relative = path.relative(parent, child);
   return (
     relative === "" ||
-    (relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
   );
 }
 
+const DEFAULT_RUNTIME_PATHS = createRuntimePaths();
+
 module.exports = {
   ROOT,
-  RUNTIME_DATA_DIR,
-  DEFAULT_SESSIONS_FILE,
-  DEFAULT_INVOCATIONS_FILE,
-  DEFAULT_SESSION_MAP_ROOT,
-  DEFAULT_TRANSCRIPT_DIR,
-  DEFAULT_AUDIT_TRANSCRIPT_DIR,
-  DEFAULT_WORKTREE_STATE_FILE,
-  DEFAULT_RAW_EVENTS_DIR,
-  LEGACY_MEMORY_DB_FILE,
-  DEFAULT_MEMORY_DB_FILE,
+  DEFAULT_RUNTIME_PATHS,
+  DEFAULT_MEMORY_DB_FILE: DEFAULT_RUNTIME_PATHS.databaseFile,
+  DEFAULT_TRANSCRIPT_DIR: DEFAULT_RUNTIME_PATHS.transcriptDir,
+  DEFAULT_AUDIT_TRANSCRIPT_DIR: DEFAULT_RUNTIME_PATHS.auditTranscriptDir,
+  DEFAULT_WORKTREE_STATE_FILE: DEFAULT_RUNTIME_PATHS.worktreeStateFile,
+  DEFAULT_RAW_EVENTS_DIR: DEFAULT_RUNTIME_PATHS.rawEventsDir,
+  createRuntimePaths,
+  resolveShiftHome,
   pathsOverlap,
-  worktreeStateFileFor,
 };

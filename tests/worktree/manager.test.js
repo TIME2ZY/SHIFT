@@ -30,9 +30,16 @@ function realPath(target) {
   }
 }
 
+function createTestManager(baseDir) {
+  return worktrees.createWorktreeManager({
+    rootDir: baseDir,
+    stateFile: path.join(baseDir, "worktrees-state.json"),
+  });
+}
+
 test("ensureWorktree creates a managed git worktree for a session", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
 
   const meta = manager.ensureWorktree({ baseDir, sessionId: "session-1" });
 
@@ -43,15 +50,22 @@ test("ensureWorktree creates a managed git worktree for a session", () => {
   assert.ok(meta.worktreeDir.startsWith(realPath(`${baseDir}.worktrees`) + path.sep));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".git")));
   assert.ok(fs.existsSync(path.join(meta.worktreeDir, ".env.local")));
-  assert.match(fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"), /SHIFT_WORKTREE=1/);
+  assert.match(
+    fs.readFileSync(path.join(meta.worktreeDir, ".env.local"), "utf8"),
+    /SHIFT_WORKTREE=1/
+  );
 });
 
-test("default worktree state file is under rootDir/data/runtime", () => {
+test("default worktree state file is under SHIFT_HOME/data", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const shiftHome = fs.mkdtempSync(path.join(os.tmpdir(), "worktree-state-home-"));
+  const manager = worktrees.createWorktreeManager({
+    rootDir: baseDir,
+    env: { SHIFT_HOME: shiftHome },
+  });
   manager.ensureWorktree({ baseDir, sessionId: "state-path-session" });
 
-  const expectedState = path.join(baseDir, "data", "runtime", "worktrees.json");
+  const expectedState = path.join(shiftHome, "data", "worktrees.json");
   assert.ok(fs.existsSync(expectedState), `expected state at ${expectedState}`);
   assert.equal(fs.existsSync(path.join(baseDir, ".invoke-worktrees.json")), false);
 
@@ -61,7 +75,7 @@ test("default worktree state file is under rootDir/data/runtime", () => {
 
 test("ensureWorktree reuses the same worktree for the same session", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
 
   const first = manager.ensureWorktree({ baseDir, sessionId: "same-session" });
   const second = manager.ensureWorktree({ baseDir, sessionId: "same-session" });
@@ -71,7 +85,7 @@ test("ensureWorktree reuses the same worktree for the same session", () => {
 
 test("getStatus reports branch, dirty state, and porcelain lines", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
   const meta = manager.ensureWorktree({ baseDir, sessionId: "status-session" });
   fs.writeFileSync(path.join(meta.worktreeDir, "changed.txt"), "dirty\n", "utf8");
 
@@ -85,7 +99,7 @@ test("getStatus reports branch, dirty state, and porcelain lines", () => {
 
 test("getDiff returns the worktree diff including untracked files", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
   const meta = manager.ensureWorktree({ baseDir, sessionId: "diff-session" });
   fs.writeFileSync(path.join(meta.worktreeDir, "new-file.txt"), "new content\n", "utf8");
 
@@ -97,17 +111,14 @@ test("getDiff returns the worktree diff including untracked files", () => {
 
 test("discardWorktree removes only a managed worktree directory", () => {
   const baseDir = makeGitRepo();
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
   const meta = manager.ensureWorktree({ baseDir, sessionId: "discard-session" });
 
   const discarded = manager.discardWorktree("discard-session");
 
   assert.equal(discarded.ok, true);
   assert.equal(fs.existsSync(meta.worktreeDir), false);
-  assert.throws(
-    () => manager.discardWorktree("discard-session"),
-    /No managed worktree/
-  );
+  assert.throws(() => manager.discardWorktree("discard-session"), /No managed worktree/);
 });
 
 test("discardWorktree refuses a state-file path that Git has not registered", () => {
@@ -123,10 +134,7 @@ test("discardWorktree refuses a state-file path that Git has not registered", ()
   state.worktrees["tampered-session"].worktreeDir = ordinaryDir;
   fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
-  assert.throws(
-    () => manager.discardWorktree("tampered-session"),
-    /unregistered worktree/
-  );
+  assert.throws(() => manager.discardWorktree("tampered-session"), /unregistered worktree/);
   assert.equal(fs.existsSync(path.join(ordinaryDir, "keep.txt")), true);
 
   state.worktrees["tampered-session"] = meta;
@@ -136,7 +144,7 @@ test("discardWorktree refuses a state-file path that Git has not registered", ()
 
 test("ensureWorktree rejects non-git base directories", () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "worktree-manager-not-git-"));
-  const manager = worktrees.createWorktreeManager({ rootDir: baseDir });
+  const manager = createTestManager(baseDir);
 
   assert.throws(
     () => manager.ensureWorktree({ baseDir, sessionId: "bad-session" }),

@@ -12,6 +12,8 @@ export interface WorktreeStatus {
 }
 
 export interface WorkspaceSnapshot {
+  sessionId: string;
+  projectKey: string;
   projectDir: string;
   worktree: WorktreeStatus | null;
 }
@@ -23,24 +25,9 @@ export interface WorkspaceDetail extends WorkspaceSnapshot {
 }
 
 async function readWorkspace(sessionId: string, signal?: AbortSignal): Promise<WorkspaceSnapshot> {
-  const projectQuery = new URLSearchParams({ sessionId });
-  const [project, statusResponse] = await Promise.all([
-    apiRequest<{ dir?: string }>(`/api/project?${projectQuery}`, { signal }),
-    authenticatedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/worktree/status`, {
-      signal,
-    }),
-  ]);
-
-  if ([400, 404].includes(statusResponse.status)) {
-    return { projectDir: project.dir || "", worktree: null };
-  }
-
-  const worktree = (await statusResponse.json()) as WorktreeStatus;
-  if (!statusResponse.ok) {
-    throw new Error("无法加载工作区状态。");
-  }
-
-  return { projectDir: project.dir || "", worktree };
+  return apiRequest<WorkspaceSnapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`, {
+    signal,
+  });
 }
 
 export function useWorkspaceDetailQuery(sessionId: string | null, enabled: boolean) {

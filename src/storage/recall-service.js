@@ -104,6 +104,7 @@ function createRecallService({
   }
 
   async function listInvocationsWithMeta(threadId) {
+    if (!resolveActiveProjectScope(threadId)) return [];
     const sqliteRecords = readSqlite("list invocations", () =>
       storage.invocations.listForThreadWithMeta(threadId)
     );
@@ -150,6 +151,7 @@ function createRecallService({
   async function searchSession(threadId, query, options = {}) {
     const started = Date.now();
     const limit = Math.max(1, Math.min(Number(options.limit) || 20, 200));
+    const projectScope = resolveActiveProjectScope(threadId);
     const includeRetired = Boolean(options.includeRetired);
     const includeThinking =
       options.includeThinking === undefined
@@ -165,6 +167,33 @@ function createRecallService({
     const searchQuery = clampSearchQuery(rawQuery, 200);
     const weak = !searchQuery || isWeakQuery(terms, rawQuery);
     let source = "sqlite";
+
+    if (!projectScope) {
+      const unavailable = finalizeSearchResult([], {
+        query: rawQuery,
+        limit,
+        weakQuery: weak,
+      });
+      unavailable.availability = {
+        state: "unavailable",
+        reason: "project_scope_unavailable",
+      };
+      storage?.memoryEvents?.recordSafe?.({
+        eventType: "memory_searched",
+        threadId,
+        payload: {
+          query: unavailable.query,
+          weakQuery: unavailable.weakQuery,
+          source: "project-scope",
+          mode: "sqlite",
+          limit,
+          hits: 0,
+          layers: unavailable.layers,
+          availability: unavailable.availability,
+        },
+      });
+      return unavailable;
+    }
 
     let result;
     if (weak) {
@@ -199,6 +228,7 @@ function createRecallService({
         if (!storage.recall && !storage.memories) return [];
         return searchSqliteLayers({
           threadId,
+          projectKey: projectScope.projectKey,
           query: searchQuery,
           terms,
           limit,
@@ -223,6 +253,7 @@ function createRecallService({
         if (wantHybrid) {
           hybrid = await collectVectorHits({
             threadId,
+            projectKey: projectScope.projectKey,
             query: searchQuery,
             terms,
             layers,
@@ -315,6 +346,7 @@ function createRecallService({
 
   async function collectVectorHits({
     threadId,
+    projectKey,
     query,
     terms,
     layers,
@@ -331,9 +363,10 @@ function createRecallService({
         hits: [],
       };
     }
-    const projectKey = resolveThreadProjectKey(threadId);
     const scopeKeys = [`thread:${threadId}`];
-    if (projectKey && memoryScope !== "thread") scopeKeys.push(`project:${projectKey}`);
+    if (projectKey && layers.includes(LAYER_PROJECT_DOC)) {
+      scopeKeys.push(`project:${projectKey}`);
+    }
     const searched = await embeddingRuntime.search(query, scopeKeys, Math.max(limit * 4, 30));
     if (searched.state !== "available") {
       return {
@@ -442,16 +475,17 @@ function createRecallService({
     return hits.slice(0, limit);
   }
 
-  function resolveThreadProjectKey(threadId) {
-    try {
-      return storage?.threads?.get?.(threadId)?.projectKey || null;
-    } catch {
-      return null;
-    }
+  function resolveActiveProjectScope(threadId) {
+    const thread = storage?.threads?.get?.(threadId);
+    if (!thread?.projectKey) return null;
+    const project = storage?.projects?.get?.(thread.projectKey);
+    if (!project || project.projectKey !== thread.projectKey) return null;
+    return { thread, project, projectKey: project.projectKey };
   }
 
   function searchSqliteLayers({
     threadId,
+    projectKey,
     query,
     terms,
     limit,
@@ -507,7 +541,7 @@ function createRecallService({
     }
     if (layers.includes(LAYER_PROJECT_DOC)) {
       byLayer[LAYER_PROJECT_DOC] = collectProjectDocCandidates({
-        threadId,
+        projectKey,
         query,
         terms,
         limit: Math.max(limit, DEFAULT_SEARCH_PROJECT_DOC_QUOTA) * 3,
@@ -545,9 +579,8 @@ function createRecallService({
     });
   }
 
-  function collectProjectDocCandidates({ threadId, query, terms, limit }) {
+  function collectProjectDocCandidates({ projectKey, query, terms, limit }) {
     if (!storage?.projectEvidence?.search) return [];
-    const projectKey = resolveThreadProjectKey(threadId);
     if (!projectKey) return [];
     const termQuery = terms.length > 0 ? terms.join(" ") : query;
     try {
@@ -694,6 +727,52 @@ function createRecallService({
     const layers = normalizeLayers(input.layers || [LAYER_MEMORY]);
     const terms = extractSearchTerms(prompt, { maxChars: 500, maxTerms: 8 });
     const weak = isWeakQuery(terms, prompt);
+    const projectScope = resolveActiveProjectScope(threadId);
+    if (!projectScope) {
+      const availability = {
+        state: "unavailable",
+        reason: "project_scope_unavailable",
+      };
+      const rendered = renderUnavailableMemoryCard(availability);
+      const budgetBuckets = resolveBudgetBuckets(budgetChars);
+      const funnel = buildFunnelStats({
+        retrieved: 0,
+        ranked: 0,
+        selected: 0,
+        rendered: 0,
+        delivered: 0,
+      });
+      storage?.memoryEvents?.recordSafe?.({
+        eventType: "memory_injected",
+        threadId,
+        payload: {
+          source: "retrieveForTurn",
+          count: 0,
+          memoryIds: [],
+          renderedIds: [],
+          availability,
+          usedChars: rendered.length,
+          truncated: false,
+          funnel,
+        },
+      });
+      return {
+        items: [],
+        rendered,
+        stats: {
+          usedChars: rendered.length,
+          truncated: false,
+          byKind: {},
+          channels: { recency: 0, related: 0, vector: 0 },
+          weakQuery: weak,
+          termCount: terms.length,
+          availability,
+          budgetBuckets,
+          funnel,
+        },
+        funnel,
+      };
+    }
 
     const byId = new Map();
     const noteChannel = (memory, channel, baseScore = 0) => {
@@ -767,6 +846,7 @@ function createRecallService({
     ) {
       const vector = await collectVectorHits({
         threadId,
+        projectKey: projectScope.projectKey,
         query: clampSearchQuery(prompt, 200) || terms.join(" "),
         terms,
         layers: [LAYER_MEMORY],
@@ -927,6 +1007,7 @@ function createRecallService({
       from: Math.max(0, Number(options.from) || 0),
       limit: options.limit || 200,
     };
+    if (!resolveActiveProjectScope(threadId)) return emptyPage;
     const readPage = () => {
       const invocation = storage.invocations.get(invocationId);
       if (!invocation || invocation.threadId !== threadId) return null;
