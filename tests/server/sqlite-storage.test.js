@@ -172,20 +172,6 @@ test("chat persists thread state through SQLite repositories", async () => {
       ["invocation-start", "text.delta", "invocation-end"]
     );
 
-    // Search comes from the SQLite projection rather than an external transcript read.
-    const search = await apiFetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=hello`
-    ).then((response) => response.json());
-    assert.equal(search.hits.length, 1);
-    assert.equal(search.hits[0].kind, "text.delta");
-
-    const userSearch = await apiFetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=Hi`
-    ).then((response) => response.json());
-    const userHit = userSearch.hits.find((hit) => hit.sourceKind === "message");
-    assert.ok(userHit);
-    assert.equal(userHit.kind, "message.user");
-
     const deleteResponse = await apiFetch(`${baseUrl}/api/sessions/${session.id}`, {
       method: "DELETE",
     });
@@ -251,12 +237,6 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
     assert.equal(run, 2);
     assert.equal(memories.length, 0);
     assert.match(stream, /event: handoff-captured/);
-    const search = await apiFetch(
-      `${baseUrl}/api/callbacks/session-search?sessionId=${session.id}&query=${encodeURIComponent("登录流程")}`
-    ).then((response) => response.json());
-    const memoryHit = search.hits.find((hit) => hit.sourceKind === "memory-entry");
-    assert.equal(memoryHit, undefined);
-    assert.ok(search.hits.some((hit) => hit.layer === "evidence"));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();
@@ -425,11 +405,6 @@ test("default sqlite mode restores sessions after restart", async () => {
     );
     // Recovery does not depend on the optional transcript audit sink.
     assert.equal(fs.existsSync(transcriptDir), false);
-
-    const recall = await apiFetch(
-      `${secondUrl}/api/callbacks/session-search?sessionId=${session.id}&query=durable%20first`
-    ).then((response) => response.json());
-    assert.ok(recall.hits.some((hit) => hit.kind === "message.user"));
 
     // Causal fields are populated for user-triggered turns.
     const { createStorage } = require("../../src/storage");

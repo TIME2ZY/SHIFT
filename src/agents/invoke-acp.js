@@ -98,6 +98,14 @@ function shouldLoadAcpSession(config, initialized) {
   );
 }
 
+function buildAcpSessionParams(cwd, mcpServers, sessionId = "") {
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    cwd,
+    mcpServers,
+  };
+}
+
 function loadAcpSdk() {
   return import("@agentclientprotocol/sdk");
 }
@@ -108,6 +116,7 @@ async function invokeAcp({
   args,
   env,
   cwd = process.cwd(),
+  mcpServers = [],
   eventContext,
   onEvent,
   onRawEvent,
@@ -232,11 +241,10 @@ async function invokeAcp({
         if (shouldLoadAcpSession(config, initialized)) {
           activeSessionId = config.resumeSessionId;
           try {
-            await ctx.request(acp.methods.agent.session.load, {
-              sessionId: activeSessionId,
-              cwd,
-              mcpServers: [],
-            });
+            await ctx.request(
+              acp.methods.agent.session.load,
+              buildAcpSessionParams(cwd, mcpServers, activeSessionId)
+            );
             loaded = true;
           } catch (error) {
             activeSessionId = "";
@@ -251,10 +259,10 @@ async function invokeAcp({
         }
 
         if (!activeSessionId) {
-          const created = await ctx.request(acp.methods.agent.session.new, {
-            cwd,
-            mcpServers: [],
-          });
+          const created = await ctx.request(
+            acp.methods.agent.session.new,
+            buildAcpSessionParams(cwd, mcpServers)
+          );
           activeSessionId = created.sessionId;
         }
 
@@ -312,4 +320,5 @@ module.exports = {
   isAcpReadOnlyToolCall,
   ACP_READ_ONLY_TOOL_KINDS,
   shouldLoadAcpSession,
+  buildAcpSessionParams,
 };

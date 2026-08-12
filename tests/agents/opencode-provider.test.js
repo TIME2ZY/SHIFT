@@ -6,7 +6,7 @@ const {
   normalizeToolArgs,
   sessionIdFromEvent,
 } = require("../../src/agents/providers/opencode");
-const { createProviderRuntime } = require("../../src/agents/providers");
+const { createProviderRuntime, buildProviderEnvironment } = require("../../src/agents/providers");
 const { buildInvocation } = require("../../src/agents/invoke-cli");
 const { AGENTS } = require("../../src/agents/catalog");
 
@@ -96,6 +96,13 @@ test("buildInvocation for opencode uses format json, thinking, auto, and max var
 test("buildInvocation can disable autoApprove", () => {
   const inv = buildInvocation({ ...AGENTS.opencode, providerOptions: { autoApprove: false } }, "x");
   assert.ok(!inv.args.includes("--auto"));
+});
+
+test("OpenCode receives Shift MCP through invocation-local config", () => {
+  const { env } = buildProviderEnvironment(AGENTS.opencode, {}, { OPENCODE_CONFIG_CONTENT: "{}" });
+  const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+  assert.equal(config.mcp.shift_context.type, "local");
+  assert.match(config.mcp.shift_context.command[1], /shift-context-mcp\.js$/);
 });
 
 test("opencode capabilities remain tools+thinking", () => {

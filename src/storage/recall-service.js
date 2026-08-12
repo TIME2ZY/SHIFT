@@ -145,7 +145,7 @@ function createRecallService({
   }
 
   /**
-   * Active search with layer metadata for session-search API (Wave R1).
+   * Active search with layer metadata for the recall_search MCP bridge.
    * Empty / weak query → recency-only memory hits (no full evidence scan).
    */
   async function searchSession(threadId, query, options = {}) {
@@ -986,7 +986,7 @@ function createRecallService({
       "## 本 thread 活跃记忆（系统注入的历史数据）",
       "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
       `原因: ${availability.reason || "unknown"}`,
-      "请稍后重试 session-search；不要假设「尚无记忆」。",
+      "请稍后重试 recall_search；不要假设「尚无记忆」。",
       "<!-- /Active Memories -->",
     ].join("\n");
   }

@@ -38,18 +38,6 @@ test("callback client builds a UTF-8 post-message request from a file", () => {
   }
 });
 
-test("callback client builds encoded recall query parameters", () => {
-  const { url, init } = callbackClient.buildRequest(
-    "session-search",
-    { query: "中文 查询", limit: "10", layers: "memory,message" },
-    ENV
-  );
-  assert.equal(init.method, "GET");
-  assert.equal(url.searchParams.get("sessionId"), "thread-中文");
-  assert.equal(url.searchParams.get("query"), "中文 查询");
-  assert.equal(url.searchParams.get("layers"), "memory,message");
-});
-
 test("callback client fails on non-2xx HTTP responses", async () => {
   const fetchImpl = async () => ({
     ok: false,
@@ -72,42 +60,9 @@ test("callback client validates required environment and arguments", () => {
     command: "post-message",
     options: { content: "你好" },
   });
-});
-
-test("callback client builds the authoritative memory-write request", () => {
-  const write = callbackClient.buildRequest(
-    "memory-write",
-    {
-      kind: "decision",
-      topic: "storage-primary",
-      content: "SQLite is primary",
-    },
-    ENV
-  );
-  assert.equal(write.url.href, "http://127.0.0.1:8787/api/callbacks/memory-write");
-  assert.equal(write.init.method, "POST");
-  assert.deepEqual(JSON.parse(write.init.body), {
-    sessionId: "thread-中文",
-    invocationId: "inv-1",
-    callbackToken: "secret",
-    kind: "decision",
-    topic: "storage-primary",
-    content: "SQLite is primary",
-  });
-
-  assert.throws(
-    () => callbackClient.buildRequest("memory-write", { kind: "decision", content: "x" }, ENV),
-    /requires --topic/
-  );
-  assert.throws(
-    () =>
-      callbackClient.buildRequest(
-        "memory-write",
-        { kind: "decision", topic: "t" },
-        ENV
-      ),
-    /requires --content/
-  );
+  assert.throws(() => callbackClient.parseArgs(["session-search"]), /Unknown callback command/);
+  assert.throws(() => callbackClient.parseArgs(["memory-write"]), /Unknown callback command/);
+  assert.throws(() => callbackClient.parseArgs(["memory-upsert"]), /Unknown callback command/);
 });
 
 test("callback client exit codes distinguish delivery from handoff acceptance", () => {

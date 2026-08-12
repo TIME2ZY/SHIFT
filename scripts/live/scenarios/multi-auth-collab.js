@@ -152,7 +152,7 @@ const PHASES = [
         agent: "codex",
         prompt: [
           "请基于本 thread 的记忆与交接，总结：token/会话策略、存储、端口、是否 refresh、实现与 review 现状。",
-          "不确定处用 session-search，不要另起新方案。",
+          "不确定处用 recall_search，不要另起新方案。",
         ].join(""),
       },
     ],

@@ -12,6 +12,9 @@ const {
 const { AGENTS } = require("../../src/agents/catalog");
 const { buildInvocation } = require("../../src/agents/invoke-cli");
 const { createProviderRuntime, listSupportedProviders } = require("../../src/agents/providers");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 test("provider registry includes antigravity", () => {
   assert.ok(listSupportedProviders().includes("antigravity"));
@@ -81,6 +84,18 @@ test("buildInvocation resumes with --conversation", () => {
   const idx = inv.args.indexOf("--conversation");
   assert.ok(idx >= 0);
   assert.equal(inv.args[idx + 1], "ac743010-d674-432f-a4a9-bf20647ceb54");
+});
+
+test("Antigravity environment registration installs Shift MCP without credentials", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "shift-agy-provider-"));
+  try {
+    antigravityProvider.buildEnvironment({}, { USERPROFILE: home });
+    const raw = fs.readFileSync(path.join(home, ".gemini", "config", "mcp_config.json"), "utf8");
+    assert.match(raw, /shift_context/);
+    assert.doesNotMatch(raw, /SHIFT_CALLBACK_TOKEN/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("buildInvocation rejects unsupported effort", () => {

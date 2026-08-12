@@ -28,7 +28,7 @@ HTTP createServer (src/server/index.js)
   ├─ project-routes     → project-repository (open / list / archive / restore)
   ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD)
   ├─ chat-routes        → start/stream/finish invocation + finalize A2A
-  ├─ callback-routes    → mid-run postMessage / memory_write / recall / (A2A finalize)
+  ├─ callback-routes    → mid-run postMessage / MCP 私有 HTTP bridge / (A2A finalize)
   ├─ memory-routes      → 读为主（list/search 等）
   └─ storage-routes     → 审计/运维向
 
@@ -129,7 +129,7 @@ Web App (web/src/app/App.tsx)
 
 | 类型                             | 入口                                                                     | 落点                               | 调用方                                    |
 | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------- | ----------------------------------------- |
-| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队        | **callback-routes**（agent memory_write） |
+| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队        | `shift_context` MCP → callback-routes 私有 bridge |
 | **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部；migrate-runtime 离线            |
 | **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件** | a2a-finalize                              |
 | **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件               | seal 路径（若接线）                       |
@@ -140,6 +140,30 @@ Web App (web/src/app/App.tsx)
 - `createMemoryCapture` **拒绝** `memoryService` 参数（防半接线）。
 - composition root 只传 `eventStore`；注释标明产品记忆走 `writeMemoryCandidate`。
 - 模块头文档区分 collaboration event vs product memory 行。
+- Agent 面向的 Memory / Recall 公开工具只有 `shift_context` MCP 的 `memory_write`、
+  `memory_evidence_list`、`recall_search`；`callback-client` 不再提供 Memory 命令。
+- `scripts/shift-context-mcp.js` 使用 token 绑定的私有 HTTP bridge：
+  `/api/callbacks/memory-write`、`/api/callbacks/memory-evidence`、
+  `/api/callbacks/recall-search`。它们不是第二套 Agent 公开语义，最终仍进入
+  `writeMemoryCandidate` / `recallService`。
+- 已删除旧 `/api/callbacks/memory-upsert`、`/api/callbacks/session-search` 和相应客户端命令，
+  不保留 callback fallback。
+
+#### 3.4.1 Provider MCP 接入
+
+所有 Provider 共用 `agents/shift-context-mcp-config.js` 中的 stdio descriptor，凭据只由当前
+invocation 的 `SHIFT_*` 环境传入：
+
+| Provider | 唯一接入方式 | 配置生命周期 |
+| -------- | ------------ | ------------ |
+| Codex | CLI `mcp_servers.shift_context.*` 参数 | invocation |
+| OpenCode | `OPENCODE_CONFIG_CONTENT.mcp.shift_context` | invocation |
+| Grok ACP | `session/new` / `session/load` 的 `mcpServers` stdio descriptor | invocation |
+| Antigravity | `~/.gemini/config/mcp_config.json` 的 `shift_context` 注册 | 持久注册；不落 token，子进程继承 invocation 环境 |
+
+Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都注入当前 invocation 的
+`SHIFT_*` 凭据；旧 `--plugin-dir` 与仓库内 Grok MCP 插件已删除。Antigravity 项目插件不是
+在线路径；全局注册合并既有 server，若同名 server 不属于 SHIFT 则显式失败。
 
 ---
 
@@ -174,8 +198,8 @@ Web App (web/src/app/App.tsx)
   `/api/project` 与会话创建后修改目录的 UI 已删除。
 - live 场景与 Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
-- 产品 Memory 的 HTTP callback 只公开 `/api/callbacks/memory-write`；已删除
-  `/api/callbacks/memory-upsert` 兼容别名及其 CLI/测试入口。
+- 产品 Memory 对 Agent 只公开 `shift_context` MCP；其私有 HTTP bridge 使用
+  `/api/callbacks/memory-write`，已删除 `/api/callbacks/memory-upsert` 兼容别名及 CLI/测试入口。
 - Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
 
 ---
@@ -258,7 +282,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | hop bind/complete            | `bindHandoffTargetInvocation` / `completeHandoffByTargetInvocation` | chat 调度器                         |
 | message user/system/callback | `appendToSession` → `appendMessage`                                 | routes / callbacks                  |
 | message assistant-final      | `completeInvocation({ message })` → `appendMessage`                 | chat 成功收尾 only                  |
-| product memory               | `memoryService.writeMemoryCandidate`                                | callback/tool HTTP                  |
+| product memory               | `memoryService.writeMemoryCandidate`                                | `shift_context.memory_write` MCP 私有 HTTP bridge |
 | collab hop 幂等              | `handoff-route-registry`（进程内，D4）                              | 仅 finalize / bind / complete       |
 
 ---
@@ -283,5 +307,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-10。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-08-12。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

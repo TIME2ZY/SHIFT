@@ -199,7 +199,7 @@ function buildFtsQuery(query, options = {}) {
   if (tokens.length === 0) return "";
   const quoted = tokens.map((token) => `"${token.replace(/"/g, '""')}"`);
   // OR is used by retrieve related-channel / Chinese multi-term recall; AND keeps
-  // active session-search closer to substring semantics when callers want strictness.
+  // active message recall closer to substring semantics when callers want strictness.
   const joiner = options.matchMode === "or" ? " OR " : " AND ";
   return quoted.join(joiner);
 }

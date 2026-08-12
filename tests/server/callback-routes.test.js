@@ -319,7 +319,7 @@ test("handleCallbackRoutes lists only successful current-invocation memory evide
   ]);
 });
 
-test("handleCallbackRoutes memory-write owns create and supersede behavior", async () => {
+test("handleCallbackRoutes memory-write is the single product-memory HTTP bridge", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.threads.create({ id: "s1" });
   try {

@@ -247,7 +247,7 @@ function renderPolicyBanner(quality) {
   const lines = [];
   if (quality.emptyPacket || !quality.hasBlock) {
     lines.push(
-      "⚠ emptyPacket：无标准 handoff。请先 session-search / 读 Active Memories，再执行破坏性操作。"
+      "⚠ emptyPacket：无标准 handoff。请先 recall_search / 读 Active Memories，再执行破坏性操作。"
     );
   } else if (quality.degraded || !quality.ok) {
     lines.push(
@@ -464,7 +464,7 @@ function renderDegradedHandoff(opts) {
   }
   lines.push(
     `缺失: ${missing.join(", ") || "what, why, next_action"}`,
-    "请先用 session-search / 读 Active Memories 补全，不要凭猜测执行破坏性操作。"
+    "请先用 recall_search / 读 Active Memories 补全，不要凭猜测执行破坏性操作。"
   );
   if (Array.isArray(repairHints) && repairHints.length > 0) {
     lines.push("repair_hints:");

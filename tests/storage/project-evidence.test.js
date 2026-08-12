@@ -134,7 +134,7 @@ test("reindex + search returns untrusted project-doc passages", () => {
   }
 });
 
-test("session-search can hit project-doc layer after reindex", async () => {
+test("recall search can hit project-doc layer after reindex", async () => {
   const root = writeProjectFixture();
   const storage = createStorage({ file: ":memory:" });
   try {
@@ -161,7 +161,7 @@ test("session-search can hit project-doc layer after reindex", async () => {
   }
 });
 
-test("session-search isolates project-doc passages by the trusted Thread Project", async () => {
+test("recall search isolates project-doc passages by the trusted Thread Project", async () => {
   const firstRoot = writeProjectFixture();
   const secondRoot = writeProjectFixture();
   fs.writeFileSync(

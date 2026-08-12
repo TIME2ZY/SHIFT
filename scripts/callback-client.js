@@ -7,9 +7,7 @@ const COMMANDS = new Set([
   "post-message",
   "thread-context",
   "list-invocations",
-  "session-search",
   "read-invocation",
-  "memory-write",
 ]);
 
 function parseArgs(argv) {
@@ -92,40 +90,9 @@ function buildRequest(command, options, env, cwd = process.cwd()) {
     };
   }
 
-  if (command === "memory-write") {
-    if (!options.kind) throw new Error("memory-write requires --kind");
-    if (!options.topic) throw new Error("memory-write requires --topic");
-    headers["Content-Type"] = "application/json; charset=utf-8";
-    const body = {
-      sessionId: context.sessionId,
-      invocationId: context.invocationId,
-      callbackToken: context.callbackToken,
-      kind: options.kind,
-      topic: options.topic,
-      content: readMessageContent(options, cwd, "memory-write"),
-    };
-    return {
-      url,
-      init: {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      },
-    };
-  }
-
   url.searchParams.set("sessionId", context.sessionId);
   url.searchParams.set("invocationId", context.invocationId);
-  if (command === "session-search") {
-    addOptionalSearchParams(url.searchParams, options, [
-      ["query", "query"],
-      ["limit", "limit"],
-      ["layers", "layers"],
-      ["include-retired", "includeRetired"],
-      ["scope", "scope"],
-      ["memory-scope", "memoryScope"],
-    ]);
-  } else if (command === "read-invocation") {
+  if (command === "read-invocation") {
     if (!options.target) throw new Error("read-invocation requires --target");
     url.searchParams.set("targetInvocationId", options.target);
     addOptionalSearchParams(url.searchParams, options, [
