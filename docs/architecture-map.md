@@ -311,6 +311,10 @@ Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Ag
 Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
 详情 API 与 UI 消费该投影；不存在 span 写表，缺失结束事件由 `span_missing_end` health 暴露。
 
+`observability-evidence-repository.js` 是 labeled recall eval 与 Memory outcome judgment 的唯一导入
+入口，HTTP bridge 为 `POST /api/storage/observability/evidence`。导入只保存结构指标、可信坐标、
+evidence ref 与 source hash；metrics 从该证据读取严格 Recall、used/correct 与业务结果合格分母。
+
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行

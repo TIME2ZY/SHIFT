@@ -186,3 +186,27 @@ test("telemetry retention route only delegates best-effort cleanup", async () =>
   assert.equal(res.status, 200);
   assert.equal(res.body.cleanup.deleted, 4);
 });
+
+test("observability evidence route delegates the single validated import entry", async () => {
+  const { res, sendJson } = responseCapture();
+  let imported;
+  const body = { id: "eval-1", kind: "labeled_recall_eval" };
+  const handle = createStorageRoutes({
+    storageContext: {
+      mode: "sqlite",
+      importObservabilityEvidence(input) {
+        imported = input;
+        return { imported: true, id: input.id, kind: input.kind };
+      },
+    },
+    sendJson,
+    readJsonBody: async () => body,
+  });
+  await handle(
+    { method: "POST" },
+    res,
+    new URL("http://127.0.0.1/api/storage/observability/evidence")
+  );
+  assert.equal(res.status, 201);
+  assert.deepEqual(imported, body);
+});

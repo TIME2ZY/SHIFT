@@ -317,6 +317,18 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
 - 缺少 finish 的 tool 或未终止 generation 必须输出 `complete=false`，并计入 health 的
   `span_missing_end`，不得静默补终态。
 
+### 8.5 Phase 2C 评估与反馈证据导入
+
+- 在线只接受两类显式导入：`labeled_recall_eval`（dataset ID/version、K、case/judgment 数、
+  Recall@K/MRR/nDCG@K）和 `memory_outcome_judgment`（现有 Invocation、可选 Memory、used、
+  correct、business outcome）。二者不得互相替代。
+- 每次导入必须提供稳定 import ID、producer、evidence ref 与 SHA-256 source hash；只存结构字段，
+  不接受原始 prompt/response/query/feedback 文本。source hash 幂等去重在唯一入口完成。
+- judgment 必须绑定同一 Thread 的现有 Invocation；Memory 如提供也必须归属该 Thread。`correct`
+  只有在 `used=true` 时允许判定，business outcome 只接受 `success | failure | unknown`。
+- strict Recall 指标读取最近一次 labeled eval；used/correct/business outcome 只以合格 judgment 为
+  分母，并暴露分子、分母及 unknown。不得从 Invocation/Handoff completed 自动推断。
+
 ## 9. Phase 0 实施边界
 
 ### 9.1 Phase 0A（本次文档提交）

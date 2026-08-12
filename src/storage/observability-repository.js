@@ -1,7 +1,7 @@
 const SAMPLE_CLASSES = Object.freeze(["eligible", "pending", "censored", "unknown", "excluded"]);
 const { projectTraceSpans } = require("./trace-span-projection");
 
-function createObservabilityRepository(db) {
+function createObservabilityRepository(db, dependencies = {}) {
   const scalar = (sql, params = {}) => Number(db.prepare(sql).get(params)?.count || 0);
 
   return {
@@ -162,7 +162,12 @@ function createObservabilityRepository(db) {
       return {
         window,
         handoff: handoffMetrics(handoffs),
-        memory: memoryHitMetrics(memoryEvents, telemetryHealth(db, window)),
+        memory: memoryHitMetrics(
+          memoryEvents,
+          telemetryHealth(db, window),
+          dependencies.evidence?.latestRecallEval?.() || null,
+          dependencies.evidence?.judgmentMetrics?.(window) || null
+        ),
       };
     },
   };
@@ -241,7 +246,7 @@ function classifyHandoff(row) {
   return "eligible";
 }
 
-function memoryHitMetrics(rows, telemetry) {
+function memoryHitMetrics(rows, telemetry, strictRecallAtK, judgments) {
   const counts = { eligible: 0, pending: 0, censored: 0, unknown: 0, excluded: 0 };
   let hits = 0;
   const availability = { available: 0, degraded: 0, unavailable: 0, unknown: 0 };
@@ -260,9 +265,10 @@ function memoryHitMetrics(rows, telemetry) {
   return {
     hitRate: rateResult(hits, counts.eligible, counts),
     availability,
-    strictRecallAtK: null,
-    usedRate: null,
-    correctRate: null,
+    strictRecallAtK,
+    usedRate: judgments?.usedRate || null,
+    correctRate: judgments?.correctRate || null,
+    businessSuccessRate: judgments?.businessSuccessRate || null,
     completeness: telemetry.failed > 0 ? "incomplete" : "best_effort",
     telemetry,
     semantics: "non-empty delivered Memory result rate; not labeled Recall@K",

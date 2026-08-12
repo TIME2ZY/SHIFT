@@ -102,7 +102,10 @@ export interface ObservabilityMetrics {
   };
   memory: {
     hitRate: QualifiedRate;
-    strictRecallAtK: QualifiedRate | null;
+    strictRecallAtK: (QualifiedRate & { cutoffK: number; mrr: number; ndcgAtK: number }) | null;
+    usedRate?: QualifiedRate | null;
+    correctRate?: QualifiedRate | null;
+    businessSuccessRate?: QualifiedRate | null;
     semantics: string;
   };
 }
