@@ -3,6 +3,7 @@ const { createInvocationRepository } = require("./invocation-repository");
 const { createHandoffRepository } = require("./handoff-repository");
 const { createObservabilityRepository } = require("./observability-repository");
 const { createEmbeddingRepository } = require("./embedding-repository");
+const { createExecutionReadModel } = require("./execution-read-model");
 const {
   enqueueProjectDocumentEmbedding,
   enqueueRecallEmbedding,
@@ -41,6 +42,7 @@ function createStorage(options = {}) {
     invocations: createInvocationRepository(db),
     handoffs: createHandoffRepository(db),
     observability: createObservabilityRepository(db),
+    executions: createExecutionReadModel(db),
     collaborationTasks: createCollaborationTaskRepository(db),
     projects: createProjectRepository(db, options.projectRepositoryOptions),
     memories: createMemoryRepository(db, recall),

@@ -45,6 +45,7 @@ Web App (web/src/app/App.tsx)
   memory-service → memories 表（产品记忆）
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
+  execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```

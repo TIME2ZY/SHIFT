@@ -15,6 +15,7 @@ import { sessionDisplayTitle } from "../features/sessions/display";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
 import { WorkspacePage } from "../features/workspace/WorkspacePage";
+import { useSessionTracesQuery } from "../features/observability/queries";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
 
@@ -96,6 +97,7 @@ export function App() {
     null;
   const activeSessionId = activeSession?.id ?? null;
   const messages = useMessagesQuery(activeSessionId);
+  const traces = useSessionTracesQuery(activeSessionId);
   const run = useSessionRun(activeSessionId);
   const selectedAgentId =
     (activeSessionId ? agentBySession[activeSessionId] : undefined) ||
@@ -353,6 +355,7 @@ export function App() {
             <MessageList
               sessionId={activeSessionId}
               messages={messages.data ?? []}
+              traces={traces.data ?? []}
               agents={agents.data ?? []}
               run={run}
               isLoading={messages.isPending && Boolean(activeSessionId)}
