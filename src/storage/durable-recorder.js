@@ -684,9 +684,67 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     return attempt("accept handoff", () => storage.handoffs.accept(input));
   }
 
+  function markHandoffEnqueued(handoffId, enqueuedAt) {
+    if (!storage?.handoffs || !handoffId) return null;
+    return attempt("mark handoff enqueued", () =>
+      storage.handoffs.markEnqueued(handoffId, enqueuedAt)
+    );
+  }
+
+  function reconcileStartup(at = new Date().toISOString()) {
+    if (!storage) return { invocations: 0, handoffs: 0, traces: 0 };
+    return attempt("reconcile startup lifecycle", () =>
+      storage.transaction(() => {
+        let invocationCount = 0;
+        for (const invocation of storage.invocations.listActive?.() || []) {
+          const record = storage.invocations.finish(invocation.id, {
+            state: "failed",
+            endedAt: at,
+            terminalReason: "restart-reconcile",
+            failureStage: "reconcile",
+            errorCode: "invocation_interrupted_by_restart",
+            retryable: true,
+          });
+          if (!record) continue;
+          invocationCount += 1;
+          storage.handoffs?.completeByTargetInvocation(invocation.id, record);
+          events.registerInvocation(invocation.id, invocation.threadId);
+          events.append({
+            threadId: invocation.threadId,
+            invocationId: invocation.id,
+            kind: "invocation-end",
+            payload: {
+              code: null,
+              signal: null,
+              forcedTerminal: true,
+              reason: "restart-reconcile",
+            },
+            createdAt: at,
+          });
+        }
+        const handoffCount = storage.handoffs?.reconcilePending?.(at) || 0;
+        let traceCount = 0;
+        for (const trace of storage.traces.listActive?.() || []) {
+          const finished = storage.traces.finish(trace.id, {
+            state: "failed",
+            endedAt: at,
+            terminalReason: "restart-reconcile",
+            failureStage: "reconcile",
+            errorCode: "trace_interrupted_by_restart",
+            retryable: true,
+          });
+          if (finished) traceCount += 1;
+        }
+        return { invocations: invocationCount, handoffs: handoffCount, traces: traceCount };
+      })
+    );
+  }
+
   function reconcileTraceHandoffs(traceId) {
     if (!storage?.handoffs || !traceId) return 0;
-    return attempt("reconcile trace handoffs", () => storage.handoffs.reconcileTracePending(traceId));
+    return attempt("reconcile trace handoffs", () =>
+      storage.handoffs.reconcileTracePending(traceId)
+    );
   }
 
   function completeTrace(input = {}) {
@@ -710,6 +768,8 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     startInvocation,
     startTrace,
     acceptHandoff,
+    markHandoffEnqueued,
+    reconcileStartup,
     reconcileTraceHandoffs,
     appendInvocationEvent,
     // finishInvocation / finishWithAssistantMessage are private — only completeInvocation is public.

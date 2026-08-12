@@ -169,6 +169,10 @@ complete_status: pending | completed | failed | aborted
 6. completed Handoff 不得退回 pending；恢复只能补齐可由权威数据证明的状态。
 7. chat end 与 callback 可以触发同一 finalize 用例，但幂等必须在 SQLite 权威入口完成。
 8. 0B 完成后，进程内 registry 必须退出 duplicate、binding 和 terminal 仲裁职责。
+9. `accepted` 只表示 SQLite 已接受路由；`enqueued_at` 必须在目标确实加入本次调度队列后写入，
+   不得在 accept 时预填。enqueue 确认写失败时必须撤销对应的进程内队列追加并 fail closed。
+10. 服务启动必须先将遗留 active Invocation 写为 failed 并追加 durable `invocation-end`，再收口
+    pending Handoff，最后将遗留 active Trace 写为 failed；三类状态不得在重启后长期 active/pending。
 
 ## 6. 指标语义与样本资格
 

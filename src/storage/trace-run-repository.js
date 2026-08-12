@@ -13,6 +13,9 @@ function createTraceRunRepository(db) {
     )
   `);
   const findById = db.prepare("SELECT * FROM trace_runs WHERE id = ?");
+  const listActive = db.prepare(
+    "SELECT * FROM trace_runs WHERE state = 'active' ORDER BY started_at ASC"
+  );
   const nextAttempt = db.prepare(`
     SELECT COALESCE(MAX(request_attempt), 0) + 1 AS attempt
     FROM trace_runs
@@ -84,6 +87,10 @@ function createTraceRunRepository(db) {
 
     get(id) {
       return mapTrace(findById.get(id));
+    },
+
+    listActive() {
+      return listActive.all().map(mapTrace);
     },
 
     bindRootInvocation(traceId, invocationId) {

@@ -2281,13 +2281,25 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   const appendFn = (sid, msg) => appended.push({ sid, msg });
   const acceptedFlights = new Map();
   const durableRecorder = {
+    markHandoffEnqueued(handoffId) {
+      return { handoffId, enqueuedAt: new Date().toISOString() };
+    },
     acceptHandoff(input) {
       const key = `${input.sourceInvocationId}:${input.targetAgentId}`;
       const prior = acceptedFlights.get(key);
       if (prior) {
-        return { accepted: false, status: "duplicate", record: { ...prior, duplicateOf: prior.handoffId } };
+        return {
+          accepted: false,
+          status: "duplicate",
+          record: { ...prior, duplicateOf: prior.handoffId },
+        };
       }
-      const record = { handoffId: "h-callback-1", routeStatus: "accepted", completeStatus: "pending", depth: input.depth };
+      const record = {
+        handoffId: "h-callback-1",
+        routeStatus: "accepted",
+        completeStatus: "pending",
+        depth: input.depth,
+      };
       acceptedFlights.set(key, record);
       return { accepted: true, status: "accepted", record };
     },
@@ -2421,8 +2433,14 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
         acceptHandoff: (input) => ({
           accepted: true,
           status: "accepted",
-          record: { handoffId: "h-callback-memory", routeStatus: "accepted", completeStatus: "pending", depth: input.depth },
+          record: {
+            handoffId: "h-callback-memory",
+            routeStatus: "accepted",
+            completeStatus: "pending",
+            depth: input.depth,
+          },
         }),
+        markHandoffEnqueued: (handoffId) => ({ handoffId, enqueuedAt: new Date().toISOString() }),
       },
       memoryCapture: {
         captureHandoff(input) {

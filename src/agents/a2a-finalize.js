@@ -356,8 +356,21 @@ function finalizeA2ARoutes(input = {}) {
       continue;
     }
 
-    // Enqueue
-    if (worklist) worklist.push(target);
+    if (!worklist) {
+      throw new Error("Accepted A2A Handoff requires a scheduler worklist.");
+    }
+    // The in-request queue is appended first; only then may durable enqueued_at
+    // claim that scheduling occurred. A failed confirmation removes this append.
+    worklist.push(target);
+    try {
+      const enqueued = durableRecorder.markHandoffEnqueued?.(accept.record.handoffId);
+      if (!enqueued?.enqueuedAt) {
+        throw new Error(`Failed to persist enqueue for Handoff ${accept.record.handoffId}.`);
+      }
+    } catch (error) {
+      worklist.pop();
+      throw error;
+    }
     a2aCount += 1;
     const reentry = worklist ? worklist.filter((id) => id === target).length > 1 : false;
     const entry = {
@@ -657,14 +670,7 @@ function emitRoute({
  * Prefer EventStore; fall back only to durableRecorder.appendInvocationEvent.
  * Transcript dual-write is intentionally removed from the hot path.
  */
-function appendRouteEvent({
-  eventStore,
-  durableRecorder,
-  sessionId,
-  invocationId,
-  kind,
-  payload,
-}) {
+function appendRouteEvent({ eventStore, durableRecorder, sessionId, invocationId, kind, payload }) {
   if (!sessionId || !invocationId) return;
   if (eventStore && typeof eventStore.append === "function") {
     eventStore.append({

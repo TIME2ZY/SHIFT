@@ -25,6 +25,7 @@ function finalizeA2ARoutes(input) {
         depth: route.depth,
       },
     }),
+    markHandoffEnqueued: (handoffId) => ({ handoffId, enqueuedAt: new Date().toISOString() }),
   };
   return finalizeA2ARoutesRaw({ ...input, durableRecorder });
 }
@@ -99,6 +100,31 @@ test("finalize enqueues complete handoff under balanced", () => {
   const route = events.find((e) => e.kind === "a2a-route" && e.payload?.handoffId);
   assert.equal(route.payload.handoffId, result.enqueued[0].handoffId);
   assert.equal(route.payload.parentInvocationId, "inv1");
+});
+
+test("finalize removes the in-memory enqueue when durable confirmation fails", () => {
+  const worklist = ["codex"];
+  assert.throws(
+    () =>
+      finalizeA2ARoutesRaw({
+        text: completeHandoffText("opencode"),
+        fromAgent: "codex",
+        threadId: "t-enqueue-fail",
+        invocationId: "inv-enqueue-fail",
+        worklist,
+        policyMode: "balanced",
+        durableRecorder: {
+          acceptHandoff: () => ({
+            accepted: true,
+            status: "accepted",
+            record: { handoffId: "h-enqueue-fail", depth: 1 },
+          }),
+          markHandoffEnqueued: () => null,
+        },
+      }),
+    /Failed to persist enqueue/
+  );
+  assert.deepEqual(worklist, ["codex"]);
 });
 
 test("finalize rejects an explicit intent routed to the wrong workflow role", () => {

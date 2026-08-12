@@ -14,7 +14,9 @@ function createHandoffRepository(db) {
       AND route_status = 'accepted' AND complete_status = 'completed'
     ORDER BY completed_at DESC LIMIT 1
   `);
-  const findInvocation = db.prepare("SELECT id, thread_id, trace_id, agent_id, state FROM invocations WHERE id = ?");
+  const findInvocation = db.prepare(
+    "SELECT id, thread_id, trace_id, agent_id, state FROM invocations WHERE id = ?"
+  );
   const insert = db.prepare(`
     INSERT INTO handoffs (
       id, thread_id, trace_id, source_invocation_id, source_agent_id, target_agent_id,
@@ -36,6 +38,11 @@ function createHandoffRepository(db) {
     WHERE id = @id AND route_status = 'accepted' AND receive_status = 'pending'
       AND complete_status = 'pending' AND target_invocation_id IS NULL
   `);
+  const markEnqueued = db.prepare(`
+    UPDATE handoffs SET enqueued_at = @enqueuedAt
+    WHERE id = @id AND route_status = 'accepted' AND enqueued_at IS NULL
+      AND receive_status = 'pending' AND complete_status = 'pending'
+  `);
   const finishTarget = db.prepare(`
     UPDATE handoffs SET complete_status = @completeStatus, completed_at = @completedAt,
       terminal_reason = @terminalReason, failure_stage = @failureStage,
@@ -47,7 +54,11 @@ function createHandoffRepository(db) {
       receive_status = CASE WHEN target_invocation_id IS NULL THEN 'not_started' ELSE receive_status END,
       complete_status = 'failed', completed_at = @completedAt,
       terminal_reason = 'restart-reconcile', failure_stage = 'reconcile',
-      error_code = CASE WHEN target_invocation_id IS NULL THEN 'handoff_target_not_started' ELSE 'handoff_target_not_terminal' END,
+       error_code = CASE
+         WHEN enqueued_at IS NULL THEN 'handoff_target_not_enqueued'
+         WHEN target_invocation_id IS NULL THEN 'handoff_target_not_started'
+         ELSE 'handoff_target_not_terminal'
+       END,
       retryable = 1
     WHERE complete_status = 'pending'
   `);
@@ -56,14 +67,22 @@ function createHandoffRepository(db) {
       receive_status = CASE WHEN target_invocation_id IS NULL THEN 'not_started' ELSE receive_status END,
       complete_status = 'failed', completed_at = @completedAt,
       terminal_reason = 'request-reconcile', failure_stage = 'reconcile',
-      error_code = CASE WHEN target_invocation_id IS NULL THEN 'handoff_target_not_started' ELSE 'handoff_target_not_terminal' END,
+       error_code = CASE
+         WHEN enqueued_at IS NULL THEN 'handoff_target_not_enqueued'
+         WHEN target_invocation_id IS NULL THEN 'handoff_target_not_started'
+         ELSE 'handoff_target_not_terminal'
+       END,
       retryable = 1
     WHERE trace_id = @traceId AND complete_status = 'pending'
   `);
-  const listByTrace = db.prepare("SELECT * FROM handoffs WHERE trace_id = ? ORDER BY created_at, id");
+  const listByTrace = db.prepare(
+    "SELECT * FROM handoffs WHERE trace_id = ? ORDER BY created_at, id"
+  );
 
   const acceptTransaction = db.transaction((input) => {
-    const source = findInvocation.get(requiredString(input.sourceInvocationId, "source invocation id"));
+    const source = findInvocation.get(
+      requiredString(input.sourceInvocationId, "source invocation id")
+    );
     if (!source) throw new Error("Source invocation does not exist.");
     if (!source.trace_id) throw new Error("Source invocation must belong to a Trace.");
     if (input.threadId && input.threadId !== source.thread_id) {
@@ -74,7 +93,8 @@ function createHandoffRepository(db) {
     if (prior) routeStatus = "already_completed";
     if (!prior) {
       prior = findAcceptedFlight.get(source.id, input.targetAgentId);
-      if (prior) routeStatus = prior.complete_status === "completed" ? "already_completed" : "duplicate";
+      if (prior)
+        routeStatus = prior.complete_status === "completed" ? "already_completed" : "duplicate";
     }
     const id = input.id || `handoff_${crypto.randomUUID().replace(/-/g, "")}`;
     const accepted = routeStatus === "accepted";
@@ -102,7 +122,7 @@ function createHandoffRepository(db) {
       policy: input.policy || null,
       source: input.source || "chat",
       createdAt: input.createdAt || new Date().toISOString(),
-      enqueuedAt: accepted ? input.enqueuedAt || new Date().toISOString() : null,
+      enqueuedAt: null,
       completedAt: accepted ? null : input.createdAt || new Date().toISOString(),
       terminalReason: accepted ? null : routeStatus,
       failureStage: accepted ? null : "handoff_route",
@@ -114,10 +134,27 @@ function createHandoffRepository(db) {
   });
 
   return {
-    accept(input = {}) { return acceptTransaction(input); },
-    get(id) { return mapHandoff(findById.get(id)); },
-    getByTargetInvocation(id) { return mapHandoff(findByTarget.get(id)); },
-    listForTrace(traceId) { return listByTrace.all(traceId).map(mapHandoff); },
+    accept(input = {}) {
+      return acceptTransaction(input);
+    },
+    get(id) {
+      return mapHandoff(findById.get(id));
+    },
+    getByTargetInvocation(id) {
+      return mapHandoff(findByTarget.get(id));
+    },
+    listForTrace(traceId) {
+      return listByTrace.all(traceId).map(mapHandoff);
+    },
+    markEnqueued(id, enqueuedAt = new Date().toISOString()) {
+      const changed = markEnqueued.run({
+        id: requiredString(id, "handoff id"),
+        enqueuedAt,
+      }).changes;
+      const handoff = mapHandoff(findById.get(id));
+      if (!handoff || (!changed && !handoff.enqueuedAt)) return null;
+      return handoff;
+    },
     bindTargetInvocation(id, targetInvocationId, startedAt) {
       const handoff = findById.get(id);
       const target = findInvocation.get(targetInvocationId);
@@ -132,14 +169,21 @@ function createHandoffRepository(db) {
       return mapHandoff(findById.get(id));
     },
     completeByTargetInvocation(targetInvocationId, outcome = {}) {
-      const completeStatus = outcome.state === "completed" ? "completed" : outcome.state === "aborted" ? "aborted" : "failed";
+      const completeStatus =
+        outcome.state === "completed"
+          ? "completed"
+          : outcome.state === "aborted"
+            ? "aborted"
+            : "failed";
       finishTarget.run({
         targetInvocationId,
         completeStatus,
         completedAt: outcome.endedAt || new Date().toISOString(),
         terminalReason: outcome.terminalReason || "target-terminal",
-        failureStage: completeStatus === "completed" ? null : outcome.failureStage || "handoff_target",
-        errorCode: completeStatus === "completed" ? null : outcome.errorCode || "handoff_target_failed",
+        failureStage:
+          completeStatus === "completed" ? null : outcome.failureStage || "handoff_target",
+        errorCode:
+          completeStatus === "completed" ? null : outcome.errorCode || "handoff_target_failed",
         retryable: completeStatus === "completed" ? null : outcome.retryable === true ? 1 : 0,
       });
       return mapHandoff(findByTarget.get(targetInvocationId));
@@ -156,16 +200,32 @@ function createHandoffRepository(db) {
 function mapHandoff(row) {
   if (!row) return null;
   return {
-    handoffId: row.id, id: row.id, threadId: row.thread_id, traceId: row.trace_id,
-    sourceInvocationId: row.source_invocation_id, sourceAgent: row.source_agent_id,
-    targetAgent: row.target_agent_id, targetInvocationId: row.target_invocation_id,
-    parseStatus: row.parse_status, routeStatus: row.route_status,
-    receiveStatus: row.receive_status, completeStatus: row.complete_status,
-    reason: row.reason, depth: row.depth, contentHash: row.content_hash,
-    duplicateOf: row.duplicate_of, repairOf: row.repair_of, phaseId: row.phase_id,
-    policy: row.policy, source: row.source, createdAt: row.created_at,
-    enqueuedAt: row.enqueued_at, startedAt: row.started_at, completedAt: row.completed_at,
-    terminalReason: row.terminal_reason, failureStage: row.failure_stage,
+    handoffId: row.id,
+    id: row.id,
+    threadId: row.thread_id,
+    traceId: row.trace_id,
+    sourceInvocationId: row.source_invocation_id,
+    sourceAgent: row.source_agent_id,
+    targetAgent: row.target_agent_id,
+    targetInvocationId: row.target_invocation_id,
+    parseStatus: row.parse_status,
+    routeStatus: row.route_status,
+    receiveStatus: row.receive_status,
+    completeStatus: row.complete_status,
+    reason: row.reason,
+    depth: row.depth,
+    contentHash: row.content_hash,
+    duplicateOf: row.duplicate_of,
+    repairOf: row.repair_of,
+    phaseId: row.phase_id,
+    policy: row.policy,
+    source: row.source,
+    createdAt: row.created_at,
+    enqueuedAt: row.enqueued_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    terminalReason: row.terminal_reason,
+    failureStage: row.failure_stage,
     errorCode: row.error_code,
     retryable: row.retryable == null ? null : row.retryable === 1,
   };

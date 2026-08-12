@@ -24,6 +24,9 @@ function createInvocationRepository(db) {
     WHERE thread_id = ? AND state = 'active'
     ORDER BY started_at ASC
   `);
+  const listActive = db.prepare(`
+    SELECT * FROM invocations WHERE state = 'active' ORDER BY started_at ASC
+  `);
   const allocateEventSequence = db.prepare(`
     UPDATE invocations
     SET next_event_sequence = next_event_sequence + 1
@@ -137,6 +140,10 @@ function createInvocationRepository(db) {
     /** Open (DB state=active) invocations for a thread — candidates for orphan reconcile. */
     listActiveForThread(threadId) {
       return listActiveByThread.all(threadId).map(mapInvocation);
+    },
+
+    listActive() {
+      return listActive.all().map(mapInvocation);
     },
 
     listForThreadWithMeta(threadId) {

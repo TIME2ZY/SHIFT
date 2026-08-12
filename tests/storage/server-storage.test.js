@@ -66,6 +66,66 @@ test("sqlite storage mode opens the durable database", async () => {
   }
 });
 
+test("server restart closes active invocation, pending handoff, and active trace", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-storage-reconcile-"));
+  const databaseFile = path.join(tmpDir, "shift.sqlite");
+  prepareCleanEpoch({ file: databaseFile });
+  const crashed = createStorage({ file: databaseFile });
+  crashed.threads.upsert({ id: "thread-1", title: "Restart", projectDir: "C:/repo" });
+  const window = crashed.windows.create({
+    id: "window-1",
+    threadId: "thread-1",
+    agentId: "codex",
+    providerKey: "codex:gpt",
+    workspaceKey: "base:C:/repo",
+    generation: 1,
+    capacityTokens: 1000,
+  });
+  crashed.traces.start({ id: "trace-1", threadId: "thread-1" });
+  crashed.invocations.start({
+    id: "source-1",
+    threadId: "thread-1",
+    traceId: "trace-1",
+    windowId: window.id,
+    agentId: "codex",
+  });
+  crashed.traces.bindRootInvocation("trace-1", "source-1");
+  const accepted = crashed.handoffs.accept({
+    sourceInvocationId: "source-1",
+    targetAgentId: "grok",
+    contentHash: "restart",
+  });
+  crashed.handoffs.markEnqueued(accepted.record.handoffId);
+  crashed.invocations.start({
+    id: "target-1",
+    threadId: "thread-1",
+    traceId: "trace-1",
+    windowId: window.id,
+    agentId: "grok",
+    parentInvocationId: "source-1",
+    triggerType: "a2a-handoff",
+  });
+  crashed.handoffs.bindTargetInvocation(accepted.record.handoffId, "target-1");
+  crashed.close();
+
+  const warnings = [];
+  const context = createServerStorage(
+    { storageMode: "sqlite", memoryDbFile: databaseFile, auditTranscript: false },
+    { error() {}, warn: (line) => warnings.push(line) }
+  );
+  try {
+    assert.equal(context.storage.invocations.get("source-1").state, "failed");
+    assert.equal(context.storage.invocations.get("target-1").state, "failed");
+    assert.equal(context.storage.invocations.listEvents("target-1").at(-1).kind, "invocation-end");
+    assert.equal(context.storage.handoffs.get(accepted.record.handoffId).completeStatus, "failed");
+    assert.equal(context.storage.traces.get("trace-1").state, "failed");
+    assert.match(warnings.join("\n"), /2 invocation\(s\).*1 trace\(s\)/);
+  } finally {
+    await context.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite audit transcript switch disables outbox archive independently", async () => {
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
