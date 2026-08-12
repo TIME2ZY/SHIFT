@@ -303,6 +303,10 @@ Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、�
 pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
 hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为不可用。
 
+Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
+筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
+同一可信 Session scope，不建立前端历史索引或新的写入口。
+
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行

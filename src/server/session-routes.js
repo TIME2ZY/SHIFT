@@ -39,7 +39,35 @@ function createSessionRoutes({
         sendJson(res, 404, { error: "Session not found." });
         return true;
       }
-      sendJson(res, 200, { traces: executionStorage?.executions?.listForThread(sessionId) || [] });
+      try {
+        const result = executionStorage?.executions?.searchForThread?.(sessionId, {
+          state: url.searchParams.get("state"),
+          agentId: url.searchParams.get("agentId"),
+          query: url.searchParams.get("q"),
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+          failuresOnly: url.searchParams.get("failuresOnly"),
+          limit: url.searchParams.get("limit"),
+          offset: url.searchParams.get("offset"),
+        }) || { traces: executionStorage?.executions?.listForThread(sessionId) || [] };
+        sendJson(res, 200, result);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
+    const traceExportMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/traces\/([a-zA-Z0-9_-]+)\/export$/
+    );
+    if (traceExportMatch && req.method === "GET") {
+      const [, sessionId, traceId] = traceExportMatch;
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      const exported = executionStorage?.executions?.export?.(sessionId, traceId) || null;
+      sendJson(res, exported ? 200 : 404, exported || { error: "Trace not found." });
       return true;
     }
 

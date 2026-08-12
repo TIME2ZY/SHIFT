@@ -300,6 +300,14 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
 - evaluator、数据集校验和报告均位于 offline/script 边界；在线 metrics 在结果未经过显式导入
   契约前继续保持严格 Recall、used 和 correct 为 `null`。
 
+### 8.3 Phase 2A Trace 查询与导出
+
+- Trace 搜索、状态/Agent/时间/失败筛选与分页必须在 Session-scoped 服务端 read model 完成；
+  Web 不跨 Session 扫描或自行构造另一份历史索引。
+- 导出只包含 Trace/Invocation/Handoff 结构元数据和 invocation event 的 allowlist 字段；默认不
+  复制 prompt、response、tool 参数、tool output、query、文件内容或环境变量。
+- 导出声明 format/version 与 capture policy，仍受可信 Session → Trace 隔离，且只读、不反写。
+
 ## 9. Phase 0 实施边界
 
 ### 9.1 Phase 0A（本次文档提交）

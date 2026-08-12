@@ -51,6 +51,48 @@ function createExecutionReadModel(db) {
     listForThread(threadId) {
       return threadId ? listTraces.all(threadId).map(traceSummary) : [];
     },
+    searchForThread(threadId, options = {}) {
+      if (!threadId) return { traces: [], page: { offset: 0, limit: 20, total: 0 } };
+      const filters = normalizeSearchOptions(options);
+      const where = ["t.thread_id = @threadId"];
+      if (filters.state) where.push("t.state = @state");
+      if (filters.agentId) {
+        where.push(
+          "EXISTS (SELECT 1 FROM invocations i WHERE i.trace_id = t.id AND i.agent_id = @agentId)"
+        );
+      }
+      if (filters.from) where.push("t.started_at >= @from");
+      if (filters.to) where.push("t.started_at < @to");
+      if (filters.failuresOnly) {
+        where.push(
+          "(t.state = 'failed' OR t.error_code IS NOT NULL OR EXISTS (SELECT 1 FROM invocations i WHERE i.trace_id = t.id AND i.state = 'failed'))"
+        );
+      }
+      if (filters.query) {
+        where.push(`(
+          t.id LIKE @query OR t.error_code LIKE @query OR t.failure_stage LIKE @query
+          OR t.terminal_reason LIKE @query
+          OR EXISTS (SELECT 1 FROM invocations i WHERE i.trace_id = t.id
+            AND (i.agent_id LIKE @query OR i.error_code LIKE @query))
+        )`);
+      }
+      const params = { threadId, ...filters, query: `%${filters.query}%` };
+      const clause = where.join(" AND ");
+      const total = Number(
+        db.prepare(`SELECT COUNT(*) AS count FROM trace_runs t WHERE ${clause}`).get(params)
+          ?.count || 0
+      );
+      const rows = db
+        .prepare(
+          `SELECT t.* FROM trace_runs t WHERE ${clause}
+           ORDER BY t.started_at DESC, t.id DESC LIMIT @limit OFFSET @offset`
+        )
+        .all(params);
+      return {
+        traces: rows.map(traceSummary),
+        page: { offset: filters.offset, limit: filters.limit, total },
+      };
+    },
     inspect(threadId, traceId) {
       if (!threadId || !traceId) return null;
       const trace = findTrace.get(traceId, threadId);
@@ -67,7 +109,80 @@ function createExecutionReadModel(db) {
       const handoffs = listHandoffs.all(traceId).map(handoffSummary);
       return { ...traceSummary(trace), invocations, handoffs };
     },
+    export(threadId, traceId) {
+      const detail = this.inspect(threadId, traceId);
+      if (!detail) return null;
+      return {
+        format: "shift-trace-export",
+        version: 1,
+        capturePolicy: "structural-metadata-v1",
+        exportedAt: new Date().toISOString(),
+        trace: {
+          ...detail,
+          invocations: detail.invocations.map((invocation) => ({
+            ...invocation,
+            events: invocation.events.map((event) => ({
+              kind: event.kind,
+              createdAt: event.createdAt,
+              sequenceNo: event.sequenceNo,
+              payload: structuralPayload(event.payload),
+            })),
+          })),
+        },
+      };
+    },
   };
+}
+
+function normalizeSearchOptions(options) {
+  const state = options.state || null;
+  if (state && !["active", "completed", "failed", "aborted"].includes(state)) {
+    throw new Error("Trace state is invalid.");
+  }
+  return {
+    state,
+    agentId: cleanString(options.agentId, 80),
+    query: cleanString(options.query, 120),
+    from: optionalDate(options.from, "from"),
+    to: optionalDate(options.to, "to"),
+    failuresOnly: options.failuresOnly === true || options.failuresOnly === "1",
+    limit: boundedInteger(options.limit, 20, 1, 100),
+    offset: boundedInteger(options.offset, 0, 0, 100_000),
+  };
+}
+
+function structuralPayload(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  const allowed = [
+    "state",
+    "status",
+    "code",
+    "signal",
+    "reason",
+    "failureStage",
+    "terminalReason",
+    "retryable",
+    "toolKind",
+  ];
+  return Object.fromEntries(
+    allowed.filter((key) => payload[key] != null).map((key) => [key, payload[key]])
+  );
+}
+
+function cleanString(value, max) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+}
+
+function optionalDate(value, name) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error(`Trace ${name} is invalid.`);
+  return date.toISOString();
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  return Number.isInteger(number) ? Math.max(min, Math.min(number, max)) : fallback;
 }
 
 function invocationSummary(row) {

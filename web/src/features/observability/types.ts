@@ -47,6 +47,20 @@ export interface TraceSummary {
   handoffs: ExecutionHandoff[];
 }
 
+export interface TraceSearchFilters {
+  state?: TraceSummary["state"] | "";
+  agentId?: string;
+  query?: string;
+  failuresOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TraceSearchResult {
+  traces: TraceSummary[];
+  page: { total: number; limit: number; offset: number };
+}
+
 export interface QualifiedRate {
   value: number | null;
   numerator: number;

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../../shared/api/queryKeys";
 import { getObservabilityMetrics, listSessionTraces } from "./api";
+import type { TraceSearchFilters } from "./types";
 
-export function useSessionTracesQuery(sessionId: string | null) {
+export function useSessionTracesQuery(sessionId: string | null, filters: TraceSearchFilters = {}) {
   return useQuery({
-    queryKey: queryKeys.sessions.traces(sessionId || ""),
-    queryFn: ({ signal }) => listSessionTraces(sessionId!, signal),
+    queryKey: [...queryKeys.sessions.traces(sessionId || ""), filters],
+    queryFn: ({ signal }) => listSessionTraces(sessionId!, filters, signal),
     enabled: Boolean(sessionId),
   });
 }
