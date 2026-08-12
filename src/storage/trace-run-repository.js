@@ -44,6 +44,10 @@ function createTraceRunRepository(db) {
     FROM invocations
     WHERE trace_id = ? AND state = 'active'
   `);
+  const countPendingHandoffs = db.prepare(`
+    SELECT COUNT(*) AS count FROM handoffs
+    WHERE trace_id = ? AND complete_status = 'pending'
+  `);
   const findDurableSuccess = db.prepare(`
     SELECT i.id
     FROM trace_runs t
@@ -94,6 +98,10 @@ function createTraceRunRepository(db) {
       const active = Number(countActiveInvocations.get(id).count) || 0;
       if (active > 0) {
         throw new Error(`Trace ${id} cannot finish with ${active} active invocation(s).`);
+      }
+      const pendingHandoffs = Number(countPendingHandoffs.get(id).count) || 0;
+      if (pendingHandoffs > 0) {
+        throw new Error(`Trace ${id} cannot finish with ${pendingHandoffs} pending handoff(s).`);
       }
       if (state === "completed") {
         if (!findDurableSuccess.get(id)) {

@@ -2,43 +2,32 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  finalizeA2ARoutes,
-  handoffRouteRegistry,
+  finalizeA2ARoutes: finalizeA2ARoutesRaw,
   collabTaskRegistry,
 } = require("../../src/agents/a2a-finalize");
 const { DECISIONS } = require("../../src/agents/handoff-policy");
 const { summarizeHandoffOutcome } = require("../../src/agents/callbacks");
 
 test.beforeEach(() => {
-  handoffRouteRegistry.resetForTests();
   collabTaskRegistry.resetForTests();
 });
 
-test("handoff route dedupe is scoped to one thread", () => {
-  const input = {
-    sourceAgent: "codex",
-    targetAgent: "gemini",
-    sourceInvocationId: "shared-invocation",
-    handoff: { to: "gemini", what: "same task" },
+let handoffNo = 0;
+function finalizeA2ARoutes(input) {
+  const durableRecorder = input.durableRecorder || {
+    acceptHandoff: (route) => ({
+      accepted: true,
+      status: "accepted",
+      record: {
+        handoffId: `h-test-${++handoffNo}`,
+        routeStatus: "accepted",
+        completeStatus: "pending",
+        depth: route.depth,
+      },
+    }),
   };
-  const first = handoffRouteRegistry.tryAcceptRoute({
-    ...input,
-    threadId: "thread-a",
-  });
-  const duplicate = handoffRouteRegistry.tryAcceptRoute({
-    ...input,
-    threadId: "thread-a",
-  });
-  const otherThread = handoffRouteRegistry.tryAcceptRoute({
-    ...input,
-    threadId: "thread-b",
-  });
-
-  assert.equal(first.accepted, true);
-  assert.equal(duplicate.accepted, false);
-  assert.equal(otherThread.accepted, true);
-  assert.notEqual(first.record.handoffId, otherThread.record.handoffId);
-});
+  return finalizeA2ARoutesRaw({ ...input, durableRecorder });
+}
 
 function completeHandoffText(to = "opencode") {
   return [

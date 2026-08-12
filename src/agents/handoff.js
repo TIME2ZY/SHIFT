@@ -4,7 +4,7 @@
  * Phase C-3 boundary:
  * - parse + evaluate: ./handoff-parse.js
  * - route finalize: ./a2a-finalize.js
- * - hop registry: ./handoff-route-registry.js (via a2a-finalize wrappers)
+ * - durable hop lifecycle: ../storage/handoff-repository.js
  *
  * Agents should emit a fenced ```handoff block when routing to another agent.
  * Soft mode (default): missing fields still allow routing; the next agent is

@@ -2279,9 +2279,23 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
 
   const appended = [];
   const appendFn = (sid, msg) => appended.push({ sid, msg });
+  const acceptedFlights = new Map();
+  const durableRecorder = {
+    acceptHandoff(input) {
+      const key = `${input.sourceInvocationId}:${input.targetAgentId}`;
+      const prior = acceptedFlights.get(key);
+      if (prior) {
+        return { accepted: false, status: "duplicate", record: { ...prior, duplicateOf: prior.handoffId } };
+      }
+      const record = { handoffId: "h-callback-1", routeStatus: "accepted", completeStatus: "pending", depth: input.depth };
+      acceptedFlights.set(key, record);
+      return { accepted: true, status: "accepted", record };
+    },
+  };
 
   const ok = callbacks.postMessage(sessionId, invocationId, "@Gemini 请继续实现", {
     appendToSession: appendFn,
+    durableRecorder,
   });
 
   assert.equal(ok.ok, true);
@@ -2313,6 +2327,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   // Idempotency: the same source invocation cannot route to the same target twice.
   const ok2 = callbacks.postMessage(sessionId, invocationId, "@Gemini 请按补充意见继续", {
     appendToSession: appendFn,
+    durableRecorder,
   });
   assert.equal(ok2.handoff.status, "skipped");
   assert.deepEqual(worklist, ["codex", "gemini"]);
@@ -2402,6 +2417,13 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
       "```",
     ].join("\n");
     const ok = callbacks.postMessage(sessionId, invocationId, content, {
+      durableRecorder: {
+        acceptHandoff: (input) => ({
+          accepted: true,
+          status: "accepted",
+          record: { handoffId: "h-callback-memory", routeStatus: "accepted", completeStatus: "pending", depth: input.depth },
+        }),
+      },
       memoryCapture: {
         captureHandoff(input) {
           captured.push(input);

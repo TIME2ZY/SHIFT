@@ -15,6 +15,7 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   appendInvocationEvent: () => false,
   completeInvocation: () => null,
   completeTrace: () => null,
+  reconcileTraceHandoffs: () => 0,
   bindProviderSession: () => false,
   addWindowUsage: () => false,
   setWindowUsageSnapshot: () => false,
@@ -459,6 +460,7 @@ function createChatRoutes({
         reason: "request-error-orphan",
         state: "failed",
       });
+      durable.reconcileTraceHandoffs?.(traceId);
       durable.completeTrace({
         traceId,
         state: "failed",
@@ -517,6 +519,7 @@ function createChatRoutes({
 
     threadCtx.currentInvocationId = null;
     threadCtx.windowId = null;
+    durable.reconcileTraceHandoffs?.(traceId);
     const traceInvocations =
       storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) || [];
     const traceActive = traceInvocations.some((row) => row.state === "active");

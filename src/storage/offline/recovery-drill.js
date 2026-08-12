@@ -11,6 +11,7 @@ const SOURCE_TABLES = Object.freeze([
   "context_windows",
   "trace_runs",
   "invocations",
+  "handoffs",
   "invocation_events",
   "messages",
   "projects",
@@ -227,6 +228,27 @@ function inspectCausality(db) {
           SELECT 1 FROM invocations i
           WHERE i.trace_id = t.id AND i.state = 'active'
         )
+    `,
+    ],
+    [
+      "handoff-invocation-causality",
+      `
+      SELECT COUNT(*) AS count FROM handoffs h
+      JOIN invocations source ON source.id = h.source_invocation_id
+      LEFT JOIN invocations target ON target.id = h.target_invocation_id
+      WHERE h.thread_id <> source.thread_id OR h.trace_id <> source.trace_id
+        OR (target.id IS NOT NULL AND (
+          h.thread_id <> target.thread_id OR h.trace_id <> target.trace_id
+          OR h.target_agent_id <> target.agent_id
+        ))
+    `,
+    ],
+    [
+      "terminal-target-pending-handoff",
+      `
+      SELECT COUNT(*) AS count FROM handoffs h
+      JOIN invocations target ON target.id = h.target_invocation_id
+      WHERE target.state <> 'active' AND h.complete_status = 'pending'
     `,
     ],
     [

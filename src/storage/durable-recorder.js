@@ -65,6 +65,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
               retryable: options.retryable === true,
             });
             if (!record) return null;
+            storage.handoffs?.completeByTargetInvocation(invocationId, record);
             events.append({
               threadId: record.threadId,
               invocationId,
@@ -388,6 +389,16 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             throw new Error(`Failed to bind root invocation ${input.invocationId} to trace.`);
           }
         }
+        if (input.handoffId) {
+          const handoff = storage.handoffs.bindTargetInvocation(
+            input.handoffId,
+            input.invocationId,
+            input.startedAt
+          );
+          if (!handoff || handoff.targetInvocationId !== input.invocationId) {
+            throw new Error(`Failed to bind invocation ${input.invocationId} to handoff.`);
+          }
+        }
         events.registerInvocation(input.invocationId, input.threadId);
         // Invocation start and its first event commit atomically.
         events.append({
@@ -454,6 +465,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             ...outcome,
           });
           if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
+          storage.handoffs?.completeByTargetInvocation(invocationId, record);
           const payload =
             endPayload && typeof endPayload === "object"
               ? { code, signal, ...endPayload }
@@ -508,6 +520,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           ...outcome,
         });
         if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
+        storage.handoffs?.completeByTargetInvocation(invocationId, record);
 
         const payload =
           input.endPayload && typeof input.endPayload === "object"
@@ -666,6 +679,16 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     return attempt("start trace", () => storage.traces.start(input));
   }
 
+  function acceptHandoff(input = {}) {
+    if (!storage?.handoffs) return null;
+    return attempt("accept handoff", () => storage.handoffs.accept(input));
+  }
+
+  function reconcileTraceHandoffs(traceId) {
+    if (!storage?.handoffs || !traceId) return 0;
+    return attempt("reconcile trace handoffs", () => storage.handoffs.reconcileTracePending(traceId));
+  }
+
   function completeTrace(input = {}) {
     if (!storage?.traces || !input.traceId) return null;
     return attempt("complete trace", () => storage.traces.finish(input.traceId, input));
@@ -686,6 +709,8 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     mirrorLastMessage,
     startInvocation,
     startTrace,
+    acceptHandoff,
+    reconcileTraceHandoffs,
     appendInvocationEvent,
     // finishInvocation / finishWithAssistantMessage are private — only completeInvocation is public.
     completeInvocation,

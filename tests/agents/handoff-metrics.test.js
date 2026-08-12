@@ -109,6 +109,13 @@ test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", 
     sendSse: (kind, payload) => events.push({ kind, payload }),
     logger: { info: (line) => lines.push(line) },
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
+    durableRecorder: {
+      acceptHandoff: (input) => ({
+        accepted: true,
+        status: "accepted",
+        record: { handoffId: "h-metrics", routeStatus: "accepted", completeStatus: "pending", depth: input.depth },
+      }),
+    },
   });
 
   assert.ok(result.metrics);

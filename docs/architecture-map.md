@@ -43,6 +43,7 @@ Web App (web/src/app/App.tsx)
   message-persistence.appendMessage → messages 表 + recall 投影
   event-store → invocation_events + outbox(JSONL 审计)
   memory-service → memories 表（产品记忆）
+  handoff-repository → durable accept / bind / complete / restart reconcile
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -102,20 +103,21 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | ---------------------- | --------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
 | 解析 fence             | `agents/handoff.js`                     | finalize 内 `selectCanonicalHandoffMatch`                                            | 无                                                        |
 | 策略                   | `handoff-policy.js`                     | finalize 内 `decidePolicy`                                                           | 无                                                        |
-| 幂等 accept            | `handoff-route-registry.tryAcceptRoute` | finalize 内                                                                          | **进程内 Map**（D4 明确不跨重启）                         |
+| 幂等 accept            | `durableRecorder.acceptHandoff`         | finalize 内                                                                          | SQLite `handoffs`，唯一 accepted flight                   |
 | 入队下一 Agent         | `worklist.push`                         | finalize 内                                                                          | **请求内存 worklist**                                     |
 | 捕获 handoff 协作事件  | `memoryCapture.captureHandoff`          | finalize 内                                                                          | event-store `handoff-captured`（**不是** product memory） |
 | 触发 finalize          | `finalizeA2ARoutes`                     | **双触发：** chat 回合结束 + callback `postMessage`                                  | —                                                         |
-| 目标 hop bind/complete | **`a2a-finalize` wrappers**（B-2）      | chat-routes 只调 `bindHandoffTargetInvocation` / `completeHandoffByTargetInvocation` | 进程内                                                    |
+| 目标 hop bind/complete | `durableRecorder.startInvocation` / `completeInvocation` | chat-worklist 传 `handoffId`；recorder 与 invocation 同事务写入 | SQLite `handoffs`                                         |
 | 协作 phase / plan gate | `collab-task-registry`                  | chat 流前检查；callback 侧 plan/workflow evidence                                    | SQLite repository（若注入）+ 进程逻辑                     |
 | 路由诊断事件           | `appendRouteEvent`                      | EventStore → else durableRecorder.**无 transcript 双写**（B-2）                      | SQLite events                                             |
 
-**结论（handoff）— B-2 已落地（2026-08-07）：**
+**结论（handoff）— durable 0B-2 已落地：**
 
 - 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`。
-- hop bind/complete 经 `a2a-finalize` 导出包装；chat 不再直接 require `handoff-route-registry`。
+- accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
+- target Invocation start/bind 与 Invocation terminal/Handoff terminal 各自在同一事务提交。
+- 服务启动会把崩溃遗留 pending Handoff 收口为 `not_started|failed`，不补造成功。
 - 热路径去掉 transcript dual-write（callback 诊断事件同样）。
-- **D4 仍开放：** 幂等仅进程内；升 SQLite 需单独 ADR/PR，禁止静默双写。
 
 ---
 
@@ -238,18 +240,18 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | --- | ------------------------- | --------------------------------------------------------- | ------ |
 | D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立         | 已收口 |
 | D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态    | 接受   |
-| D3  | Handoff 双触发            | chat end 与 callback post 均触发；hop API 经 a2a-finalize | 接受   |
-| D4  | Handoff 幂等进程内        | 冻结为进程内；升 SQLite 必须另行修改 ADR                  | 待决策 |
+| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize     | 接受   |
+| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted     | 已收口 |
 | D5  | 事件 sink 回退            | 无 transcript 热路径双写                                  | 已收口 |
 | D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                 | 已收口 |
 | D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线          | 已收口 |
-| D8  | Collab 任务 vs hop 注册表 | task 可持久化；hop 仍为进程内，与 D4 同一边界             | 接受   |
+| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                | 已收口 |
 | D9  | worktree 双地图           | session Map 与 manager 文件职责分离                       | 接受   |
 
 **已收敛（保护，勿回退）：**
 
 - 在线业务真相源 = SQLite（ADR-001）；server/agents **不** require dual/legacy 读写。
-- A2A 业务 finalize = 单一 `finalizeA2ARoutes`；hop bind/complete 经同一模块包装。
+- A2A 业务 finalize = 单一 `finalizeA2ARoutes`；handoff lifecycle 由 SQLite repository 仲裁。
 - Message 物理 insert = 单一 `appendMessage`（热路径）。
 - Invocation 调度终态 = 单一 `completeInvocation`。
 - 产品记忆写 = `writeMemoryCandidate`；协作事件 = `memoryCapture`（无 memoryService）。
@@ -292,12 +294,12 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | trace start / finish         | `durableRecorder.startTrace` / `completeTrace`                      | 仅 chat request 生命周期            |
 | invocation start             | `durableRecorder.startInvocation`                                   | 仅 chat 调度器                      |
 | invocation finish            | `durableRecorder.completeInvocation`                                | chat 调度器；孤儿用 force/reconcile |
-| handoff accept/enqueue       | `finalizeA2ARoutes`                                                 | chat end、callback post             |
-| hop bind/complete            | `bindHandoffTargetInvocation` / `completeHandoffByTargetInvocation` | chat 调度器                         |
+| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`               | chat end、callback post             |
+| hop bind/complete            | `durableRecorder.startInvocation` / `completeInvocation`            | chat 调度器                         |
 | message user/system/callback | `appendToSession` → `appendMessage`                                 | routes / callbacks                  |
 | message assistant-final      | `completeInvocation({ message })` → `appendMessage`                 | chat 成功收尾 only                  |
 | product memory               | `memoryService.writeMemoryCandidate`                                | `shift_context.memory_write` MCP 私有 HTTP bridge |
-| collab hop 幂等              | `handoff-route-registry`（进程内，D4）                              | 仅 finalize / bind / complete       |
+| collab hop 幂等              | `handoff-repository`（SQLite）                                      | 仅 finalize accept                  |
 
 ---
 

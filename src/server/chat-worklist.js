@@ -17,8 +17,6 @@ const {
 const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
 const {
   finalizeA2ARoutes,
-  bindHandoffTargetInvocation,
-  completeHandoffByTargetInvocation,
   isEffectiveHandoffHop,
 } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
@@ -435,23 +433,10 @@ try {
       parentInvocationId,
       triggerMessageId,
       triggerType,
+      handoffId: queuedCause?.handoffId || null,
     });
     if (!durableRun) {
       throw new Error(`Failed to persist invocation start for ${invocationId}.`);
-    }
-    // Bind A2A hop → target invocation when this agent was started by a handoff.
-    if (parentInvocationId && triggerType === "a2a-handoff") {
-      try {
-        bindHandoffTargetInvocation({
-          threadId: sessionId,
-          sourceInvocationId: parentInvocationId,
-          targetAgent: agent,
-          targetInvocationId: invocationId,
-          handoffId: queuedCause?.handoffId || null,
-        });
-      } catch (error) {
-        log.warn?.(`[handoff-route] bind target failed: ${error.message}`);
-      }
     }
     let activeInvocationId = invocationId;
     // Prefer tracker bound to the durable window snapshot when present.
@@ -982,11 +967,6 @@ try {
           supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
         },
       });
-      try {
-        completeHandoffByTargetInvocation(abortInvId, { ok: false });
-      } catch {
-        /* ignore */
-      }
       aborted = true;
       previousInvocationId = abortInvId;
       break;
@@ -1133,23 +1113,16 @@ try {
       usage: invocationUsage,
     });
 
-    // Close A2A hop when this agent was the handoff target (same module boundary as finalize).
-    try {
-      const hop = completeHandoffByTargetInvocation(finalInvocationId, {
-        ok: code === 0,
+    const hop = storage?.handoffs?.getByTargetInvocation?.(finalInvocationId);
+    if (hop && !res.writableEnded && !res.destroyed) {
+      sendSse(res, "a2a-hop-complete", {
+        handoffId: hop.handoffId,
+        sourceInvocationId: hop.sourceInvocationId,
+        targetInvocationId: hop.targetInvocationId,
+        completeStatus: hop.completeStatus,
+        routeStatus: hop.routeStatus,
+        effective: isEffectiveHandoffHop(hop),
       });
-      if (hop && !res.writableEnded && !res.destroyed) {
-        sendSse(res, "a2a-hop-complete", {
-          handoffId: hop.handoffId,
-          sourceInvocationId: hop.sourceInvocationId,
-          targetInvocationId: hop.targetInvocationId,
-          completeStatus: hop.completeStatus,
-          routeStatus: hop.routeStatus,
-          effective: isEffectiveHandoffHop(hop),
-        });
-      }
-    } catch (error) {
-      log.warn?.(`[handoff-route] complete hop failed: ${error.message}`);
     }
 
     // POST soft seal after a complete answer (never mid-stream kill path).

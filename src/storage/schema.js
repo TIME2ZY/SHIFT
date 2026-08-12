@@ -937,6 +937,59 @@ const MIGRATIONS = Object.freeze([
         WHERE trace_id IS NOT NULL;
     `,
   },
+  {
+    version: 25,
+    name: "durable_handoff_lifecycle",
+    sql: `
+      CREATE TABLE handoffs (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        trace_id TEXT NOT NULL,
+        source_invocation_id TEXT NOT NULL,
+        source_agent_id TEXT NOT NULL,
+        target_agent_id TEXT NOT NULL,
+        target_invocation_id TEXT,
+        parse_status TEXT NOT NULL CHECK (parse_status IN ('parsed', 'failed', 'skipped')),
+        route_status TEXT NOT NULL CHECK (route_status IN ('accepted', 'rejected', 'duplicate', 'already_completed')),
+        receive_status TEXT NOT NULL CHECK (receive_status IN ('pending', 'started', 'not_started')),
+        complete_status TEXT NOT NULL CHECK (complete_status IN ('pending', 'completed', 'failed', 'aborted')),
+        reason TEXT,
+        depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
+        content_hash TEXT NOT NULL,
+        duplicate_of TEXT,
+        repair_of TEXT,
+        phase_id TEXT,
+        policy TEXT,
+        source TEXT,
+        created_at TEXT NOT NULL,
+        enqueued_at TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        terminal_reason TEXT,
+        failure_stage TEXT,
+        error_code TEXT,
+        retryable INTEGER CHECK (retryable IN (0, 1)),
+        metadata_json TEXT,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (trace_id) REFERENCES trace_runs(id),
+        FOREIGN KEY (source_invocation_id) REFERENCES invocations(id),
+        FOREIGN KEY (target_invocation_id) REFERENCES invocations(id),
+        FOREIGN KEY (duplicate_of) REFERENCES handoffs(id),
+        FOREIGN KEY (repair_of) REFERENCES handoffs(id)
+      );
+
+      CREATE UNIQUE INDEX handoffs_accepted_flight
+        ON handoffs(source_invocation_id, target_agent_id)
+        WHERE route_status = 'accepted';
+      CREATE UNIQUE INDEX handoffs_target_invocation
+        ON handoffs(target_invocation_id)
+        WHERE target_invocation_id IS NOT NULL;
+      CREATE INDEX handoffs_trace_created ON handoffs(trace_id, created_at);
+      CREATE INDEX handoffs_pending ON handoffs(complete_status, receive_status, created_at);
+      CREATE INDEX handoffs_completed_content
+        ON handoffs(thread_id, target_agent_id, content_hash, complete_status);
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

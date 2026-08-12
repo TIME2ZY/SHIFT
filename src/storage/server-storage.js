@@ -66,6 +66,10 @@ function createServerStorage(options = {}, logger = console) {
     logger,
   });
   const recorder = createDurableRecorder({ storage, eventStore, logger });
+  const reconciledHandoffs = storage.handoffs?.reconcilePending?.() || 0;
+  if (reconciledHandoffs > 0) {
+    logger.warn?.(`[handoff-reconcile] closed ${reconciledHandoffs} pending handoff(s)`);
+  }
   const sessionService = storage
     ? createSqliteSessionService({
         storage,
