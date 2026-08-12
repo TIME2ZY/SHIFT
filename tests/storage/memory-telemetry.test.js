@@ -34,6 +34,57 @@ test("memory_events table exists after migrations", () => {
   }
 });
 
+test("recordSafe exposes telemetry sink failures without breaking callers", () => {
+  const storage = createFixture();
+  try {
+    const original = storage.memoryEvents.record;
+    storage.memoryEvents.record = () => {
+      throw new Error("simulated disk failure");
+    };
+    assert.equal(
+      storage.memoryEvents.recordSafe({ eventType: "memory_injected" }, { error() {} }),
+      null
+    );
+    storage.memoryEvents.record = original;
+    const health = storage.observability.health();
+    assert.equal(health.checks.telemetry_write_failure, 1);
+    assert.equal(health.state, "degraded");
+    assert.equal(health.alerts[0].code, "telemetry_write_failure");
+    assert.match(health.telemetry.lastError, /simulated disk failure/);
+
+    storage.memoryEvents.recordSafe({ eventType: "memory_injected", threadId: "thread-1" });
+    const recovered = storage.observability.health();
+    assert.equal(recovered.checks.telemetry_write_failure, 0);
+    assert.deepEqual(recovered.alerts, []);
+    assert.equal(recovered.telemetry.failed, 1);
+  } finally {
+    storage.close();
+  }
+});
+
+test("best-effort telemetry cleanup retains recent events", () => {
+  const storage = createFixture();
+  try {
+    storage.memoryEvents.record({
+      eventType: "memory_injected",
+      threadId: "thread-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_injected",
+      threadId: "thread-1",
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+    assert.deepEqual(
+      storage.memoryEvents.cleanupExpired({ before: "2026-07-01T00:00:00.000Z", limit: 10 }),
+      { events: 1, failures: 0 }
+    );
+    assert.equal(storage.memoryEvents.listForThread("thread-1").length, 1);
+  } finally {
+    storage.close();
+  }
+});
+
 test("write emits a durable memory event", () => {
   const storage = createFixture();
   try {

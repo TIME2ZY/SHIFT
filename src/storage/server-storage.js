@@ -158,6 +158,18 @@ function createServerStorage(options = {}, logger = console) {
         retentionDays,
       };
     },
+    cleanupBestEffortTelemetry(options = {}) {
+      if (!storage?.memoryEvents?.cleanupExpired) return { available: false, deleted: 0 };
+      const retentionDays = Math.max(1, Math.min(Number(options.retentionDays) || 30, 365));
+      const now = options.now ? new Date(options.now) : new Date();
+      const before = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+      return {
+        available: true,
+        deleted: storage.memoryEvents.cleanupExpired({ before, limit: options.limit }),
+        before,
+        retentionDays,
+      };
+    },
     sessionService,
     /**
      * Ordered shutdown: final outbox flush (while DB open) → recorder/event

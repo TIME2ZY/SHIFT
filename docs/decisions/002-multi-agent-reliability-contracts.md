@@ -272,6 +272,19 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
    purge 和 Project 隔离边界。
 7. OTLP 或第三方 exporter 属于后续可选 sink，不改变 SQLite 业务权威边界。
 
+### 8.1 Phase 1B telemetry health 与保留策略
+
+- best-effort telemetry sink 的尝试、成功、失败和最后错误写入同一 SQLite 的诊断状态表；
+  它只证明 sink 完整性，不补造 Memory 业务事实，也不参与恢复或成功率仲裁。
+- `memory_events.recordSafe` 是该状态的唯一写入口。telemetry 失败不打断主链路，但 health
+  必须暴露累计失败和最后失败时间，并派生本地告警；数据库整体不可读时 health 直接不可用。
+- 默认告警阈值为最后一次 telemetry 失败尚未被后续成功覆盖、权威完整性违规，或 outbox
+  pending age 超过 300 秒。累计与窗口失败仍保留用于审计；告警是 health 的派生输出，不建立
+  新的状态机。
+- 自动或手工保留清理只允许删除超过期限的 best-effort `memory_events` 和已投递 outbox。
+  Trace、Invocation、Handoff、Message、产品 Memory 和 pending outbox 不在此策略内；Thread
+  purge 仍由既有权威生命周期负责。
+
 ## 9. Phase 0 实施边界
 
 ### 9.1 Phase 0A（本次文档提交）

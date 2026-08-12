@@ -37,6 +37,35 @@ function createMemoryEventRepository(db) {
     WHERE thread_id = ?
     GROUP BY event_type
   `);
+  const recordAttempt = db.prepare(`
+    UPDATE telemetry_sink_health
+    SET attempted = attempted + 1, last_attempt_at = @at
+    WHERE sink = 'memory_events'
+  `);
+  const recordSuccess = db.prepare(`
+    UPDATE telemetry_sink_health
+    SET succeeded = succeeded + 1, last_success_at = @at, last_error = NULL
+    WHERE sink = 'memory_events'
+  `);
+  const recordFailure = db.prepare(`
+    UPDATE telemetry_sink_health
+    SET failed = failed + 1, last_failure_at = @at, last_error = @error
+    WHERE sink = 'memory_events'
+  `);
+  const insertFailure = db.prepare(`
+    INSERT INTO telemetry_write_failures (sink, error, occurred_at)
+    VALUES ('memory_events', @error, @at)
+  `);
+  const deleteExpired = db.prepare(`
+    DELETE FROM memory_events WHERE id IN (
+      SELECT id FROM memory_events WHERE created_at < @before ORDER BY id LIMIT @limit
+    )
+  `);
+  const deleteExpiredFailures = db.prepare(`
+    DELETE FROM telemetry_write_failures WHERE id IN (
+      SELECT id FROM telemetry_write_failures WHERE occurred_at < @before ORDER BY id LIMIT @limit
+    )
+  `);
 
   return {
     record(input = {}) {
@@ -69,9 +98,22 @@ function createMemoryEventRepository(db) {
      * Best-effort record: never throws to callers (telemetry must not break paths).
      */
     recordSafe(input, logger = console) {
+      const at = new Date().toISOString();
       try {
-        return this.record(input);
+        recordAttempt.run({ at });
+        const result = this.record(input);
+        recordSuccess.run({ at });
+        return result;
       } catch (error) {
+        try {
+          const serializedError = truncateError(error);
+          db.transaction(() => {
+            recordFailure.run({ at, error: serializedError });
+            insertFailure.run({ at, error: serializedError });
+          })();
+        } catch {
+          // The telemetry database itself may be unavailable; never mask the original failure.
+        }
         logger.error?.(`[memory-events] record failed: ${error.message}`);
         return null;
       }
@@ -94,7 +136,26 @@ function createMemoryEventRepository(db) {
       }
       return out;
     },
+
+    cleanupExpired(options = {}) {
+      const before = requiredDate(options.before);
+      const limit = normalizeLimit(options.limit, 1000);
+      return db.transaction(() => ({
+        events: deleteExpired.run({ before, limit }).changes,
+        failures: deleteExpiredFailures.run({ before, limit }).changes,
+      }))();
+    },
   };
+}
+
+function requiredDate(value) {
+  const date = new Date(value);
+  if (!value || !Number.isFinite(date.getTime())) throw new Error("Retention cutoff is invalid.");
+  return date.toISOString();
+}
+
+function truncateError(error) {
+  return String(error?.message || error || "unknown telemetry failure").slice(0, 500);
 }
 
 function mapEvent(row) {

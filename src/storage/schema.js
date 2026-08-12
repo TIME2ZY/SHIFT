@@ -990,6 +990,34 @@ const MIGRATIONS = Object.freeze([
         ON handoffs(thread_id, target_agent_id, content_hash, complete_status);
     `,
   },
+  {
+    version: 26,
+    name: "telemetry_sink_health",
+    sql: `
+      CREATE TABLE telemetry_sink_health (
+        sink TEXT PRIMARY KEY,
+        attempted INTEGER NOT NULL DEFAULT 0 CHECK (attempted >= 0),
+        succeeded INTEGER NOT NULL DEFAULT 0 CHECK (succeeded >= 0),
+        failed INTEGER NOT NULL DEFAULT 0 CHECK (failed >= 0),
+        last_attempt_at TEXT,
+        last_success_at TEXT,
+        last_failure_at TEXT,
+        last_error TEXT
+      );
+
+      CREATE TABLE telemetry_write_failures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sink TEXT NOT NULL,
+        error TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+      );
+
+      CREATE INDEX telemetry_write_failures_sink_occurred
+        ON telemetry_write_failures(sink, occurred_at);
+
+      INSERT INTO telemetry_sink_health (sink) VALUES ('memory_events');
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {
