@@ -31,6 +31,11 @@ test("storage health route exposes mode, epoch, and outbox health", async () => 
         oldestPendingAt: "2026-01-01T00:00:00.000Z",
         lastError: "disk unavailable",
       }),
+      observabilityHealth: () => ({
+        state: "degraded",
+        authoritativeViolations: 1,
+        checks: { missing_trace_id: 1 },
+      }),
     },
     sendJson,
     readJsonBody: async () => ({}),
@@ -45,6 +50,72 @@ test("storage health route exposes mode, epoch, and outbox health", async () => 
   assert.equal(res.body.storage.auditTranscript, true);
   assert.equal(res.body.storage.epoch.epochId, "epoch-1");
   assert.equal(res.body.storage.outbox.pending, 2);
+  assert.equal(res.body.storage.observability.checks.missing_trace_id, 1);
+});
+
+test("observability metrics endpoint preserves sample counts and time window", async () => {
+  const { res, sendJson } = responseCapture();
+  const handle = createStorageRoutes({
+    storageContext: {
+      mode: "sqlite",
+      observabilityMetrics: (window) => ({
+        window,
+        handoff: { endToEnd: { value: 0.5, numerator: 1, denominator: 2, pending: 1, unknown: 0 } },
+        memory: { hitRate: { value: 1, numerator: 2, denominator: 2 }, strictRecallAtK: null },
+      }),
+    },
+    sendJson,
+    readJsonBody: async () => ({}),
+  });
+  await handle(
+    { method: "GET" },
+    res,
+    new URL("http://127.0.0.1/api/storage/observability/metrics?from=2026-08-01&to=2026-08-02")
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.metrics.handoff.endToEnd.denominator, 2);
+  assert.equal(res.body.metrics.memory.strictRecallAtK, null);
+  assert.equal(res.body.metrics.window.from, "2026-08-01");
+});
+
+test("observability metrics endpoint rejects invalid windows", async () => {
+  const { res, sendJson } = responseCapture();
+  const handle = createStorageRoutes({
+    storageContext: {
+      mode: "sqlite",
+      observabilityMetrics() { throw new Error("Metric window from is invalid."); },
+    },
+    sendJson,
+    readJsonBody: async () => ({}),
+  });
+  await handle(
+    { method: "GET" }, res,
+    new URL("http://127.0.0.1/api/storage/observability/metrics?from=invalid")
+  );
+  assert.equal(res.status, 400);
+});
+
+test("trace inspection is scoped to the trusted Thread coordinate", async () => {
+  const { res, sendJson } = responseCapture();
+  const handle = createStorageRoutes({
+    storageContext: {
+      mode: "sqlite",
+      inspectTrace: () => ({ traceId: "trace-1", threadId: "thread-1", complete: { ok: true } }),
+    },
+    sendJson,
+    readJsonBody: async () => ({}),
+  });
+  await handle(
+    { method: "GET" }, res,
+    new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-2")
+  );
+  assert.equal(res.status, 404);
+  await handle(
+    { method: "GET" }, res,
+    new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-1")
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.trace.complete.ok, true);
 });
 
 test("storage cleanup route validates policy and reports deleted delivered rows", async () => {

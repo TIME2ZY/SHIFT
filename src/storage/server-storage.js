@@ -132,6 +132,9 @@ function createServerStorage(options = {}, logger = console) {
       }
       return health;
     },
+    observabilityHealth: (options) => storage?.observability?.health?.(options) || null,
+    observabilityMetrics: (options) => storage?.observability?.metrics?.(options) || null,
+    inspectTrace: (traceId) => storage?.observability?.inspectTrace?.(traceId) || null,
     cleanupDeliveredOutbox(options) {
       if (!storage?.outbox?.cleanupDelivered) {
         return { available: false, deleted: 0 };

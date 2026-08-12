@@ -44,6 +44,7 @@ Web App (web/src/app/App.tsx)
   event-store → invocation_events + outbox(JSONL 审计)
   memory-service → memories 表（产品记忆）
   handoff-repository → durable accept / bind / complete / restart reconcile
+  observability-repository → live Trace completeness + qualified Handoff/Memory metrics
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -286,6 +287,11 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval   | scripts + tests        |
 
 **禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
+
+在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics` 和按可信
+`threadId` 约束的 `/api/storage/observability/traces/:traceId`。指标直接查询 SQLite source
+tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used 与
+correct 在无标注或证据时保持 `null`。
 
 ## 6. 事件类型 → 单一写入口
 

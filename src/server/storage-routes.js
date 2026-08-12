@@ -26,6 +26,11 @@ function createStorageRoutes({
           oldestPendingAt: null,
           lastError: null,
         },
+        observability: storageContext.observabilityHealth?.() || {
+          state: "unavailable",
+          authoritativeViolations: null,
+          checks: null,
+        },
       },
     };
   }
@@ -33,6 +38,46 @@ function createStorageRoutes({
   return async function handleStorageRoutes(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/storage/health") {
       sendJson(res, 200, healthPayload());
+      return true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/storage/observability/metrics") {
+      try {
+        const metrics = storageContext.observabilityMetrics?.({
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+        });
+        if (!metrics) {
+          sendJson(res, 503, { error: "Observability metrics are unavailable." });
+          return true;
+        }
+        sendJson(res, 200, { metrics });
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
+    const traceMatch = url.pathname.match(/^\/api\/storage\/observability\/traces\/([^/]+)$/);
+    if (req.method === "GET" && traceMatch) {
+      let traceId;
+      try {
+        traceId = decodeURIComponent(traceMatch[1]);
+      } catch {
+        sendJson(res, 400, { error: "traceId is invalid." });
+        return true;
+      }
+      const threadId = url.searchParams.get("threadId");
+      if (!threadId) {
+        sendJson(res, 400, { error: "threadId is required." });
+        return true;
+      }
+      const trace = storageContext.inspectTrace?.(traceId) || null;
+      if (!trace || trace.threadId !== threadId) {
+        sendJson(res, 404, { error: "Trace not found for this Thread." });
+        return true;
+      }
+      sendJson(res, 200, { trace });
       return true;
     }
 

@@ -1,6 +1,7 @@
 const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = require("./database");
 const { createInvocationRepository } = require("./invocation-repository");
 const { createHandoffRepository } = require("./handoff-repository");
+const { createObservabilityRepository } = require("./observability-repository");
 const { createEmbeddingRepository } = require("./embedding-repository");
 const {
   enqueueProjectDocumentEmbedding,
@@ -39,6 +40,7 @@ function createStorage(options = {}) {
     traces: createTraceRunRepository(db),
     invocations: createInvocationRepository(db),
     handoffs: createHandoffRepository(db),
+    observability: createObservabilityRepository(db),
     collaborationTasks: createCollaborationTaskRepository(db),
     projects: createProjectRepository(db, options.projectRepositoryOptions),
     memories: createMemoryRepository(db, recall),
