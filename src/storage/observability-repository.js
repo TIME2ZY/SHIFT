@@ -1,4 +1,5 @@
 const SAMPLE_CLASSES = Object.freeze(["eligible", "pending", "censored", "unknown", "excluded"]);
+const { projectTraceSpans } = require("./trace-span-projection");
 
 function createObservabilityRepository(db) {
   const scalar = (sql, params = {}) => Number(db.prepare(sql).get(params)?.count || 0);
@@ -71,6 +72,14 @@ function createObservabilityRepository(db) {
           )
         `),
       };
+      const spanMissingEnd = db
+        .prepare("SELECT id FROM trace_runs WHERE state <> 'active' AND started_at >= @cutoff")
+        .all({ cutoff: traceContractAppliedAt })
+        .reduce(
+          (sum, row) =>
+            sum + projectTraceSpans(db, row.id).spans.filter((span) => !span.complete).length,
+          0
+        );
       const authoritativeViolations = Object.values(checks).reduce((sum, value) => sum + value, 0);
       const telemetry = telemetryHealth(db);
       const outboxPendingAge = ageSeconds(oldestPending, now);
@@ -89,6 +98,9 @@ function createObservabilityRepository(db) {
           count: telemetry.unresolvedFailures,
           lastOccurredAt: telemetry.lastFailureAt,
         });
+      }
+      if (spanMissingEnd > 0) {
+        alerts.push({ code: "span_missing_end", severity: "warning", count: spanMissingEnd });
       }
       if (outboxPendingAge != null && outboxPendingAge > outboxPendingAlertSeconds) {
         alerts.push({
@@ -114,13 +126,13 @@ function createObservabilityRepository(db) {
         telemetry,
         checks: {
           ...checks,
-          span_missing_end: null,
+          span_missing_end: spanMissingEnd,
           telemetry_write_failure: telemetry.unresolvedFailures,
           metric_projection_lag: 0,
           outbox_pending_age: outboxPendingAge,
         },
         capabilities: {
-          span_missing_end: "not_applicable_phase_0",
+          span_missing_end: "derived_from_canonical_events",
           telemetry_write_failure: "durable_sink_attempt_counters",
           metric_projection_lag: "live_sql_zero_lag",
         },

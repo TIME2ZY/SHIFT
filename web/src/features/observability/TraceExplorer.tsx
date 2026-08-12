@@ -2,11 +2,7 @@ import { useMemo, useState } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { TraceSummary } from "./types";
 import type { QualifiedRate } from "./types";
-import {
-  useObservabilityMetricsQuery,
-  useSessionTracesQuery,
-  useTraceDetailQuery,
-} from "./queries";
+import { useObservabilityMetricsQuery, useTraceDetailQuery } from "./queries";
 import { exportSessionTrace } from "./api";
 
 function Rate({ label, rate }: { label: string; rate: QualifiedRate }) {
@@ -49,13 +45,21 @@ export function TraceExplorer({
   const [state, setState] = useState<TraceSummary["state"] | "">("");
   const [failuresOnly, setFailuresOnly] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const filtered = useSessionTracesQuery(sessionId || null, {
-    state,
-    query: query.trim(),
-    failuresOnly,
-    limit: 100,
-  });
-  const visible = sessionId ? filtered.data?.traces || [] : traces;
+  const visible = useMemo(
+    () =>
+      traces.filter((trace) => {
+        if (state && trace.state !== state) return false;
+        if (failuresOnly && trace.state !== "failed" && !trace.outcome.errorCode) return false;
+        const needle = query.trim().toLowerCase();
+        return (
+          !needle ||
+          trace.traceId.toLowerCase().includes(needle) ||
+          trace.outcome.errorCode?.toLowerCase().includes(needle) ||
+          trace.invocations.some((item) => item.agentId.toLowerCase().includes(needle))
+        );
+      }),
+    [failuresOnly, query, state, traces]
+  );
   const selected = useMemo(
     () => visible.find((trace) => trace.traceId === selectedId) || visible[0] || null,
     [selectedId, visible]
@@ -83,26 +87,9 @@ export function TraceExplorer({
             <Rate label="Memory 命中率" rate={metrics.data.memory.hitRate} />
             <div className="trace-metric trace-metric-unavailable">
               <dt>严格 Recall@K</dt>
-              <dd>
-                {metrics.data.memory.strictRecallAtK
-                  ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
-                  : "需标注集"}
-              </dd>
-              <small>
-                {metrics.data.memory.strictRecallAtK
-                  ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
-                  : "命中率不等同于相关性召回率"}
-              </small>
+              <dd>{metrics.data.memory.strictRecallAtK ? "已评估" : "需标注集"}</dd>
+              <small>命中率不等同于相关性召回率</small>
             </div>
-            {metrics.data.memory.usedRate ? (
-              <Rate label="Memory 使用率" rate={metrics.data.memory.usedRate} />
-            ) : null}
-            {metrics.data.memory.correctRate ? (
-              <Rate label="Memory 正确率" rate={metrics.data.memory.correctRate} />
-            ) : null}
-            {metrics.data.memory.businessSuccessRate ? (
-              <Rate label="业务成功率" rate={metrics.data.memory.businessSuccessRate} />
-            ) : null}
           </dl>
         ) : null}
       </section>

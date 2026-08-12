@@ -39,10 +39,10 @@ test("observability health exposes authoritative completeness checks", () => {
     assert.equal(health.checks.missing_trace_id, 0);
     assert.equal(health.checks.terminal_invocation_missing_end_event, 0);
     assert.equal(health.checks.metric_projection_lag, 0);
-    assert.equal(health.checks.span_missing_end, null);
+    assert.equal(health.checks.span_missing_end, 0);
     assert.equal(health.checks.telemetry_write_failure, 0);
     assert.deepEqual(health.alerts, []);
-    assert.equal(health.capabilities.span_missing_end, "not_applicable_phase_0");
+    assert.equal(health.capabilities.span_missing_end, "derived_from_canonical_events");
   } finally {
     storage.close();
   }

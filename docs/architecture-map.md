@@ -307,6 +307,10 @@ Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Ag
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
 同一可信 Session scope，不建立前端历史索引或新的写入口。
 
+`trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
+Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
+详情 API 与 UI 消费该投影；不存在 span 写表，缺失结束事件由 `span_missing_end` health 暴露。
+
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行

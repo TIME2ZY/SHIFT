@@ -1,3 +1,5 @@
+const { projectTraceSpans } = require("./trace-span-projection");
+
 function createExecutionReadModel(db) {
   const listTraces = db.prepare(
     "SELECT * FROM trace_runs WHERE thread_id = ? ORDER BY started_at DESC, id DESC"
@@ -107,7 +109,7 @@ function createExecutionReadModel(db) {
         })),
       }));
       const handoffs = listHandoffs.all(traceId).map(handoffSummary);
-      return { ...traceSummary(trace), invocations, handoffs };
+      return { ...traceSummary(trace), invocations, handoffs, ...projectTraceSpans(db, traceId) };
     },
     export(threadId, traceId) {
       const detail = this.inspect(threadId, traceId);

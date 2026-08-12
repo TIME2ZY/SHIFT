@@ -308,6 +308,15 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   复制 prompt、response、tool 参数、tool output、query、文件内容或环境变量。
 - 导出声明 format/version 与 capture policy，仍受可信 Session → Trace 隔离，且只读、不反写。
 
+### 8.4 Phase 2B 派生 Span 与 Link
+
+- generation span 从 Invocation + context window generation 派生；tool span 从同一 Invocation 的
+  `tool.started` / `tool.finished` 规范事件配对；recall span 从带 invocation_id 的 Memory telemetry
+  派生；Handoff link 从权威 Handoff target 绑定派生。
+- 不新增在线 span/span_link 写表。投影可重建且不得反写源表；payload 只暴露结构 allowlist。
+- 缺少 finish 的 tool 或未终止 generation 必须输出 `complete=false`，并计入 health 的
+  `span_missing_end`，不得静默补终态。
+
 ## 9. Phase 0 实施边界
 
 ### 9.1 Phase 0A（本次文档提交）

@@ -26,6 +26,18 @@ export async function exportSessionTrace(sessionId: string, traceId: string) {
   );
 }
 
+export async function inspectSessionTrace(
+  sessionId: string,
+  traceId: string,
+  signal?: AbortSignal
+) {
+  const response = await apiRequest<{ trace: import("./types").TraceSummary }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/traces/${encodeURIComponent(traceId)}`,
+    { signal }
+  );
+  return response.trace;
+}
+
 export async function getObservabilityMetrics(signal?: AbortSignal) {
   const response = await apiRequest<{ metrics: ObservabilityMetrics }>(
     "/api/storage/observability/metrics",

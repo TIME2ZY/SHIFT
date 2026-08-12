@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../../shared/api/queryKeys";
-import { getObservabilityMetrics, listSessionTraces } from "./api";
+import { getObservabilityMetrics, inspectSessionTrace, listSessionTraces } from "./api";
 import type { TraceSearchFilters } from "./types";
 
 export function useSessionTracesQuery(sessionId: string | null, filters: TraceSearchFilters = {}) {
@@ -16,5 +16,13 @@ export function useObservabilityMetricsQuery(enabled = true) {
     queryKey: queryKeys.observability.metrics,
     queryFn: ({ signal }) => getObservabilityMetrics(signal),
     enabled,
+  });
+}
+
+export function useTraceDetailQuery(sessionId: string | null | undefined, traceId: string | null) {
+  return useQuery({
+    queryKey: ["observability", "trace", sessionId, traceId],
+    queryFn: ({ signal }) => inspectSessionTrace(sessionId!, traceId!, signal),
+    enabled: Boolean(sessionId && traceId),
   });
 }
