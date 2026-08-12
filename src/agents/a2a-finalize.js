@@ -19,9 +19,13 @@ const {
   DECISIONS,
 } = require("./handoff-policy");
 const { buildFinalizeMetrics, logFinalizeMetrics } = require("./handoff-metrics");
-const handoffRouteRegistry = require("./handoff-route-registry");
+const crypto = require("node:crypto");
 const collabTaskRegistry = require("./collab-task-registry");
-const { HANDOFF_PARSE_STATUS, HANDOFF_ROUTE_STATUS } = require("../shared/collab-contracts");
+const {
+  HANDOFF_PARSE_STATUS,
+  HANDOFF_ROUTE_STATUS,
+  isEffectiveA2aHop,
+} = require("../shared/collab-contracts");
 
 /**
  * Unified A2A route finalization for chat turn-end and callback postMessage.
@@ -94,7 +98,7 @@ function finalizeA2ARoutes(input = {}) {
       mentionCount: mentions.length,
     });
     const handoff = handoffMatch.handoff;
-    const contentHash = handoffRouteRegistry.hashHandoffContent(handoff, target);
+    const contentHash = hashHandoffContent(handoff, target);
     const parseStatus = handoff ? HANDOFF_PARSE_STATUS.PARSED : HANDOFF_PARSE_STATUS.FAILED;
     const quality = agentHandoff.evaluateHandoff(handoff, {
       routedTo: target,
@@ -295,13 +299,14 @@ function finalizeA2ARoutes(input = {}) {
       continue;
     }
 
-    // Phase 3: idempotent accept — one route per (sourceInvocation, target).
-    const accept = handoffRouteRegistry.tryAcceptRoute({
+    if (!durableRecorder || typeof durableRecorder.acceptHandoff !== "function") {
+      throw new Error("A2A finalize requires durable Handoff storage.");
+    }
+    const accept = durableRecorder.acceptHandoff({
       threadId: sessionId,
-      sourceAgent: fromAgent,
-      targetAgent: target,
+      sourceAgentId: fromAgent,
+      targetAgentId: target,
       sourceInvocationId: invocationId || null,
-      handoff,
       contentHash,
       depth: a2aCount + 1,
       parseStatus,
@@ -351,8 +356,21 @@ function finalizeA2ARoutes(input = {}) {
       continue;
     }
 
-    // Enqueue
-    if (worklist) worklist.push(target);
+    if (!worklist) {
+      throw new Error("Accepted A2A Handoff requires a scheduler worklist.");
+    }
+    // The in-request queue is appended first; only then may durable enqueued_at
+    // claim that scheduling occurred. A failed confirmation removes this append.
+    worklist.push(target);
+    try {
+      const enqueued = durableRecorder.markHandoffEnqueued?.(accept.record.handoffId);
+      if (!enqueued?.enqueuedAt) {
+        throw new Error(`Failed to persist enqueue for Handoff ${accept.record.handoffId}.`);
+      }
+    } catch (error) {
+      worklist.pop();
+      throw error;
+    }
     a2aCount += 1;
     const reentry = worklist ? worklist.filter((id) => id === target).length > 1 : false;
     const entry = {
@@ -446,7 +464,7 @@ function finalizeA2ARoutes(input = {}) {
     capturedCount,
     hopRecords,
     duplicateRoutes,
-    effectiveHops: handoffRouteRegistry.listEffectiveHops(),
+    effectiveHops: hopRecords.filter(isEffectiveHandoffHop),
   };
 }
 
@@ -652,14 +670,7 @@ function emitRoute({
  * Prefer EventStore; fall back only to durableRecorder.appendInvocationEvent.
  * Transcript dual-write is intentionally removed from the hot path.
  */
-function appendRouteEvent({
-  eventStore,
-  durableRecorder,
-  sessionId,
-  invocationId,
-  kind,
-  payload,
-}) {
+function appendRouteEvent({ eventStore, durableRecorder, sessionId, invocationId, kind, payload }) {
   if (!sessionId || !invocationId) return;
   if (eventStore && typeof eventStore.append === "function") {
     eventStore.append({
@@ -677,29 +688,27 @@ function appendRouteEvent({
   // always wires eventStore through createServer → durable recorder.
 }
 
-/**
- * Scheduler-facing hop lifecycle (Phase B-2). Chat routes bind/complete through
- * these wrappers so hop identity stays on the same module boundary as finalize.
- * Registry remains process-local until a durable hop store is adopted (map D4).
- */
-function bindHandoffTargetInvocation(input) {
-  return handoffRouteRegistry.bindTargetInvocation(input);
-}
-
-function completeHandoffByTargetInvocation(targetInvocationId, options) {
-  return handoffRouteRegistry.completeByTargetInvocation(targetInvocationId, options);
-}
-
 function isEffectiveHandoffHop(record) {
-  return handoffRouteRegistry.isEffectiveA2aHop(record);
+  return isEffectiveA2aHop(record);
+}
+
+function hashHandoffContent(handoff, targetAgent) {
+  const h = handoff && typeof handoff === "object" ? handoff : {};
+  return crypto
+    .createHash("sha256")
+    .update(
+      [targetAgent, h.to, h.goal, h.what, h.why, h.next_action]
+        .map((value) => String(value || "").toLowerCase())
+        .join("\n")
+    )
+    .digest("hex")
+    .slice(0, 16);
 }
 
 module.exports = {
   finalizeA2ARoutes,
-  bindHandoffTargetInvocation,
-  completeHandoffByTargetInvocation,
   isEffectiveHandoffHop,
-  handoffRouteRegistry,
+  hashHandoffContent,
   collabTaskRegistry,
   // appendRouteEvent stays module-private (not a second public event API).
 };

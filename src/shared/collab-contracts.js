@@ -169,6 +169,7 @@ const HANDOFF_COMPLETE_STATUS = Object.freeze({
   PENDING: "pending",
   COMPLETED: "completed",
   FAILED: "failed",
+  ABORTED: "aborted",
 });
 
 /**

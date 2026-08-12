@@ -33,6 +33,8 @@ test("memory database applies schema and safety pragmas", () => {
       "threads",
       "context_windows",
       "messages",
+      "trace_runs",
+      "handoffs",
       "invocations",
       "invocation_events",
       "memory_entries",

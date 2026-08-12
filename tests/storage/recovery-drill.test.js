@@ -36,6 +36,14 @@ function seed(storage, projectDir) {
     windowId: window.id,
     agentId: "codex",
   });
+  const trace = storage.traces.start({ threadId: "thread-1" });
+  storage.db.prepare("UPDATE invocations SET trace_id = ? WHERE id = ?").run(trace.id, "invocation-1");
+  storage.traces.bindRootInvocation(trace.id, "invocation-1");
+  storage.handoffs.accept({
+    sourceInvocationId: "invocation-1",
+    targetAgentId: "grok",
+    contentHash: "recovery-handoff",
+  });
   storage.invocations.appendEvent({
     invocationId: "invocation-1",
     kind: "text.delta",
@@ -75,6 +83,8 @@ test("SQLite backup restores authority rows and epoch into an empty directory", 
     assert.equal(report.restored.counts.threads, 1);
     assert.equal(report.restored.counts.messages, 1);
     assert.equal(report.restored.counts.invocations, 1);
+    assert.equal(report.restored.counts.trace_runs, 1);
+    assert.equal(report.restored.counts.handoffs, 1);
     assert.equal(report.restored.counts.invocation_events, 1);
 
     const restored = createStorage({ file: report.restoredFile });

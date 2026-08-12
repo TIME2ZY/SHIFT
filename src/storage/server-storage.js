@@ -66,6 +66,13 @@ function createServerStorage(options = {}, logger = console) {
     logger,
   });
   const recorder = createDurableRecorder({ storage, eventStore, logger });
+  const reconciled = recorder.reconcileStartup();
+  if (reconciled.invocations || reconciled.handoffs || reconciled.traces) {
+    logger.warn?.(
+      `[startup-reconcile] closed ${reconciled.invocations} invocation(s), ` +
+        `${reconciled.handoffs} handoff(s), and ${reconciled.traces} trace(s)`
+    );
+  }
   const sessionService = storage
     ? createSqliteSessionService({
         storage,
@@ -128,6 +135,9 @@ function createServerStorage(options = {}, logger = console) {
       }
       return health;
     },
+    observabilityHealth: (options) => storage?.observability?.health?.(options) || null,
+    observabilityMetrics: (options) => storage?.observability?.metrics?.(options) || null,
+    inspectTrace: (traceId) => storage?.observability?.inspectTrace?.(traceId) || null,
     cleanupDeliveredOutbox(options) {
       if (!storage?.outbox?.cleanupDelivered) {
         return { available: false, deleted: 0 };

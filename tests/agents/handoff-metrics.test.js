@@ -28,7 +28,13 @@ test("buildFinalizeMetrics computes rates for mixed outcomes", () => {
     repairs: [{ to: "grok" }],
     skipped: [],
     handoffQualityByTarget: {
-      opencode: { ok: true, degraded: false, emptyPacket: false, hasBlock: true, toMismatch: false },
+      opencode: {
+        ok: true,
+        degraded: false,
+        emptyPacket: false,
+        hasBlock: true,
+        toMismatch: false,
+      },
       grok: { ok: false, degraded: true, emptyPacket: true, hasBlock: false, toMismatch: false },
     },
     capturedCount: 1,
@@ -57,9 +63,7 @@ test("memoryCardHasActiveItems detects empty and non-empty cards", () => {
   assert.equal(memoryCardHasActiveItems(""), false);
   assert.equal(memoryCardHasActiveItems("<!-- Active Memories (0) -->\n尚无结构化记忆"), false);
   assert.equal(
-    memoryCardHasActiveItems(
-      "<!-- Active Memories (1) -->\n1. [active][handoff] id=m1\ncontent"
-    ),
+    memoryCardHasActiveItems("<!-- Active Memories (1) -->\n1. [active][handoff] id=m1\ncontent"),
     true
   );
 });
@@ -109,6 +113,19 @@ test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", 
     sendSse: (kind, payload) => events.push({ kind, payload }),
     logger: { info: (line) => lines.push(line) },
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
+    durableRecorder: {
+      acceptHandoff: (input) => ({
+        accepted: true,
+        status: "accepted",
+        record: {
+          handoffId: "h-metrics",
+          routeStatus: "accepted",
+          completeStatus: "pending",
+          depth: input.depth,
+        },
+      }),
+      markHandoffEnqueued: (handoffId) => ({ handoffId, enqueuedAt: new Date().toISOString() }),
+    },
   });
 
   assert.ok(result.metrics);

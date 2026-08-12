@@ -9,10 +9,10 @@ function createInvocationRepository(db) {
   const insertInvocation = db.prepare(`
     INSERT INTO invocations
       (id, thread_id, window_id, agent_id, state, started_at,
-       parent_invocation_id, trigger_message_id, trigger_type)
+       parent_invocation_id, trigger_message_id, trigger_type, trace_id)
     VALUES
       (@id, @threadId, @windowId, @agentId, 'active', @startedAt,
-       @parentInvocationId, @triggerMessageId, @triggerType)
+       @parentInvocationId, @triggerMessageId, @triggerType, @traceId)
   `);
   const findById = db.prepare("SELECT * FROM invocations WHERE id = ?");
   const findMessageOwner = db.prepare("SELECT thread_id FROM messages WHERE id = ?");
@@ -23,6 +23,9 @@ function createInvocationRepository(db) {
     SELECT * FROM invocations
     WHERE thread_id = ? AND state = 'active'
     ORDER BY started_at ASC
+  `);
+  const listActive = db.prepare(`
+    SELECT * FROM invocations WHERE state = 'active' ORDER BY started_at ASC
   `);
   const allocateEventSequence = db.prepare(`
     UPDATE invocations
@@ -69,7 +72,14 @@ function createInvocationRepository(db) {
   `);
   const finalize = db.prepare(`
     UPDATE invocations
-    SET state = @state, exit_code = @exitCode, signal = @signal, ended_at = @endedAt
+    SET state = @state,
+        exit_code = @exitCode,
+        signal = @signal,
+        ended_at = @endedAt,
+        terminal_reason = @terminalReason,
+        failure_stage = @failureStage,
+        error_code = @errorCode,
+        retryable = @retryable
     WHERE id = @id AND state = 'active'
   `);
   const appendEventTransaction = db.transaction((input) => {
@@ -96,8 +106,15 @@ function createInvocationRepository(db) {
       const threadId = requiredString(input.threadId, "thread id");
       const parentInvocationId = nullableString(input.parentInvocationId);
       const triggerMessageId = nullableString(input.triggerMessageId);
+      const traceId = nullableString(input.traceId);
       assertCausalOwner(findById, parentInvocationId, threadId, "parent invocation");
       assertCausalOwner(findMessageOwner, triggerMessageId, threadId, "trigger message");
+      assertCausalOwner(
+        db.prepare("SELECT thread_id FROM trace_runs WHERE id = ?"),
+        traceId,
+        threadId,
+        "trace"
+      );
       insertInvocation.run({
         id: requiredString(input.id, "invocation id"),
         threadId,
@@ -107,6 +124,7 @@ function createInvocationRepository(db) {
         parentInvocationId,
         triggerMessageId,
         triggerType: normalizeTriggerType(input.triggerType),
+        traceId,
       });
       return this.get(input.id);
     },
@@ -122,6 +140,10 @@ function createInvocationRepository(db) {
     /** Open (DB state=active) invocations for a thread — candidates for orphan reconcile. */
     listActiveForThread(threadId) {
       return listActiveByThread.all(threadId).map(mapInvocation);
+    },
+
+    listActive() {
+      return listActive.all().map(mapInvocation);
     },
 
     listForThreadWithMeta(threadId) {
@@ -165,6 +187,15 @@ function createInvocationRepository(db) {
           exitCode: Number.isInteger(outcome.exitCode) ? outcome.exitCode : null,
           signal: nullableString(outcome.signal),
           endedAt: outcome.endedAt || new Date().toISOString(),
+          terminalReason: nullableString(outcome.terminalReason),
+          failureStage: nullableString(outcome.failureStage),
+          errorCode: nullableString(outcome.errorCode),
+          retryable:
+            outcome.retryable === undefined || outcome.retryable === null
+              ? null
+              : outcome.retryable
+                ? 1
+                : 0,
         }).changes;
         return changed > 0 ? mapInvocation(findById.get(id)) : null;
       });
@@ -198,6 +229,11 @@ function mapInvocation(row) {
     parentInvocationId: row.parent_invocation_id,
     triggerMessageId: row.trigger_message_id,
     triggerType: row.trigger_type,
+    traceId: row.trace_id,
+    terminalReason: row.terminal_reason,
+    failureStage: row.failure_stage,
+    errorCode: row.error_code,
+    retryable: row.retryable === null || row.retryable === undefined ? null : row.retryable === 1,
     nextEventSequence: row.next_event_sequence,
   };
 }
