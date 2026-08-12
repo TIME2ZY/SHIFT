@@ -13,6 +13,7 @@ function createSessionRoutes({
   getUsageSummary,
   usageStorage,
   recallService,
+  executionStorage,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -31,6 +32,34 @@ function createSessionRoutes({
   }
 
   return async function handleSessionRoutes(req, res, url) {
+    const tracesMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/traces$/);
+    if (tracesMatch && req.method === "GET") {
+      const sessionId = tracesMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      sendJson(res, 200, { traces: executionStorage?.executions?.listForThread(sessionId) || [] });
+      return true;
+    }
+
+    const traceMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/traces\/([a-zA-Z0-9_-]+)$/
+    );
+    if (traceMatch && req.method === "GET") {
+      const sessionId = traceMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      const trace = executionStorage?.executions?.inspect(sessionId, traceMatch[2]) || null;
+      if (!trace) {
+        sendJson(res, 404, { error: "Trace not found for this Session." });
+        return true;
+      }
+      sendJson(res, 200, { trace });
+      return true;
+    }
     if (req.method === "GET" && url.pathname === "/api/messages") {
       const sessionId = url.searchParams.get("sessionId");
       if (sessionId) {

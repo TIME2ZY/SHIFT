@@ -45,6 +45,7 @@ Web App (web/src/app/App.tsx)
   memory-service → memories 表（产品记忆）
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
+  execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -289,10 +290,23 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 **禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
 
+带分级相关性和业务 outcome 证据的 Memory 评估位于
+`src/storage/offline/labeled-recall-eval.js`，仅由 `scripts/eval-recall-fts.js` 调用。它计算
+严格 Recall@K、MRR、nDCG@K 和离线业务结果关联；结果不进入在线热路径，也不反写业务表。
+
 在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics` 和按可信
 `threadId` 约束的 `/api/storage/observability/traces/:traceId`。指标直接查询 SQLite source
 tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used 与
 correct 在无标注或证据时保持 `null`。
+
+Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
+pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
+hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为不可用。
+
+`memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
+由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
+`POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行
+事实和 pending outbox 不进入该清理路径。
 
 ## 6. 事件类型 → 单一写入口
 

@@ -6,13 +6,26 @@ const { createStorage } = require("../../src/storage");
 function seed(storage) {
   storage.threads.upsert({ id: "thread-1", title: "Observability", projectDir: "C:/repo" });
   const window = storage.windows.create({
-    id: "window-1", threadId: "thread-1", agentId: "codex", providerKey: "codex:gpt",
-    workspaceKey: "base:C:/repo", generation: 1, capacityTokens: 1000,
+    id: "window-1",
+    threadId: "thread-1",
+    agentId: "codex",
+    providerKey: "codex:gpt",
+    workspaceKey: "base:C:/repo",
+    generation: 1,
+    capacityTokens: 1000,
   });
-  storage.traces.start({ id: "trace-1", threadId: "thread-1", startedAt: "2026-08-01T00:00:00.000Z" });
+  storage.traces.start({
+    id: "trace-1",
+    threadId: "thread-1",
+    startedAt: "2026-08-01T00:00:00.000Z",
+  });
   storage.invocations.start({
-    id: "source-1", threadId: "thread-1", traceId: "trace-1",
-    windowId: window.id, agentId: "codex", startedAt: "2026-08-01T00:00:01.000Z",
+    id: "source-1",
+    threadId: "thread-1",
+    traceId: "trace-1",
+    windowId: window.id,
+    agentId: "codex",
+    startedAt: "2026-08-01T00:00:01.000Z",
   });
   return window;
 }
@@ -27,8 +40,33 @@ test("observability health exposes authoritative completeness checks", () => {
     assert.equal(health.checks.terminal_invocation_missing_end_event, 0);
     assert.equal(health.checks.metric_projection_lag, 0);
     assert.equal(health.checks.span_missing_end, null);
+    assert.equal(health.checks.telemetry_write_failure, 0);
+    assert.deepEqual(health.alerts, []);
     assert.equal(health.capabilities.span_missing_end, "not_applicable_phase_0");
-  } finally { storage.close(); }
+  } finally {
+    storage.close();
+  }
+});
+
+test("observability health alerts when pending outbox exceeds threshold", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage);
+    storage.outbox.enqueue({
+      id: "outbox-1",
+      threadId: "thread-1",
+      invocationId: "source-1",
+      sequenceNo: 0,
+      kind: "text",
+      payload: {},
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+    const health = storage.observability.health({ now: "2026-08-01T00:10:00.000Z" });
+    assert.ok(health.alerts.some((alert) => alert.code === "outbox_pending_age"));
+    assert.equal(health.state, "degraded");
+  } finally {
+    storage.close();
+  }
 });
 
 test("observability health degrades on terminal invocation without durable end event", () => {
@@ -42,7 +80,9 @@ test("observability health degrades on terminal invocation without durable end e
     const trace = storage.observability.inspectTrace("trace-1");
     assert.equal(trace.complete.ok, false);
     assert.ok(trace.complete.issues.includes("terminal_invocation_missing_end_event"));
-  } finally { storage.close(); }
+  } finally {
+    storage.close();
+  }
 });
 
 test("handoff metrics classify eligible pending and excluded samples", () => {
@@ -50,33 +90,52 @@ test("handoff metrics classify eligible pending and excluded samples", () => {
   try {
     const window = seed(storage);
     const first = storage.handoffs.accept({
-      id: "handoff-ok", sourceInvocationId: "source-1", targetAgentId: "grok",
-      contentHash: "ok", createdAt: "2026-08-01T01:00:00.000Z",
+      id: "handoff-ok",
+      sourceInvocationId: "source-1",
+      targetAgentId: "grok",
+      contentHash: "ok",
+      createdAt: "2026-08-01T01:00:00.000Z",
     });
     storage.invocations.start({
-      id: "target-ok", threadId: "thread-1", traceId: "trace-1", windowId: window.id,
-      agentId: "grok", startedAt: "2026-08-01T01:00:01.000Z",
+      id: "target-ok",
+      threadId: "thread-1",
+      traceId: "trace-1",
+      windowId: window.id,
+      agentId: "grok",
+      startedAt: "2026-08-01T01:00:01.000Z",
     });
     storage.handoffs.bindTargetInvocation(first.record.handoffId, "target-ok");
-    storage.invocations.finish("target-ok", { state: "completed", terminalReason: "assistant-final" });
+    storage.invocations.finish("target-ok", {
+      state: "completed",
+      terminalReason: "assistant-final",
+    });
     storage.handoffs.completeByTargetInvocation("target-ok", storage.invocations.get("target-ok"));
     storage.handoffs.accept({
-      id: "handoff-pending", sourceInvocationId: "source-1", targetAgentId: "gemini",
-      contentHash: "pending", createdAt: "2026-08-01T02:00:00.000Z",
+      id: "handoff-pending",
+      sourceInvocationId: "source-1",
+      targetAgentId: "gemini",
+      contentHash: "pending",
+      createdAt: "2026-08-01T02:00:00.000Z",
     });
     storage.handoffs.accept({
-      id: "handoff-duplicate", sourceInvocationId: "source-1", targetAgentId: "grok",
-      contentHash: "different", createdAt: "2026-08-01T03:00:00.000Z",
+      id: "handoff-duplicate",
+      sourceInvocationId: "source-1",
+      targetAgentId: "grok",
+      contentHash: "different",
+      createdAt: "2026-08-01T03:00:00.000Z",
     });
     const metrics = storage.observability.metrics({
-      from: "2026-08-01T00:00:00.000Z", to: "2026-08-02T00:00:00.000Z",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
     });
     assert.equal(metrics.handoff.endToEnd.numerator, 1);
     assert.equal(metrics.handoff.endToEnd.denominator, 1);
     assert.equal(metrics.handoff.endToEnd.pending, 1);
     assert.equal(metrics.handoff.endToEnd.excluded, 1);
     assert.equal(metrics.handoff.semantics.businessOutcome, null);
-  } finally { storage.close(); }
+  } finally {
+    storage.close();
+  }
 });
 
 test("memory observability reports hit rate without claiming strict Recall", () => {
@@ -84,17 +143,20 @@ test("memory observability reports hit rate without claiming strict Recall", () 
   try {
     seed(storage);
     storage.memoryEvents.record({
-      eventType: "memory_injected", threadId: "thread-1",
+      eventType: "memory_injected",
+      threadId: "thread-1",
       createdAt: "2026-08-01T01:00:00.000Z",
       payload: { count: 2, availability: { state: "available" } },
     });
     storage.memoryEvents.record({
-      eventType: "memory_injected", threadId: "thread-1",
+      eventType: "memory_injected",
+      threadId: "thread-1",
       createdAt: "2026-08-01T02:00:00.000Z",
       payload: { count: 0, availability: { state: "degraded" } },
     });
     const metrics = storage.observability.metrics({
-      from: "2026-08-01T00:00:00.000Z", to: "2026-08-02T00:00:00.000Z",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
     });
     assert.equal(metrics.memory.hitRate.numerator, 1);
     assert.equal(metrics.memory.hitRate.denominator, 2);
@@ -103,5 +165,7 @@ test("memory observability reports hit rate without claiming strict Recall", () 
     assert.equal(metrics.memory.usedRate, null);
     assert.equal(metrics.memory.correctRate, null);
     assert.equal(metrics.memory.completeness, "best_effort");
-  } finally { storage.close(); }
+  } finally {
+    storage.close();
+  }
 });

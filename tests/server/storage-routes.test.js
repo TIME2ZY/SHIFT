@@ -83,13 +83,16 @@ test("observability metrics endpoint rejects invalid windows", async () => {
   const handle = createStorageRoutes({
     storageContext: {
       mode: "sqlite",
-      observabilityMetrics() { throw new Error("Metric window from is invalid."); },
+      observabilityMetrics() {
+        throw new Error("Metric window from is invalid.");
+      },
     },
     sendJson,
     readJsonBody: async () => ({}),
   });
   await handle(
-    { method: "GET" }, res,
+    { method: "GET" },
+    res,
     new URL("http://127.0.0.1/api/storage/observability/metrics?from=invalid")
   );
   assert.equal(res.status, 400);
@@ -106,12 +109,14 @@ test("trace inspection is scoped to the trusted Thread coordinate", async () => 
     readJsonBody: async () => ({}),
   });
   await handle(
-    { method: "GET" }, res,
+    { method: "GET" },
+    res,
     new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-2")
   );
   assert.equal(res.status, 404);
   await handle(
-    { method: "GET" }, res,
+    { method: "GET" },
+    res,
     new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-1")
   );
   assert.equal(res.status, 200);
@@ -156,4 +161,28 @@ test("storage cleanup route rejects unsafe retention parameters", async () => {
 
   await handle({ method: "POST" }, res, new URL("http://127.0.0.1/api/storage/outbox/cleanup"));
   assert.equal(res.status, 400);
+});
+
+test("telemetry retention route only delegates best-effort cleanup", async () => {
+  const { res, sendJson } = responseCapture();
+  let cleanupOptions;
+  const handle = createStorageRoutes({
+    storageContext: {
+      mode: "sqlite",
+      cleanupBestEffortTelemetry(options) {
+        cleanupOptions = options;
+        return { available: true, deleted: 4, retentionDays: options.retentionDays };
+      },
+    },
+    sendJson,
+    readJsonBody: async () => ({ retentionDays: 30, limit: 500 }),
+  });
+  await handle(
+    { method: "POST" },
+    res,
+    new URL("http://127.0.0.1/api/storage/observability/retention")
+  );
+  assert.deepEqual(cleanupOptions, { retentionDays: 30, limit: 500 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.cleanup.deleted, 4);
 });

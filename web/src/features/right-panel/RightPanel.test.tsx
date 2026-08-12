@@ -17,6 +17,7 @@ function renderPanel() {
         sessionId="session-1"
         selectedAgentId="codex"
         run={null}
+        traces={[]}
         open={false}
         onClose={() => undefined}
         onAgentChange={() => undefined}
@@ -56,6 +57,7 @@ describe("RightPanel", () => {
           sessionId="session-1"
           selectedAgentId="codex"
           run={null}
+          traces={[]}
           open={false}
           onClose={() => undefined}
           onAgentChange={onAgentChange}
@@ -98,7 +100,11 @@ describe("RightPanel", () => {
 
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("负责实现与验证。")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Agent", "记忆"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Agent",
+      "记忆",
+      "追踪",
+    ]);
     expect(screen.queryByText("当前团队")).not.toBeInTheDocument();
     expect(await screen.findByText("2.4k tokens")).toBeInTheDocument();
     expect(screen.getByText("40% · 充足")).toBeInTheDocument();

@@ -116,6 +116,28 @@ test("session routes return per-agent usage and persisted invocation process", a
   assert.equal(processRes.body.tools[0].toolName, "read_file");
 });
 
+test("session trace routes are scoped and expose durable execution summaries", async () => {
+  const res = makeRes();
+  const handle = createHandler(res, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    executionStorage: {
+      executions: {
+        listForThread: () => [{ traceId: "trace-1", state: "failed" }],
+        inspect: (threadId, traceId) =>
+          threadId === "s1" && traceId === "trace-1"
+            ? { traceId, threadId, invocations: [], handoffs: [] }
+            : null,
+      },
+    },
+  });
+  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces"));
+  assert.equal(res.body.traces[0].state, "failed");
+  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces/trace-1"));
+  assert.equal(res.body.trace.traceId, "trace-1");
+  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces/missing"));
+  assert.equal(res.statusCode, 404);
+});
+
 test("discarding a worktree clears only the Session runtime link", async () => {
   const res = makeRes();
   let cleared = null;

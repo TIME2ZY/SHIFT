@@ -1,4 +1,7 @@
 export const queryKeys = {
+  observability: {
+    metrics: ["observability", "metrics"] as const,
+  },
   agents: {
     all: ["agents"] as const,
   },
@@ -16,6 +19,7 @@ export const queryKeys = {
     memories: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
     memoryInject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
     workspace: (sessionId: string) => ["sessions", sessionId, "workspace"] as const,
+    traces: (sessionId: string) => ["sessions", sessionId, "traces"] as const,
     invocationProcess: (sessionId: string, invocationId: string, detail?: "summary" | "full") =>
       detail
         ? (["sessions", sessionId, "invocations", invocationId, "process", detail] as const)

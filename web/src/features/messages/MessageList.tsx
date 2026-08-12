@@ -8,6 +8,7 @@ import {
 import { AgentAvatar, UserAvatar, agentColorSlot, resolveAgent } from "../agents/AgentAvatar";
 import type { AgentSummary } from "../agents/types";
 import type { PersistedMessage } from "./types";
+import type { TraceSummary } from "../observability/types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 
 interface QuickPrompt {
@@ -39,6 +40,7 @@ const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
 interface MessageListProps {
   sessionId: string | null;
   messages: PersistedMessage[];
+  traces?: TraceSummary[];
   agents: AgentSummary[];
   run: SessionRun | null;
   isLoading: boolean;
@@ -241,6 +243,7 @@ function HandoffDivider({
 export function MessageList({
   sessionId,
   messages,
+  traces = [],
   agents,
   run,
   isLoading,
@@ -262,6 +265,20 @@ export function MessageList({
           message.role !== "system"
       ),
     [messages]
+  );
+  const persistedInvocationIds = useMemo(
+    () => new Set(messages.map((message) => message.invocationId).filter(Boolean)),
+    [messages]
+  );
+  const orphanFailures = useMemo(
+    () =>
+      traces.flatMap((trace) =>
+        trace.invocations.filter(
+          (invocation) =>
+            invocation.state === "failed" && !persistedInvocationIds.has(invocation.invocationId)
+        )
+      ),
+    [persistedInvocationIds, traces]
   );
   const transcriptMessages = useMemo(
     () =>
@@ -553,6 +570,40 @@ export function MessageList({
               ) : (
                 visibleMessage.content
               )}
+            </MessageRow>
+          );
+        })}
+
+        {orphanFailures.map((invocation) => {
+          const agent = resolveAgent(invocation.agentId, invocation.agentId, agents);
+          const reason =
+            invocation.outcome.errorCode ||
+            invocation.outcome.terminalReason ||
+            "invocation_failed";
+          return (
+            <MessageRow
+              messageKey={`durable-failure:${invocation.invocationId}`}
+              role="assistant"
+              author={agent?.label || invocation.agentId}
+              status="运行失败"
+              agentId={invocation.agentId}
+              setMessageRef={setMessageRef}
+              key={invocation.invocationId}
+            >
+              <div className="react-durable-failure" role="alert">
+                <strong>执行在返回最终消息前失败</strong>
+                <span>{reason}</span>
+                {invocation.outcome.failureStage ? (
+                  <small>阶段：{invocation.outcome.failureStage}</small>
+                ) : null}
+                <MessageProcessDetails
+                  sessionId={sessionId}
+                  invocationId={invocation.invocationId}
+                  loadDurable
+                  initialStatus="error"
+                  onOpenWorkspace={onOpenWorkspace}
+                />
+              </div>
             </MessageRow>
           );
         })}

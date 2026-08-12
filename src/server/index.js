@@ -223,6 +223,7 @@ function createServer(options = {}) {
     setSessionWorktree: updateWorktreeDurable,
     usageStorage: storageContext.storage,
     recallService,
+    executionStorage: storageContext.storage,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
