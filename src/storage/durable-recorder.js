@@ -59,6 +59,10 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
               state: terminalState,
               exitCode: Number.isInteger(options.exitCode) ? options.exitCode : null,
               signal: options.signal || null,
+              terminalReason: reason,
+              failureStage: options.failureStage || "reconcile",
+              errorCode: options.errorCode || "invocation_force_terminal",
+              retryable: options.retryable === true,
             });
             if (!record) return null;
             events.append({
@@ -376,7 +380,14 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           parentInvocationId: input.parentInvocationId,
           triggerMessageId: input.triggerMessageId,
           triggerType: input.triggerType,
+          traceId: input.traceId,
         });
+        if (input.traceId && !input.parentInvocationId) {
+          const boundTrace = storage.traces.bindRootInvocation(input.traceId, input.invocationId);
+          if (!boundTrace?.rootInvocationId) {
+            throw new Error(`Failed to bind root invocation ${input.invocationId} to trace.`);
+          }
+        }
         events.registerInvocation(input.invocationId, input.threadId);
         // Invocation start and its first event commit atomically.
         events.append({
@@ -390,6 +401,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             parentInvocationId: input.parentInvocationId || null,
             triggerMessageId: input.triggerMessageId || null,
             triggerType: input.triggerType || null,
+            traceId: input.traceId || null,
           },
           createdAt: input.startedAt,
           sequenceNo: 0,
@@ -428,10 +440,18 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             return null;
           }
           const state = resolveFinishDbState(code, signal, endPayload);
+          const outcome = resolveInvocationOutcome({
+            state,
+            code,
+            signal,
+            reason: endPayload?.terminalReason || endPayload?.reason,
+            endPayload,
+          });
           const record = storage.invocations.finish(invocationId, {
             state,
             exitCode: code,
             signal,
+            ...outcome,
           });
           if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
           const payload =
@@ -473,11 +493,19 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         const code = input.code;
         const signal = input.signal;
         const state = resolveFinishDbState(code, signal, input.endPayload);
+        const outcome = resolveInvocationOutcome({
+          state,
+          code,
+          signal,
+          reason: input.reason,
+          endPayload: input.endPayload,
+        });
         const record = storage.invocations.finish(invocationId, {
           state,
           exitCode: code,
           signal,
           endedAt: input.endedAt,
+          ...outcome,
         });
         if (!record) throw new Error(`Invocation ${invocationId} is not active.`);
 
@@ -584,12 +612,16 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         windowId: input.windowId,
         message: input.message,
         endedAt: input.endedAt,
+        reason,
       });
       if (!result) return null;
       return { invocation: result.invocation, message: result.message || null, reason };
     }
 
-    const record = finishInvocation(invocationId, input.code, input.signal, input.endPayload);
+    const record = finishInvocation(invocationId, input.code, input.signal, {
+      ...(input.endPayload && typeof input.endPayload === "object" ? input.endPayload : {}),
+      terminalReason: input.endPayload?.terminalReason || reason,
+    });
     if (!record) return null;
     return { invocation: record, message: null, reason };
   }
@@ -617,9 +649,26 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
 
   function archiveThread(threadId) {
     if (!threadId) return null;
+    // Close durable work before the deletion guard starts rejecting late writes.
+    // The owning chat request can then close its Trace as aborted without
+    // leaving an active Invocation behind.
+    reconcileThreadActive(threadId, {
+      reason: "thread-archived",
+      state: "aborted",
+    });
     deletedThreads.add(threadId);
     events.markThreadDeleted(threadId);
     return attempt("archive thread", () => storage.threads.delete(threadId));
+  }
+
+  function startTrace(input = {}) {
+    if (!storage?.traces || !isThreadWritable(input.threadId)) return null;
+    return attempt("start trace", () => storage.traces.start(input));
+  }
+
+  function completeTrace(input = {}) {
+    if (!storage?.traces || !input.traceId) return null;
+    return attempt("complete trace", () => storage.traces.finish(input.traceId, input));
   }
 
   function close() {
@@ -636,9 +685,11 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     sealAndRotateWindow,
     mirrorLastMessage,
     startInvocation,
+    startTrace,
     appendInvocationEvent,
     // finishInvocation / finishWithAssistantMessage are private — only completeInvocation is public.
     completeInvocation,
+    completeTrace,
     forceTerminalInvocation,
     forceFailInvocation,
     reconcileThreadActive,
@@ -665,4 +716,40 @@ function resolveFinishDbState(code, signal, endPayload) {
   return "failed";
 }
 
-module.exports = { createDurableRecorder, DurableWriteError };
+function resolveInvocationOutcome({ state, code, signal, reason, endPayload } = {}) {
+  const payload = endPayload && typeof endPayload === "object" ? endPayload : {};
+  const terminalReason = String(
+    payload.terminalReason ||
+      reason ||
+      (state === "completed" ? "assistant-final" : "provider-exit")
+  ).slice(0, 200);
+  if (state === "completed") {
+    return {
+      terminalReason,
+      failureStage: null,
+      errorCode: null,
+      retryable: null,
+    };
+  }
+  const failureStage = String(
+    payload.failureStage || (state === "aborted" ? "request" : "provider_run")
+  ).slice(0, 80);
+  const errorCode = String(
+    payload.errorCode ||
+      (state === "aborted"
+        ? "invocation_aborted"
+        : signal
+          ? "provider_signalled"
+          : Number.isInteger(code)
+            ? `provider_exit_${code}`
+            : "provider_failed")
+  ).slice(0, 120);
+  return {
+    terminalReason,
+    failureStage,
+    errorCode,
+    retryable: payload.retryable === true,
+  };
+}
+
+module.exports = { createDurableRecorder, DurableWriteError, resolveInvocationOutcome };

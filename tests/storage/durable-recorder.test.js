@@ -37,6 +37,12 @@ test("durable recorder writes thread, window, message, and invocation data", () 
     });
     recorder.mirrorLastMessage(session, { windowId: window.id });
 
+    const trace = recorder.startTrace({
+      threadId: session.id,
+      clientTurnId: "turn-1",
+      startedAt: "2026-07-12T00:00:01.500Z",
+    });
+
     const run = recorder.startInvocation({
       session,
       invocationId: "invocation-1",
@@ -49,6 +55,7 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       startedAt: "2026-07-12T00:00:02.000Z",
       triggerMessageId: "message-user",
       triggerType: "user-message",
+      traceId: trace.id,
     });
     recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "Stored" });
     // Assistant-final goes only through completeInvocation (not mirror + finish*).
@@ -71,6 +78,8 @@ test("durable recorder writes thread, window, message, and invocation data", () 
     assert.equal(finished.message.id, "message-assistant");
     assert.equal(storage.invocations.get("invocation-1").triggerMessageId, "message-user");
     assert.equal(storage.invocations.get("invocation-1").triggerType, "user-message");
+    assert.equal(storage.invocations.get("invocation-1").traceId, trace.id);
+    assert.equal(storage.traces.get(trace.id).rootInvocationId, "invocation-1");
 
     assert.equal(run.window.id, window.id);
     assert.equal(storage.threads.get("thread-1").lastAgentId, "codex");
@@ -82,6 +91,16 @@ test("durable recorder writes thread, window, message, and invocation data", () 
     assert.equal(storage.messages.listForThread("thread-1").length, 2);
     assert.equal(storage.messages.get("message-assistant").windowId, window.id);
     assert.equal(storage.invocations.get("invocation-1").state, "completed");
+    assert.equal(storage.invocations.get("invocation-1").terminalReason, "assistant-final");
+    assert.equal(storage.invocations.get("invocation-1").failureStage, null);
+    assert.equal(
+      recorder.completeTrace({
+        traceId: trace.id,
+        state: "completed",
+        terminalReason: "request-completed",
+      }).state,
+      "completed"
+    );
     assert.deepEqual(
       storage.invocations.listEvents("invocation-1").map((event) => event.kind),
       ["invocation-start", "text.delta", "invocation-end"]
@@ -141,7 +160,32 @@ test("completeInvocation covers abort, final, atomic rollback, and rejects missi
     assert.equal(aborted.reason, "aborted");
     assert.equal(aborted.message, null);
     assert.equal(aborted.invocation.state, "aborted");
+    assert.equal(aborted.invocation.terminalReason, "aborted");
+    assert.equal(aborted.invocation.failureStage, "request");
+    assert.equal(aborted.invocation.errorCode, "invocation_aborted");
+    assert.equal(aborted.invocation.retryable, false);
     assert.equal(storage.messages.listForThread("thread-1").length, 1);
+
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-provider-fail",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+    });
+    const failed = recorder.completeInvocation({
+      invocationId: "inv-provider-fail",
+      code: 7,
+      signal: null,
+      reason: "provider-failed",
+    });
+    assert.equal(failed.invocation.state, "failed");
+    assert.equal(failed.invocation.terminalReason, "provider-failed");
+    assert.equal(failed.invocation.failureStage, "provider_run");
+    assert.equal(failed.invocation.errorCode, "provider_exit_7");
+    assert.equal(failed.invocation.retryable, false);
 
     recorder.startInvocation({
       session,
@@ -278,7 +322,10 @@ test("deleting a thread suppresses late writes from its active invocation", () =
       recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "late" }),
       false
     );
-    assert.equal(recorder.completeInvocation({ invocationId: "invocation-1", code: 0, signal: null }), null);
+    assert.equal(
+      recorder.completeInvocation({ invocationId: "invocation-1", code: 0, signal: null }),
+      null
+    );
     assert.equal(errors.length, 0);
   } finally {
     recorder.close();

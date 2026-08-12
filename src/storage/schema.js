@@ -896,6 +896,47 @@ const MIGRATIONS = Object.freeze([
         ON threads(project_key, deleted_at, updated_at DESC);
     `,
   },
+  {
+    version: 24,
+    name: "trace_request_and_invocation_outcomes",
+    sql: `
+      CREATE TABLE trace_runs (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        client_turn_id TEXT,
+        request_attempt INTEGER NOT NULL CHECK (request_attempt > 0),
+        state TEXT NOT NULL CHECK (state IN ('active', 'completed', 'failed', 'aborted')),
+        root_invocation_id TEXT,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        terminal_reason TEXT,
+        failure_stage TEXT,
+        error_code TEXT,
+        retryable INTEGER CHECK (retryable IN (0, 1)),
+        metadata_json TEXT,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (root_invocation_id) REFERENCES invocations(id) ON DELETE SET NULL,
+        UNIQUE (thread_id, client_turn_id, request_attempt)
+      );
+
+      CREATE INDEX trace_runs_thread_started
+        ON trace_runs(thread_id, started_at DESC);
+      CREATE INDEX trace_runs_state_started
+        ON trace_runs(state, started_at);
+      CREATE UNIQUE INDEX trace_runs_attempt_identity
+        ON trace_runs(thread_id, COALESCE(client_turn_id, ''), request_attempt);
+
+      ALTER TABLE invocations ADD COLUMN trace_id TEXT REFERENCES trace_runs(id);
+      ALTER TABLE invocations ADD COLUMN terminal_reason TEXT;
+      ALTER TABLE invocations ADD COLUMN failure_stage TEXT;
+      ALTER TABLE invocations ADD COLUMN error_code TEXT;
+      ALTER TABLE invocations ADD COLUMN retryable INTEGER CHECK (retryable IN (0, 1));
+
+      CREATE INDEX invocations_trace_started
+        ON invocations(trace_id, started_at)
+        WHERE trace_id IS NOT NULL;
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

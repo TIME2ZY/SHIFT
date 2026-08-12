@@ -59,6 +59,7 @@ async function runChatWorklist(ctx) {
     res,
     sendSse,
     sessionId,
+    traceId,
     AGENTS,
     callbacks,
     contextHealth,
@@ -423,6 +424,7 @@ try {
       session,
       invocationId,
       threadId: sessionId,
+      traceId,
       agentId: agent,
       providerKey,
       workspaceKey,
@@ -768,6 +770,7 @@ try {
           session,
           invocationId: retry.invocationId,
           threadId: sessionId,
+          traceId,
           agentId: agent,
           providerKey,
           workspaceKey,
@@ -923,6 +926,10 @@ try {
             fillRatioAtEnd: ratio,
             sealerState: "sealed",
             emptyEmergency: true,
+            terminalState: "failed",
+            failureStage: "seal",
+            errorCode: "empty_emergency_retry",
+            retryable: true,
           },
         });
         if (!contextSealHandled) {
@@ -1000,6 +1007,10 @@ try {
         endPayload: {
           ...endPayload,
           emptyAssistant: true,
+          terminalState: "failed",
+          failureStage: "seal",
+          errorCode: "empty_under_seal",
+          retryable: true,
         },
       });
       sendSse(res, "error", {
@@ -1017,6 +1028,37 @@ try {
       });
       previousInvocationId = finalInvocationId;
       aborted = true;
+      break;
+    }
+
+    if (code !== 0 || signal) {
+      durable.completeInvocation({
+        invocationId: finalInvocationId,
+        code,
+        signal,
+        reason: "provider-failed",
+        endPayload: {
+          ...endPayload,
+          terminalState: "failed",
+          failureStage: "provider_run",
+          retryable: false,
+        },
+      });
+      sendSse(res, "error", {
+        message: "Agent process exited without a successful durable result.",
+        retryable: false,
+        agent,
+        code,
+        signal,
+      });
+      sendSse(res, "agent-exit", {
+        agent,
+        code,
+        signal,
+        invocationId: finalInvocationId,
+        usage: invocationUsage,
+      });
+      previousInvocationId = finalInvocationId;
       break;
     }
 

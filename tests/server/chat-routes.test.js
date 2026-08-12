@@ -230,3 +230,43 @@ test("a slower older chat request cannot abort the newer request", async () => {
   assert.equal(appended.length, 1);
   assert.equal(appended[0][1].content, "newer");
 });
+
+test("chat preparation failure closes the durable trace", async () => {
+  const res = makeRes();
+  const completed = [];
+  const handle = chatRoutes.createChatRoutes(
+    baseDeps(res, {
+      durableRecorder: {
+        enabled: true,
+        startTrace: () => ({ id: "trace-1" }),
+        completeTrace: (outcome) => completed.push(outcome),
+        ensureWindow: () => null,
+      },
+      contextHealth: {
+        getAgentCapacity: () => 1000,
+        makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
+      },
+      memoryCapture: {
+        replayThread: async () => {
+          throw Object.assign(new Error("recall unavailable"), { code: "recall_unavailable" });
+        },
+      },
+      readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "go" }),
+    })
+  );
+
+  await assert.rejects(
+    handle(makeReq("POST"), res, { pathname: "/api/chat" }),
+    /recall unavailable/
+  );
+  assert.deepEqual(completed, [
+    {
+      traceId: "trace-1",
+      state: "failed",
+      terminalReason: "preparation-failed",
+      failureStage: "bootstrap",
+      errorCode: "recall_unavailable",
+      retryable: false,
+    },
+  ]);
+});

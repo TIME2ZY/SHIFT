@@ -16,6 +16,7 @@ const { createProjectRepository } = require("./project-repository");
 const { createRecallRepository } = require("./recall-repository");
 const { createStorageMetadataRepository } = require("./storage-metadata-repository");
 const { createThreadRepository } = require("./thread-repository");
+const { createTraceRunRepository } = require("./trace-run-repository");
 const { createWindowRepository } = require("./window-repository");
 const { createCollaborationTaskRepository } = require("./collaboration-task-repository");
 
@@ -34,6 +35,7 @@ function createStorage(options = {}) {
     threads: createThreadRepository(db),
     windows: createWindowRepository(db),
     messages: createMessageRepository(db),
+    traces: createTraceRunRepository(db),
     invocations: createInvocationRepository(db),
     collaborationTasks: createCollaborationTaskRepository(db),
     projects: createProjectRepository(db, options.projectRepositoryOptions),

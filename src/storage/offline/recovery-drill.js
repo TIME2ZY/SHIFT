@@ -9,6 +9,7 @@ const SOURCE_TABLES = Object.freeze([
   "storage_metadata",
   "threads",
   "context_windows",
+  "trace_runs",
   "invocations",
   "invocation_events",
   "messages",
@@ -207,6 +208,25 @@ function inspectCausality(db) {
       SELECT COUNT(*) AS count FROM invocations i
       JOIN messages m ON m.id = i.trigger_message_id
       WHERE i.thread_id <> m.thread_id
+    `,
+    ],
+    [
+      "invocation-trace-thread",
+      `
+      SELECT COUNT(*) AS count FROM invocations i
+      JOIN trace_runs t ON t.id = i.trace_id
+      WHERE i.thread_id <> t.thread_id
+    `,
+    ],
+    [
+      "terminal-trace-active-invocation",
+      `
+      SELECT COUNT(*) AS count FROM trace_runs t
+      WHERE t.state <> 'active'
+        AND EXISTS (
+          SELECT 1 FROM invocations i
+          WHERE i.trace_id = t.id AND i.state = 'active'
+        )
     `,
     ],
     [

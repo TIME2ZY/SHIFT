@@ -27,7 +27,7 @@
 HTTP createServer (src/server/index.js)
   ├─ project-routes     → project-repository (open / list / archive / restore)
   ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD)
-  ├─ chat-routes        → start/stream/finish invocation + finalize A2A
+  ├─ chat-routes        → start/finish Trace + start/stream/finish invocation + finalize A2A
   ├─ callback-routes    → mid-run postMessage / MCP 私有 HTTP bridge / (A2A finalize)
   ├─ memory-routes      → 读为主（list/search 等）
   └─ storage-routes     → 审计/运维向
@@ -38,7 +38,7 @@ Web App (web/src/app/App.tsx)
   └─ workspace feature → /api/sessions/:sessionId/workspace（目录绑定只读）
 
 持久化核心：
-  durable-recorder  → invocations + events + (assistant-final 原子 finish)
+  durable-recorder  → trace_runs + invocations + events + (assistant-final 原子 finish)
   sqlite-session-service → threads + messages (appendToSession)
   message-persistence.appendMessage → messages 表 + recall 投影
   event-store → invocation_events + outbox(JSONL 审计)
@@ -51,17 +51,30 @@ Web App (web/src/app/App.tsx)
 | ------------------ | -------------------------------------------------------------- |
 | 1 打开 Project     | `project-repository.openDirectory` ← project-routes            |
 | 2 建 thread        | `sqlite-session-service.createSession({ projectKey })`         |
-| 3 用户消息         | `appendToSession` ← chat-routes                                |
-| 4 start invocation | `durable.startInvocation` ← chat-routes                        |
-| 5 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent` |
-| 6 终态             | **见 §3.1**（多出口）                                          |
-| 7 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage       |
-| 8 恢复             | 按活跃 Project 读取 SQLite threads/messages/invocations        |
-| 9 handoff          | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）      |
+| 3 Trace start      | `durable.startTrace` ← chat-routes                             |
+| 4 用户消息         | `appendToSession` ← chat-routes                                |
+| 5 start invocation | `durable.startInvocation({ traceId })` ← chat-routes            |
+| 6 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent` |
+| 7 终态             | `completeInvocation` 后 `completeTrace`                        |
+| 8 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage       |
+| 9 恢复             | SQLite threads/messages/trace_runs/invocations                 |
+| 10 handoff         | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）      |
 
 ---
 
 ## 3. 写路径清单（权威意图 vs 实际入口）
+
+### 3.0 Trace request 生命周期
+
+| 步骤 | 权威写入口 | 实际调用方 | 落库 |
+| ---- | ---------- | ---------- | ---- |
+| start | `durableRecorder.startTrace` | `chat-routes` 在可信 Session 校验后、异步准备前 | `trace_runs` active row + request attempt |
+| bind root | `traceRunRepository.bindRootInvocation` | `durableRecorder.startInvocation` 内部 | `trace_runs.root_invocation_id` |
+| finish | `durableRecorder.completeTrace` | `chat-routes` 准备失败、执行异常或 invocation 收口后 | completed / failed / aborted + 统一 outcome |
+
+Trace 与 Invocation 通过 `invocations.trace_id` 绑定。同一 client turn 的重试使用独立、单调
+`request_attempt`；完成态要求不存在 active invocation，且 completed 必须存在 durable
+assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检查跨 thread 与终态因果。
 
 ### 3.1 Invocation 生命周期（start / event / finish）
 
@@ -276,6 +289,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 | 事件                         | 写入口                                                              | 允许的触发器                        |
 | ---------------------------- | ------------------------------------------------------------------- | ----------------------------------- |
+| trace start / finish         | `durableRecorder.startTrace` / `completeTrace`                      | 仅 chat request 生命周期            |
 | invocation start             | `durableRecorder.startInvocation`                                   | 仅 chat 调度器                      |
 | invocation finish            | `durableRecorder.completeInvocation`                                | chat 调度器；孤儿用 force/reconcile |
 | handoff accept/enqueue       | `finalizeA2ARoutes`                                                 | chat end、callback post             |

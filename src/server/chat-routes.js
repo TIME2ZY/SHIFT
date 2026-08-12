@@ -11,8 +11,10 @@ const NOOP_DURABLE_RECORDER = Object.freeze({
   sealWindow: () => null,
   sealAndRotateWindow: () => null,
   startInvocation: () => null,
+  startTrace: () => null,
   appendInvocationEvent: () => false,
   completeInvocation: () => null,
+  completeTrace: () => null,
   bindProviderSession: () => false,
   addWindowUsage: () => false,
   setWindowUsageSnapshot: () => false,
@@ -156,6 +158,32 @@ function createChatRoutes({
     res.once("close", () => {
       invocationController.abort();
     });
+    const trace = durable.startTrace({
+      threadId: sessionId,
+      clientTurnId,
+      metadata: { requestedAgent, useWorktree },
+    });
+    if (durable.enabled && !trace) {
+      if (activeInvocations.get(sessionId) === invocationController) {
+        activeInvocations.delete(sessionId);
+      }
+      sendJson(res, 503, { error: "Failed to persist trace start." });
+      return true;
+    }
+    const traceId = trace?.id || null;
+    const failPreparationTrace = (error, stage) => {
+      if (!traceId) return;
+      durable.completeTrace({
+        traceId,
+        state: invocationController.signal.aborted ? "aborted" : "failed",
+        terminalReason: invocationController.signal.aborted
+          ? "request-superseded"
+          : "preparation-failed",
+        failureStage: stage,
+        errorCode: error?.code || `${stage}_failed`,
+        retryable: false,
+      });
+    };
 
     if (
       useWorktree &&
@@ -204,6 +232,7 @@ function createChatRoutes({
     try {
       await memories.replayThread(sessionId);
     } catch (error) {
+      failPreparationTrace(error, "bootstrap");
       if (activeInvocations.get(sessionId) === invocationController) {
         activeInvocations.delete(sessionId);
       }
@@ -215,6 +244,7 @@ function createChatRoutes({
       res.destroyed ||
       res.writableEnded
     ) {
+      failPreparationTrace(null, "request");
       if (!res.destroyed && !res.writableEnded) {
         sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
       }
@@ -253,6 +283,7 @@ function createChatRoutes({
       bootstrapPacket = coerced.packet;
       bootstrapInject = coerced.inject || bootstrapInject;
     } catch (error) {
+      failPreparationTrace(error, "bootstrap");
       if (activeInvocations.get(sessionId) === invocationController) {
         activeInvocations.delete(sessionId);
       }
@@ -265,6 +296,7 @@ function createChatRoutes({
       res.destroyed ||
       res.writableEnded
     ) {
+      failPreparationTrace(null, "request");
       if (!res.destroyed && !res.writableEnded) {
         sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
       }
@@ -341,6 +373,7 @@ function createChatRoutes({
     const runObs = createRunObservability({ startedAt: Date.now() });
     const threadCtx = {
       sessionId,
+      traceId,
       res,
       worklist,
       controller: invocationController,
@@ -372,6 +405,7 @@ function createChatRoutes({
       res,
       sendSse,
       sessionId,
+      traceId,
       session,
       AGENTS,
       callbacks,
@@ -417,7 +451,24 @@ function createChatRoutes({
       augmentPrompt,
     };
 
-    const workResult = await runChatWorklist(workCtx);
+    let workResult;
+    try {
+      workResult = await runChatWorklist(workCtx);
+    } catch (error) {
+      durable.reconcileThreadActive?.(sessionId, {
+        reason: "request-error-orphan",
+        state: "failed",
+      });
+      durable.completeTrace({
+        traceId,
+        state: "failed",
+        terminalReason: "request-error",
+        failureStage: error?.name === "DurableWriteError" ? "persistence" : "request",
+        errorCode: error?.code || "chat_request_failed",
+        retryable: error?.retryable === true,
+      });
+      throw error;
+    }
     aborted = workResult.aborted;
     ownedInvocationSlotAtCleanup = workResult.ownedInvocationSlotAtCleanup;
     session = workCtx.session;
@@ -466,6 +517,30 @@ function createChatRoutes({
 
     threadCtx.currentInvocationId = null;
     threadCtx.windowId = null;
+    const traceInvocations =
+      storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) || [];
+    const traceActive = traceInvocations.some((row) => row.state === "active");
+    const traceSucceeded = traceInvocations.some(
+      (row) => row.state === "completed" && row.terminalReason === "assistant-final"
+    );
+    durable.completeTrace({
+      traceId,
+      state: aborted ? "aborted" : traceActive || !traceSucceeded ? "failed" : "completed",
+      terminalReason: aborted
+        ? "request-aborted"
+        : traceActive
+          ? "invocation-orphan-remaining"
+          : !traceSucceeded
+            ? "invocation-failed"
+            : "request-completed",
+      failureStage: traceActive ? "reconcile" : !traceSucceeded ? "provider_run" : null,
+      errorCode: traceActive
+        ? "invocation_orphan_remaining"
+        : !traceSucceeded
+          ? "invocation_failed"
+          : null,
+      retryable: false,
+    });
     if (!aborted) {
       // Hard invariant: done implies no open durable invocations for this thread.
       const stillOpen =
