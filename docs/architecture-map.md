@@ -290,6 +290,10 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 **禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
 
+带分级相关性和业务 outcome 证据的 Memory 评估位于
+`src/storage/offline/labeled-recall-eval.js`，仅由 `scripts/eval-recall-fts.js` 调用。它计算
+严格 Recall@K、MRR、nDCG@K 和离线业务结果关联；结果不进入在线热路径，也不反写业务表。
+
 在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics` 和按可信
 `threadId` 约束的 `/api/storage/observability/traces/:traceId`。指标直接查询 SQLite source
 tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used 与

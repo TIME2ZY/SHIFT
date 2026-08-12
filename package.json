@@ -29,6 +29,7 @@
     "memory:retire-project": "node scripts/retire-project-memories.js",
     "eval:memory-write": "node scripts/eval-memory-write.js",
     "eval:recall-fts": "node scripts/eval-recall-fts.js",
+    "eval:recall-labeled": "node scripts/eval-recall-fts.js --json",
     "eval:recall-hybrid": "node scripts/eval-recall-hybrid.js",
     "backfill:embeddings": "node scripts/backfill-embeddings.js",
     "audit:storage:divergence": "node scripts/audit-dual-storage.js",

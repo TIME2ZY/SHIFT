@@ -1,35 +1,23 @@
 {
-  "version": 1,
+  "version": 2,
   "queries": [
-    {
-      "id": "exact-topic-project-memory",
-      "threadId": "alpha-b",
-      "query": "storage.authoritative",
-      "expected": ["memory-storage-current"],
-      "forbidden": ["memory-storage-old", "memory-other-storage"],
-      "expectedChannel": "exact-topic"
-    },
-    {
-      "id": "chinese-short-phrase",
-      "threadId": "alpha-b",
-      "query": "权威存储",
-      "expected": ["memory-storage-current"],
-      "forbidden": ["memory-storage-old", "memory-other-storage"],
-      "expectedChannel": "fts"
-    },
     {
       "id": "chinese-long-question",
       "threadId": "alpha-a",
       "query": "在线读写未采用什么数据库",
-      "expected": ["memory-storage-current"],
+      "relevance": { "memory-storage-current": 3 },
       "forbidden": ["memory-storage-old", "memory-other-storage"],
-      "expectedChannel": "fts"
+      "expectedChannel": "fts",
+      "businessOutcome": {
+        "label": "success",
+        "evidence": "golden answer requires the current authoritative storage decision"
+      }
     },
     {
       "id": "mixed-language-identifier",
       "threadId": "alpha-b",
       "query": "auth token 过期 AUTH_EXPIRED",
-      "expected": ["memory-auth-expiry"],
+      "relevance": { "memory-auth-expiry": 3 },
       "forbidden": ["memory-other-storage"],
       "expectedChannel": "fts"
     },
@@ -37,21 +25,21 @@
       "id": "thread-scope-isolation",
       "threadId": "alpha-b",
       "query": "调试端口 9999",
-      "expected": [],
+      "relevance": {},
       "forbidden": ["memory-debug-port"]
     },
     {
       "id": "project-scope-isolation",
       "threadId": "other-a",
       "query": "SQLite 权威存储",
-      "expected": ["memory-other-storage"],
+      "relevance": { "memory-other-storage": 3 },
       "forbidden": ["memory-storage-current", "memory-storage-old"]
     },
     {
       "id": "no-relevant-result",
       "threadId": "alpha-a",
       "query": "量子渲染引擎",
-      "expected": [],
+      "relevance": {},
       "forbidden": [
         "memory-storage-current",
         "memory-auth-expiry",

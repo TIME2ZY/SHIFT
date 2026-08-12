@@ -285,6 +285,17 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   Trace、Invocation、Handoff、Message、产品 Memory 和 pending outbox 不在此策略内；Thread
   purge 仍由既有权威生命周期负责。
 
+### 8.2 Phase 1C 标注评估契约
+
+- 严格 Recall@K 的数据集使用 version 2：每个 query 必须提供 source ID → 0–3 的 graded
+  relevance judgment；Recall@K 以全部正相关 judgment 为分母，MRR 以存在正相关标注的 query
+  为分母，nDCG@K 使用 graded relevance。
+- 无正相关结果的 query 仍保留用于 scope leakage 和 retired result 检查，不进入 MRR 分母。
+- 可选业务 outcome 只接受 `success | failure | unknown` 和非空 evidence；报告分别展示标注覆盖、
+  成功率与“成功且相关结果完整召回”的比例，不把相关性推断成业务因果。
+- evaluator、数据集校验和报告均位于 offline/script 边界；在线 metrics 在结果未经过显式导入
+  契约前继续保持严格 Recall、used 和 correct 为 `null`。
+
 ## 9. Phase 0 实施边界
 
 ### 9.1 Phase 0A（本次文档提交）

@@ -8,7 +8,8 @@ const { createRecallService } = require("../src/storage/recall-service");
 const {
   evaluateRecallCases,
   evaluateRecallGate,
-} = require("../src/storage/recall-eval");
+  validateLabeledRecallDataset,
+} = require("../src/storage/offline/labeled-recall-eval");
 
 const DEFAULT_CASES = path.resolve(__dirname, "../evals/recall-fts/cases.json");
 
@@ -30,18 +31,7 @@ function parseArgs(argv) {
 
 function loadCases(file) {
   const value = JSON.parse(fs.readFileSync(file, "utf8"));
-  if (!value || value.version !== 1 || !Array.isArray(value.queries)) {
-    throw new Error("Recall eval cases must use version 1 and contain queries.");
-  }
-  const ids = new Set();
-  for (const item of value.queries) {
-    if (!item?.id || ids.has(item.id)) throw new Error("Recall eval query ids must be unique.");
-    if (typeof item.query !== "string" || item.query.trim().length < 2) {
-      throw new Error(`Recall eval query ${item.id} is invalid.`);
-    }
-    ids.add(item.id);
-  }
-  return value.queries;
+  return validateLabeledRecallDataset(value);
 }
 
 function seedCorpus(storage, root) {
@@ -172,6 +162,7 @@ async function main() {
         `cases=${metrics.cases}`,
         `recall@${options.limit}=${metrics.recallAtK.toFixed(3)}`,
         `mrr=${metrics.mrr.toFixed(3)}`,
+        `ndcg@${options.limit}=${metrics.ndcgAtK.toFixed(3)}`,
         `scopeLeakage=${metrics.scopeLeakageRate.toFixed(3)}`,
         `superseded=${metrics.supersededRecallRate.toFixed(3)}`,
         `p50=${metrics.latencyP50Ms}ms`,
