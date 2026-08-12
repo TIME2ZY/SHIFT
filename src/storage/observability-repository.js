@@ -35,12 +35,17 @@ function createObservabilityRepository(db) {
     health(options = {}) {
       const now = validDate(options.now) || new Date();
       const outboxPendingAlertSeconds = positiveNumber(options.outboxPendingAlertSeconds, 300);
+      const traceContractAppliedAt = db
+        .prepare("SELECT applied_at FROM schema_migrations WHERE version = 24")
+        .get()?.applied_at;
       const oldestPending = db
         .prepare("SELECT MIN(created_at) AS value FROM storage_outbox WHERE status = 'pending'")
         .get()?.value;
       const checks = {
         missing_trace_id: scalar(
-          "SELECT COUNT(*) AS count FROM invocations WHERE trace_id IS NULL"
+          `SELECT COUNT(*) AS count FROM invocations
+           WHERE trace_id IS NULL AND started_at >= @traceContractAppliedAt`,
+          { traceContractAppliedAt }
         ),
         terminal_invocation_missing_end_event: scalar(`
           SELECT COUNT(*) AS count FROM invocations i
@@ -97,6 +102,14 @@ function createObservabilityRepository(db) {
         state: alerts.length > 0 ? "degraded" : "available",
         checkedAt: now.toISOString(),
         authoritativeViolations,
+        applicability: { traceContractAppliedAt },
+        historical: {
+          invocation_missing_trace_before_contract: scalar(
+            `SELECT COUNT(*) AS count FROM invocations
+             WHERE trace_id IS NULL AND started_at < @traceContractAppliedAt`,
+            { traceContractAppliedAt }
+          ),
+        },
         alerts,
         telemetry,
         checks: {

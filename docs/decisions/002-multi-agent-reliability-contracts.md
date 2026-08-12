@@ -258,6 +258,10 @@ outbox_pending_age
 观测写入失败不得静默提升业务成功率。非权威 telemetry 失败可以不打断业务，但必须使相关
 Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入失败必须 fail closed。
 
+完整性检查只约束相应契约生效后的事实。`missing_trace_id` 以 migration 24 的实际
+`schema_migrations.applied_at` 为 applicability cutoff；更早的 Invocation 保留为历史诊断计数，
+不得补造 Trace，也不得使当前 health 永久 degraded。
+
 ## 8. Payload、隐私、采样与保留
 
 1. 结构性 lifecycle 元数据默认全量持久化；成功 payload 可以采样，错误/降级 payload 保留。

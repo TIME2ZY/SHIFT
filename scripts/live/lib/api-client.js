@@ -93,6 +93,24 @@ function createApiClient({ baseUrl, uiToken }) {
     return result;
   }
 
+  async function listTraces(sessionId) {
+    const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}/traces`);
+    if (!result.ok) throw new Error(`listTraces failed (${result.status})`);
+    return result.body.traces || [];
+  }
+
+  async function inspectTrace(sessionId, traceId) {
+    const result = await getJson(
+      `/api/sessions/${encodeURIComponent(sessionId)}/traces/${encodeURIComponent(traceId)}`
+    );
+    if (!result.ok) throw new Error(`inspectTrace failed (${result.status})`);
+    return result.body.trace;
+  }
+
+  async function observabilityMetrics() {
+    return getJson("/api/storage/observability/metrics");
+  }
+
   async function health() {
     return getJson("/api/storage/health");
   }
@@ -157,6 +175,9 @@ function createApiClient({ baseUrl, uiToken }) {
     listMemories,
     getMessages,
     getUsage,
+    listTraces,
+    inspectTrace,
+    observabilityMetrics,
     health,
     agents,
     chat,

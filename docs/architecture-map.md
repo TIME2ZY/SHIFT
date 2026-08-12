@@ -308,6 +308,9 @@ hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为�
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行
 事实和 pending outbox 不进入该清理路径。
 
+Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用边界：更早且没有
+`trace_id` 的 Invocation 仅作为 `historical` 诊断计数，不参与当前告警，也不会被补造 Trace。
+
 ## 6. 事件类型 → 单一写入口
 
 | 事件                         | 写入口                                                   | 允许的触发器                                      |

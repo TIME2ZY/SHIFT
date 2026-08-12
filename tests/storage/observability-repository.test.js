@@ -48,6 +48,51 @@ test("observability health exposes authoritative completeness checks", () => {
   }
 });
 
+test("observability health excludes pre-contract invocations without inventing traces", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.threads.upsert({ id: "legacy-thread", title: "Legacy", projectDir: "C:/legacy" });
+    const window = storage.windows.create({
+      id: "legacy-window",
+      threadId: "legacy-thread",
+      agentId: "codex",
+      providerKey: "codex:gpt",
+      workspaceKey: "base:C:/legacy",
+      generation: 1,
+      capacityTokens: 1000,
+    });
+    const cutoff = storage.db
+      .prepare("SELECT applied_at FROM schema_migrations WHERE version = 24")
+      .get().applied_at;
+    storage.db
+      .prepare(
+        `INSERT INTO invocations
+          (id, thread_id, window_id, agent_id, state, started_at)
+         VALUES (?, ?, ?, ?, 'completed', ?)`
+      )
+      .run("legacy-invocation", "legacy-thread", window.id, "codex", "2000-01-01T00:00:00.000Z");
+    storage.db
+      .prepare(
+        `INSERT INTO invocation_events
+          (invocation_id, sequence_no, kind, payload_json, created_at)
+         VALUES (?, 0, 'invocation-end', '{}', ?)`
+      )
+      .run("legacy-invocation", "2000-01-01T00:00:01.000Z");
+
+    const health = storage.observability.health();
+    assert.equal(health.checks.missing_trace_id, 0);
+    assert.equal(health.historical.invocation_missing_trace_before_contract, 1);
+    assert.equal(health.applicability.traceContractAppliedAt, cutoff);
+    assert.equal(
+      storage.db.prepare("SELECT trace_id FROM invocations WHERE id = ?").get("legacy-invocation")
+        .trace_id,
+      null
+    );
+  } finally {
+    storage.close();
+  }
+});
+
 test("observability health alerts when pending outbox exceeds threshold", () => {
   const storage = createStorage({ file: ":memory:" });
   try {

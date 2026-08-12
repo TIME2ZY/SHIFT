@@ -2,11 +2,11 @@
 
 用 **真实 Grok CLI** 在 **与日常相同的 runtime DB** 上自动打多轮对话，验证记忆注入、window seal 等管道在真对话里是否立得住。
 
-| | `npm test` | Live |
-|--|------------|------|
-| CLI | mock | **真 grok** |
-| DB | 测试夹具 / 内存 | **默认 `data/runtime`**（与 UI 同库） |
-| 入口 | `npm test` | `npm run test:live:solo-grok` |
+|      | `npm test`      | Live                                  |
+| ---- | --------------- | ------------------------------------- |
+| CLI  | mock            | **真 grok**                           |
+| DB   | 测试夹具 / 内存 | **默认 `data/runtime`**（与 UI 同库） |
+| 入口 | `npm test`      | `npm run test:live:solo-grok`         |
 
 ## 前置
 
@@ -84,31 +84,31 @@ npm run test:live:solo-grok -- --require-seal --strict-memory
 
 主验收只认 **clean run**（单次进程、无 `--session-id` / `--start-from`）：
 
-| 标志 | 含义 |
-|------|------|
-| `cleanRunPassed` | 连续跑通且硬断言全过 — **唯一主验收** |
+| 标志              | 含义                                                    |
+| ----------------- | ------------------------------------------------------- |
+| `cleanRunPassed`  | 连续跑通且硬断言全过 — **唯一主验收**                   |
 | `resumeRunPassed` | 仅当 `--allow-resume` 时，续跑可 exit 0（恢复能力测试） |
 
 硬断言要点：
 
-- **L0** 禁止用续跑冒充 clean pass  
-- **L9** seal 触发轮必须有非空回答或 `seal-and-replayed`（禁止空 assistant）  
-- **L10 / L10b** 禁止空 assistant-final  
-- **L11** 重放不得重复持久化 user message  
-- **F-*** 期望事实（24h TTL、无 refresh、SQLite…），非「回答看起来很长」  
+- **L0** 禁止用续跑冒充 clean pass
+- **L9** seal 触发轮必须有非空回答或 `seal-and-replayed`（禁止空 assistant）
+- **L10 / L10b** 禁止空 assistant-final
+- **L11** 重放不得重复持久化 user message
+- **F-*** 期望事实（24h TTL、无 refresh、SQLite…），非「回答看起来很长」
 
 确定性单测（进 `npm test`）：`tests/scenarios/live-assert.test.js`  
 （fake 投影 / seal 边界表在 `context-budget.js`，不依赖真 Grok。）
 
 ## Exit code
 
-| Code | 含义 |
-|------|------|
-| 0 | 硬断言通过（resume 须带 `--allow-resume`） |
-| 1 | 硬断言失败、空 assistant、续跑未授权、或运行错误 |
-| 2 | Preflight 失败 |
-| 3 | 超时 |
-| 4 | `--strict-memory` 下软断言失败 |
+| Code | 含义                                             |
+| ---- | ------------------------------------------------ |
+| 0    | 硬断言通过（resume 须带 `--allow-resume`）       |
+| 1    | 硬断言失败、空 assistant、续跑未授权、或运行错误 |
+| 2    | Preflight 失败                                   |
+| 3    | 超时                                             |
+| 4    | `--strict-memory` 下软断言失败                   |
 
 ## 费用与时间
 
@@ -131,12 +131,22 @@ npm run test:live:multi-collab -- --mode spawn --dry-run
 npm run test:live:multi-collab -- --mode spawn --discuss-capacity 22000 --implement-capacity 48000
 ```
 
-| 幕 | capacity | worktree | Agent |
-|----|----------|----------|--------|
-| discuss | 22000 | off | gemini, codex |
-| implement | 48000 | **on** | grok, opencode |
-| recall | 48000 | off | codex |
+| 幕        | capacity | worktree | Agent          |
+| --------- | -------- | -------- | -------------- |
+| discuss   | 22000    | off      | gemini, codex  |
+| implement | 48000    | **on**   | grok, opencode |
+| recall    | 48000    | off      | codex          |
 
 整场 **不因首次 seal 结束**；每幕跑完脚本内全部用户轮。断言见 `lib/multi-assert.js`（四角出现、A2A、seal 轮非空答等）。
 
 **要求：** 本机 PATH 上有对应 CLI（gemini/antigravity、codex、grok、opencode）。
+
+## Trace / Observability 1D 门禁
+
+```powershell
+npm run test:live:observability -- --mode spawn
+```
+
+该场景使用真实 Grok→Codex Handoff，随后重启同一服务并重新读取 Session Trace。报告会核对
+SSE invocation ID、durable Trace/Invocation/Handoff、terminal outcome 与 storage health，并写入
+`output/live/observability-acceptance-*/`。只有 `cleanRunPassed=true` 才允许开始 Phase 2。
