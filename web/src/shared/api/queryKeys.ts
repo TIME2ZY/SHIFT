@@ -1,4 +1,7 @@
 export const queryKeys = {
+  observability: {
+    metrics: ["observability", "metrics"] as const,
+  },
   agents: {
     all: ["agents"] as const,
   },

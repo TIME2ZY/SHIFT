@@ -46,3 +46,27 @@ export interface TraceSummary {
   invocations: ExecutionInvocation[];
   handoffs: ExecutionHandoff[];
 }
+
+export interface QualifiedRate {
+  value: number | null;
+  numerator: number;
+  denominator: number;
+  pending: number;
+  censored: number;
+  unknown: number;
+  excluded: number;
+}
+
+export interface ObservabilityMetrics {
+  window: { from: string; to: string };
+  handoff: {
+    scheduling: QualifiedRate;
+    execution: QualifiedRate;
+    endToEnd: QualifiedRate;
+  };
+  memory: {
+    hitRate: QualifiedRate;
+    strictRecallAtK: QualifiedRate | null;
+    semantics: string;
+  };
+}

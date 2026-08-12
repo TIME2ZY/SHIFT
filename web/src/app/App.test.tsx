@@ -89,6 +89,7 @@ vi.mock("../features/chat/useChatActions", () => ({
 
 vi.mock("../features/observability/queries", () => ({
   useSessionTracesQuery: () => ({ data: [], isPending: false, error: null }),
+  useObservabilityMetricsQuery: () => ({ data: null, isPending: false, error: null }),
 }));
 
 vi.mock("../runtime/session-run-provider", () => ({

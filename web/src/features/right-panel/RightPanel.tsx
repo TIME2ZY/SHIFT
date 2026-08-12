@@ -4,14 +4,17 @@ import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery, useMemoryInjectQuery } from "../memory/queries";
 import { AgentUsageCard, type AgentActivityStatus } from "../usage/AgentUsageCard";
 import { useUsageQuery } from "../usage/queries";
+import { TraceExplorer } from "../observability/TraceExplorer";
+import type { TraceSummary } from "../observability/types";
 
-type PanelTab = "agents" | "memory";
+type PanelTab = "agents" | "memory" | "trace";
 
 interface RightPanelProps {
   sessionId: string | null;
   agents: AgentSummary[];
   selectedAgentId: string;
   run: SessionRun | null;
+  traces: TraceSummary[];
   open: boolean;
   onClose(): void;
   onAgentChange(agentId: string): void;
@@ -20,6 +23,7 @@ interface RightPanelProps {
 const TABS: ReadonlyArray<readonly [PanelTab, string]> = [
   ["agents", "Agent"],
   ["memory", "记忆"],
+  ["trace", "追踪"],
 ];
 
 function activityStatus(agentId: string, run: SessionRun | null): AgentActivityStatus {
@@ -40,6 +44,7 @@ export function RightPanel({
   agents,
   selectedAgentId,
   run,
+  traces,
   open,
   onClose,
   onAgentChange,
@@ -102,8 +107,8 @@ export function RightPanel({
       role={open ? "dialog" : undefined}
     >
       <header className="react-panel-mobile-header">
-        <strong>Agent 与记忆</strong>
-        <button ref={closeRef} type="button" aria-label="关闭 Agent 与记忆" onClick={onClose}>
+        <strong>会话信息</strong>
+        <button ref={closeRef} type="button" aria-label="关闭会话信息" onClick={onClose}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 6l12 12M18 6 6 18" />
           </svg>
@@ -193,8 +198,7 @@ export function RightPanel({
             ) : null}
             {memories.data?.memories.length === 0 ? (
               <p className="react-panel-empty">
-                当前对话还没有有效记忆。跨会话项目结论请写入 docs/（可用 recall 检索
-                project-doc）。
+                当前对话还没有有效记忆。跨会话项目结论请写入 docs/（可用 recall 检索 project-doc）。
               </p>
             ) : null}
             <div className="react-memory-list">
@@ -209,6 +213,17 @@ export function RightPanel({
                 </article>
               ))}
             </div>
+          </section>
+        ) : null}
+
+        {tab === "trace" ? (
+          <section
+            id="right-panel-trace"
+            role="tabpanel"
+            aria-labelledby="right-panel-tab-trace"
+            tabIndex={0}
+          >
+            <TraceExplorer traces={traces} agents={agents} />
           </section>
         ) : null}
       </div>

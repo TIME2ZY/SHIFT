@@ -347,7 +347,7 @@ export function App() {
                     <circle cx="12" cy="8" r="3" />
                     <path d="M6.5 19c.7-3.2 2.5-5 5.5-5s4.8 1.8 5.5 5" />
                   </svg>
-                  <span>Agent 与记忆</span>
+                  <span>会话信息</span>
                 </button>
               </div>
             </header>
@@ -392,6 +392,7 @@ export function App() {
             agents={agents.data ?? []}
             selectedAgentId={selectedAgentId}
             run={run}
+            traces={traces.data ?? []}
             open={infoPanelOpen}
             onClose={closeInfoPanel}
             onAgentChange={selectAgent}

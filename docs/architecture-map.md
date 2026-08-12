@@ -295,6 +295,10 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used 与
 correct 在无标注或证据时保持 `null`。
 
+Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
+pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
+hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为不可用。
+
 ## 6. 事件类型 → 单一写入口
 
 | 事件                         | 写入口                                                   | 允许的触发器                                      |
