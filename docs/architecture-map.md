@@ -131,7 +131,6 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 用户 / 系统 / A2A 通知  | `appendToSession` → `appendMessage`                 | sqlite-session-service | `user` / `a2a-*` / `system-notice`…  |
 | 助手终态正文            | `completeInvocation({ message })` → `appendMessage` | durable-recorder       | `assistant-final`                    |
 | Callback 中途 assistant | `appendToSession`                                   | callbacks              | **`assistant-callback`（B-3 显式）** |
-| 镜像末条                | `mirrorLastMessage`                                 | durable-recorder       | 沿用消息上的 type                    |
 | 物理 insert             | **仅** `message-persistence.appendMessage`          | 热路径                 | + recall upsert                      |
 
 **结论（message）— B-3 已落地（2026-08-07）：**
@@ -140,6 +139,8 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - Callback **必须** `messageType: "assistant-callback"`，不得冒充 final。
 - 守卫测试：`tests/storage/message-write-path.test.js` 禁止 server/agents/session 直接 `.messages.append`。
 - 离线 `migrate-runtime` 仍可直写 repository（非热路径）。
+- 已删除仅供测试/兼容使用的 `durableRecorder.mirrorLastMessage` 公开入口；在线消息只保留上述两类
+  用例入口并共享同一个物理写入口。
 
 ---
 
@@ -379,5 +380,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-12。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-08-13。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

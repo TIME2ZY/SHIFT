@@ -717,11 +717,6 @@ function createCollabTaskRegistry(options = {}) {
     });
   }
 
-  /** Backward-compatible name; completion now means the terminal done phase. */
-  function markDelivered(threadId, input = {}) {
-    return markDone(threadId, input);
-  }
-
   function updateTask(threadId, patch = {}, event = {}) {
     const task = getOrCreateTask(threadId);
     for (const key of [
@@ -798,7 +793,6 @@ function createCollabTaskRegistry(options = {}) {
     shouldBlockImplementationRoute,
     updateTask,
     markDone,
-    markDelivered,
     shouldSkipRedundantReview,
     resetForTests,
   };

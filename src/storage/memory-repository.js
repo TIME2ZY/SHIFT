@@ -180,11 +180,6 @@ function createMemoryRepository(db) {
       return mapMemory(findByCaptureThread.get(owner, captureKey));
     },
 
-    /** @deprecated prefer getByCaptureKey with scope; kept for call sites using thread id */
-    getByCaptureKeyForThread(threadId, captureKey) {
-      return this.getByCaptureKey(threadId, captureKey, { scope: "thread" });
-    },
-
     listForThread(threadId) {
       // Include thread-owned rows and project rows that originated here (UI history).
       return listByOriginOrOwner.all(threadId, threadId).map(mapMemory);
