@@ -83,10 +83,12 @@
     0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 60%, transparent);
 
   /* Typography roles */
-  --font-brand: "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
-  --font-ui: "Plus Jakarta Sans", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  --font-brand: "Space Grotesk", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-ui: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-body: var(--font-ui);
-  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
+  --font-sans: var(--font-ui);
+  --font-mono: "JetBrains Mono", Consolas, "Courier New", ui-monospace, monospace;
+
 
   /* Spacing scale (8px base) */
   --space-1: 4px;

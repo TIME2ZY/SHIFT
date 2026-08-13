@@ -252,10 +252,20 @@ export function TraceExplorer({
                   >
                     {index ? (
                       <span className="trace-connector" aria-hidden="true">
-                        →
+                        <svg
+                          viewBox="0 0 20 12"
+                          width="16"
+                          height="10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        >
+                          <path d="M1 6h14M11 2l4 4-4 4" />
+                        </svg>
                       </span>
                     ) : null}
-                    <div>
+                    <div className="trace-hop-badge">
+                      <span className="trace-hop-dot" aria-hidden="true" />
                       <strong>{label(invocation.agentId)}</strong>
                       <small>{invocation.state}</small>
                     </div>
@@ -300,14 +310,17 @@ export function TraceExplorer({
                         data-complete={span.complete || undefined}
                         key={span.spanId}
                       >
-                        <span>{span.kind}</span>
-                        <strong>{span.name}</strong>
-                        <small>{span.complete ? span.state : "missing end"}</small>
+                        <span className="trace-span-kind">{span.kind}</span>
+                        <strong className="trace-span-name">{span.name}</strong>
+                        <small className="trace-span-status">
+                          {span.complete ? span.state : "missing end"}
+                        </small>
                       </li>
                     ))}
                   </ol>
                 </section>
               ) : null}
+
             </article>
           ) : null}
         </div>

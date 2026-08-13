@@ -229,15 +229,43 @@ function HandoffDivider({
       role="status"
       aria-label={`${fromLabel} 已将任务交接给 ${toLabel}`}
     >
-      <span>{fromLabel}</span>
-      <svg viewBox="0 0 40 12" aria-hidden="true">
-        <path d="M1 6h35M31 2l5 4-5 4" />
-      </svg>
-      <span>{toLabel}</span>
-      {message.handoffDegraded ? <small>交接信息不完整</small> : null}
+      <div className="react-handoff-card">
+        <span
+          className="react-handoff-agent"
+          data-agent-color={from?.id ? agentColorSlot(from.id) : undefined}
+        >
+          <span className="react-handoff-dot" aria-hidden="true" />
+          <strong>{fromLabel}</strong>
+        </span>
+        <div className="react-handoff-flow">
+          <span>交接给</span>
+          <svg
+            viewBox="0 0 24 12"
+            width="24"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+          >
+            <path d="M2 6h18M15 2l5 4-5 4" />
+          </svg>
+        </div>
+        <span
+          className="react-handoff-agent"
+          data-agent-color={to?.id ? agentColorSlot(to.id) : undefined}
+        >
+          <span className="react-handoff-dot" aria-hidden="true" />
+          <strong>{toLabel}</strong>
+        </span>
+        {message.handoffDegraded ? (
+          <small className="react-handoff-degraded">交接信息不完整</small>
+        ) : null}
+      </div>
     </div>
   );
 }
+
 
 export function MessageList({
   sessionId,
