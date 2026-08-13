@@ -165,6 +165,30 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
             window: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
             handoff: { scheduling: rate, execution: rate, endToEnd: rate },
             memory: { hitRate: rate, strictRecallAtK: null, semantics: "hit rate" },
+            comparison: {
+              baselineWindow: {
+                from: "2026-08-11T00:00:00.000Z",
+                to: "2026-08-12T00:00:00.000Z",
+              },
+              minSamples: 5,
+              dropThreshold: 0.1,
+              indicators: [
+                {
+                  metric: "handoff.endToEnd",
+                  state: "unknown",
+                  delta: null,
+                  current: { value: 0.5, numerator: 1, denominator: 2 },
+                  baseline: { value: null, numerator: 0, denominator: 0 },
+                },
+                {
+                  metric: "memory.hitRate",
+                  state: "unknown",
+                  delta: null,
+                  current: { value: 0.5, numerator: 1, denominator: 2 },
+                  baseline: { value: null, numerator: 0, denominator: 0 },
+                },
+              ],
+            },
           },
         },
       });
@@ -406,7 +430,7 @@ test("surfaces a streamed provider failure as a toast and failed run", async ({ 
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.locator(".react-toast").getByText("Provider unavailable")).toBeVisible();
-  await expect(page.getByText("运行失败", { exact: true })).toBeVisible();
+  await expect(page.locator(".react-run-status")).toHaveText("运行失败");
 });
 
 test("stops a connecting run and confirms the cancellation", async ({ page }) => {
@@ -435,9 +459,9 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
     .getByRole("button", { name: "关闭会话列表" })
     .click();
 
-  await page.getByRole("button", { name: "Agent 与记忆" }).click();
+  await page.getByRole("button", { name: "会话信息" }).click();
   await expect(page.getByRole("dialog", { name: "对话信息" })).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("tab")).toHaveCount(3);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "对话信息" })).toBeHidden();
   await expect(page.locator(".react-info-panel-button")).toBeFocused();

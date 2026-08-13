@@ -16,7 +16,7 @@ related:
 
 ## 1. 状态
 
-**Accepted — Phase 0–2 implemented; Phase 3 operationalization in progress**
+**Accepted — Phase 0–3 implemented**
 
 本 ADR 冻结 Trace、Invocation、Handoff、指标资格和 Memory 漏斗的命名与边界。现有
 Invocation durable finish、Handoff 进程内幂等和 Memory funnel 已部分实现；本次 0A 只修改

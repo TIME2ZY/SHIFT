@@ -76,29 +76,6 @@ function createStorageRoutes({
       return true;
     }
 
-    const traceMatch = url.pathname.match(/^\/api\/storage\/observability\/traces\/([^/]+)$/);
-    if (req.method === "GET" && traceMatch) {
-      let traceId;
-      try {
-        traceId = decodeURIComponent(traceMatch[1]);
-      } catch {
-        sendJson(res, 400, { error: "traceId is invalid." });
-        return true;
-      }
-      const threadId = url.searchParams.get("threadId");
-      if (!threadId) {
-        sendJson(res, 400, { error: "threadId is required." });
-        return true;
-      }
-      const trace = storageContext.inspectTrace?.(traceId) || null;
-      if (!trace || trace.threadId !== threadId) {
-        sendJson(res, 404, { error: "Trace not found for this Thread." });
-        return true;
-      }
-      sendJson(res, 200, { trace });
-      return true;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/storage/outbox/cleanup") {
       const body = await readJsonBody(req);
       const retentionDays = Number(body.retentionDays ?? defaultRetentionDays);

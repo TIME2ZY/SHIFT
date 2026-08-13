@@ -128,18 +128,20 @@ export function TraceExplorer({
                 <Rate label="业务成功率" rate={metrics.data.memory.businessSuccessRate} />
               ) : null}
             </dl>
-            <div className="trace-trend" aria-label="与前一窗口对比">
-              {metrics.data.comparison.indicators.map((indicator) => (
-                <span data-state={indicator.state} key={indicator.metric}>
-                  {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory"}
-                  <strong>
-                    {indicator.state === "unknown"
-                      ? "样本不足"
-                      : `${indicator.delta! >= 0 ? "+" : ""}${Math.round(indicator.delta! * 100)}pp`}
-                  </strong>
-                </span>
-              ))}
-            </div>
+            {metrics.data.comparison?.indicators?.length ? (
+              <div className="trace-trend" aria-label="与前一窗口对比">
+                {metrics.data.comparison.indicators.map((indicator) => (
+                  <span data-state={indicator.state} key={indicator.metric}>
+                    {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory"}
+                    <strong>
+                      {indicator.state === "unknown"
+                        ? "样本不足"
+                        : `${indicator.delta! >= 0 ? "+" : ""}${Math.round(indicator.delta! * 100)}pp`}
+                    </strong>
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>

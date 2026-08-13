@@ -154,7 +154,6 @@ function createServerStorage(options = {}, logger = console) {
     observabilityExporterHealth: () => observabilityExporter.health(),
     observabilityMetrics: (options) => storage?.observability?.metrics?.(options) || null,
     importObservabilityEvidence: (input) => storage?.observabilityEvidence?.import?.(input) || null,
-    inspectTrace: (traceId) => storage?.observability?.inspectTrace?.(traceId) || null,
     cleanupDeliveredOutbox(options) {
       if (!storage?.outbox?.cleanupDelivered) {
         return { available: false, deleted: 0 };

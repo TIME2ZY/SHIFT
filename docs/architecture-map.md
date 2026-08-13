@@ -294,10 +294,10 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 `src/storage/offline/labeled-recall-eval.js`，仅由 `scripts/eval-recall-fts.js` 调用。它计算
 严格 Recall@K、MRR、nDCG@K 和离线业务结果关联；结果不进入在线热路径，也不反写业务表。
 
-在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics` 和按可信
-`threadId` 约束的 `/api/storage/observability/traces/:traceId`。指标直接查询 SQLite source
-tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used 与
-correct 在无标注或证据时保持 `null`。
+在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics`，以及唯一的
+Session-scoped `/api/sessions/:sessionId/traces*` 查询、详情和导出路径。指标直接查询 SQLite
+source tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used
+与 correct 在无标注或证据时保持 `null`。旧 storage-level Trace detail 路由已删除。
 
 Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
 pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
@@ -306,6 +306,10 @@ hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为�
 Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
 同一可信 Session scope，不建立前端历史索引或新的写入口。
+
+`observability-repository.metrics` 同时读取当前窗口与紧邻的等长前序窗口，按显式最小样本量和
+下降阈值派生 `stable | regressed | unknown`；不持久化聚合结果。health alerts 携带确定性的
+诊断标题和操作建议，Web 事故队列只读消费这些派生输出，不形成修复状态机。
 
 `trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
 Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。

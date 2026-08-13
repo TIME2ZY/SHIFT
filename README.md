@@ -232,7 +232,7 @@ skills/         注入给 Agent 的协作与交接规则
 下一阶段将围绕“更容易接入 Agent、更清晰地观察协作、更安全地交付代码”继续完善：
 
 - [x] Trace / 审计平台（durable Trace、Handoff、指标与脱敏导出）
-- [ ] Phase 3 可运维化（浏览器验收、回归检测、本地告警、可选 exporter）
+- [x] Phase 3 可运维化（浏览器验收、回归检测、本地告警、可选 exporter）
 
 ---
 
