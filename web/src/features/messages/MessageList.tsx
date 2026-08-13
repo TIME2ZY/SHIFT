@@ -229,12 +229,39 @@ function HandoffDivider({
       role="status"
       aria-label={`${fromLabel} 已将任务交接给 ${toLabel}`}
     >
-      <span>{fromLabel}</span>
-      <svg viewBox="0 0 40 12" aria-hidden="true">
-        <path d="M1 6h35M31 2l5 4-5 4" />
-      </svg>
-      <span>{toLabel}</span>
-      {message.handoffDegraded ? <small>交接信息不完整</small> : null}
+      <div className="react-handoff-card">
+        <span
+          className="react-handoff-agent"
+          data-agent-color={from?.id ? agentColorSlot(from.id) : undefined}
+        >
+          <span className="react-handoff-dot" aria-hidden="true" />
+          <strong>{fromLabel}</strong>
+        </span>
+        <div className="react-handoff-flow">
+          <span>交接给</span>
+          <svg
+            viewBox="0 0 24 12"
+            width="24"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+          >
+            <path d="M2 6h18M15 2l5 4-5 4" />
+          </svg>
+        </div>
+        <span
+          className="react-handoff-agent"
+          data-agent-color={to?.id ? agentColorSlot(to.id) : undefined}
+        >
+          <span className="react-handoff-dot" aria-hidden="true" />
+          <strong>{toLabel}</strong>
+        </span>
+        {message.handoffDegraded ? (
+          <small className="react-handoff-degraded">交接信息不完整</small>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -398,11 +425,44 @@ export function MessageList({
     }
   }
 
+  const isNavigatingRef = useRef(false);
+  const navigationReleaseTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (navigationReleaseTimerRef.current !== null) {
+        window.clearTimeout(navigationReleaseTimerRef.current);
+      }
+    },
+    []
+  );
+
+  function releaseNavigationLock() {
+    isNavigatingRef.current = false;
+    navigationReleaseTimerRef.current = null;
+    const element = scrollRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setFollowingLatest(distanceFromBottom < 80);
+  }
+
   function scrollToMessage(key: string) {
     const target = messageRefs.current.get(key);
     if (!target) return;
+    if (navigationReleaseTimerRef.current !== null) {
+      window.clearTimeout(navigationReleaseTimerRef.current);
+      navigationReleaseTimerRef.current = null;
+    }
     setActiveMessageKey(key);
-    setFollowingLatest(key === latestMessageKey);
+    const isLatest = key === latestMessageKey;
+    if (isLatest) {
+      isNavigatingRef.current = false;
+      setFollowingLatest(true);
+    } else {
+      isNavigatingRef.current = true;
+      setFollowingLatest(false);
+      navigationReleaseTimerRef.current = window.setTimeout(releaseNavigationLock, 600);
+    }
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.focus({ preventScroll: true });
   }
@@ -411,12 +471,23 @@ export function MessageList({
     const element = scrollRef.current;
     if (!element) return;
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (isNavigatingRef.current) {
+      if (distanceFromBottom > 100) {
+        isNavigatingRef.current = false;
+      }
+      return;
+    }
     setFollowingLatest(distanceFromBottom < 80);
   }
 
   function scrollToLatest() {
     const element = scrollRef.current;
     if (!element) return;
+    if (navigationReleaseTimerRef.current !== null) {
+      window.clearTimeout(navigationReleaseTimerRef.current);
+      navigationReleaseTimerRef.current = null;
+    }
+    isNavigatingRef.current = false;
     element.scrollTop = element.scrollHeight;
     setFollowingLatest(true);
     if (latestMessageKey) setActiveMessageKey(latestMessageKey);
