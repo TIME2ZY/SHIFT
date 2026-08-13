@@ -31,6 +31,10 @@ function createStorageRoutes({
           authoritativeViolations: null,
           checks: null,
         },
+        observabilityExporter: storageContext.observabilityExporterHealth?.() || {
+          enabled: false,
+          state: "disabled",
+        },
       },
     };
   }
