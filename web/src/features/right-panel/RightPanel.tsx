@@ -79,9 +79,9 @@ export function RightPanel({
         </button>
       </header>
       <header className="react-panel-title">
-        <strong>Agent 与用量</strong>
-        <span>当前会话</span>
+        <strong>Agent</strong>
       </header>
+
       <div className="react-panel-body react-panel-body-agents">
         {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
         {usage.error ? (

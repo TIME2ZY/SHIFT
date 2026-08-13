@@ -99,7 +99,8 @@ describe("RightPanel", () => {
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("负责实现与验证。")).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-    expect(screen.getByText("Agent 与用量")).toBeInTheDocument();
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+
     expect(screen.queryByText("当前团队")).not.toBeInTheDocument();
     expect(await screen.findByText("2.4k tokens")).toBeInTheDocument();
     expect(screen.getByText("40% · 充足")).toBeInTheDocument();
