@@ -68,6 +68,27 @@ describe("TraceExplorer", () => {
                 strictRecallAtK: null,
                 semantics: "hit rate",
               },
+              comparison: {
+                baselineWindow: { from: base.startedAt, to: base.endedAt },
+                minSamples: 5,
+                dropThreshold: 0.1,
+                indicators: [
+                  {
+                    metric: "handoff.endToEnd",
+                    state: "regressed",
+                    delta: -0.25,
+                    current: { value: 0.5, numerator: 1, denominator: 2 },
+                    baseline: { value: 0.75, numerator: 3, denominator: 4 },
+                  },
+                  {
+                    metric: "memory.hitRate",
+                    state: "unknown",
+                    delta: null,
+                    current: { value: 0.5, numerator: 1, denominator: 2 },
+                    baseline: { value: null, numerator: 0, denominator: 0 },
+                  },
+                ],
+              },
             },
           })
         )
@@ -154,6 +175,8 @@ describe("TraceExplorer", () => {
     );
     expect(await screen.findByText("Handoff 调度")).toBeInTheDocument();
     expect(screen.getByText("需标注集")).toBeInTheDocument();
+    expect(screen.getByText("-25pp")).toBeInTheDocument();
+    expect(screen.getByText("样本不足")).toBeInTheDocument();
     expect(screen.getAllByText(/1\/2 · pending 1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Codex")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));

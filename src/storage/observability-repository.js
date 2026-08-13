@@ -141,34 +141,92 @@ function createObservabilityRepository(db, dependencies = {}) {
 
     metrics(options = {}) {
       const window = metricWindow(options);
-      const handoffs = db
-        .prepare(
-          `
+      const current = metricsForWindow(db, dependencies, window);
+      const baselineWindow = previousWindow(window);
+      const baseline = metricsForWindow(db, dependencies, baselineWindow);
+      return {
+        ...current,
+        comparison: compareMetrics(current, baseline, {
+          minSamples: positiveNumber(options.regressionMinSamples, 5),
+          dropThreshold: positiveRatio(options.regressionDropThreshold, 0.1),
+        }),
+      };
+    },
+  };
+}
+
+function metricsForWindow(db, dependencies, window) {
+  const handoffs = db
+    .prepare(
+      `
           SELECT * FROM handoffs
           WHERE created_at >= @from AND created_at < @to
           ORDER BY created_at, id
         `
-        )
-        .all(window);
-      const memoryEvents = db
-        .prepare(
-          `
+    )
+    .all(window);
+  const memoryEvents = db
+    .prepare(
+      `
           SELECT payload_json FROM memory_events
           WHERE event_type = 'memory_injected' AND created_at >= @from AND created_at < @to
           ORDER BY id
         `
-        )
-        .all(window);
-      return {
-        window,
-        handoff: handoffMetrics(handoffs),
-        memory: memoryHitMetrics(
-          memoryEvents,
-          telemetryHealth(db, window),
-          dependencies.evidence?.latestRecallEval?.() || null,
-          dependencies.evidence?.judgmentMetrics?.(window) || null
-        ),
-      };
+    )
+    .all(window);
+  return {
+    window,
+    handoff: handoffMetrics(handoffs),
+    memory: memoryHitMetrics(
+      memoryEvents,
+      telemetryHealth(db, window),
+      dependencies.evidence?.latestRecallEval?.() || null,
+      dependencies.evidence?.judgmentMetrics?.(window) || null
+    ),
+  };
+}
+
+function previousWindow(window) {
+  const from = new Date(window.from);
+  const duration = new Date(window.to).getTime() - from.getTime();
+  return { from: new Date(from.getTime() - duration).toISOString(), to: window.from };
+}
+
+function compareMetrics(current, baseline, options) {
+  const definitions = [
+    ["handoff.endToEnd", current.handoff.endToEnd, baseline.handoff.endToEnd],
+    ["memory.hitRate", current.memory.hitRate, baseline.memory.hitRate],
+  ];
+  return {
+    baselineWindow: baseline.window,
+    minSamples: options.minSamples,
+    dropThreshold: options.dropThreshold,
+    indicators: definitions.map(([metric, value, prior]) =>
+      compareRate(metric, value, prior, options)
+    ),
+  };
+}
+
+function compareRate(metric, current, baseline, options) {
+  const eligible =
+    current.denominator >= options.minSamples &&
+    baseline.denominator >= options.minSamples &&
+    current.value != null &&
+    baseline.value != null;
+  const delta = eligible ? current.value - baseline.value : null;
+  return {
+    metric,
+    state: !eligible ? "unknown" : delta <= -options.dropThreshold ? "regressed" : "stable",
+    delta,
+    current: {
+      value: current.value,
+      numerator: current.numerator,
+      denominator: current.denominator,
+    },
+    baseline: {
+      value: baseline.value,
+      numerator: baseline.numerator,
+      denominator: baseline.denominator,
     },
   };
 }
@@ -349,6 +407,11 @@ function ageSeconds(value, now) {
 function positiveNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function positiveRatio(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 && number <= 1 ? number : fallback;
 }
 
 function parseJson(value) {

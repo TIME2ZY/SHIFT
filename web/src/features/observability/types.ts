@@ -108,4 +108,16 @@ export interface ObservabilityMetrics {
     businessSuccessRate?: QualifiedRate | null;
     semantics: string;
   };
+  comparison: {
+    baselineWindow: { from: string; to: string };
+    minSamples: number;
+    dropThreshold: number;
+    indicators: Array<{
+      metric: "handoff.endToEnd" | "memory.hitRate";
+      state: "stable" | "regressed" | "unknown";
+      delta: number | null;
+      current: Pick<QualifiedRate, "value" | "numerator" | "denominator">;
+      baseline: Pick<QualifiedRate, "value" | "numerator" | "denominator">;
+    }>;
+  };
 }

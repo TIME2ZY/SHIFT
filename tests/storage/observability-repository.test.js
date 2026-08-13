@@ -214,3 +214,39 @@ test("memory observability reports hit rate without claiming strict Recall", () 
     storage.close();
   }
 });
+
+test("metrics compare equal windows and fail closed on small samples", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage);
+    for (let index = 0; index < 5; index += 1) {
+      storage.memoryEvents.record({
+        eventType: "memory_injected",
+        threadId: "thread-1",
+        createdAt: `2026-08-${index < 4 ? "01" : "02"}T0${index}:00:00.000Z`,
+        payload: { count: index < 4 ? 1 : 0, availability: { state: "available" } },
+      });
+    }
+    const metrics = storage.observability.metrics({
+      from: "2026-08-02T00:00:00.000Z",
+      to: "2026-08-03T00:00:00.000Z",
+      regressionMinSamples: 1,
+    });
+    const memory = metrics.comparison.indicators.find(
+      (indicator) => indicator.metric === "memory.hitRate"
+    );
+    assert.equal(metrics.comparison.baselineWindow.from, "2026-08-01T00:00:00.000Z");
+    assert.equal(memory.state, "regressed");
+    assert.equal(memory.current.denominator, 1);
+    assert.equal(memory.baseline.denominator, 4);
+    assert.equal(memory.delta, -1);
+    assert.equal(
+      storage.observability
+        .metrics({ from: "2026-08-02T00:00:00.000Z", to: "2026-08-03T00:00:00.000Z" })
+        .comparison.indicators.find((indicator) => indicator.metric === "memory.hitRate").state,
+      "unknown"
+    );
+  } finally {
+    storage.close();
+  }
+});

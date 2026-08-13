@@ -2475,6 +2475,26 @@ body {
   font-size: 11px;
 }
 
+.trace-trend {
+  display: flex;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-2);
+}
+.trace-trend span {
+  display: flex;
+  flex: 1;
+  justify-content: space-between;
+  color: var(--text-tertiary);
+  font: 10px/1.2 var(--font-mono);
+}
+.trace-trend span[data-state="regressed"] strong {
+  color: var(--danger);
+}
+.trace-trend span[data-state="stable"] strong {
+  color: var(--success);
+}
+
 .trace-ledger {
   display: grid;
   gap: 2px;
