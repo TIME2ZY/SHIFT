@@ -121,6 +121,8 @@ function createServerStorage(options = {}, logger = console) {
       endpoint: options.observabilityExportEndpoint,
       protocol: options.observabilityExportProtocol,
       intervalMs: options.observabilityExportIntervalMs,
+      requestTimeoutMs: options.observabilityExportTimeoutMs,
+      closeTimeoutMs: options.observabilityExportCloseTimeoutMs,
       fetch: options.observabilityExportFetch,
       logger,
       readHealth: () => storage.observability.health(),

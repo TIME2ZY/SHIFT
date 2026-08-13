@@ -10,6 +10,7 @@ const VERIFY_SCRIPTS = Object.freeze([
   "test",
   "typecheck:web",
   "test:web",
+  "test:web:e2e",
   "build:web",
 ]);
 
@@ -46,7 +47,9 @@ function main() {
       process.exit(1);
     }
     if (result.status !== 0) {
-      console.error(`verify-pr: ${scriptName} failed with exit code ${result.status ?? "unknown"}.`);
+      console.error(
+        `verify-pr: ${scriptName} failed with exit code ${result.status ?? "unknown"}.`
+      );
       process.exit(result.status ?? 1);
     }
   }

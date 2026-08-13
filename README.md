@@ -7,7 +7,7 @@
 ![Storage](https://img.shields.io/badge/Storage-SQLite-2563eb?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active%20development-c46a16?style=flat-square)
 
-[快速开始](#快速开始) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证) · [TODO](#todo--接下来计划)
+[快速开始](#快速开始) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证) · [能力状态](#能力状态)
 
 ## 项目定位
 
@@ -227,12 +227,16 @@ skills/         注入给 Agent 的协作与交接规则
 | `npm run test:web:e2e`  | Playwright 核心浏览器流程    |
 | `npm run build:web`     | 构建 React 前端到 `dist/web` |
 
-## TODO · 接下来计划
+`npm run verify:pr` 会运行上述静态检查、后端测试、Web 测试、浏览器 E2E 和生产构建；本地与
+GitHub PR 使用同一门禁。真实 Provider 的 `npm run test:live:observability` 保持手工发布验收，
+避免普通 PR 依赖外部凭据。
 
-下一阶段将围绕“更容易接入 Agent、更清晰地观察协作、更安全地交付代码”继续完善：
+## 能力状态
 
 - [x] Trace / 审计平台（durable Trace、Handoff、指标与脱敏导出）
 - [x] Phase 3 可运维化（浏览器验收、回归检测、本地告警、可选 exporter）
+
+下一产品阶段在进入实现前单独立项；本清单只描述已经交付并有回归门禁的能力。
 
 ---
 

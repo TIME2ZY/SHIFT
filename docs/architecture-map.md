@@ -310,6 +310,8 @@ Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Ag
 `observability-repository.metrics` 同时读取当前窗口与紧邻的等长前序窗口，按显式最小样本量和
 下降阈值派生 `stable | regressed | unknown`；不持久化聚合结果。health alerts 携带确定性的
 诊断标题和操作建议，Web 事故队列只读消费这些派生输出，不形成修复状态机。
+Handoff 全局窗口与 outcome evidence 窗口分别由 `handoffs_created_at` 和
+`evidence_imports_kind_created` 支撑；查询计划测试防止数据增长后退化为全表扫描。
 
 `trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
 Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
@@ -320,8 +322,8 @@ Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans �
 evidence ref 与 source hash；metrics 从该证据读取严格 Recall、used/correct 与业务结果合格分母。
 
 可选 `observability-exporter.js` 只从 health/metrics 读模型生成去标识化结构快照，默认关闭，支持
-OTLP HTTP JSON 与 Sentry envelope 传输。它不读取 Trace payload、不写 SQLite，失败仅通过独立
-exporter health 暴露，不影响 Trace、Invocation、Handoff 或业务成功率。
+SHIFT webhook JSON 与 Sentry envelope 传输。它不是标准 OTLP exporter，不读取 Trace payload、
+不写 SQLite，失败仅通过独立 exporter health 暴露，不影响 Trace、Invocation、Handoff 或业务成功率。
 
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口

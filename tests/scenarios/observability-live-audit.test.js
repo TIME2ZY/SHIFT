@@ -4,6 +4,7 @@ const {
   evaluateObservabilitySnapshot,
   compareRestartSnapshots,
   localizeFailure,
+  evaluatePhase3Release,
 } = require("../../scripts/live/lib/observability-audit");
 
 function healthySnapshot() {
@@ -45,6 +46,49 @@ test("live observability audit aligns SSE causality with durable terminal state"
   const report = evaluateObservabilitySnapshot(healthySnapshot());
   assert.equal(report.passed, true);
   assert.deepEqual(report.acceptedHandoffIds, ["h1"]);
+});
+
+test("phase three release gate requires trend alerts and redacted exporter delivery", () => {
+  const report = evaluatePhase3Release({
+    metrics: {
+      comparison: { indicators: [{ metric: "handoff.endToEnd" }, { metric: "memory.hitRate" }] },
+    },
+    health: {
+      observability: { alerts: [] },
+      observabilityExporter: { enabled: true, state: "idle" },
+    },
+    exportRequests: [
+      {
+        json: {
+          snapshot: {
+            schema: "shift-observability-snapshot-v1",
+            health: { state: "available" },
+            metrics: { handoffEndToEnd: { value: 1 } },
+          },
+        },
+      },
+    ],
+  });
+  assert.equal(report.passed, true);
+});
+
+test("phase three release gate rejects sensitive exporter fields", () => {
+  const report = evaluatePhase3Release({
+    metrics: { comparison: { indicators: [{}, {}] } },
+    health: {
+      observability: { alerts: [] },
+      observabilityExporter: { enabled: true },
+    },
+    exportRequests: [
+      {
+        json: {
+          snapshot: { schema: "shift-observability-snapshot-v1", prompt: "secret" },
+        },
+      },
+    ],
+  });
+  assert.equal(report.passed, false);
+  assert.ok(report.assertions.some((item) => item.id === "P3-EXPORT-REDACTED" && !item.ok));
 });
 
 test("failure localization prefers incomplete spans then handoff and invocation coordinates", () => {

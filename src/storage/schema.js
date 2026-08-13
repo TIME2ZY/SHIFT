@@ -1062,6 +1062,15 @@ const MIGRATIONS = Object.freeze([
       CREATE INDEX memory_outcome_judgments_thread ON memory_outcome_judgments(thread_id);
     `,
   },
+  {
+    version: 28,
+    name: "observability_window_indexes",
+    sql: `
+      CREATE INDEX handoffs_created_at ON handoffs(created_at);
+      CREATE INDEX evidence_imports_kind_created
+        ON observability_evidence_imports(kind, created_at);
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

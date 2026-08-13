@@ -165,6 +165,50 @@ function localizeFailure(trace = {}) {
   return null;
 }
 
+function evaluatePhase3Release(input = {}) {
+  const metrics = input.metrics?.metrics || input.metrics || null;
+  const health = input.health?.storage || input.health || null;
+  const exporter = health?.observabilityExporter || null;
+  const requests = Array.isArray(input.exportRequests) ? input.exportRequests : [];
+  const comparison = metrics?.comparison;
+  const snapshot = requests.at(-1)?.json?.snapshot || null;
+  const serialized = JSON.stringify(snapshot || {});
+  const assertions = [
+    assertion(
+      "P3-TREND-CONTRACT",
+      Array.isArray(comparison?.indicators) && comparison.indicators.length === 2,
+      comparison
+        ? `${comparison.indicators?.length || 0} comparison indicator(s)`
+        : "comparison missing"
+    ),
+    assertion(
+      "P3-ALERT-CONTRACT",
+      Array.isArray(health?.observability?.alerts),
+      health?.observability
+        ? `${health.observability.alerts?.length || 0} active alert(s)`
+        : "alerts missing"
+    ),
+    assertion(
+      "P3-EXPORTER-ENABLED",
+      exporter?.enabled === true,
+      exporter ? `state=${exporter.state}` : "exporter health missing"
+    ),
+    assertion(
+      "P3-EXPORT-DELIVERED",
+      requests.length > 0 && snapshot?.schema === "shift-observability-snapshot-v1",
+      `${requests.length} receiver request(s)`
+    ),
+    assertion(
+      "P3-EXPORT-REDACTED",
+      !/(traceId|threadId|invocationId|memoryId|prompt|response|query|toolOutput|environment)/i.test(
+        serialized
+      ),
+      "snapshot contains structural aggregates only"
+    ),
+  ];
+  return { passed: assertions.every((item) => item.ok), assertions };
+}
+
 function location(errorCode, failureStage, invocationId, coordinateId) {
   return {
     errorCode,
@@ -178,4 +222,9 @@ function assertion(id, ok, message) {
   return { id, ok: Boolean(ok), message };
 }
 
-module.exports = { evaluateObservabilitySnapshot, compareRestartSnapshots, localizeFailure };
+module.exports = {
+  evaluateObservabilitySnapshot,
+  compareRestartSnapshots,
+  localizeFailure,
+  evaluatePhase3Release,
+};

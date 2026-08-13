@@ -254,3 +254,35 @@ test("metrics compare equal windows and fail closed on small samples", () => {
     storage.close();
   }
 });
+
+test("observability window queries use dedicated time indexes", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    const handoffPlan = storage.db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT * FROM handoffs
+         WHERE created_at >= @from AND created_at < @to ORDER BY created_at, id`
+      )
+      .all({ from: "2026-08-01T00:00:00.000Z", to: "2026-08-02T00:00:00.000Z" })
+      .map((row) => row.detail)
+      .join(" ");
+    assert.match(handoffPlan, /USING INDEX handoffs_created_at/);
+
+    const evidencePlan = storage.db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT i.id FROM observability_evidence_imports i
+         WHERE i.kind = @kind AND i.created_at >= @from AND i.created_at < @to
+         ORDER BY i.created_at`
+      )
+      .all({
+        kind: "memory_outcome_judgment",
+        from: "2026-08-01T00:00:00.000Z",
+        to: "2026-08-02T00:00:00.000Z",
+      })
+      .map((row) => row.detail)
+      .join(" ");
+    assert.match(evidencePlan, /USING (?:COVERING )?INDEX evidence_imports_kind_created/);
+  } finally {
+    storage.close();
+  }
+});
