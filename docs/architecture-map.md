@@ -310,6 +310,8 @@ Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Ag
 `observability-repository.metrics` 同时读取当前窗口与紧邻的等长前序窗口，按显式最小样本量和
 下降阈值派生 `stable | regressed | unknown`；不持久化聚合结果。health alerts 携带确定性的
 诊断标题和操作建议，Web 事故队列只读消费这些派生输出，不形成修复状态机。
+Handoff 全局窗口与 outcome evidence 窗口分别由 `handoffs_created_at` 和
+`evidence_imports_kind_created` 支撑；查询计划测试防止数据增长后退化为全表扫描。
 
 `trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
 Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
