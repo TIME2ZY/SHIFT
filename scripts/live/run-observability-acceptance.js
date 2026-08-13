@@ -40,7 +40,7 @@ async function main() {
   try {
     receiver = await startObservabilityReceiver();
     process.env.SHIFT_OBSERVABILITY_EXPORT_ENDPOINT = receiver.endpoint;
-    process.env.SHIFT_OBSERVABILITY_EXPORT_PROTOCOL = "otlp-http";
+    process.env.SHIFT_OBSERVABILITY_EXPORT_PROTOCOL = "shift-webhook";
     harness = await startHarness(opts, { dumpDir });
     const project = await harness.api.openProject(resolveProjectDir(opts));
     const session = await harness.api.createSession(project.projectKey);

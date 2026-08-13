@@ -9,7 +9,7 @@ test("exporter is disabled by default and sends only structural aggregates", asy
   const disabled = createObservabilityExporter({ env: {} });
   assert.deepEqual(disabled.health(), {
     enabled: false,
-    protocol: "otlp-http",
+    protocol: "shift-webhook",
     state: "disabled",
     attempted: 0,
     succeeded: 0,
@@ -71,4 +71,50 @@ test("sentry-compatible export emits one envelope without identifiers", async ()
   assert.equal(result.state, "available");
   assert.equal(request.headers["content-type"], "application/x-sentry-envelope");
   assert.doesNotMatch(request.body, /traceId|threadId|invocationId/);
+});
+
+test("concurrent flushes share one bounded request", async () => {
+  let calls = 0;
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const exporter = createObservabilityExporter({
+    endpoint: "https://example.invalid/hook",
+    protocol: "shift-webhook",
+    env: {},
+    fetch: async () => {
+      calls += 1;
+      await pending;
+      return { ok: true, status: 202 };
+    },
+    readHealth: () => ({ state: "available", alerts: [] }),
+    readMetrics: () => ({}),
+  });
+  const first = exporter.flush();
+  const second = exporter.flush();
+  assert.equal(first, second);
+  release();
+  await first;
+  assert.equal(calls, 1);
+  assert.equal(exporter.health().attempted, 1);
+});
+
+test("request timeout degrades exporter and close remains bounded", async () => {
+  const exporter = createObservabilityExporter({
+    endpoint: "https://example.invalid/hook",
+    env: {},
+    requestTimeoutMs: 50,
+    closeTimeoutMs: 50,
+    fetch: async () => new Promise(() => {}),
+    readHealth: () => ({ state: "available", alerts: [] }),
+    readMetrics: () => ({}),
+    logger: { warn() {} },
+  });
+  const started = Date.now();
+  const result = await exporter.flush();
+  assert.equal(result.state, "degraded");
+  assert.match(result.lastError, /timeout/);
+  await exporter.close();
+  assert.ok(Date.now() - started < 500);
 });
