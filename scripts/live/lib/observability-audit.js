@@ -116,8 +116,66 @@ function compareRestartSnapshots(before, after) {
   return { passed: assertions.every((item) => item.ok), assertions };
 }
 
+function localizeFailure(trace = {}) {
+  const invocations = Array.isArray(trace.invocations) ? trace.invocations : [];
+  const handoffs = Array.isArray(trace.handoffs) ? trace.handoffs : [];
+  const spans = Array.isArray(trace.spans) ? trace.spans : [];
+  const incompleteSpan = spans.find((span) => span.complete === false);
+  if (incompleteSpan) {
+    return location(
+      "span_missing_end",
+      incompleteSpan.kind,
+      incompleteSpan.invocationId,
+      incompleteSpan.spanId
+    );
+  }
+  const handoff = handoffs.find(
+    (item) =>
+      item.routeStatus === "accepted" &&
+      (item.receiveStatus !== "started" || ["failed", "aborted"].includes(item.completeStatus))
+  );
+  if (handoff) {
+    const code =
+      handoff.outcome?.errorCode ||
+      (handoff.receiveStatus !== "started" ? "handoff_not_started" : "handoff_target_failed");
+    return location(
+      code,
+      "handoff",
+      handoff.targetInvocationId || handoff.sourceInvocationId,
+      handoff.handoffId
+    );
+  }
+  const invocation = [...invocations].reverse().find((item) => item.state !== "completed");
+  if (invocation) {
+    return location(
+      invocation.outcome?.errorCode || `invocation_${invocation.state}`,
+      invocation.outcome?.failureStage || "invocation",
+      invocation.invocationId,
+      trace.traceId
+    );
+  }
+  if (trace.state && trace.state !== "completed") {
+    return location(
+      trace.outcome?.errorCode || `trace_${trace.state}`,
+      trace.outcome?.failureStage || "request",
+      trace.rootInvocationId || null,
+      trace.traceId
+    );
+  }
+  return null;
+}
+
+function location(errorCode, failureStage, invocationId, coordinateId) {
+  return {
+    errorCode,
+    failureStage,
+    invocationId: invocationId || null,
+    coordinateId: coordinateId || null,
+  };
+}
+
 function assertion(id, ok, message) {
   return { id, ok: Boolean(ok), message };
 }
 
-module.exports = { evaluateObservabilitySnapshot, compareRestartSnapshots };
+module.exports = { evaluateObservabilitySnapshot, compareRestartSnapshots, localizeFailure };

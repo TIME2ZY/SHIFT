@@ -5,6 +5,7 @@ interface MockState {
   chatCompleted: boolean;
   chatBody: Record<string, unknown> | null;
   worktreeAttached: boolean;
+  traceQueries: string[];
 }
 
 type ChatMode = "success" | "error" | "slow";
@@ -15,6 +16,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     chatCompleted: false,
     chatBody: null,
     worktreeAttached: false,
+    traceQueries: [],
   };
 
   await page.route("**/favicon.svg", async (route) => {
@@ -142,6 +144,139 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
                 },
               ]
             : [],
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/storage/observability/metrics" && method === "GET") {
+      const rate = {
+        value: 0.5,
+        numerator: 1,
+        denominator: 2,
+        pending: 0,
+        censored: 0,
+        unknown: 1,
+        excluded: 0,
+      };
+      await route.fulfill({
+        json: {
+          metrics: {
+            window: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
+            handoff: { scheduling: rate, execution: rate, endToEnd: rate },
+            memory: { hitRate: rate, strictRecallAtK: null, semantics: "hit rate" },
+            comparison: {
+              baselineWindow: {
+                from: "2026-08-11T00:00:00.000Z",
+                to: "2026-08-12T00:00:00.000Z",
+              },
+              minSamples: 5,
+              dropThreshold: 0.1,
+              indicators: [
+                {
+                  metric: "handoff.endToEnd",
+                  state: "unknown",
+                  delta: null,
+                  current: { value: 0.5, numerator: 1, denominator: 2 },
+                  baseline: { value: null, numerator: 0, denominator: 0 },
+                },
+                {
+                  metric: "memory.hitRate",
+                  state: "unknown",
+                  delta: null,
+                  current: { value: 0.5, numerator: 1, denominator: 2 },
+                  baseline: { value: null, numerator: 0, denominator: 0 },
+                },
+              ],
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/sessions/session-1/traces" && method === "GET") {
+      state.traceQueries.push(url.search);
+      const failed = {
+        traceId: "trace-failed",
+        threadId: "session-1",
+        clientTurnId: "turn-2",
+        requestAttempt: 2,
+        state: "failed",
+        startedAt: "2026-08-13T00:00:00.000Z",
+        endedAt: "2026-08-13T00:00:03.000Z",
+        rootInvocationId: "inv-failed",
+        outcome: {
+          terminalReason: "request-error",
+          failureStage: "provider_run",
+          errorCode: "provider_exit_7",
+          retryable: false,
+        },
+        invocationCounts: { total: 1, failed: 1 },
+        handoffCounts: { total: 0, accepted: 0, failed: 0 },
+        invocations: [
+          {
+            invocationId: "inv-failed",
+            traceId: "trace-failed",
+            agentId: "gemini",
+            state: "failed",
+            parentInvocationId: null,
+            triggerMessageId: null,
+            triggerType: "user-message",
+            startedAt: "2026-08-13T00:00:00.000Z",
+            endedAt: "2026-08-13T00:00:03.000Z",
+            exitCode: 7,
+            signal: null,
+            outcome: {
+              terminalReason: "provider-failed",
+              failureStage: "provider_run",
+              errorCode: "provider_exit_7",
+              retryable: false,
+            },
+          },
+        ],
+        handoffs: [],
+      };
+      const traces = url.searchParams.get("failuresOnly") === "1" ? [failed] : [failed];
+      await route.fulfill({
+        json: { traces, page: { total: traces.length, limit: 100, offset: 0 } },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/sessions/session-1/traces/trace-failed" && method === "GET") {
+      await route.fulfill({
+        json: {
+          trace: {
+            traceId: "trace-failed",
+            threadId: "session-1",
+            spans: [
+              {
+                spanId: "generation-inv-failed",
+                invocationId: "inv-failed",
+                parentSpanId: null,
+                kind: "generation",
+                name: "Gemini generation",
+                state: "failed",
+                complete: true,
+                startedAt: "2026-08-13T00:00:00.000Z",
+                endedAt: "2026-08-13T00:00:03.000Z",
+                attributes: { agentId: "gemini" },
+              },
+            ],
+            links: [],
+          },
+        },
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/sessions/session-1/traces/trace-failed/export" && method === "GET") {
+      await route.fulfill({
+        json: {
+          format: "shift-trace-export",
+          capturePolicy: "structural-metadata-v1",
+          trace: { traceId: "trace-failed", errorCode: "provider_exit_7" },
         },
       });
       return;
@@ -295,7 +430,7 @@ test("surfaces a streamed provider failure as a toast and failed run", async ({ 
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.locator(".react-toast").getByText("Provider unavailable")).toBeVisible();
-  await expect(page.getByText("运行失败", { exact: true })).toBeVisible();
+  await expect(page.locator(".react-run-status")).toHaveText("运行失败");
 });
 
 test("stops a connecting run and confirms the cancellation", async ({ page }) => {
@@ -324,9 +459,9 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
     .getByRole("button", { name: "关闭会话列表" })
     .click();
 
-  await page.getByRole("button", { name: "Agent 与记忆" }).click();
+  await page.getByRole("button", { name: "会话信息" }).click();
   await expect(page.getByRole("dialog", { name: "对话信息" })).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("tab")).toHaveCount(3);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "对话信息" })).toBeHidden();
   await expect(page.locator(".react-info-panel-button")).toBeFocused();
@@ -338,4 +473,31 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
   }));
   expect(viewport.scrollWidth).toBe(viewport.clientWidth);
   expect(viewport.chatHeight).toBeGreaterThan(700);
+});
+
+test("locates a durable failure after refresh and exports structural metadata", async ({
+  page,
+}) => {
+  const state = await mockShiftApi(page);
+  await page.goto("./");
+
+  await page.getByRole("tab", { name: "追踪" }).click();
+  const tracePanel = page.getByRole("tabpanel", { name: "追踪" });
+  await expect(tracePanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(tracePanel.getByText("Gemini generation")).toBeVisible();
+  await tracePanel.getByRole("button", { name: "只看断点" }).click();
+  await expect
+    .poll(() => state.traceQueries.some((query) => query.includes("failuresOnly=1")))
+    .toBe(true);
+
+  const download = page.waitForEvent("download");
+  await tracePanel.getByRole("button", { name: "导出" }).click();
+  const artifact = await download;
+  expect(artifact.suggestedFilename()).toBe("trace-failed.json");
+
+  await page.reload();
+  await page.getByRole("tab", { name: "追踪" }).click();
+  const restoredPanel = page.getByRole("tabpanel", { name: "追踪" });
+  await expect(restoredPanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(restoredPanel.getByText("Gemini generation")).toBeVisible();
 });

@@ -3,6 +3,7 @@ const test = require("node:test");
 const {
   evaluateObservabilitySnapshot,
   compareRestartSnapshots,
+  localizeFailure,
 } = require("../../scripts/live/lib/observability-audit");
 
 function healthySnapshot() {
@@ -44,6 +45,43 @@ test("live observability audit aligns SSE causality with durable terminal state"
   const report = evaluateObservabilitySnapshot(healthySnapshot());
   assert.equal(report.passed, true);
   assert.deepEqual(report.acceptedHandoffIds, ["h1"]);
+});
+
+test("failure localization prefers incomplete spans then handoff and invocation coordinates", () => {
+  assert.deepEqual(
+    localizeFailure({
+      traceId: "trace-1",
+      state: "failed",
+      invocations: [{ invocationId: "inv-1", state: "failed", outcome: { errorCode: "exit_7" } }],
+      handoffs: [],
+      spans: [{ spanId: "tool-1", invocationId: "inv-1", kind: "tool", complete: false }],
+    }),
+    {
+      errorCode: "span_missing_end",
+      failureStage: "tool",
+      invocationId: "inv-1",
+      coordinateId: "tool-1",
+    }
+  );
+  assert.equal(
+    localizeFailure({
+      traceId: "trace-2",
+      state: "failed",
+      invocations: [],
+      handoffs: [
+        {
+          handoffId: "handoff-1",
+          sourceInvocationId: "source-1",
+          targetInvocationId: null,
+          routeStatus: "accepted",
+          receiveStatus: "not_started",
+          completeStatus: "failed",
+          outcome: {},
+        },
+      ],
+    }).errorCode,
+    "handoff_not_started"
+  );
 });
 
 test("live observability audit fails active traces and incomplete handoffs", () => {

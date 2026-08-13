@@ -8,6 +8,7 @@ const { createOutboxFlusher } = require("./outbox-flusher");
 const { createStorage } = require("./index");
 const { createEmbeddingRuntime } = require("./embedding-runtime");
 const { createSqliteSessionService } = require("./sqlite-session-service");
+const { createObservabilityExporter } = require("./observability-exporter");
 
 function createServerStorage(options = {}, logger = console) {
   const mode = options.storageMode || process.env[ENV.STORAGE_MODE] || "sqlite";
@@ -113,6 +114,19 @@ function createServerStorage(options = {}, logger = console) {
       autoStart: options.embeddingAutoStart !== false,
       intervalMs: options.embeddingIntervalMs,
     });
+  const observabilityExporter =
+    options.observabilityExporter ||
+    createObservabilityExporter({
+      env: options.env || process.env,
+      endpoint: options.observabilityExportEndpoint,
+      protocol: options.observabilityExportProtocol,
+      intervalMs: options.observabilityExportIntervalMs,
+      fetch: options.observabilityExportFetch,
+      logger,
+      readHealth: () => storage.observability.health(),
+      readMetrics: () => storage.observability.metrics(),
+    });
+  observabilityExporter.start();
 
   return {
     mode,
@@ -123,6 +137,7 @@ function createServerStorage(options = {}, logger = console) {
     eventStore,
     outboxFlusher,
     embeddingRuntime,
+    observabilityExporter,
     outboxHealth: () => {
       const health = storage?.outbox?.health?.() || { state: "unavailable", pending: 0 };
       if (!auditTranscript && health.pending === 0) {
@@ -136,9 +151,9 @@ function createServerStorage(options = {}, logger = console) {
       return health;
     },
     observabilityHealth: (options) => storage?.observability?.health?.(options) || null,
+    observabilityExporterHealth: () => observabilityExporter.health(),
     observabilityMetrics: (options) => storage?.observability?.metrics?.(options) || null,
     importObservabilityEvidence: (input) => storage?.observabilityEvidence?.import?.(input) || null,
-    inspectTrace: (traceId) => storage?.observability?.inspectTrace?.(traceId) || null,
     cleanupDeliveredOutbox(options) {
       if (!storage?.outbox?.cleanupDelivered) {
         return { available: false, deleted: 0 };
@@ -177,6 +192,11 @@ function createServerStorage(options = {}, logger = console) {
      * stores → checkpoint → close DB. Prefer awaiting the returned Promise.
      */
     async close() {
+      try {
+        await observabilityExporter.close();
+      } catch (error) {
+        logger.error?.(`[sqlite-storage] observability exporter close failed: ${error.message}`);
+      }
       try {
         await embeddingRuntime.close();
       } catch (error) {

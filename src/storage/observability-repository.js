@@ -85,30 +85,38 @@ function createObservabilityRepository(db, dependencies = {}) {
       const outboxPendingAge = ageSeconds(oldestPending, now);
       const alerts = [];
       if (authoritativeViolations > 0) {
-        alerts.push({
-          code: "authoritative_completeness_violation",
-          severity: "error",
-          count: authoritativeViolations,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "authoritative_completeness_violation",
+            severity: "error",
+            count: authoritativeViolations,
+          })
+        );
       }
       if (telemetry.unresolvedFailures > 0) {
-        alerts.push({
-          code: "telemetry_write_failure",
-          severity: "warning",
-          count: telemetry.unresolvedFailures,
-          lastOccurredAt: telemetry.lastFailureAt,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "telemetry_write_failure",
+            severity: "warning",
+            count: telemetry.unresolvedFailures,
+            lastOccurredAt: telemetry.lastFailureAt,
+          })
+        );
       }
       if (spanMissingEnd > 0) {
-        alerts.push({ code: "span_missing_end", severity: "warning", count: spanMissingEnd });
+        alerts.push(
+          diagnosticAlert({ code: "span_missing_end", severity: "warning", count: spanMissingEnd })
+        );
       }
       if (outboxPendingAge != null && outboxPendingAge > outboxPendingAlertSeconds) {
-        alerts.push({
-          code: "outbox_pending_age",
-          severity: "warning",
-          value: outboxPendingAge,
-          threshold: outboxPendingAlertSeconds,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "outbox_pending_age",
+            severity: "warning",
+            value: outboxPendingAge,
+            threshold: outboxPendingAlertSeconds,
+          })
+        );
       }
       return {
         state: alerts.length > 0 ? "degraded" : "available",
@@ -141,34 +149,119 @@ function createObservabilityRepository(db, dependencies = {}) {
 
     metrics(options = {}) {
       const window = metricWindow(options);
-      const handoffs = db
-        .prepare(
-          `
+      const current = metricsForWindow(db, dependencies, window);
+      const baselineWindow = previousWindow(window);
+      const baseline = metricsForWindow(db, dependencies, baselineWindow);
+      return {
+        ...current,
+        comparison: compareMetrics(current, baseline, {
+          minSamples: positiveNumber(options.regressionMinSamples, 5),
+          dropThreshold: positiveRatio(options.regressionDropThreshold, 0.1),
+        }),
+      };
+    },
+  };
+}
+
+const ALERT_DIAGNOSTICS = Object.freeze({
+  authoritative_completeness_violation: {
+    title: "权威执行链不完整",
+    action: "打开失败 Trace，核对 Invocation 终态、Handoff target 与 invocation-end。",
+  },
+  telemetry_write_failure: {
+    title: "Memory 遥测写入失败",
+    action: "检查 telemetry 最后错误；业务事实仍有效，但相关 Memory 指标不完整。",
+  },
+  span_missing_end: {
+    title: "执行区段缺少结束事件",
+    action: "按 Trace 的 incomplete span 定位 tool 或 generation，并核对 Provider 终止路径。",
+  },
+  outbox_pending_age: {
+    title: "审计 Outbox 积压",
+    action: "检查审计 sink 与 outbox flusher；不得删除仍为 pending 的事件。",
+  },
+});
+
+function diagnosticAlert(alert) {
+  const diagnostic = ALERT_DIAGNOSTICS[alert.code] || {
+    title: alert.code,
+    action: "按告警代码检查对应的持久化事实。",
+  };
+  return { ...alert, diagnostic };
+}
+
+function metricsForWindow(db, dependencies, window) {
+  const handoffs = db
+    .prepare(
+      `
           SELECT * FROM handoffs
           WHERE created_at >= @from AND created_at < @to
           ORDER BY created_at, id
         `
-        )
-        .all(window);
-      const memoryEvents = db
-        .prepare(
-          `
+    )
+    .all(window);
+  const memoryEvents = db
+    .prepare(
+      `
           SELECT payload_json FROM memory_events
           WHERE event_type = 'memory_injected' AND created_at >= @from AND created_at < @to
           ORDER BY id
         `
-        )
-        .all(window);
-      return {
-        window,
-        handoff: handoffMetrics(handoffs),
-        memory: memoryHitMetrics(
-          memoryEvents,
-          telemetryHealth(db, window),
-          dependencies.evidence?.latestRecallEval?.() || null,
-          dependencies.evidence?.judgmentMetrics?.(window) || null
-        ),
-      };
+    )
+    .all(window);
+  return {
+    window,
+    handoff: handoffMetrics(handoffs),
+    memory: memoryHitMetrics(
+      memoryEvents,
+      telemetryHealth(db, window),
+      dependencies.evidence?.latestRecallEval?.() || null,
+      dependencies.evidence?.judgmentMetrics?.(window) || null
+    ),
+  };
+}
+
+function previousWindow(window) {
+  const from = new Date(window.from);
+  const duration = new Date(window.to).getTime() - from.getTime();
+  return { from: new Date(from.getTime() - duration).toISOString(), to: window.from };
+}
+
+function compareMetrics(current, baseline, options) {
+  const definitions = [
+    ["handoff.endToEnd", current.handoff.endToEnd, baseline.handoff.endToEnd],
+    ["memory.hitRate", current.memory.hitRate, baseline.memory.hitRate],
+  ];
+  return {
+    baselineWindow: baseline.window,
+    minSamples: options.minSamples,
+    dropThreshold: options.dropThreshold,
+    indicators: definitions.map(([metric, value, prior]) =>
+      compareRate(metric, value, prior, options)
+    ),
+  };
+}
+
+function compareRate(metric, current, baseline, options) {
+  const eligible =
+    current.denominator >= options.minSamples &&
+    baseline.denominator >= options.minSamples &&
+    current.value != null &&
+    baseline.value != null;
+  const delta = eligible ? current.value - baseline.value : null;
+  return {
+    metric,
+    state: !eligible ? "unknown" : delta <= -options.dropThreshold ? "regressed" : "stable",
+    delta,
+    current: {
+      value: current.value,
+      numerator: current.numerator,
+      denominator: current.denominator,
+    },
+    baseline: {
+      value: baseline.value,
+      numerator: baseline.numerator,
+      denominator: baseline.denominator,
     },
   };
 }
@@ -349,6 +442,11 @@ function ageSeconds(value, now) {
 function positiveNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function positiveRatio(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 && number <= 1 ? number : fallback;
 }
 
 function parseJson(value) {

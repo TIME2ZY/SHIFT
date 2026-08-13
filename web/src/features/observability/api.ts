@@ -1,5 +1,10 @@
 import { apiRequest } from "../../shared/api/client";
-import type { ObservabilityMetrics, TraceSearchFilters, TraceSearchResult } from "./types";
+import type {
+  ObservabilityHealth,
+  ObservabilityMetrics,
+  TraceSearchFilters,
+  TraceSearchResult,
+} from "./types";
 
 export async function listSessionTraces(
   sessionId: string,
@@ -44,4 +49,12 @@ export async function getObservabilityMetrics(signal?: AbortSignal) {
     { signal }
   );
   return response.metrics;
+}
+
+export async function getObservabilityHealth(signal?: AbortSignal) {
+  const response = await apiRequest<{ storage: { observability: ObservabilityHealth } }>(
+    "/api/storage/health",
+    { signal }
+  );
+  return response.storage.observability;
 }

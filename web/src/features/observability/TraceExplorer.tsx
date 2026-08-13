@@ -4,6 +4,7 @@ import type { TraceSummary } from "./types";
 import type { QualifiedRate } from "./types";
 import {
   useObservabilityMetricsQuery,
+  useObservabilityHealthQuery,
   useSessionTracesQuery,
   useTraceDetailQuery,
 } from "./queries";
@@ -44,6 +45,7 @@ export function TraceExplorer({
   sessionId?: string | null;
 }) {
   const metrics = useObservabilityMetricsQuery();
+  const health = useObservabilityHealthQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<TraceSummary["state"] | "">("");
@@ -69,6 +71,27 @@ export function TraceExplorer({
 
   return (
     <div className="trace-explorer">
+      {health.data?.alerts.length ? (
+        <section className="trace-alert-center" aria-label="本地告警">
+          <header>
+            <strong>事故队列</strong>
+            <span>{health.data.alerts.length} 个需定位</span>
+          </header>
+          <ol>
+            {health.data.alerts.map((alert) => (
+              <li data-severity={alert.severity} key={alert.code}>
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{alert.diagnostic.title}</strong>
+                  <p>{alert.diagnostic.action}</p>
+                  <code>{alert.code}</code>
+                </div>
+                <b>{alert.count ?? alert.value ?? "!"}</b>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       <section className="trace-metrics" aria-label="近 24 小时协作指标">
         <header>
           <span>近 24 小时</span>
@@ -76,34 +99,50 @@ export function TraceExplorer({
         </header>
         {metrics.error ? <p className="react-panel-error">指标暂不可用。</p> : null}
         {metrics.data ? (
-          <dl>
-            <Rate label="Handoff 调度" rate={metrics.data.handoff.scheduling} />
-            <Rate label="Handoff 执行" rate={metrics.data.handoff.execution} />
-            <Rate label="Handoff 端到端" rate={metrics.data.handoff.endToEnd} />
-            <Rate label="Memory 命中率" rate={metrics.data.memory.hitRate} />
-            <div className="trace-metric trace-metric-unavailable">
-              <dt>严格 Recall@K</dt>
-              <dd>
-                {metrics.data.memory.strictRecallAtK
-                  ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
-                  : "需标注集"}
-              </dd>
-              <small>
-                {metrics.data.memory.strictRecallAtK
-                  ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
-                  : "命中率不等同于相关性召回率"}
-              </small>
-            </div>
-            {metrics.data.memory.usedRate ? (
-              <Rate label="Memory 使用率" rate={metrics.data.memory.usedRate} />
+          <>
+            <dl>
+              <Rate label="Handoff 调度" rate={metrics.data.handoff.scheduling} />
+              <Rate label="Handoff 执行" rate={metrics.data.handoff.execution} />
+              <Rate label="Handoff 端到端" rate={metrics.data.handoff.endToEnd} />
+              <Rate label="Memory 命中率" rate={metrics.data.memory.hitRate} />
+              <div className="trace-metric trace-metric-unavailable">
+                <dt>严格 Recall@K</dt>
+                <dd>
+                  {metrics.data.memory.strictRecallAtK
+                    ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
+                    : "需标注集"}
+                </dd>
+                <small>
+                  {metrics.data.memory.strictRecallAtK
+                    ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
+                    : "命中率不等同于相关性召回率"}
+                </small>
+              </div>
+              {metrics.data.memory.usedRate ? (
+                <Rate label="Memory 使用率" rate={metrics.data.memory.usedRate} />
+              ) : null}
+              {metrics.data.memory.correctRate ? (
+                <Rate label="Memory 正确率" rate={metrics.data.memory.correctRate} />
+              ) : null}
+              {metrics.data.memory.businessSuccessRate ? (
+                <Rate label="业务成功率" rate={metrics.data.memory.businessSuccessRate} />
+              ) : null}
+            </dl>
+            {metrics.data.comparison?.indicators?.length ? (
+              <div className="trace-trend" aria-label="与前一窗口对比">
+                {metrics.data.comparison.indicators.map((indicator) => (
+                  <span data-state={indicator.state} key={indicator.metric}>
+                    {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory"}
+                    <strong>
+                      {indicator.state === "unknown"
+                        ? "样本不足"
+                        : `${indicator.delta! >= 0 ? "+" : ""}${Math.round(indicator.delta! * 100)}pp`}
+                    </strong>
+                  </span>
+                ))}
+              </div>
             ) : null}
-            {metrics.data.memory.correctRate ? (
-              <Rate label="Memory 正确率" rate={metrics.data.memory.correctRate} />
-            ) : null}
-            {metrics.data.memory.businessSuccessRate ? (
-              <Rate label="业务成功率" rate={metrics.data.memory.businessSuccessRate} />
-            ) : null}
-          </dl>
+          </>
         ) : null}
       </section>
       <div className="trace-controls" aria-label="筛选 Trace">

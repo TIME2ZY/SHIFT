@@ -108,6 +108,10 @@ test("observability health alerts when pending outbox exceeds threshold", () => 
     });
     const health = storage.observability.health({ now: "2026-08-01T00:10:00.000Z" });
     assert.ok(health.alerts.some((alert) => alert.code === "outbox_pending_age"));
+    assert.match(
+      health.alerts.find((alert) => alert.code === "outbox_pending_age").diagnostic.action,
+      /outbox flusher/
+    );
     assert.equal(health.state, "degraded");
   } finally {
     storage.close();
@@ -210,6 +214,42 @@ test("memory observability reports hit rate without claiming strict Recall", () 
     assert.equal(metrics.memory.usedRate, null);
     assert.equal(metrics.memory.correctRate, null);
     assert.equal(metrics.memory.completeness, "best_effort");
+  } finally {
+    storage.close();
+  }
+});
+
+test("metrics compare equal windows and fail closed on small samples", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage);
+    for (let index = 0; index < 5; index += 1) {
+      storage.memoryEvents.record({
+        eventType: "memory_injected",
+        threadId: "thread-1",
+        createdAt: `2026-08-${index < 4 ? "01" : "02"}T0${index}:00:00.000Z`,
+        payload: { count: index < 4 ? 1 : 0, availability: { state: "available" } },
+      });
+    }
+    const metrics = storage.observability.metrics({
+      from: "2026-08-02T00:00:00.000Z",
+      to: "2026-08-03T00:00:00.000Z",
+      regressionMinSamples: 1,
+    });
+    const memory = metrics.comparison.indicators.find(
+      (indicator) => indicator.metric === "memory.hitRate"
+    );
+    assert.equal(metrics.comparison.baselineWindow.from, "2026-08-01T00:00:00.000Z");
+    assert.equal(memory.state, "regressed");
+    assert.equal(memory.current.denominator, 1);
+    assert.equal(memory.baseline.denominator, 4);
+    assert.equal(memory.delta, -1);
+    assert.equal(
+      storage.observability
+        .metrics({ from: "2026-08-02T00:00:00.000Z", to: "2026-08-03T00:00:00.000Z" })
+        .comparison.indicators.find((indicator) => indicator.metric === "memory.hitRate").state,
+      "unknown"
+    );
   } finally {
     storage.close();
   }

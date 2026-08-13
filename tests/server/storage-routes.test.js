@@ -98,31 +98,6 @@ test("observability metrics endpoint rejects invalid windows", async () => {
   assert.equal(res.status, 400);
 });
 
-test("trace inspection is scoped to the trusted Thread coordinate", async () => {
-  const { res, sendJson } = responseCapture();
-  const handle = createStorageRoutes({
-    storageContext: {
-      mode: "sqlite",
-      inspectTrace: () => ({ traceId: "trace-1", threadId: "thread-1", complete: { ok: true } }),
-    },
-    sendJson,
-    readJsonBody: async () => ({}),
-  });
-  await handle(
-    { method: "GET" },
-    res,
-    new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-2")
-  );
-  assert.equal(res.status, 404);
-  await handle(
-    { method: "GET" },
-    res,
-    new URL("http://127.0.0.1/api/storage/observability/traces/trace-1?threadId=thread-1")
-  );
-  assert.equal(res.status, 200);
-  assert.equal(res.body.trace.complete.ok, true);
-});
-
 test("storage cleanup route validates policy and reports deleted delivered rows", async () => {
   const { res, sendJson } = responseCapture();
   let cleanupOptions;

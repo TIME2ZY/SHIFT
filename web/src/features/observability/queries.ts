@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../../shared/api/queryKeys";
-import { getObservabilityMetrics, inspectSessionTrace, listSessionTraces } from "./api";
+import {
+  getObservabilityHealth,
+  getObservabilityMetrics,
+  inspectSessionTrace,
+  listSessionTraces,
+} from "./api";
 import type { TraceSearchFilters } from "./types";
 
 export function useSessionTracesQuery(sessionId: string | null, filters: TraceSearchFilters = {}) {
@@ -16,6 +21,15 @@ export function useObservabilityMetricsQuery(enabled = true) {
     queryKey: queryKeys.observability.metrics,
     queryFn: ({ signal }) => getObservabilityMetrics(signal),
     enabled,
+  });
+}
+
+export function useObservabilityHealthQuery(enabled = true) {
+  return useQuery({
+    queryKey: ["observability", "health"],
+    queryFn: ({ signal }) => getObservabilityHealth(signal),
+    enabled,
+    refetchInterval: 30_000,
   });
 }
 

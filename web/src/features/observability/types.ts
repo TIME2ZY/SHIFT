@@ -108,4 +108,31 @@ export interface ObservabilityMetrics {
     businessSuccessRate?: QualifiedRate | null;
     semantics: string;
   };
+  comparison: {
+    baselineWindow: { from: string; to: string };
+    minSamples: number;
+    dropThreshold: number;
+    indicators: Array<{
+      metric: "handoff.endToEnd" | "memory.hitRate";
+      state: "stable" | "regressed" | "unknown";
+      delta: number | null;
+      current: Pick<QualifiedRate, "value" | "numerator" | "denominator">;
+      baseline: Pick<QualifiedRate, "value" | "numerator" | "denominator">;
+    }>;
+  };
+}
+
+export interface ObservabilityHealth {
+  state: "available" | "degraded" | "unavailable";
+  authoritativeViolations: number | null;
+  alerts: Array<{
+    code: string;
+    severity: "error" | "warning";
+    count?: number;
+    value?: number;
+    threshold?: number;
+    lastOccurredAt?: string | null;
+    diagnostic: { title: string; action: string };
+  }>;
+  checks: Record<string, number | null> | null;
 }

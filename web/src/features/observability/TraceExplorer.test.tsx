@@ -21,57 +21,107 @@ describe("TraceExplorer", () => {
   it("shows agent routes and switches to a failed breakpoint", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            metrics: {
-              window: { from: base.startedAt, to: base.endedAt },
-              handoff: {
-                scheduling: {
-                  value: 0.5,
-                  numerator: 1,
-                  denominator: 2,
-                  pending: 1,
-                  censored: 0,
-                  unknown: 0,
-                  excluded: 0,
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/api/storage/health")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                storage: {
+                  observability: {
+                    state: "degraded",
+                    authoritativeViolations: 0,
+                    checks: {},
+                    alerts: [
+                      {
+                        code: "span_missing_end",
+                        severity: "warning",
+                        count: 1,
+                        diagnostic: {
+                          title: "执行区段缺少结束事件",
+                          action: "按 Trace 的 incomplete span 定位 tool 或 generation。",
+                        },
+                      },
+                    ],
+                  },
                 },
-                execution: {
-                  value: 1,
-                  numerator: 2,
-                  denominator: 2,
-                  pending: 1,
-                  censored: 0,
-                  unknown: 0,
-                  excluded: 0,
+              })
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              metrics: {
+                window: { from: base.startedAt, to: base.endedAt },
+                handoff: {
+                  scheduling: {
+                    value: 0.5,
+                    numerator: 1,
+                    denominator: 2,
+                    pending: 1,
+                    censored: 0,
+                    unknown: 0,
+                    excluded: 0,
+                  },
+                  execution: {
+                    value: 1,
+                    numerator: 2,
+                    denominator: 2,
+                    pending: 1,
+                    censored: 0,
+                    unknown: 0,
+                    excluded: 0,
+                  },
+                  endToEnd: {
+                    value: 0.5,
+                    numerator: 1,
+                    denominator: 2,
+                    pending: 1,
+                    censored: 0,
+                    unknown: 0,
+                    excluded: 0,
+                  },
                 },
-                endToEnd: {
-                  value: 0.5,
-                  numerator: 1,
-                  denominator: 2,
-                  pending: 1,
-                  censored: 0,
-                  unknown: 0,
-                  excluded: 0,
+                memory: {
+                  hitRate: {
+                    value: 0.5,
+                    numerator: 1,
+                    denominator: 2,
+                    pending: 0,
+                    censored: 0,
+                    unknown: 1,
+                    excluded: 0,
+                  },
+                  strictRecallAtK: null,
+                  semantics: "hit rate",
+                },
+                comparison: {
+                  baselineWindow: { from: base.startedAt, to: base.endedAt },
+                  minSamples: 5,
+                  dropThreshold: 0.1,
+                  indicators: [
+                    {
+                      metric: "handoff.endToEnd",
+                      state: "regressed",
+                      delta: -0.25,
+                      current: { value: 0.5, numerator: 1, denominator: 2 },
+                      baseline: { value: 0.75, numerator: 3, denominator: 4 },
+                    },
+                    {
+                      metric: "memory.hitRate",
+                      state: "unknown",
+                      delta: null,
+                      current: { value: 0.5, numerator: 1, denominator: 2 },
+                      baseline: { value: null, numerator: 0, denominator: 0 },
+                    },
+                  ],
                 },
               },
-              memory: {
-                hitRate: {
-                  value: 0.5,
-                  numerator: 1,
-                  denominator: 2,
-                  pending: 0,
-                  censored: 0,
-                  unknown: 1,
-                  excluded: 0,
-                },
-                strictRecallAtK: null,
-                semantics: "hit rate",
-              },
-            },
-          })
-        )
-      )
+            })
+          )
+        );
+      })
     );
     const traces: TraceSummary[] = [
       {
@@ -153,7 +203,11 @@ describe("TraceExplorer", () => {
       </QueryClientProvider>
     );
     expect(await screen.findByText("Handoff 调度")).toBeInTheDocument();
+    expect(await screen.findByText("事故队列")).toBeInTheDocument();
+    expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
     expect(screen.getByText("需标注集")).toBeInTheDocument();
+    expect(screen.getByText("-25pp")).toBeInTheDocument();
+    expect(screen.getByText("样本不足")).toBeInTheDocument();
     expect(screen.getAllByText(/1\/2 · pending 1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Codex")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));

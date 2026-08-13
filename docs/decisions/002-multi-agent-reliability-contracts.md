@@ -16,7 +16,7 @@ related:
 
 ## 1. 状态
 
-**Accepted — Phase 0A contracts; Phase 0B runtime wiring pending**
+**Accepted — Phase 0–3 implemented**
 
 本 ADR 冻结 Trace、Invocation、Handoff、指标资格和 Memory 漏斗的命名与边界。现有
 Invocation durable finish、Handoff 进程内幂等和 Memory funnel 已部分实现；本次 0A 只修改
@@ -328,6 +328,17 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   只有在 `used=true` 时允许判定，business outcome 只接受 `success | failure | unknown`。
 - strict Recall 指标读取最近一次 labeled eval；used/correct/business outcome 只以合格 judgment 为
   分母，并暴露分子、分母及 unknown。不得从 Invocation/Handoff completed 自动推断。
+
+### 8.6 Phase 3 可运维化
+
+- Phase 3A 以真实浏览器验收 Trace 搜索、断点定位、派生 Span、刷新恢复与脱敏导出；典型故障
+  必须映射到稳定的 failure stage / error code / durable coordinate，验收不得读取前端内存作为真相。
+- Phase 3B 在同一 metrics 读入口计算当前窗口与紧邻前一窗口的对比；回归只由明确阈值派生，
+  必须携带当前/基线分子分母，样本不足时保持 unknown，不另建指标写表。
+- Phase 3C 本地告警中心只消费 `/api/storage/health` 的派生 alerts，并给出基于 code 的确定性定位
+  建议；建议不是新的业务状态，也不得自动改写或修复权威事实。
+- Phase 3D exporter 默认关闭，只发送结构化 health/metrics 快照；不得发送 ID、prompt、response、
+  query、tool payload、文件或环境变量。发送失败只影响 exporter health，不改变在线业务结果。
 
 ## 9. Phase 0 实施边界
 
