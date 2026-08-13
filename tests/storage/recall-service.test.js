@@ -672,7 +672,13 @@ test("searchForAgent applies fixed safe defaults and returns the v2 contract", a
   const { storage, service } = createFixture();
   try {
     const result = await service.searchForAgent(
-      { threadId: "thread-1", invocationId: "invocation-1", caller: "mcp" },
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-1",
+        agentId: "codex",
+        operationKey: "recall:invocation-1:defaults",
+        caller: "mcp",
+      },
       { query: "sqlite memory" }
     );
 

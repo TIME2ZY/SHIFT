@@ -5,6 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 import { TraceExplorer } from "./TraceExplorer";
 import type { TraceSummary } from "./types";
 
+const rate = (numerator: number, denominator: number) => ({
+  value: denominator ? numerator / denominator : null,
+  numerator,
+  denominator,
+  pending: 0,
+  censored: 0,
+  unknown: 0,
+  excluded: 0,
+});
+
 const base = {
   threadId: "s1",
   clientTurnId: "turn-1",
@@ -84,17 +94,30 @@ describe("TraceExplorer", () => {
                   },
                 },
                 memory: {
-                  hitRate: {
-                    value: 0.5,
-                    numerator: 1,
-                    denominator: 2,
-                    pending: 0,
-                    censored: 0,
-                    unknown: 1,
-                    excluded: 0,
+                  search: {
+                    availabilityRate: rate(2, 2),
+                    memoryHitRate: rate(1, 2),
+                    totalResultRate: rate(2, 2),
+                    averageMemoryHits: 0.5,
+                    availability: { available: 2, degraded: 0, unavailable: 0, unknown: 0 },
                   },
+                  injection: {
+                    availabilityRate: rate(2, 2),
+                    coverageRate: rate(1, 2),
+                    averageDelivered: 0.5,
+                    budgetDropRate: rate(0, 1),
+                    truncationRate: rate(0, 2),
+                    availability: { available: 2, degraded: 0, unavailable: 0, unknown: 0 },
+                  },
+                  write: { calls: 1, created: 1, unchanged: 0, superseded: 0, rejected: 0 },
                   strictRecallAtK: null,
-                  semantics: "hit rate",
+                  usedRate: null,
+                  correctRate: null,
+                  businessSuccessRate: null,
+                  completeness: "best_effort",
+                  telemetry: { failed: 0, lastFailureAt: null, lastError: null },
+                  applicability: { contractAppliedAt: base.startedAt, historicalExcluded: 0 },
+                  semantics: "separate online metrics",
                 },
                 comparison: {
                   baselineWindow: { from: base.startedAt, to: base.endedAt },
@@ -109,7 +132,7 @@ describe("TraceExplorer", () => {
                       baseline: { value: 0.75, numerator: 3, denominator: 4 },
                     },
                     {
-                      metric: "memory.hitRate",
+                      metric: "memory.searchHitRate",
                       state: "unknown",
                       delta: null,
                       current: { value: 0.5, numerator: 1, denominator: 2 },

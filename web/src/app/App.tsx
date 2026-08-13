@@ -14,7 +14,7 @@ import { SessionList } from "../features/sessions/SessionList";
 import { sessionDisplayTitle } from "../features/sessions/display";
 import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
-import { WorkspacePage } from "../features/workspace/WorkspacePage";
+import { AuditPage } from "../features/observability/AuditPage";
 import { useSessionTracesQuery } from "../features/observability/queries";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
@@ -235,14 +235,14 @@ export function App() {
           </button>
           <button
             type="button"
-            data-active={navigation.page === "workspace" || undefined}
-            aria-current={navigation.page === "workspace" ? "page" : undefined}
-            onClick={() => navigation.navigate("workspace")}
+            data-active={navigation.page === "audit" || undefined}
+            aria-current={navigation.page === "audit" ? "page" : undefined}
+            onClick={() => navigation.navigate("audit")}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6.5h6l2 2h8v9H4v-11Z" />
+              <path d="M5 19V9m7 10V5m7 14v-7M3 19h18" />
             </svg>
-            <span>工作区</span>
+            <span>审计</span>
           </button>
         </nav>
 
@@ -361,7 +361,6 @@ export function App() {
               isLoading={messages.isPending && Boolean(activeSessionId)}
               error={messages.error}
               onRetry={() => void messages.refetch()}
-              onOpenWorkspace={() => navigation.navigate("workspace")}
               onUsePrompt={(prompt) => {
                 draftSeedIdRef.current += 1;
                 setComposerDraftSeed({
@@ -392,16 +391,16 @@ export function App() {
             agents={agents.data ?? []}
             selectedAgentId={selectedAgentId}
             run={run}
-            traces={traces.data?.traces ?? []}
             open={infoPanelOpen}
             onClose={closeInfoPanel}
             onAgentChange={selectAgent}
           />
         </>
       ) : (
-        <WorkspacePage
+        <AuditPage
           sessionId={activeSessionId}
           sessionTitle={activeSessionTitle}
+          agents={agents.data ?? []}
           onOpenChat={() => navigation.navigate("chat")}
           onOpenSessions={() => {
             setInfoPanelOpen(false);

@@ -61,7 +61,10 @@ test("observability metrics endpoint preserves sample counts and time window", a
       observabilityMetrics: (window) => ({
         window,
         handoff: { endToEnd: { value: 0.5, numerator: 1, denominator: 2, pending: 1, unknown: 0 } },
-        memory: { hitRate: { value: 1, numerator: 2, denominator: 2 }, strictRecallAtK: null },
+        memory: {
+          search: { memoryHitRate: { value: 1, numerator: 2, denominator: 2 } },
+          strictRecallAtK: null,
+        },
       }),
     },
     sendJson,

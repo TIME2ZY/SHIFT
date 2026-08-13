@@ -6,7 +6,7 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import type { InvocationProcess } from "./invocation-types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 
-function renderProcess(process: InvocationProcess, onOpenWorkspace = vi.fn(), content?: string) {
+function renderProcess(process: InvocationProcess, content?: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -19,18 +19,17 @@ function renderProcess(process: InvocationProcess, onOpenWorkspace = vi.fn(), co
         sessionId="s1"
         invocationId="i1"
         content={content}
-        onOpenWorkspace={onOpenWorkspace}
       />
     </QueryClientProvider>
   );
-  return { ...rendered, onOpenWorkspace };
+  return rendered;
 }
 
 describe("MessageProcessDetails", () => {
   it("keeps narrative events in stream order and moves only tools to the end", async () => {
     const user = userEvent.setup();
     const body = "先说明目标。\n\n修改完成。";
-    const { container, onOpenWorkspace } = renderProcess(
+    const { container } = renderProcess(
       {
         version: 1,
         invocationId: "i1",
@@ -78,7 +77,6 @@ describe("MessageProcessDetails", () => {
         progress: [],
         changedFiles: [{ path: "web/src/App.tsx", changeType: "modified" }],
       },
-      vi.fn(),
       body
     );
 
@@ -113,8 +111,7 @@ describe("MessageProcessDetails", () => {
     expect(screen.getByText(/Update File: web\/src\/App\.tsx/)).toBeInTheDocument();
     expect(screen.getByText("Success. Updated web/src/App.tsx")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "在工作区查看差异" }));
-    expect(onOpenWorkspace).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "在工作区查看差异" })).not.toBeInTheDocument();
   });
 
   it("removes final commentary that exactly repeats the authoritative text", () => {
@@ -181,7 +178,6 @@ describe("MessageProcessDetails", () => {
         progress: [],
         changedFiles: [],
       },
-      vi.fn(),
       "修复完成。"
     );
 
@@ -220,7 +216,6 @@ describe("MessageProcessDetails", () => {
         progress: [],
         changedFiles: [],
       },
-      vi.fn(),
       "修复完成。"
     );
 

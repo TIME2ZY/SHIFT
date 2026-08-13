@@ -51,7 +51,9 @@ test("live observability audit aligns SSE causality with durable terminal state"
 test("phase three release gate requires trend alerts and redacted exporter delivery", () => {
   const report = evaluatePhase3Release({
     metrics: {
-      comparison: { indicators: [{ metric: "handoff.endToEnd" }, { metric: "memory.hitRate" }] },
+      comparison: {
+        indicators: [{ metric: "handoff.endToEnd" }, { metric: "memory.searchHitRate" }],
+      },
     },
     health: {
       observability: { alerts: [] },

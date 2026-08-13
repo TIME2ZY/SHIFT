@@ -85,6 +85,31 @@ test("best-effort telemetry cleanup retains recent events", () => {
   }
 });
 
+test("operation key makes contracted telemetry idempotent", () => {
+  const storage = createFixture();
+  try {
+    const event = {
+      eventType: "memory_searched",
+      threadId: "thread-1",
+      invocationId: "invocation-1",
+      agentId: "codex",
+      operationKey: "recall:invocation-1:retry",
+      payloadVersion: 1,
+      payload: {
+        requestedLayers: ["memory"],
+        totalHits: 1,
+        memoryHits: 1,
+        availability: { state: "available" },
+      },
+    };
+    assert.equal(storage.memoryEvents.record(event).duplicate, false);
+    assert.equal(storage.memoryEvents.record(event).duplicate, true);
+    assert.equal(storage.memoryEvents.listByType("memory_searched").length, 1);
+  } finally {
+    storage.close();
+  }
+});
+
 test("write emits a durable memory event", () => {
   const storage = createFixture();
   try {
@@ -136,7 +161,7 @@ test("supersession emits memory_superseded events", () => {
   }
 });
 
-test("retrieveForTurn records memory_injected with availability", async () => {
+test("retrieveForTurn prepares injection without recording delivery", async () => {
   const storage = createFixture();
   try {
     storage.memory.createProduct({
@@ -167,13 +192,13 @@ test("retrieveForTurn records memory_injected with availability", async () => {
     assert.ok(pack.stats.budgetBuckets.thread > 0);
 
     const counts = storage.memoryEvents.countsForThread("thread-1");
-    assert.ok(counts.memory_injected >= 1);
+    assert.equal(counts.memory_injected || 0, 0);
   } finally {
     storage.close();
   }
 });
 
-test("searchSession records memory_searched", async () => {
+test("only authenticated agent search records memory_searched", async () => {
   const storage = createFixture();
   try {
     storage.memory.createProduct({
@@ -193,8 +218,24 @@ test("searchSession records memory_searched", async () => {
       },
     });
     await service.searchSession("thread-1", "redis port");
-    const counts = storage.memoryEvents.countsForThread("thread-1");
-    assert.ok(counts.memory_searched >= 1);
+    assert.equal(storage.memoryEvents.countsForThread("thread-1").memory_searched || 0, 0);
+    await service.searchForAgent(
+      {
+        threadId: "thread-1",
+        invocationId: "invocation-1",
+        agentId: "codex",
+        operationKey: "recall:invocation-1:test",
+      },
+      { query: "redis port", layers: ["memory"] }
+    );
+    assert.equal(storage.memoryEvents.countsForThread("thread-1").memory_searched, 1);
+    const event = storage.db
+      .prepare("SELECT * FROM memory_events WHERE event_type = 'memory_searched'")
+      .get();
+    assert.equal(event.invocation_id, "invocation-1");
+    assert.equal(event.agent_id, "codex");
+    assert.equal(event.operation_key, "recall:invocation-1:test");
+    assert.equal(event.payload_version, 1);
   } finally {
     storage.close();
   }

@@ -65,10 +65,6 @@ export function TraceExplorer({
   const detail = useTraceDetailQuery(sessionId, selected?.traceId || null);
   const label = (id: string) => agents.find((agent) => agent.id === id)?.label || id;
 
-  if (!traces.length) {
-    return <p className="react-panel-empty">运行一次任务后，这里会出现可追溯的协作航线。</p>;
-  }
-
   return (
     <div className="trace-explorer">
       {health.data?.alerts.length ? (
@@ -104,20 +100,10 @@ export function TraceExplorer({
               <Rate label="Handoff 调度" rate={metrics.data.handoff.scheduling} />
               <Rate label="Handoff 执行" rate={metrics.data.handoff.execution} />
               <Rate label="Handoff 端到端" rate={metrics.data.handoff.endToEnd} />
-              <Rate label="Memory 命中率" rate={metrics.data.memory.hitRate} />
-              <div className="trace-metric trace-metric-unavailable">
-                <dt>严格 Recall@K</dt>
-                <dd>
-                  {metrics.data.memory.strictRecallAtK
-                    ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
-                    : "需标注集"}
-                </dd>
-                <small>
-                  {metrics.data.memory.strictRecallAtK
-                    ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
-                    : "命中率不等同于相关性召回率"}
-                </small>
-              </div>
+              <Rate label="MCP 检索可用率" rate={metrics.data.memory.search.availabilityRate} />
+              <Rate label="Memory 层命中率" rate={metrics.data.memory.search.memoryHitRate} />
+              <Rate label="自动注入可用率" rate={metrics.data.memory.injection.availabilityRate} />
+              <Rate label="自动注入覆盖率" rate={metrics.data.memory.injection.coverageRate} />
               {metrics.data.memory.usedRate ? (
                 <Rate label="Memory 使用率" rate={metrics.data.memory.usedRate} />
               ) : null}
@@ -132,7 +118,7 @@ export function TraceExplorer({
               <div className="trace-trend" aria-label="与前一窗口对比">
                 {metrics.data.comparison.indicators.map((indicator) => (
                   <span data-state={indicator.state} key={indicator.metric}>
-                    {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory"}
+                    {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory 检索"}
                     <strong>
                       {indicator.state === "unknown"
                         ? "样本不足"
@@ -142,16 +128,42 @@ export function TraceExplorer({
                 ))}
               </div>
             ) : null}
+            <div className="trace-write-summary" aria-label="MCP Memory 写入结果">
+              <span>写入调用 <strong>{metrics.data.memory.write.calls}</strong></span>
+              <span>创建 <strong>{metrics.data.memory.write.created}</strong></span>
+              <span>替代 <strong>{metrics.data.memory.write.superseded}</strong></span>
+              <span>拒绝 <strong>{metrics.data.memory.write.rejected}</strong></span>
+            </div>
           </>
         ) : null}
       </section>
+      {metrics.data ? (
+        <section className="trace-offline-eval" aria-label="离线 Recall 评估">
+          <header><span>离线评估</span><strong>不属于近 24 小时窗口</strong></header>
+          <div>
+            <strong>严格 Recall@K</strong>
+            <b>
+              {metrics.data.memory.strictRecallAtK
+                ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
+                : "需标注集"}
+            </b>
+            <small>
+              {metrics.data.memory.strictRecallAtK
+                ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
+                : "在线命中率不能替代相关性 Recall"}
+            </small>
+          </div>
+        </section>
+      ) : null}
       <div className="trace-controls" aria-label="筛选 Trace">
         <label>
           <span className="sr-only">搜索 Trace</span>
           <input
             type="search"
+            name="trace-query"
+            autoComplete="off"
             value={query}
-            placeholder="Trace ID、Agent 或错误码"
+            placeholder="Trace ID、Agent 或错误码…"
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
@@ -175,6 +187,9 @@ export function TraceExplorer({
         </button>
       </div>
       <div className="trace-ledger" aria-label="Trace 列表">
+        {!visible.length ? (
+          <p className="react-panel-empty">运行一次任务后，这里会出现可追溯的协作航线。</p>
+        ) : null}
         {visible.map((trace) => (
           <button
             type="button"

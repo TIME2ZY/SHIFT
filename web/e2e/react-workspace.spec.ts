@@ -164,7 +164,30 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
           metrics: {
             window: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
             handoff: { scheduling: rate, execution: rate, endToEnd: rate },
-            memory: { hitRate: rate, strictRecallAtK: null, semantics: "hit rate" },
+            memory: {
+              search: {
+                availabilityRate: rate,
+                memoryHitRate: rate,
+                totalResultRate: rate,
+                averageMemoryHits: 0.5,
+                availability: { available: 1, degraded: 0, unavailable: 0, unknown: 1 },
+              },
+              injection: {
+                availabilityRate: rate,
+                coverageRate: rate,
+                averageDelivered: 0.5,
+                budgetDropRate: rate,
+                truncationRate: rate,
+                availability: { available: 1, degraded: 0, unavailable: 0, unknown: 1 },
+              },
+              write: { calls: 1, created: 1, unchanged: 0, superseded: 0, rejected: 0 },
+              strictRecallAtK: null,
+              usedRate: null,
+              correctRate: null,
+              businessSuccessRate: null,
+              applicability: { contractAppliedAt: "2026-08-13T00:00:00.000Z", historicalEventsExcluded: 0 },
+              semantics: "separate online metrics",
+            },
             comparison: {
               baselineWindow: {
                 from: "2026-08-11T00:00:00.000Z",
@@ -181,7 +204,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
                   baseline: { value: null, numerator: 0, denominator: 0 },
                 },
                 {
-                  metric: "memory.hitRate",
+                  metric: "memory.searchHitRate",
                   state: "unknown",
                   delta: null,
                   current: { value: 0.5, numerator: 1, denominator: 2 },
@@ -282,43 +305,6 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
-    if (url.pathname === "/api/sessions/session-1/workspace" && method === "GET") {
-      await route.fulfill({
-        json: {
-          sessionId: "session-1",
-          projectKey: "dir:shift",
-          projectDir: state.projectDir,
-          worktree: state.worktreeAttached
-            ? {
-                branch: "shift/session-1",
-                worktreeDir: "C:/projects/shift.worktrees/session-1",
-                baseDir: state.projectDir,
-                clean: false,
-                porcelain: [" M web/src/app/App.tsx"],
-                previewUrl: "http://localhost:4173",
-              }
-            : null,
-        },
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/sessions/session-1/worktree/diff" && method === "GET") {
-      const diff = [
-        "diff --git a/web/src/app/App.tsx b/web/src/app/App.tsx",
-        "index 1111111..2222222 100644",
-        "--- a/web/src/app/App.tsx",
-        "+++ b/web/src/app/App.tsx",
-        "@@ -1 +1,2 @@",
-        " export function App() {",
-        '+  return <main data-page="workspace" />;',
-      ].join("\n");
-      await route.fulfill({
-        json: { diff, truncated: false, totalChars: diff.length },
-      });
-      return;
-    }
-
     if (url.pathname === "/api/chat" && method === "POST") {
       state.chatBody = request.postDataJSON() as Record<string, unknown>;
       state.worktreeAttached = state.chatBody.useWorktree === true;
@@ -375,17 +361,15 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
   return state;
 }
 
-test("uses the Project-bound directory and completes a worktree chat run", async ({ page }) => {
+test("keeps worktree execution while exposing Audit in the former workspace slot", async ({ page }) => {
   const state = await mockShiftApi(page);
 
   await page.goto("./");
   await expect(page.locator("#main-content").getByText("React E2E")).toBeVisible();
 
-  await page.getByRole("button", { name: "工作区", exact: true }).click();
-  await expect(page.getByRole("region", { name: "项目与分支" }).getByRole("code")).toHaveText(
-    "C:/projects/shift"
-  );
-  await expect(page.getByText("由 Project 绑定")).toBeVisible();
+  await expect(page.getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "审计", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "运行与 Memory 审计" })).toBeVisible();
 
   await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
@@ -399,21 +383,11 @@ test("uses the Project-bound directory and completes a worktree chat run", async
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
-  await page.getByRole("tab", { name: "记忆" }).click();
-  await expect(page.getByText("本回合注入 1 条", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "审计", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "运行与 Memory 审计" })).toBeVisible();
   await expect(
     page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
   ).toBeVisible();
-  await page.getByRole("button", { name: "工作区", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "shift/session-1" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /web\/src\/app\/App\.tsx/ })).toBeVisible();
-  await expect(page.getByLabel("web/src/app/App.tsx Diff")).toContainText(
-    'return <main data-page="workspace" />;'
-  );
-  await expect(page.getByRole("link", { name: "打开预览" })).toHaveAttribute(
-    "href",
-    "http://localhost:4173"
-  );
   expect(state.chatBody).toMatchObject({
     sessionId: "session-1",
     agent: "gemini",
@@ -460,10 +434,11 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
     .click();
 
   await page.getByRole("button", { name: "会话信息" }).click();
-  await expect(page.getByRole("dialog", { name: "对话信息" })).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(3);
+  await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByText("Agent 与用量")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "对话信息" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeHidden();
   await expect(page.locator(".react-info-panel-button")).toBeFocused();
 
   const viewport = await page.evaluate(() => ({
@@ -481,8 +456,8 @@ test("locates a durable failure after refresh and exports structural metadata", 
   const state = await mockShiftApi(page);
   await page.goto("./");
 
-  await page.getByRole("tab", { name: "追踪" }).click();
-  const tracePanel = page.getByRole("tabpanel", { name: "追踪" });
+  await page.getByRole("button", { name: "审计", exact: true }).click();
+  const tracePanel = page.getByRole("region", { name: "在线运行观测" });
   await expect(tracePanel.getByText("provider_exit_7")).toBeVisible();
   await expect(tracePanel.getByText("Gemini generation")).toBeVisible();
   await tracePanel.getByRole("button", { name: "只看断点" }).click();
@@ -496,8 +471,7 @@ test("locates a durable failure after refresh and exports structural metadata", 
   expect(artifact.suggestedFilename()).toBe("trace-failed.json");
 
   await page.reload();
-  await page.getByRole("tab", { name: "追踪" }).click();
-  const restoredPanel = page.getByRole("tabpanel", { name: "追踪" });
+  const restoredPanel = page.getByRole("region", { name: "在线运行观测" });
   await expect(restoredPanel.getByText("provider_exit_7")).toBeVisible();
   await expect(restoredPanel.getByText("Gemini generation")).toBeVisible();
 });

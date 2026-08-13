@@ -75,7 +75,12 @@ test("embedding runtime indexes authoritative writes and enables semantic recall
       logger: { error() {}, info() {} },
     });
     const result = await service.searchForAgent(
-      { threadId: "thread-1", invocationId: "inv-1" },
+      {
+        threadId: "thread-1",
+        invocationId: "inv-1",
+        agentId: "codex",
+        operationKey: "recall:inv-1:semantic",
+      },
       { query: "relational authority", layers: ["memory"] }
     );
     assert.equal(result.hits[0].source.memoryId, written.memory.id);
@@ -131,7 +136,12 @@ test("vector query failure degrades to FTS without failing recall", async () => 
       logger: { error() {}, info() {} },
     });
     const result = await service.searchForAgent(
-      { threadId: "thread-1", invocationId: "inv-1" },
+      {
+        threadId: "thread-1",
+        invocationId: "inv-1",
+        agentId: "codex",
+        operationKey: "recall:inv-1:fallback",
+      },
       { query: "Fallback keyword", layers: ["memory"] }
     );
     assert.equal(result.hits.length, 1);

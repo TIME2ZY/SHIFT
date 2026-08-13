@@ -200,11 +200,19 @@ function metricsForWindow(db, dependencies, window) {
         `
     )
     .all(window);
+  const memoryContractAppliedAt = db
+    .prepare("SELECT applied_at FROM schema_migrations WHERE version = 29")
+    .get()?.applied_at;
   const memoryEvents = db
     .prepare(
       `
-          SELECT payload_json FROM memory_events
-          WHERE event_type = 'memory_injected' AND created_at >= @from AND created_at < @to
+          SELECT event_type, payload_json FROM memory_events
+          WHERE event_type IN ('memory_searched', 'memory_injected', 'memory_write_completed')
+            AND payload_version = 1
+            AND operation_key IS NOT NULL
+            AND invocation_id IS NOT NULL
+            AND agent_id IS NOT NULL
+            AND created_at >= @from AND created_at < @to
           ORDER BY id
         `
     )
@@ -212,11 +220,12 @@ function metricsForWindow(db, dependencies, window) {
   return {
     window,
     handoff: handoffMetrics(handoffs),
-    memory: memoryHitMetrics(
+    memory: memoryMetrics(
       memoryEvents,
       telemetryHealth(db, window),
       dependencies.evidence?.latestRecallEval?.() || null,
-      dependencies.evidence?.judgmentMetrics?.(window) || null
+      dependencies.evidence?.judgmentMetrics?.(window) || null,
+      memoryMetricApplicability(db, memoryContractAppliedAt)
     ),
   };
 }
@@ -230,7 +239,7 @@ function previousWindow(window) {
 function compareMetrics(current, baseline, options) {
   const definitions = [
     ["handoff.endToEnd", current.handoff.endToEnd, baseline.handoff.endToEnd],
-    ["memory.hitRate", current.memory.hitRate, baseline.memory.hitRate],
+    ["memory.searchHitRate", current.memory.search.memoryHitRate, baseline.memory.search.memoryHitRate],
   ];
   return {
     baselineWindow: baseline.window,
@@ -339,32 +348,133 @@ function classifyHandoff(row) {
   return "eligible";
 }
 
-function memoryHitMetrics(rows, telemetry, strictRecallAtK, judgments) {
-  const counts = { eligible: 0, pending: 0, censored: 0, unknown: 0, excluded: 0 };
-  let hits = 0;
-  const availability = { available: 0, degraded: 0, unavailable: 0, unknown: 0 };
-  for (const row of rows) {
-    const payload = parseJson(row.payload_json);
-    const state = payload?.availability?.state;
-    if (!payload || !["available", "degraded", "unavailable"].includes(state)) {
-      counts.unknown += 1;
-      availability.unknown += 1;
-      continue;
-    }
-    availability[state] += 1;
-    counts.eligible += 1;
-    if (Number(payload.count) > 0) hits += 1;
-  }
+function memoryMetrics(rows, telemetry, strictRecallAtK, judgments, applicability) {
+  const searchRows = rows.filter((row) => row.event_type === "memory_searched");
+  const injectionRows = rows.filter((row) => row.event_type === "memory_injected");
+  const writeRows = rows.filter((row) => row.event_type === "memory_write_completed");
   return {
-    hitRate: rateResult(hits, counts.eligible, counts),
-    availability,
+    search: memorySearchMetrics(searchRows),
+    injection: memoryInjectionMetrics(injectionRows),
+    write: memoryWriteMetrics(writeRows),
     strictRecallAtK,
     usedRate: judgments?.usedRate || null,
     correctRate: judgments?.correctRate || null,
     businessSuccessRate: judgments?.businessSuccessRate || null,
     completeness: telemetry.failed > 0 ? "incomplete" : "best_effort",
     telemetry,
-    semantics: "non-empty delivered Memory result rate; not labeled Recall@K",
+    applicability,
+    semantics: "MCP search, delivered injection, and MCP write results are separate online metrics",
+  };
+}
+
+function memorySearchMetrics(rows) {
+  const parsed = rows.map((row) => parseJson(row.payload_json));
+  const availability = availabilityCounts(parsed);
+  const attempted = parsed.length;
+  const available = parsed.filter((payload) => payload?.availability?.state === "available");
+  const memoryEligible = available.filter((payload) =>
+    Array.isArray(payload.requestedLayers) && payload.requestedLayers.includes("memory")
+  );
+  const knownAttempts = attempted - availability.unknown;
+  const unavailableAttempts = availability.degraded + availability.unavailable;
+  const availableWithoutMemory = available.length - memoryEligible.length;
+  return {
+    availabilityRate: simpleRate(availability.available, knownAttempts, {
+      unknown: availability.unknown,
+    }),
+    memoryHitRate: simpleRate(
+      memoryEligible.filter((payload) => Number(payload.memoryHits) > 0).length,
+      memoryEligible.length,
+      { unknown: unavailableAttempts + availability.unknown, excluded: availableWithoutMemory }
+    ),
+    totalResultRate: simpleRate(
+      available.filter((payload) => Number(payload.totalHits) > 0).length,
+      available.length,
+      { unknown: unavailableAttempts + availability.unknown }
+    ),
+    averageMemoryHits:
+      memoryEligible.length > 0
+        ? memoryEligible.reduce((sum, payload) => sum + Number(payload.memoryHits || 0), 0) /
+          memoryEligible.length
+        : null,
+    availability,
+  };
+}
+
+function memoryInjectionMetrics(rows) {
+  const parsed = rows.map((row) => parseJson(row.payload_json));
+  const availability = availabilityCounts(parsed);
+  const attempted = parsed.length;
+  const available = parsed.filter((payload) => payload?.availability?.state === "available");
+  const delivered = available.reduce((sum, payload) => sum + Number(payload.delivered || 0), 0);
+  const selected = available.reduce((sum, payload) => sum + Number(payload.selected || 0), 0);
+  const budgetDropped = available.reduce(
+    (sum, payload) => sum + Math.max(0, Number(payload.selected || 0) - Number(payload.delivered || 0)),
+    0
+  );
+  const knownAttempts = attempted - availability.unknown;
+  const unavailableAttempts = availability.degraded + availability.unavailable;
+  return {
+    availabilityRate: simpleRate(availability.available, knownAttempts, {
+      unknown: availability.unknown,
+    }),
+    coverageRate: simpleRate(
+      available.filter((payload) => Number(payload.delivered) > 0).length,
+      available.length,
+      { unknown: unavailableAttempts + availability.unknown }
+    ),
+    averageDelivered: available.length > 0 ? delivered / available.length : null,
+    budgetDropRate: simpleRate(budgetDropped, selected, 0),
+    truncationRate: simpleRate(
+      available.filter((payload) => payload.truncated === true).length,
+      available.length,
+      attempted - available.length
+    ),
+    availability,
+  };
+}
+
+function memoryWriteMetrics(rows) {
+  const counts = { calls: rows.length, created: 0, unchanged: 0, superseded: 0, rejected: 0 };
+  for (const row of rows) {
+    const outcome = parseJson(row.payload_json)?.outcome;
+    if (Object.hasOwn(counts, outcome)) counts[outcome] += 1;
+  }
+  return counts;
+}
+
+function availabilityCounts(payloads) {
+  const counts = { available: 0, degraded: 0, unavailable: 0, unknown: 0 };
+  for (const payload of payloads) {
+    const state = payload?.availability?.state;
+    if (state === "available" || state === "degraded" || state === "unavailable") counts[state] += 1;
+    else counts.unknown += 1;
+  }
+  return counts;
+}
+
+function simpleRate(numerator, denominator, classification = {}) {
+  return {
+    value: denominator > 0 ? numerator / denominator : null,
+    numerator,
+    denominator,
+    pending: 0,
+    censored: 0,
+    unknown: Number(classification.unknown || 0),
+    excluded: Number(classification.excluded || 0),
+  };
+}
+
+function memoryMetricApplicability(db, appliedAt) {
+  return {
+    contractAppliedAt: appliedAt || null,
+    historicalEventsExcluded: scalarCount(
+      db,
+      `SELECT COUNT(*) AS count FROM memory_events
+       WHERE event_type IN ('memory_searched', 'memory_injected')
+         AND (payload_version IS NULL OR operation_key IS NULL OR invocation_id IS NULL OR agent_id IS NULL)`,
+      {}
+    ),
   };
 }
 

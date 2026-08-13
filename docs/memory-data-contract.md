@@ -135,6 +135,30 @@ Project 未归档；不得仅相信客户端提交的 Project 标识。project-d
 结果或明确不可用，禁止退化为跨 Project 全库检索。归档 Project 的投影可以保留以便恢复，
 但不参与正常 Agent recall。
 
+### 5.1 Agent 行为审计与在线指标
+
+Memory 的业务状态仍以 `memory_entries` 为权威；审计事件不得反写、确认或否决产品 Memory。
+Agent 对 Memory 的公开行为只有经认证 Invocation 绑定的 `memory_write` 与 `recall_search` MCP。
+
+- `memory_write_completed` 记录 MCP 操作结果：`created | unchanged | superseded | rejected`。
+- `memory_searched` 只记录 `recall_search` MCP；内部 `searchSession` 不进入 MCP 指标。
+- `memory_injected` 只在 Memory 已交付给目标 Invocation 后记录一次；检索 service 不重复写入。
+- 上述在线指标事件必须带 `invocation_id`、`agent_id`、`operation_key` 和 payload version。
+- 历史缺少这些坐标的事件保留供审计，但不进入新指标，也不得猜测回填。
+
+在线指标口径：
+
+- MCP 检索可用率：`available / attempted`。
+- Memory 层命中率：请求 memory layer 且可用的 MCP 检索中，`memoryHits > 0` 的比例。
+- 注入可用率：`available / attempted`。
+- 注入覆盖率：可用注入中 `delivered > 0` 的比例；`delivered` 以实际 rendered IDs 为准，
+  不使用预算裁剪前的 selected 数量。
+- 写入指标只按 MCP 结果分类，不把写入数量解释为质量。
+
+严格 Recall@K、MRR 与 nDCG 属于带数据集版本的离线评估，不属于“近 24 小时”在线窗口。
+Memory used/correct 若无自动证据保持不可用；业务 outcome 必须按 Invocation 去重，不能按
+Memory judgment 行重复计数。
+
 召回流程：
 
 ```text

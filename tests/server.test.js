@@ -3060,6 +3060,7 @@ test("/api/callbacks/recall-search returns the authenticated v2 agent contract",
       body: JSON.stringify({
         sessionId: sid,
         invocationId: captured.env.SHIFT_INVOCATION_ID,
+        operationId: "server-test-recall-success",
         query: "redis clustering",
         layers: ["memory", "message", "evidence"],
         limit: 10,
@@ -3087,6 +3088,7 @@ test("/api/callbacks/recall-search rejects an invalid callback token", async () 
       body: JSON.stringify({
         sessionId: "x",
         invocationId: "y",
+        operationId: "server-test-recall-invalid-token",
         query: "previous decision",
       }),
     });

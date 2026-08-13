@@ -18,7 +18,6 @@ export const queryKeys = {
     usage: (sessionId: string) => ["sessions", sessionId, "usage"] as const,
     memories: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
     memoryInject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
-    workspace: (sessionId: string) => ["sessions", sessionId, "workspace"] as const,
     traces: (sessionId: string) => ["sessions", sessionId, "traces"] as const,
     invocationProcess: (sessionId: string, invocationId: string, detail?: "summary" | "full") =>
       detail

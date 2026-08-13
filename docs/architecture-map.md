@@ -35,7 +35,7 @@ HTTP createServer (src/server/index.js)
 Web App (web/src/app/App.tsx)
   ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
   ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
-  └─ workspace feature → /api/sessions/:sessionId/workspace（目录绑定只读）
+  └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
   durable-recorder  → trace_runs + invocations + events + (assistant-final 原子 finish)
@@ -212,7 +212,8 @@ Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都�
   或历史对话。
 - 新建会话只提交当前 `projectKey`；前端不再调用全局 `GET /api/sessions`，也不再提交
   `projectDir`。
-- Workspace 通过 `/api/sessions/:sessionId/workspace` 显示后端解析的只读 Project 绑定；
+- Web 不再公开 Workspace / Diff 页面；worktree 仍是后端执行隔离与交付校验机制，聊天仅保留
+  文件变更摘要，审计页占用原工作区顶级入口；
   `/api/project` 与会话创建后修改目录的 UI 已删除。
 - live 场景与 Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
@@ -296,12 +297,21 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 在线观测只读入口为 `/api/storage/health`、`/api/storage/observability/metrics`，以及唯一的
 Session-scoped `/api/sessions/:sessionId/traces*` 查询、详情和导出路径。指标直接查询 SQLite
-source tables，不建立第二业务真相源；Memory 仅展示 best-effort hit rate，严格 Recall、used
-与 correct 在无标注或证据时保持 `null`。旧 storage-level Trace detail 路由已删除。
+source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP search 可用率与 Memory 层命中、
+实际 injection 可用率与覆盖率、MCP write 结果计数；严格 Recall、used 与 correct 在无标注或证据
+时保持 `null`。旧 storage-level Trace detail 路由已删除。
 
-Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
-pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
-hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为不可用。
+Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
+pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实。右侧会话栏
+只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
+
+Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 MCP write。`memory_searched`
+只由经认证的 `searchForAgent` 完成后写入；通用 `searchSession` 不写 MCP 审计。`memory_injected`
+只由 chat worklist 在目标 Invocation 已 durable started 且注入包已交付时写一次，
+`retrieveForTurn` 仅返回结构结果。指标只接纳 migration 29 后带 Invocation、Agent、operation key
+与 payload version 的事件；旧事件保留为 historical，不猜测回填。
+
+严格 Recall@K 与 MRR/nDCG 作为最近一次离线评估独立展示，不继承在线 24 小时时间窗。
 
 Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用

@@ -45,6 +45,7 @@ function makeMemoryHandle(storage, extras = {}) {
       sendJson: extras.sendJson,
       readJsonBody: extras.readJsonBody,
       memoryService: storage.memory,
+      storage,
       eventStore: extras.eventStore || {
         append() {},
       },
@@ -151,6 +152,7 @@ test("recall-search requires callback authentication and forwards only trusted c
     readJsonBody: async () => ({
       sessionId: "s1",
       invocationId: "i1",
+      operationId: "op-recall-1",
       query: "previous decision",
       layers: ["memory", "evidence"],
       limit: 6,
@@ -167,7 +169,13 @@ test("recall-search requires callback authentication and forwards only trusted c
   assert.equal(res.body.version, 2);
   assert.deepEqual(calls, [
     {
-      context: { threadId: "s1", invocationId: "i1", caller: "mcp" },
+      context: {
+        threadId: "s1",
+        invocationId: "i1",
+        agentId: "agent",
+        operationKey: "recall:i1:op-recall-1",
+        caller: "mcp",
+      },
       query: {
         query: "previous decision",
         layers: ["memory", "evidence"],
@@ -187,6 +195,7 @@ test("recall-search rejects missing tokens and agent-controlled scope fields", a
     readJsonBody: async () => ({
       sessionId: "s1",
       invocationId: "i1",
+      operationId: "op-recall-missing-token",
       query: "previous decision",
     }),
   });
@@ -206,6 +215,7 @@ test("recall-search rejects missing tokens and agent-controlled scope fields", a
     readJsonBody: async () => ({
       sessionId: "s1",
       invocationId: "i1",
+      operationId: "op-recall-scope",
       query: "previous decision",
       projectKey: "other-project",
     }),
@@ -329,6 +339,7 @@ test("handleCallbackRoutes memory-write is the single product-memory HTTP bridge
       readJsonBody: async () => ({
         sessionId: "s1",
         invocationId: "i1",
+        operationId: "op-write-1",
         callbackToken: "tok",
         kind: "decision",
         topic: "storage-primary",
@@ -362,6 +373,7 @@ test("handleCallbackRoutes memory-write is the single product-memory HTTP bridge
       readJsonBody: async () => ({
         sessionId: "s1",
         invocationId: "i1",
+        operationId: "op-write-2",
         callbackToken: "tok",
         kind: "decision",
         topic: "storage-primary",
@@ -391,6 +403,7 @@ test("handleCallbackRoutes memory-write validates topic and availability", async
       readJsonBody: async () => ({
         sessionId: "s1",
         invocationId: "i1",
+        operationId: "op-write-missing-topic",
         callbackToken: "tok",
         kind: "fact",
         content: "no topic",
@@ -403,6 +416,12 @@ test("handleCallbackRoutes memory-write validates topic and availability", async
     );
     assert.equal(missingTopic.statusCode, 400);
     assert.match(missingTopic.body.error, /topic/i);
+    const rejected = storage.db
+      .prepare("SELECT * FROM memory_events WHERE event_type = 'memory_write_completed'")
+      .get();
+    assert.equal(rejected.operation_key, "memory-write:i1:op-write-missing-topic");
+    assert.equal(JSON.parse(rejected.payload_json).outcome, "rejected");
+    assert.equal(JSON.parse(rejected.payload_json).reasonCode, "missing_topic");
 
     const unavailable = makeRes();
     const noService = callbackRoutes.createCallbackRoutes({
@@ -414,6 +433,7 @@ test("handleCallbackRoutes memory-write validates topic and availability", async
       readJsonBody: async () => ({
         sessionId: "s1",
         invocationId: "i1",
+        operationId: "op-write-unavailable",
         callbackToken: "tok",
         kind: "fact",
         topic: "x",

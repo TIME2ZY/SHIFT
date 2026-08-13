@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type AppPage = "chat" | "workspace";
+export type AppPage = "chat" | "audit";
 
 function pageFromHash(hash: string): AppPage {
-  return hash.replace(/^#\/?/, "") === "workspace" ? "workspace" : "chat";
+  const page = hash.replace(/^#\/?/, "");
+  // Retired workspace links land on Audit, which now owns the former nav slot.
+  return page === "audit" || page === "workspace" ? "audit" : "chat";
 }
 
 export function useAppNavigation() {
@@ -16,7 +18,7 @@ export function useAppNavigation() {
   }, []);
 
   const navigate = useCallback((nextPage: AppPage) => {
-    const nextHash = nextPage === "chat" ? "#/chat" : "#/workspace";
+    const nextHash = `#/${nextPage}`;
     if (window.location.hash === nextHash) {
       setPage(nextPage);
       return;

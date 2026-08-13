@@ -249,6 +249,7 @@ function createServer(options = {}) {
     recallService,
     memoryCapture,
     memoryService,
+    storage: storageContext.storage,
     logger,
   });
   const handleChatRoutes = createChatRoutes({

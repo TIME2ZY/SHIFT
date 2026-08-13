@@ -528,12 +528,19 @@ try {
       storage?.memoryEvents?.recordSafe?.({
         eventType: "memory_injected",
         threadId: sessionId,
+        invocationId,
         agentId: agent,
+        operationKey: `inject:${invocationId}:bootstrap`,
+        payloadVersion: 1,
         payload: {
           source: "bootstrap",
-          count: injectPayload.count,
           memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
+          renderedIds: bootstrapInject.stats?.funnel?.renderedIds || [],
           availability: injectPayload.availability,
+          funnel: injectPayload.funnel,
+          delivered: Number(injectPayload.funnel?.delivered || 0),
+          selected: Number(injectPayload.funnel?.selected || injectPayload.count || 0),
+          truncated: Boolean(injectPayload.funnel?.truncated),
         },
       });
     }
@@ -561,17 +568,23 @@ try {
           stats: pending.inject.stats,
         });
         sendSse(res, "memory-inject", a2aInject);
-        storage?.memoryEvents?.recordSafe?.({
-          eventType: "memory_injected",
-          threadId: sessionId,
-          agentId: pending.agent,
-          payload: {
-            source: "a2a",
-            count: a2aInject.count,
-            memoryIds: (a2aInject.items || []).map((item) => item.id).filter(Boolean),
-            availability: a2aInject.availability,
-          },
-        });
+          storage?.memoryEvents?.recordSafe?.({
+            eventType: "memory_injected",
+            threadId: sessionId,
+            invocationId,
+            agentId: pending.agent,
+            operationKey: `inject:${invocationId}:a2a`,
+            payloadVersion: 1,
+            payload: {
+              source: "a2a",
+              memoryIds: (a2aInject.items || []).map((item) => item.id).filter(Boolean),
+              availability: a2aInject.availability,
+              funnel: a2aInject.funnel,
+              delivered: Number(a2aInject.funnel?.delivered || 0),
+              selected: Number(a2aInject.funnel?.selected || a2aInject.count || 0),
+              truncated: Boolean(a2aInject.funnel?.truncated),
+            },
+          });
       }
     }
     threadCtx.currentInvocationId = invocationId;

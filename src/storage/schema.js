@@ -1071,6 +1071,21 @@ const MIGRATIONS = Object.freeze([
         ON observability_evidence_imports(kind, created_at);
     `,
   },
+  {
+    version: 29,
+    name: "memory_observability_contract",
+    sql: `
+      ALTER TABLE memory_events ADD COLUMN operation_key TEXT;
+      ALTER TABLE memory_events ADD COLUMN payload_version INTEGER;
+
+      CREATE UNIQUE INDEX memory_events_operation
+        ON memory_events(event_type, operation_key)
+        WHERE operation_key IS NOT NULL;
+      CREATE INDEX memory_events_contract_window
+        ON memory_events(event_type, payload_version, created_at)
+        WHERE operation_key IS NOT NULL;
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

@@ -9,15 +9,19 @@ const EVENT_TYPES = Object.freeze([
   "memory_searched",
   "memory_opened",
   "memory_superseded",
+  "memory_write_completed",
   "decision_language_detected",
 ]);
 
 function createMemoryEventRepository(db) {
   const insert = db.prepare(`
     INSERT INTO memory_events
-      (event_type, thread_id, project_key, memory_id, invocation_id, agent_id, payload_json, created_at)
+      (event_type, thread_id, project_key, memory_id, invocation_id, agent_id,
+       operation_key, payload_version, payload_json, created_at)
     VALUES
-      (@eventType, @threadId, @projectKey, @memoryId, @invocationId, @agentId, @payloadJson, @createdAt)
+      (@eventType, @threadId, @projectKey, @memoryId, @invocationId, @agentId,
+       @operationKey, @payloadVersion, @payloadJson, @createdAt)
+    ON CONFLICT DO NOTHING
   `);
   const listByThread = db.prepare(`
     SELECT * FROM memory_events
@@ -78,10 +82,13 @@ function createMemoryEventRepository(db) {
         memoryId: nullableString(input.memoryId),
         invocationId: nullableString(input.invocationId),
         agentId: nullableString(input.agentId),
+        operationKey: nullableString(input.operationKey),
+        payloadVersion: positiveIntegerOrNull(input.payloadVersion),
         payloadJson: serializePayload(input.payload),
         createdAt,
       });
       return {
+        duplicate: info.changes === 0,
         id: Number(info.lastInsertRowid),
         eventType,
         threadId: nullableString(input.threadId),
@@ -89,6 +96,8 @@ function createMemoryEventRepository(db) {
         memoryId: nullableString(input.memoryId),
         invocationId: nullableString(input.invocationId),
         agentId: nullableString(input.agentId),
+        operationKey: nullableString(input.operationKey),
+        payloadVersion: positiveIntegerOrNull(input.payloadVersion),
         payload: input.payload && typeof input.payload === "object" ? input.payload : null,
         createdAt,
       };
@@ -168,6 +177,8 @@ function mapEvent(row) {
     memoryId: row.memory_id,
     invocationId: row.invocation_id,
     agentId: row.agent_id,
+    operationKey: row.operation_key,
+    payloadVersion: row.payload_version,
     payload: parsePayload(row.payload_json),
     createdAt: row.created_at,
   };
@@ -202,6 +213,13 @@ function normalizeLimit(value, fallback) {
 
 function nullableString(value) {
   return typeof value === "string" && value ? value : null;
+}
+
+function positiveIntegerOrNull(value) {
+  if (value == null) return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new Error("payloadVersion must be positive.");
+  return number;
 }
 
 module.exports = {

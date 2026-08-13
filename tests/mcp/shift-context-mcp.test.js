@@ -91,7 +91,10 @@ test("recall_search bridge binds trusted context outside the agent arguments", a
   assert.equal(captured.url.href, "http://127.0.0.1:8787/api/callbacks/recall-search");
   assert.equal(captured.init.method, "POST");
   assert.equal(captured.init.headers["X-Callback-Token"], "secret");
-  assert.deepEqual(JSON.parse(captured.init.body), {
+  const body = JSON.parse(captured.init.body);
+  assert.match(body.operationId, /^[0-9a-f-]{36}$/i);
+  delete body.operationId;
+  assert.deepEqual(body, {
     sessionId: "thread-1",
     invocationId: "invocation-1",
     query: "why SQLite",
@@ -212,7 +215,10 @@ test("memory_write bridge binds callback credentials from environment", async ()
   assert.equal(result.outcome, "created");
   assert.equal(captured.url.href, "http://127.0.0.1:8787/api/callbacks/memory-write");
   assert.equal(captured.init.headers["X-Callback-Token"], "secret");
-  assert.deepEqual(JSON.parse(captured.init.body), {
+  const body = JSON.parse(captured.init.body);
+  assert.match(body.operationId, /^[0-9a-f-]{36}$/i);
+  delete body.operationId;
+  assert.deepEqual(body, {
     sessionId: "thread-1",
     invocationId: "invocation-1",
     callbackToken: "secret",

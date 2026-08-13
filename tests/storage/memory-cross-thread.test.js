@@ -75,7 +75,13 @@ test("decision is thread-only and not injected into sibling thread", async () =>
     assert.match(packA.rendered, /SQLite/);
 
     const agentResult = await service.searchForAgent(
-      { threadId: "thread-a", invocationId: "invocation-a", caller: "mcp" },
+      {
+        threadId: "thread-a",
+        invocationId: "invocation-a",
+        agentId: "codex",
+        operationKey: "recall:invocation-a:thread-scope",
+        caller: "mcp",
+      },
       { query: "SQLite 存储", layers: ["memory"], memoryScope: "thread" }
     );
     const hit = agentResult.hits.find((h) => h.source.memoryId === written.memory.id);
@@ -143,7 +149,13 @@ test("legacy active project memory is not durable-searchable from sibling thread
 
     const service = createRecallService({ storage, transcript: emptyTranscript() });
     const agentB = await service.searchForAgent(
-      { threadId: "thread-b", invocationId: "inv-b", caller: "mcp" },
+      {
+        threadId: "thread-b",
+        invocationId: "inv-b",
+        agentId: "codex",
+        operationKey: "recall:inv-b:legacy-scope",
+        caller: "mcp",
+      },
       { query: "SQLite 存储", layers: ["memory"], memoryScope: "all" }
     );
     assert.equal(
