@@ -1866,7 +1866,6 @@ body {
   font: 10px/1 var(--font-ui);
 }
 
-
 .react-run-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   color: var(--danger);
@@ -2873,11 +2872,11 @@ body {
   font: 600 10px/1 var(--font-mono);
   text-transform: uppercase;
 }
-.trace-span-kind[data-kind="tool"] {
+.trace-spans li[data-kind="tool"] .trace-span-kind {
   background: color-mix(in srgb, var(--agent-2) 15%, transparent);
   color: var(--agent-2);
 }
-.trace-span-kind[data-kind="handoff"] {
+.trace-spans li[data-kind="handoff"] .trace-span-kind {
   background: color-mix(in srgb, var(--agent-1) 15%, transparent);
   color: var(--agent-1);
 }
@@ -2900,7 +2899,6 @@ body {
   color: var(--danger);
   font-weight: 600;
 }
-
 
 .react-panel-tabs button {
   position: relative;
@@ -3535,7 +3533,7 @@ body {
   }
 
   .react-panel-body {
-    height: calc(100% - 108px); /* mobile header + tabs */
+    height: calc(100% - 114px); /* mobile header + panel title */
   }
 
   .react-info-panel-button {
@@ -3559,7 +3557,6 @@ body {
     background: var(--overlay-scrim);
     -webkit-tap-highlight-color: transparent;
   }
-
 }
 
 @media (max-width: 720px) {

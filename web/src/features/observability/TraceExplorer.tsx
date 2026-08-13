@@ -22,7 +22,6 @@ function Rate({ label, rate }: { label: string; rate: QualifiedRate }) {
     </div>
   );
 }
-
 function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
 }
@@ -105,7 +104,10 @@ export function TraceExplorer({
                 <Rate label="Handoff 端到端" rate={metrics.data.handoff.endToEnd} />
                 <Rate label="MCP 检索可用率" rate={metrics.data.memory.search.availabilityRate} />
                 <Rate label="Memory 层命中率" rate={metrics.data.memory.search.memoryHitRate} />
-                <Rate label="自动注入可用率" rate={metrics.data.memory.injection.availabilityRate} />
+                <Rate
+                  label="自动注入可用率"
+                  rate={metrics.data.memory.injection.availabilityRate}
+                />
                 <Rate label="自动注入覆盖率" rate={metrics.data.memory.injection.coverageRate} />
                 {metrics.data.memory.usedRate ? (
                   <Rate label="Memory 使用率" rate={metrics.data.memory.usedRate} />
@@ -132,10 +134,18 @@ export function TraceExplorer({
                 </div>
               ) : null}
               <div className="trace-write-summary" aria-label="MCP Memory 写入结果">
-                <span>写入调用 <strong>{metrics.data.memory.write.calls}</strong></span>
-                <span>创建 <strong>{metrics.data.memory.write.created}</strong></span>
-                <span>替代 <strong>{metrics.data.memory.write.superseded}</strong></span>
-                <span>拒绝 <strong>{metrics.data.memory.write.rejected}</strong></span>
+                <span>
+                  写入调用 <strong>{metrics.data.memory.write.calls}</strong>
+                </span>
+                <span>
+                  创建 <strong>{metrics.data.memory.write.created}</strong>
+                </span>
+                <span>
+                  替代 <strong>{metrics.data.memory.write.superseded}</strong>
+                </span>
+                <span>
+                  拒绝 <strong>{metrics.data.memory.write.rejected}</strong>
+                </span>
               </div>
             </>
           ) : null}
@@ -143,7 +153,10 @@ export function TraceExplorer({
 
         {metrics.data ? (
           <section className="trace-offline-eval" aria-label="离线 Recall 评估">
-            <header><span>离线评估</span><strong>不属于近 24 小时窗口</strong></header>
+            <header>
+              <span>离线评估</span>
+              <strong>不属于近 24 小时窗口</strong>
+            </header>
             <div>
               <strong>严格 Recall@K</strong>
               <b>
@@ -320,7 +333,6 @@ export function TraceExplorer({
                   </ol>
                 </section>
               ) : null}
-
             </article>
           ) : null}
         </div>
@@ -339,4 +351,3 @@ function downloadTrace(payload: Record<string, unknown>, traceId: string) {
   anchor.click();
   URL.revokeObjectURL(url);
 }
-

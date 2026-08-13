@@ -266,7 +266,6 @@ function HandoffDivider({
   );
 }
 
-
 export function MessageList({
   sessionId,
   messages,
@@ -427,10 +426,33 @@ export function MessageList({
   }
 
   const isNavigatingRef = useRef(false);
+  const navigationReleaseTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (navigationReleaseTimerRef.current !== null) {
+        window.clearTimeout(navigationReleaseTimerRef.current);
+      }
+    },
+    []
+  );
+
+  function releaseNavigationLock() {
+    isNavigatingRef.current = false;
+    navigationReleaseTimerRef.current = null;
+    const element = scrollRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setFollowingLatest(distanceFromBottom < 80);
+  }
 
   function scrollToMessage(key: string) {
     const target = messageRefs.current.get(key);
     if (!target) return;
+    if (navigationReleaseTimerRef.current !== null) {
+      window.clearTimeout(navigationReleaseTimerRef.current);
+      navigationReleaseTimerRef.current = null;
+    }
     setActiveMessageKey(key);
     const isLatest = key === latestMessageKey;
     if (isLatest) {
@@ -439,11 +461,11 @@ export function MessageList({
     } else {
       isNavigatingRef.current = true;
       setFollowingLatest(false);
+      navigationReleaseTimerRef.current = window.setTimeout(releaseNavigationLock, 600);
     }
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.focus({ preventScroll: true });
   }
-
 
   function handleMessageScroll() {
     const element = scrollRef.current;
@@ -458,10 +480,14 @@ export function MessageList({
     setFollowingLatest(distanceFromBottom < 80);
   }
 
-
   function scrollToLatest() {
     const element = scrollRef.current;
     if (!element) return;
+    if (navigationReleaseTimerRef.current !== null) {
+      window.clearTimeout(navigationReleaseTimerRef.current);
+      navigationReleaseTimerRef.current = null;
+    }
+    isNavigatingRef.current = false;
     element.scrollTop = element.scrollHeight;
     setFollowingLatest(true);
     if (latestMessageKey) setActiveMessageKey(latestMessageKey);

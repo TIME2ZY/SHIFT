@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
@@ -13,6 +13,7 @@ function renderMessageList(element: ReactElement) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -107,6 +108,45 @@ describe("MessageList", () => {
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
     expect(userBubble).toHaveAttribute("aria-current", "location");
+  });
+
+  it("releases message navigation after a smooth scroll near the bottom", () => {
+    vi.useFakeTimers();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          { id: "m1", role: "user", content: "第一条" },
+          { id: "m2", role: "assistant", agentId: "codex", content: "第二条" },
+        ]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={null}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    const transcript = screen.getByRole("log");
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 550, writable: true },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "跳到第 1 条你消息" }));
+    expect(screen.getByRole("button", { name: "回到最新" })).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(600));
+
+    expect(screen.queryByRole("button", { name: "回到最新" })).not.toBeInTheDocument();
+    fireEvent.scroll(transcript);
+    expect(screen.queryByRole("button", { name: "回到最新" })).not.toBeInTheDocument();
   });
 
   it("stops following new output after the user scrolls away from the latest message", async () => {

@@ -24,13 +24,18 @@ export function AuditPage({
           <span className="audit-page-eyebrow">审计 · {sessionTitle}</span>
           <h1>运行与 Memory 审计</h1>
           <p>
-            核对 Agent 执行链、MCP 检索、自动注入和写入结果。Memory 由 Agent 自动抽取，不设人工审核状态。
+            核对 Agent 执行链、MCP 检索、自动注入和写入结果。Memory 由 Agent
+            自动抽取，不设人工审核状态。
           </p>
         </div>
       </header>
 
       <div className="audit-layout">
-        <section className="audit-traces" aria-label="在线运行观测" aria-labelledby="audit-traces-title">
+        <section
+          className="audit-traces"
+          aria-label="在线运行观测"
+          aria-labelledby="audit-traces-title"
+        >
           <header className="audit-section-heading">
             <div>
               <span>ONLINE</span>
@@ -78,4 +83,3 @@ export function AuditPage({
     </main>
   );
 }
-

@@ -185,7 +185,10 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
               usedRate: null,
               correctRate: null,
               businessSuccessRate: null,
-              applicability: { contractAppliedAt: "2026-08-13T00:00:00.000Z", historicalEventsExcluded: 0 },
+              applicability: {
+                contractAppliedAt: "2026-08-13T00:00:00.000Z",
+                historicalEventsExcluded: 0,
+              },
               semantics: "separate online metrics",
             },
             comparison: {
@@ -361,7 +364,9 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
   return state;
 }
 
-test("keeps worktree execution while exposing Audit in the former workspace slot", async ({ page }) => {
+test("keeps worktree execution while exposing Audit in the former workspace slot", async ({
+  page,
+}) => {
   const state = await mockShiftApi(page);
 
   await page.goto("./");
@@ -436,7 +441,9 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
   await page.getByRole("button", { name: "会话信息" }).click();
   await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeVisible();
   await expect(page.getByRole("tab")).toHaveCount(0);
-  await expect(page.getByText("Agent 与用量")).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "会话 Agent" }).getByText("Agent", { exact: true })
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeHidden();
   await expect(page.locator(".react-info-panel-button")).toBeFocused();
