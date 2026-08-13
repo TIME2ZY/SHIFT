@@ -426,27 +426,40 @@ export function MessageList({
     }
   }
 
+  const isNavigatingRef = useRef(false);
+
   function scrollToMessage(key: string) {
     const target = messageRefs.current.get(key);
     if (!target) return;
     setActiveMessageKey(key);
     const isLatest = key === latestMessageKey;
-    setFollowingLatest(isLatest);
-    if (isLatest && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (isLatest) {
+      isNavigatingRef.current = false;
+      setFollowingLatest(true);
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
     } else {
+      isNavigatingRef.current = true;
+      setFollowingLatest(false);
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     target.focus({ preventScroll: true });
   }
 
-
   function handleMessageScroll() {
     const element = scrollRef.current;
     if (!element) return;
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (isNavigatingRef.current) {
+      if (distanceFromBottom > 100) {
+        isNavigatingRef.current = false;
+      }
+      return;
+    }
     setFollowingLatest(distanceFromBottom < 80);
   }
+
 
   function scrollToLatest() {
     const element = scrollRef.current;
