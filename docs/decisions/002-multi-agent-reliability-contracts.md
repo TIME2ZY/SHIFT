@@ -337,8 +337,9 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   必须携带当前/基线分子分母，样本不足时保持 unknown，不另建指标写表。
 - Phase 3C 本地告警中心只消费 `/api/storage/health` 的派生 alerts，并给出基于 code 的确定性定位
   建议；建议不是新的业务状态，也不得自动改写或修复权威事实。
-- Phase 3D exporter 默认关闭，只发送结构化 health/metrics 快照；不得发送 ID、prompt、response、
-  query、tool payload、文件或环境变量。发送失败只影响 exporter health，不改变在线业务结果。
+- Phase 3D exporter 默认关闭，只发送结构化 health/metrics 快照；协议名为 `shift-webhook` 或
+  `sentry-envelope`，不得把自定义 JSON 声称为标准 OTLP。不得发送 ID、prompt、response、query、
+  tool payload、文件或环境变量。发送失败只影响 exporter health，不改变在线业务结果。
 
 ## 9. Phase 0 实施边界
 

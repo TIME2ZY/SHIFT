@@ -141,7 +141,7 @@ npm run test:live:multi-collab -- --mode spawn --discuss-capacity 22000 --implem
 
 **要求：** 本机 PATH 上有对应 CLI（gemini/antigravity、codex、grok、opencode）。
 
-## Trace / Observability 1D 门禁
+## Trace / Observability Phase 3 发布门禁
 
 ```powershell
 npm run test:live:observability -- --mode spawn
@@ -149,4 +149,4 @@ npm run test:live:observability -- --mode spawn
 
 该场景使用真实 Grok→Codex Handoff，随后重启同一服务并重新读取 Session Trace。报告会核对
 SSE invocation ID、durable Trace/Invocation/Handoff、terminal outcome 与 storage health，并写入
-`output/live/observability-acceptance-*/`。只有 `cleanRunPassed=true` 才允许开始 Phase 2。
+`output/live/observability-acceptance-*/`。只有 `cleanRunPassed=true` 才允许发布观测能力变更。

@@ -16,7 +16,7 @@ related:
 
 ## 1. 状态
 
-**Accepted — original cutover closed; 2026-08-09 runtime-home amendment pending**
+**Accepted — SQLite cutover and runtime-home amendment implemented**
 
 本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离、
 真实 legacy 数据清理和在线兼容模式退役均已完成。产品 composition root 只接受 SQLite；
@@ -27,9 +27,9 @@ thread/message/invocation、provider resume、memory 和 recall 均不再读写 
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
 评审文档，不允许实现自行选择。
 
-2026-08-12 增补的 Trace/Handoff 行描述 Phase 0B 的目标权威边界；当前实现仍以
-`docs/architecture-map.md` 为准。在 0B 完成前，Handoff route registry 仍是进程内实现，
-不得把目标表述误读为已完成持久化，也不得据此生成历史成功率。
+2026-08-12 增补的 Trace/Handoff 权威边界已经实现：Handoff accept、enqueue confirmation、
+target bind 与 terminal 均由 SQLite repository 仲裁，启动 reconcile 收口遗留状态。当前代码
+锚点以 `docs/architecture-map.md` 为准；不得重新引入进程内 route registry 作为平级真相源。
 
 ## 2. 背景
 

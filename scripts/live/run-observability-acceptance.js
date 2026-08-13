@@ -91,7 +91,7 @@ async function main() {
     });
     writeReport(dumpDir, {
       title: "Live observability acceptance",
-      scenarioId: "trace-observability-1d",
+      scenarioId: "trace-observability-phase-3",
       mode: "spawn",
       sessionId,
       turnCount: 1,
@@ -112,7 +112,7 @@ async function main() {
   } catch (error) {
     writeReport(dumpDir, {
       title: "Live observability acceptance",
-      scenarioId: "trace-observability-1d",
+      scenarioId: "trace-observability-phase-3",
       mode: "spawn",
       sessionId,
       turnCount: sessionId ? 1 : 0,

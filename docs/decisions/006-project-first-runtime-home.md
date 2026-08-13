@@ -15,11 +15,11 @@ related:
 
 ## 状态
 
-**Accepted — implementation pending on `codex/project-first-shift-home`**
+**Accepted — implemented**
 
-本 ADR 是 XL 变更的实施前契约。实现必须在一个 PR 中按顺序完成文档、运行目录迁移、
-Project 生命周期、Thread 绑定、检索隔离和前端项目导航；不得在过渡结束后保留旧在线
-数据库或无 Project 的会话创建路径。
+运行目录迁移、Project 生命周期、Thread 绑定、检索隔离和前端项目导航均已完成。在线
+composition root 只接受 `SHIFT_HOME/data` 下的 active clean epoch SQLite；不得恢复旧在线
+数据库位置、无 Project 的会话创建路径或调用方选择 recall Project 的能力。
 
 ## 背景
 

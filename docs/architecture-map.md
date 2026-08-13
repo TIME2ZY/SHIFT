@@ -320,8 +320,8 @@ Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans �
 evidence ref 与 source hash；metrics 从该证据读取严格 Recall、used/correct 与业务结果合格分母。
 
 可选 `observability-exporter.js` 只从 health/metrics 读模型生成去标识化结构快照，默认关闭，支持
-OTLP HTTP JSON 与 Sentry envelope 传输。它不读取 Trace payload、不写 SQLite，失败仅通过独立
-exporter health 暴露，不影响 Trace、Invocation、Handoff 或业务成功率。
+SHIFT webhook JSON 与 Sentry envelope 传输。它不是标准 OTLP exporter，不读取 Trace payload、
+不写 SQLite，失败仅通过独立 exporter health 暴露，不影响 Trace、Invocation、Handoff 或业务成功率。
 
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
