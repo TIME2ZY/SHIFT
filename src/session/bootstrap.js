@@ -303,37 +303,6 @@ async function buildBootstrapPacket(opts) {
   };
 }
 
-/** Normalize legacy string or modern object returns for callers/tests. */
-function coerceBootstrapResult(result) {
-  if (typeof result === "string") {
-    return { packet: result, inject: emptyInject() };
-  }
-  if (result && typeof result.packet === "string") {
-    return {
-      packet: result.packet,
-      inject: {
-        items: Array.isArray(result.inject?.items) ? result.inject.items : [],
-        stats: result.inject?.stats || emptyInject().stats,
-      },
-    };
-  }
-  return { packet: "", inject: emptyInject() };
-}
-
-function coerceMemoryCardResult(result) {
-  if (typeof result === "string") {
-    return { rendered: result, items: [], stats: emptyInject().stats };
-  }
-  if (result && typeof result.rendered === "string") {
-    return {
-      rendered: result.rendered,
-      items: Array.isArray(result.items) ? result.items : [],
-      stats: result.stats || emptyInject().stats,
-    };
-  }
-  return { rendered: "", items: [], stats: emptyInject().stats };
-}
-
 function toInjectPreview(inject, { sessionId, agent, source } = {}) {
   const pack = inject && typeof inject === "object" ? inject : emptyInject();
   return {
@@ -351,8 +320,6 @@ module.exports = {
   buildIdentity,
   buildDigest,
   buildActiveMemoryCard,
-  coerceBootstrapResult,
-  coerceMemoryCardResult,
   toInjectPreview,
   emptyInject,
   RECALL_RULE,

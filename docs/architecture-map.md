@@ -275,6 +275,11 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                  |
 | worktree | manager, delivery-verifier                                                                                                                                         |
 
+在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
+`memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
+Bootstrap 与 Active Memory Card 分别只接受结构化 `{ packet, inject }` 和
+`{ rendered, items, stats }` 返回契约，不再兼容历史字符串返回值。
+
 ### 5.2 离线 / 工具（应保持出热路径）
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：

@@ -120,6 +120,7 @@ function baseDeps(res, overrides = {}) {
     },
     sessionBootstrap: {
       buildBootstrapPacket: async () => ({ packet: "", inject: { items: [], stats: {} } }),
+      buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
     agentIdentity: {
@@ -157,6 +158,19 @@ function baseDeps(res, overrides = {}) {
     parseA2AMentions: () => [],
     filterBenignStderr: (text) => text,
     runChildStream: async () => ({ code: 0, signal: null }),
+    durableRecorder: {
+      enabled: false,
+      ensureWindow: () => null,
+      startTrace: () => null,
+      completeTrace() {},
+      reconcileTraceHandoffs: () => 0,
+    },
+    eventStore: {
+      append: () => ({ ok: false, event: null, sqlite: false }),
+    },
+    memoryCapture: {
+      replayThread: async () => ({ replayed: 0, existing: 0, failed: 0, available: false }),
+    },
     getSession: () => ({ worktree: null, projectDir: "/root" }),
     setSessionWorktree: () => ({ worktree: null, projectDir: "/root" }),
     appendToSession() {},
@@ -168,6 +182,23 @@ function baseDeps(res, overrides = {}) {
     ...overrides,
   };
 }
+
+test("createChatRoutes requires authoritative persistence dependencies", () => {
+  const res = makeRes();
+  const deps = baseDeps(res);
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, durableRecorder: null }),
+    /durableRecorder is required/
+  );
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, eventStore: null }),
+    /eventStore is required/
+  );
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, memoryCapture: null }),
+    /memoryCapture is required/
+  );
+});
 
 test("handleChatRoutes rejects unsupported agents before starting chat", async () => {
   const res = makeRes();
