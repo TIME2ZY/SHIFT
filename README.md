@@ -9,8 +9,6 @@
 
 [快速开始](#快速开始) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证) · [TODO](#todo--接下来计划)
 
-
-
 ## 项目定位
 
 SHIFT 是一个本地优先的多 Agent 协作控制台，不提供模型，也不替代各家 Agent CLI。它负责把本机已经安装和登录的 Agent 接入统一工作流：
@@ -40,12 +38,12 @@ SHIFT 让原本分散在多个终端里的 Agent 共享任务上下文，把一�
 
 Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 
-| Agent        | 默认模型           | 运行方式        | 默认职责                                       |
-| ------------ | ------------------ | --------------- | ---------------------------------------------- |
-| **Codex**    | `gpt-5.6-sol`      | Codex CLI       | 开始/末尾把关、参与讨论、收敛方案、最终目标验收 |
-| **Gemini**   | `gemini-3.6-flash` | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
-| **Grok**     | `grok-4.5`         | Grok Build ACP  | 先给具体修改方案，获批后实现、测试并总结         |
-| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI | 代码 review；通过后规范 commit、push 和 PR       |
+| Agent        | 默认模型                  | 运行方式        | 默认职责                                        |
+| ------------ | ------------------------- | --------------- | ----------------------------------------------- |
+| **Codex**    | `gpt-5.6-sol`             | Codex CLI       | 开始/末尾把关、参与讨论、收敛方案、最终目标验收 |
+| **Gemini**   | `gemini-3.6-flash`        | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
+| **Grok**     | `grok-4.5`                | Grok Build ACP  | 先给具体修改方案，获批后实现、测试并总结        |
+| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI    | 代码 review；通过后规范 commit、push 和 PR      |
 
 模型、容量和职责目前是固定配置。SHIFT 不打包这些 CLI，也不管理它们的账号；使用前需要在本机分别安装并完成认证。
 
@@ -233,7 +231,8 @@ skills/         注入给 Agent 的协作与交接规则
 
 下一阶段将围绕“更容易接入 Agent、更清晰地观察协作、更安全地交付代码”继续完善：
 
-- [ ] 审计平台
+- [x] Trace / 审计平台（durable Trace、Handoff、指标与脱敏导出）
+- [ ] Phase 3 可运维化（浏览器验收、回归检测、本地告警、可选 exporter）
 
 ---
 
