@@ -19,15 +19,15 @@ const {
 
 test("provider registry includes grok", () => {
   assert.ok(listSupportedProviders().includes("grok"));
-  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.6" });
   assert.equal(typeof runtime.transform, "function");
   assert.equal(typeof runtime.extractSessionId, "function");
 });
 
-test("AGENTS.grok is catalogued with grok-4.5 high", () => {
+test("AGENTS.grok is catalogued with grok-4.6 high", () => {
   assert.ok(AGENTS.grok);
   assert.equal(AGENTS.grok.providerId, "grok");
-  assert.equal(AGENTS.grok.model, "grok-4.5");
+  assert.equal(AGENTS.grok.model, "grok-4.6");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
   assert.equal(AGENTS.grok.capacityTokens, undefined);
   assert.equal(getAgentModelProfile("grok").contextTokens, 500_000);
@@ -41,7 +41,7 @@ test("buildInvocation for grok spawns local grok CLI headless", () => {
   assert.ok(inv.args.includes("--output-format"));
   assert.ok(inv.args.includes("streaming-json"));
   assert.ok(inv.args.includes("-m"));
-  assert.ok(inv.args.includes("grok-4.5"));
+  assert.ok(inv.args.includes("grok-4.6"));
   assert.ok(inv.args.includes("--reasoning-effort"));
   assert.ok(inv.args.includes("high"));
   assert.ok(inv.args.includes("--always-approve"));
@@ -115,7 +115,7 @@ test("resolveGrokCommand returns a string", () => {
 });
 
 test("createGrokRuntime coalesces many tiny thought tokens", () => {
-  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.6" });
   const ctx = { agent: "grok", invocationId: "inv-1" };
 
   const pieces = ["The", " user", " wants", " a", " short", " answer."];
@@ -153,7 +153,7 @@ test("createGrokRuntime coalesces many tiny thought tokens", () => {
 });
 
 test("createGrokRuntime flushes thinking before text and coalesces text", () => {
-  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.6" });
   const ctx = { agent: "grok", invocationId: "inv-2" };
 
   // Under threshold: still buffered
@@ -185,7 +185,7 @@ test("createGrokRuntime flushes thinking before text and coalesces text", () => 
 });
 
 test("createGrokRuntime extracts session id from end", () => {
-  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.6" });
   assert.equal(
     runtime.extractSessionId({
       type: "end",
@@ -197,7 +197,7 @@ test("createGrokRuntime extracts session id from end", () => {
 });
 
 test("grok end converts additional cached input to the canonical inclusive input", () => {
-  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createProviderRuntime({ providerId: "grok", model: "grok-4.6" });
   const events = runtime.transform(
     {
       type: "end",
@@ -236,7 +236,7 @@ test("identity file exists for grok and mentions CLI", () => {
 });
 
 test("createGrokRuntime maps tool_use / tool_result to tool.*", () => {
-  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.5" });
+  const runtime = createGrokRuntime({ providerId: "grok", model: "grok-4.6" });
   const ctx = { agent: "grok", invocationId: "inv-tool" };
   const started = runtime.transform(
     {

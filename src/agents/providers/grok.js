@@ -8,7 +8,7 @@ const { firstNonEmpty, resolveProxy } = require("../proxy");
  * Grok Build CLI provider.
  *
  * Child process is the local `grok` binary (same pattern as codex / opencode):
- *   grok -p "..." --output-format streaming-json -m grok-4.5 \
+ *   grok -p "..." --output-format streaming-json -m grok-4.6 \
  *     --reasoning-effort high --always-approve ...
  *   (--no-subagents only when providerOptions.noSubagents === true)
  *
@@ -77,7 +77,7 @@ function createGrokRuntime(cli) {
             ...base,
             sessionId: sessionId || "",
             provider: "grok",
-            model: (cli && cli.model) || "grok-4.5",
+            model: (cli && cli.model) || "grok-4.6",
           })
         );
       };

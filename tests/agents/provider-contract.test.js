@@ -24,7 +24,7 @@ const path = require("node:path");
 const CONFIGS = {
   codex: { providerId: "codex", model: "gpt-5.6-sol", reasoningEffort: "medium" },
   opencode: { providerId: "opencode", model: "deepseek-v4-flash", reasoningEffort: "max" },
-  grok: { providerId: "grok", model: "grok-4.5", reasoningEffort: "high" },
+  grok: { providerId: "grok", model: "grok-4.6", reasoningEffort: "high" },
   antigravity: {
     providerId: "antigravity",
     model: "gemini-3.6-flash",

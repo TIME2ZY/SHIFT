@@ -81,7 +81,7 @@ const MODEL_PROFILES = [
     sealActionUsableRatio: 0.98,
     reasoning: { supported: true, levels: ["low", "high", "max"] },
   }),
-  model("grok", "grok-4.5", "xai", {
+  model("grok", "grok-4.6", "xai", {
     contextTokens: 500_000,
     capacitySource: "manual",
     // Local config: [session] auto_compact_threshold_percent = 85 (catalog may say 80).
@@ -146,7 +146,7 @@ const AGENTS = {
     "讨论伙伴：提出正常可行的选项、风险与反例，与 Codex 互相验证，不为猎奇而发散。",
     { reasoningEffort: "high" }
   ),
-  grok: agent("grok", "Grok", "grok", "grok-4.5", "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。", {
+  grok: agent("grok", "Grok", "grok", "grok-4.6", "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。", {
     reasoningEffort: "high",
     transport: "acp",
   }),

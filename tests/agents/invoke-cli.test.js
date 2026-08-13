@@ -306,7 +306,7 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.gemini.model, "gemini-3.6-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
-  assert.equal(AGENTS.grok.model, "grok-4.5");
+  assert.equal(AGENTS.grok.model, "grok-4.6");
   assert.equal(AGENTS.grok.reasoningEffort, "high");
   assert.equal(AGENTS.grok.providerId, "grok");
   assert.equal(AGENTS.opencode.model, "deepseek-v4-flash");
@@ -1162,7 +1162,7 @@ test("provider registry lists codex, grok, opencode, and antigravity", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
   assert.deepEqual(listSupportedProviders().sort(), ["antigravity", "codex", "grok", "opencode"]);
   assert.ok(createProviderRuntime({ providerId: "codex" }));
-  assert.ok(createProviderRuntime({ providerId: "grok", model: "grok-4.5" }));
+  assert.ok(createProviderRuntime({ providerId: "grok", model: "grok-4.6" }));
   assert.ok(
     createProviderRuntime({
       providerId: "antigravity",
