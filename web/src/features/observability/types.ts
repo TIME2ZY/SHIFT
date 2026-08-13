@@ -101,19 +101,41 @@ export interface ObservabilityMetrics {
     endToEnd: QualifiedRate;
   };
   memory: {
-    hitRate: QualifiedRate;
+    search: {
+      availabilityRate: QualifiedRate;
+      memoryHitRate: QualifiedRate;
+      totalResultRate: QualifiedRate;
+      averageMemoryHits: number | null;
+      availability: Record<string, number>;
+    };
+    injection: {
+      availabilityRate: QualifiedRate;
+      coverageRate: QualifiedRate;
+      averageDelivered: number | null;
+      budgetDropRate: QualifiedRate;
+      truncationRate: QualifiedRate;
+      availability: Record<string, number>;
+    };
+    write: {
+      calls: number;
+      created: number;
+      unchanged: number;
+      superseded: number;
+      rejected: number;
+    };
     strictRecallAtK: (QualifiedRate & { cutoffK: number; mrr: number; ndcgAtK: number }) | null;
     usedRate?: QualifiedRate | null;
     correctRate?: QualifiedRate | null;
     businessSuccessRate?: QualifiedRate | null;
     semantics: string;
+    applicability: { contractAppliedAt: string | null; historicalEventsExcluded: number };
   };
   comparison: {
     baselineWindow: { from: string; to: string };
     minSamples: number;
     dropThreshold: number;
     indicators: Array<{
-      metric: "handoff.endToEnd" | "memory.hitRate";
+      metric: "handoff.endToEnd" | "memory.searchHitRate";
       state: "stable" | "regressed" | "unknown";
       delta: number | null;
       current: Pick<QualifiedRate, "value" | "numerator" | "denominator">;

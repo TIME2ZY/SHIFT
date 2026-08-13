@@ -127,7 +127,9 @@ function createRecallService({
    */
   async function searchForAgent(context, input = {}) {
     const threadId = requiredString(context?.threadId, "thread id");
-    requiredString(context?.invocationId, "invocation id");
+    const invocationId = requiredString(context?.invocationId, "invocation id");
+    const agentId = requiredString(context?.agentId, "agent id");
+    const operationKey = requiredString(context?.operationKey, "operation key");
     const query = requiredString(input.query, "recall query");
     const limit = Math.max(1, Math.min(Number(input.limit) || 10, 30));
     const layers = normalizeLayers(
@@ -141,7 +143,28 @@ function createRecallService({
       // Product Memory is thread-only (ADR-005); never expand to project entries.
       memoryScope: "thread",
     });
-    return toAgentRecallResult(result, { threadId });
+    const response = toAgentRecallResult(result, { threadId });
+    const counts = layerHitCounts(result.hits);
+    storage?.memoryEvents?.recordSafe?.({
+      eventType: "memory_searched",
+      threadId,
+      invocationId,
+      agentId,
+      operationKey,
+      payloadVersion: 1,
+      payload: {
+        caller: "mcp",
+        queryChars: query.length,
+        requestedLayers: layers,
+        limit,
+        availability: result.availability,
+        totalHits: result.hits.length,
+        ...counts,
+        truncated: Boolean(result.truncated),
+        recallMode: result.recallMode || "fts",
+      },
+    });
+    return response;
   }
 
   /**
@@ -178,20 +201,6 @@ function createRecallService({
         state: "unavailable",
         reason: "project_scope_unavailable",
       };
-      storage?.memoryEvents?.recordSafe?.({
-        eventType: "memory_searched",
-        threadId,
-        payload: {
-          query: unavailable.query,
-          weakQuery: unavailable.weakQuery,
-          source: "project-scope",
-          mode: "sqlite",
-          limit,
-          hits: 0,
-          layers: unavailable.layers,
-          availability: unavailable.availability,
-        },
-      });
       return unavailable;
     }
 
@@ -312,21 +321,6 @@ function createRecallService({
           ? { state: "unavailable", reason: "search_failed" }
           : { state: "available", empty: result.hits.length === 0 };
     }
-
-    storage?.memoryEvents?.recordSafe?.({
-      eventType: "memory_searched",
-      threadId,
-      payload: {
-        query: result.query,
-        weakQuery: result.weakQuery,
-        source,
-        mode: "sqlite",
-        limit,
-        hits: result.hits.length,
-        layers: result.layers,
-        availability: result.availability || null,
-      },
-    });
 
     logSearchMetrics({
       threadId,
@@ -742,20 +736,6 @@ function createRecallService({
         rendered: 0,
         delivered: 0,
       });
-      storage?.memoryEvents?.recordSafe?.({
-        eventType: "memory_injected",
-        threadId,
-        payload: {
-          source: "retrieveForTurn",
-          count: 0,
-          memoryIds: [],
-          renderedIds: [],
-          availability,
-          usedChars: rendered.length,
-          truncated: false,
-          funnel,
-        },
-      });
       return {
         items: [],
         rendered,
@@ -957,21 +937,6 @@ function createRecallService({
       funnel,
     };
 
-    storage?.memoryEvents?.recordSafe?.({
-      eventType: "memory_injected",
-      threadId,
-      payload: {
-        source: "retrieveForTurn",
-        count: selected.length,
-        memoryIds: selected.map((item) => item.id).filter(Boolean),
-        renderedIds: cardMeta.renderedIds || [],
-        availability,
-        usedChars,
-        truncated: stats.truncated,
-        funnel,
-      },
-    });
-
     return {
       items: selected,
       rendered,
@@ -1040,6 +1005,18 @@ function createRecallService({
     resolveA2AMemoryBudget,
     resolveMemoryBudget,
   };
+}
+
+function layerHitCounts(hits = []) {
+  const counts = { memoryHits: 0, messageHits: 0, evidenceHits: 0, projectDocHits: 0 };
+  for (const hit of hits) {
+    const layer = hit.layer || hit.metadata?.layer;
+    if (layer === "memory") counts.memoryHits += 1;
+    else if (layer === "message") counts.messageHits += 1;
+    else if (layer === "evidence") counts.evidenceHits += 1;
+    else if (layer === "project-doc") counts.projectDocHits += 1;
+  }
+  return counts;
 }
 
 module.exports = {

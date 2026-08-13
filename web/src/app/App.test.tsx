@@ -116,7 +116,7 @@ vi.mock("../features/projects/ProjectRail", () => ({
   ),
 }));
 vi.mock("../features/right-panel/RightPanel", () => ({ RightPanel: () => null }));
-vi.mock("../features/workspace/WorkspacePage", () => ({ WorkspacePage: () => null }));
+vi.mock("../features/observability/AuditPage", () => ({ AuditPage: () => null }));
 
 beforeEach(() => {
   window.localStorage.clear();

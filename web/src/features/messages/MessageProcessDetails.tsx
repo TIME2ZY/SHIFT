@@ -130,7 +130,6 @@ export function MessageProcessDetails({
   content = "",
   loadDurable = true,
   initialStatus,
-  onOpenWorkspace,
 }: {
   sessionId: string | null;
   invocationId?: string;
@@ -138,7 +137,6 @@ export function MessageProcessDetails({
   content?: string;
   loadDurable?: boolean;
   initialStatus?: "running" | "done" | "error";
-  onOpenWorkspace?(): void;
 }) {
   const canLoadDurable = loadDurable && Boolean(sessionId && invocationId);
   const [processExpanded, setProcessExpanded] = useState(false);
@@ -320,11 +318,6 @@ export function MessageProcessDetails({
                 <section className="react-process-section react-changed-files">
                   <header>
                     <h3>修改文件</h3>
-                    {onOpenWorkspace ? (
-                      <button type="button" onClick={onOpenWorkspace}>
-                        在工作区查看差异
-                      </button>
-                    ) : null}
                   </header>
                   <ul>
                     {visibleChangedFiles.map((file) => (

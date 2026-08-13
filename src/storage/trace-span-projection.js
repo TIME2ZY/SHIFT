@@ -107,9 +107,11 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
 
 function recallAttributes(payload) {
   return {
-    count: Number(payload?.count || payload?.items?.length || 0),
+    totalHits: Number(payload?.totalHits || 0),
+    memoryHits: Number(payload?.memoryHits || 0),
+    delivered: Number(payload?.delivered || 0),
     availability: payload?.availability?.state || null,
-    mode: payload?.stats?.mode || null,
+    requestedLayers: Array.isArray(payload?.requestedLayers) ? payload.requestedLayers : [],
   };
 }
 

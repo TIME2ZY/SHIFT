@@ -187,29 +187,40 @@ test("handoff metrics classify eligible pending and excluded samples", () => {
   }
 });
 
-test("memory observability reports hit rate without claiming strict Recall", () => {
+test("memory observability separates MCP search and delivered injection", () => {
   const storage = createStorage({ file: ":memory:" });
   try {
     seed(storage);
     storage.memoryEvents.record({
       eventType: "memory_injected",
       threadId: "thread-1",
+      invocationId: "invocation-1",
+      agentId: "codex",
+      operationKey: "inject:invocation-1:bootstrap",
+      payloadVersion: 1,
       createdAt: "2026-08-01T01:00:00.000Z",
-      payload: { count: 2, availability: { state: "available" } },
+      payload: { delivered: 2, selected: 2, availability: { state: "available" } },
     });
     storage.memoryEvents.record({
       eventType: "memory_injected",
       threadId: "thread-1",
+      invocationId: "invocation-2",
+      agentId: "codex",
+      operationKey: "inject:invocation-2:bootstrap",
+      payloadVersion: 1,
       createdAt: "2026-08-01T02:00:00.000Z",
-      payload: { count: 0, availability: { state: "degraded" } },
+      payload: { delivered: 0, selected: 0, availability: { state: "degraded" } },
     });
     const metrics = storage.observability.metrics({
       from: "2026-08-01T00:00:00.000Z",
       to: "2026-08-02T00:00:00.000Z",
     });
-    assert.equal(metrics.memory.hitRate.numerator, 1);
-    assert.equal(metrics.memory.hitRate.denominator, 2);
-    assert.equal(metrics.memory.hitRate.value, 0.5);
+    assert.equal(metrics.memory.injection.coverageRate.numerator, 1);
+    assert.equal(metrics.memory.injection.coverageRate.denominator, 1);
+    assert.equal(metrics.memory.injection.coverageRate.unknown, 1);
+    assert.equal(metrics.memory.injection.availabilityRate.denominator, 2);
+    assert.equal(metrics.memory.injection.availabilityRate.unknown, 0);
+    assert.equal(metrics.memory.injection.coverageRate.value, 1);
     assert.equal(metrics.memory.strictRecallAtK, null);
     assert.equal(metrics.memory.usedRate, null);
     assert.equal(metrics.memory.correctRate, null);
@@ -225,10 +236,19 @@ test("metrics compare equal windows and fail closed on small samples", () => {
     seed(storage);
     for (let index = 0; index < 5; index += 1) {
       storage.memoryEvents.record({
-        eventType: "memory_injected",
+        eventType: "memory_searched",
         threadId: "thread-1",
+        invocationId: `invocation-${index}`,
+        agentId: "codex",
+        operationKey: `recall:invocation-${index}:test`,
+        payloadVersion: 1,
         createdAt: `2026-08-${index < 4 ? "01" : "02"}T0${index}:00:00.000Z`,
-        payload: { count: index < 4 ? 1 : 0, availability: { state: "available" } },
+        payload: {
+          requestedLayers: ["memory"],
+          totalHits: index < 4 ? 1 : 0,
+          memoryHits: index < 4 ? 1 : 0,
+          availability: { state: "available" },
+        },
       });
     }
     const metrics = storage.observability.metrics({
@@ -237,7 +257,7 @@ test("metrics compare equal windows and fail closed on small samples", () => {
       regressionMinSamples: 1,
     });
     const memory = metrics.comparison.indicators.find(
-      (indicator) => indicator.metric === "memory.hitRate"
+      (indicator) => indicator.metric === "memory.searchHitRate"
     );
     assert.equal(metrics.comparison.baselineWindow.from, "2026-08-01T00:00:00.000Z");
     assert.equal(memory.state, "regressed");
@@ -247,7 +267,9 @@ test("metrics compare equal windows and fail closed on small samples", () => {
     assert.equal(
       storage.observability
         .metrics({ from: "2026-08-02T00:00:00.000Z", to: "2026-08-03T00:00:00.000Z" })
-        .comparison.indicators.find((indicator) => indicator.metric === "memory.hitRate").state,
+        .comparison.indicators.find(
+          (indicator) => indicator.metric === "memory.searchHitRate"
+        ).state,
       "unknown"
     );
   } finally {

@@ -74,6 +74,14 @@ test("memory database applies schema and safety pragmas", () => {
         .all()
         .map((column) => column.name)
     );
+    const memoryEventColumns = new Set(
+      db
+        .prepare("PRAGMA table_info(memory_events)")
+        .all()
+        .map((column) => column.name)
+    );
+    assert.ok(memoryEventColumns.has("operation_key"));
+    assert.ok(memoryEventColumns.has("payload_version"));
     for (const column of [
       "metadata_json",
       "window_id",

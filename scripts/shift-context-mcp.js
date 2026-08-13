@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const readline = require("node:readline");
+const crypto = require("node:crypto");
 
 const SERVER_NAME = "shift-context";
 const SERVER_VERSION = "0.1.0";
@@ -135,6 +136,7 @@ async function callMemoryWrite(args, { env = process.env, fetchImpl = globalThis
     throw new Error("Global fetch is unavailable; Node 20+ is required.");
   }
   const context = requireShiftContext(env);
+  const operationId = crypto.randomUUID();
   const response = await fetchImpl(new URL("/api/callbacks/memory-write", `${context.apiUrl}/`), {
     method: "POST",
     headers: {
@@ -146,6 +148,7 @@ async function callMemoryWrite(args, { env = process.env, fetchImpl = globalThis
       sessionId: context.sessionId,
       invocationId: context.invocationId,
       callbackToken: context.callbackToken,
+      operationId,
       kind: args?.kind,
       topic: args?.topic,
       content: args?.content,
@@ -222,6 +225,7 @@ async function callRecallSearch(args, { env = process.env, fetchImpl = globalThi
     throw new Error("Global fetch is unavailable; Node 20+ is required.");
   }
   const context = requireShiftContext(env);
+  const operationId = crypto.randomUUID();
   const response = await fetchImpl(new URL("/api/callbacks/recall-search", `${context.apiUrl}/`), {
     method: "POST",
     headers: {
@@ -232,6 +236,7 @@ async function callRecallSearch(args, { env = process.env, fetchImpl = globalThi
     body: JSON.stringify({
       sessionId: context.sessionId,
       invocationId: context.invocationId,
+      operationId,
       query: args.query.trim(),
       ...(args.layers === undefined ? {} : { layers: args.layers }),
       ...(args.limit === undefined ? {} : { limit: args.limit }),

@@ -46,7 +46,10 @@ test("span projection derives generation tool recall and links without span writ
       eventType: "memory_injected",
       threadId: "thread-1",
       invocationId: "inv-1",
-      payload: { count: 2, availability: { state: "available" }, query: "secret query" },
+      agentId: "codex",
+      operationKey: "inject:inv-1:bootstrap",
+      payloadVersion: 1,
+      payload: { delivered: 2, selected: 2, availability: { state: "available" } },
       createdAt: "2026-08-13T00:00:03.000Z",
     });
     storage.invocations.appendEvent({
@@ -68,6 +71,7 @@ test("span projection derives generation tool recall and links without span writ
     assert.equal(projection.spans[0].attributes.generation, 2);
     assert.equal(projection.spans[1].attributes.text, undefined);
     assert.equal(projection.spans[2].attributes.query, undefined);
+    assert.equal(projection.spans[2].attributes.delivered, 2);
     assert.equal(
       storage.db.prepare("SELECT name FROM sqlite_master WHERE name = 'trace_spans'").get(),
       undefined

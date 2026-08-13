@@ -46,7 +46,6 @@ interface MessageListProps {
   isLoading: boolean;
   error: Error | null;
   onRetry(): void;
-  onOpenWorkspace?(): void;
   /** Fill the composer when user clicks a recommended starter prompt. */
   onUsePrompt?(prompt: QuickPrompt): void;
 }
@@ -249,7 +248,6 @@ export function MessageList({
   isLoading,
   error,
   onRetry,
-  onOpenWorkspace,
   onUsePrompt,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -565,7 +563,6 @@ export function MessageList({
                   content={visibleMessage.content}
                   loadDurable={isHost && Boolean(visibleMessage.invocationId)}
                   initialStatus={isHost ? (visibleMessage.exitCode ? "error" : "done") : undefined}
-                  onOpenWorkspace={onOpenWorkspace}
                 />
               ) : (
                 visibleMessage.content
@@ -601,7 +598,6 @@ export function MessageList({
                   invocationId={invocation.invocationId}
                   loadDurable
                   initialStatus="error"
-                  onOpenWorkspace={onOpenWorkspace}
                 />
               </div>
             </MessageRow>
@@ -648,7 +644,6 @@ export function MessageList({
                 liveMessage={message}
                 content={message.text}
                 loadDurable={false}
-                onOpenWorkspace={onOpenWorkspace}
               />
             </MessageRow>
           );

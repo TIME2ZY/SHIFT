@@ -75,6 +75,31 @@ function appendMemoryCapturedEvent(eventStore, sessionId, invocationId, memory, 
   });
 }
 
+function recordMemoryWriteResult({
+  storage,
+  sessionId,
+  invocationId,
+  agentId,
+  operationId,
+  outcome,
+  kind = null,
+  topic = null,
+  memoryId = null,
+  supersededMemoryIds = [],
+  reasonCode = null,
+}) {
+  storage?.memoryEvents?.recordSafe?.({
+    eventType: "memory_write_completed",
+    threadId: sessionId,
+    invocationId,
+    agentId,
+    memoryId,
+    operationKey: `memory-write:${invocationId}:${operationId}`,
+    payloadVersion: 1,
+    payload: { outcome, kind, topic, supersededMemoryIds, reasonCode },
+  });
+}
+
 function createCallbackRoutes({
   callbacks,
   transcript,
@@ -86,6 +111,7 @@ function createCallbackRoutes({
   recallService,
   memoryCapture,
   memoryService = null,
+  storage = null,
   eventStore = null,
   logger = console,
 }) {
@@ -102,17 +128,25 @@ function createCallbackRoutes({
 
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
       const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
+      const operationId = typeof body.operationId === "string" ? body.operationId : "";
       const callbackToken = String(req.headers["x-callback-token"] || "");
       const query = typeof body.query === "string" ? body.query.trim() : "";
       const layers =
         body.layers === undefined ? undefined : Array.isArray(body.layers) ? body.layers : null;
       const limit = body.limit === undefined ? 10 : body.limit;
-      const allowedFields = new Set(["sessionId", "invocationId", "query", "layers", "limit"]);
+      const allowedFields = new Set([
+        "sessionId",
+        "invocationId",
+        "operationId",
+        "query",
+        "layers",
+        "limit",
+      ]);
       const unknownFields = Object.keys(body).filter((field) => !allowedFields.has(field));
 
-      if (!sessionId || !invocationId || !callbackToken) {
+      if (!sessionId || !invocationId || !operationId || !callbackToken) {
         sendJson(res, 400, {
-          error: "sessionId, invocationId, and X-Callback-Token are required.",
+          error: "sessionId, invocationId, operationId, and X-Callback-Token are required.",
         });
         return true;
       }
@@ -153,6 +187,8 @@ function createCallbackRoutes({
         {
           threadId: sessionId,
           invocationId,
+          agentId: resolveAgentId(callbacks, sessionId, invocationId),
+          operationKey: `recall:${invocationId}:${operationId}`,
           caller: "mcp",
         },
         {
@@ -180,7 +216,9 @@ function createCallbackRoutes({
       const content = typeof body.content === "string" ? body.content : "";
 
       if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
+        sendJson(res, 400, {
+          error: "sessionId, invocationId, and callbackToken are required.",
+        });
         return true;
       }
       if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
@@ -359,52 +397,71 @@ function createCallbackRoutes({
 
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
       const invocationId = typeof body.invocationId === "string" ? body.invocationId : "";
+      const operationId = typeof body.operationId === "string" ? body.operationId : "";
       const callbackToken = typeof body.callbackToken === "string" ? body.callbackToken : "";
       const kind = typeof body.kind === "string" ? body.kind.trim() : "";
       const topic = typeof body.topic === "string" ? body.topic.trim() : "";
       const content = typeof body.content === "string" ? body.content.trim() : "";
       const scope = typeof body.scope === "string" ? body.scope.trim() : undefined;
 
-      if (!sessionId || !invocationId || !callbackToken) {
-        sendJson(res, 400, { error: "sessionId, invocationId, and callbackToken are required." });
+      if (!sessionId || !invocationId || !operationId || !callbackToken) {
+        sendJson(res, 400, {
+          error: "sessionId, invocationId, operationId, and callbackToken are required.",
+        });
         return true;
       }
       if (!callbacks.validateToken(sessionId, invocationId, callbackToken)) {
         sendJson(res, 401, { error: "Invalid callback token." });
         return true;
       }
-      if (!memoryService) {
-        sendJson(res, 503, {
-          error: "Memory service unavailable. SQLite storage is required.",
+      const agentId = resolveAgentId(callbacks, sessionId, invocationId);
+      const rejectWrite = (status, error, reasonCode) => {
+        recordMemoryWriteResult({
+          storage,
+          sessionId,
+          invocationId,
+          agentId,
+          operationId,
+          outcome: "rejected",
+          kind: kind || null,
+          topic: topic || null,
+          reasonCode,
         });
+        sendJson(res, status, { outcome: "rejected", code: reasonCode, reason: error, error });
+      };
+      if (!memoryService) {
+        rejectWrite(
+          503,
+          "Memory service unavailable. SQLite storage is required.",
+          "service_unavailable"
+        );
         return true;
       }
       if (getSession && !getSession(sessionId)) {
-        sendJson(res, 404, { error: "Session not found." });
+        rejectWrite(404, "Session not found.", "session_not_found");
         return true;
       }
       if (!PRODUCT_KINDS.includes(kind)) {
-        sendJson(res, 400, {
-          error: `kind must be one of: ${PRODUCT_KINDS.join(", ")}.`,
-        });
+        rejectWrite(400, `kind must be one of: ${PRODUCT_KINDS.join(", ")}.`, "invalid_kind");
         return true;
       }
       if (!topic) {
-        sendJson(res, 400, { error: "topic is required for memory_write." });
+        rejectWrite(400, "topic is required for memory_write.", "missing_topic");
         return true;
       }
       if (!content) {
-        sendJson(res, 400, { error: "content is required." });
+        rejectWrite(400, "content is required.", "missing_content");
         return true;
       }
       if (content.length > MAX_MEMORY_CONTENT_CHARS) {
-        sendJson(res, 400, {
-          error: `content exceeds ${MAX_MEMORY_CONTENT_CHARS} characters.`,
-        });
+        rejectWrite(
+          400,
+          `content exceeds ${MAX_MEMORY_CONTENT_CHARS} characters.`,
+          "content_too_long"
+        );
         return true;
       }
 
-      const agentId = resolveAgentId(callbacks, sessionId, invocationId);
       try {
         // The invocation token binds trusted MCP context. The unified service
         // derives ownership and authority from it.
@@ -459,6 +516,18 @@ function createCallbackRoutes({
             createdAt: outcome.memory.createdAt,
           },
         };
+        recordMemoryWriteResult({
+          storage,
+          sessionId,
+          invocationId,
+          agentId,
+          operationId,
+          outcome: outcome.outcome,
+          kind,
+          topic: outcome.topic,
+          memoryId: outcome.memory.id,
+          supersededMemoryIds: (outcome.superseded || []).map((item) => item.id || item),
+        });
         broadcastMemoryEvent(callbacks, sessionId, payload);
         const liveStats = bumpThreadWriteStat(callbacks, sessionId, "upsertCallback", 1);
         const writeMetrics = buildMemoryWriteMetrics({
@@ -489,12 +558,7 @@ function createCallbackRoutes({
       } catch (error) {
         logger.error?.(`[memory-write] failed: ${error.message}`);
         bumpThreadWriteStat(callbacks, sessionId, "errors", 1);
-        sendJson(res, 400, {
-          outcome: "rejected",
-          code: "invalid_candidate",
-          reason: error.message,
-          error: error.message,
-        });
+        rejectWrite(400, error.message, "invalid_candidate");
       }
       return true;
     }
