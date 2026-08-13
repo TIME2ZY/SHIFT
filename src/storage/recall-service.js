@@ -80,12 +80,8 @@ function createRecallService({
     logger.error?.(`[sqlite-recall] ${operation} failed: ${error.message}`);
   }
 
-  /**
-   * Run a SQLite branch; on failure return undefined so callers keep the file
-   * result. Never treat a DB exception as "empty memory".
-   */
+  /** Run a SQLite search; preserve unavailable state instead of reporting an empty result. */
   function trySqlite(operation, work) {
-    if (!storage) return undefined;
     try {
       return work();
     } catch (error) {
@@ -233,7 +229,7 @@ function createRecallService({
         };
       }
     } else {
-      let sqliteHits = trySqlite("search transcript", () => {
+      let sqliteHits = trySqlite("search recall projection", () => {
         if (!storage.recall && !storage.memories) return [];
         return searchSqliteLayers({
           threadId,

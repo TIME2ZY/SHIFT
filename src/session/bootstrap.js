@@ -1,4 +1,3 @@
-const transcript = require("./transcript");
 const {
   renderActiveMemoryCard,
   resolveA2AMemoryBudget,
@@ -52,10 +51,13 @@ function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
 
 async function buildDigest({
   sessionId,
-  invocationSource = transcript,
+  invocationSource,
   digestSource = null,
   logger = console,
 }) {
+  if (!invocationSource || typeof invocationSource.listInvocationsWithMeta !== "function") {
+    throw new TypeError("invocationSource is required");
+  }
   let semanticDigest = null;
   if (digestSource && typeof digestSource.get === "function") {
     try {
@@ -263,7 +265,7 @@ async function buildBootstrapPacket(opts) {
     agent,
     generation = 1,
     prompt = "",
-    invocationSource = transcript,
+    invocationSource,
     digestSource = null,
     retrieveSource = null,
     memorySource = null,

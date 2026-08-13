@@ -102,7 +102,6 @@ function recordMemoryWriteResult({
 
 function createCallbackRoutes({
   callbacks,
-  transcript,
   appendToSession,
   getSession,
   sendJson,
@@ -115,7 +114,8 @@ function createCallbackRoutes({
   eventStore = null,
   logger = console,
 }) {
-  const recall = recallService || transcript;
+  if (!recallService) throw new TypeError("recallService is required");
+  const recall = recallService;
   return async function handleCallbackRoutes(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/callbacks/recall-search") {
       let body;

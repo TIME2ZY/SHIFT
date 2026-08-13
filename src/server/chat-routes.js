@@ -207,15 +207,6 @@ function createChatRoutes({
       workspaceKey,
       capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
     });
-    try {
-      await memories.replayThread(sessionId);
-    } catch (error) {
-      failPreparationTrace(error, "bootstrap");
-      if (activeInvocations.get(sessionId) === invocationController) {
-        activeInvocations.delete(sessionId);
-      }
-      throw error;
-    }
     if (
       invocationController.signal.aborted ||
       activeInvocations.get(sessionId) !== invocationController ||

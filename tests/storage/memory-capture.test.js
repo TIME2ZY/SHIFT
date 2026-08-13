@@ -80,3 +80,7 @@ test("createMemoryCapture rejects memoryService half-wiring", () => {
     /does not accept memoryService/
   );
 });
+
+test("createMemoryCapture requires EventStore", () => {
+  assert.throws(() => createMemoryCapture(), /requires an eventStore/);
+});

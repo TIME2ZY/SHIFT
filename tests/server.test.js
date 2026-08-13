@@ -2530,7 +2530,9 @@ test("callbacks.validateToken accepts only exact matches", () => {
   const invocationId = "invocation-vt-1";
   const callbackToken = "token-vt-1";
   const threadCtx = {
-    tokens: new Map([[invocationId, { agentId: "codex", callbackToken }]]),
+    tokens: new Map([
+      [invocationId, { agentId: "codex", callbackToken, expiresAt: Date.now() + 60_000 }],
+    ]),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -2646,7 +2648,7 @@ test("validateToken rejects expired tokens and lazily cleans them up", () => {
   callbacks.unregisterThread(sessionId);
 });
 
-test("validateToken accepts non-expiring legacy tokens (backward compat)", () => {
+test("validateToken rejects tokens without a valid expiry", () => {
   const sessionId = "session-leg-1";
   const invocationId = "invocation-leg-1";
   const callbackToken = "token-leg-1";
@@ -2665,7 +2667,8 @@ test("validateToken accepts non-expiring legacy tokens (backward compat)", () =>
   };
   callbacks.registerThread(sessionId, threadCtx);
 
-  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), true);
+  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), false);
+  assert.equal(threadCtx.tokens.has(invocationId), false, "malformed token should be cleaned up");
 
   callbacks.unregisterThread(sessionId);
 });

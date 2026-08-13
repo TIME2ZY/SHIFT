@@ -272,13 +272,21 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
 | agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                  |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                   |
 | worktree | manager, delivery-verifier                                                                                                                                         |
 
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
 `memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
 Bootstrap 与 Active Memory Card 分别只接受结构化 `{ packet, inject }` 和
 `{ rendered, items, stats }` 返回契约，不再兼容历史字符串返回值。
+Callback token 只存在于当前进程的 active thread 上下文，必须携带有效 `expiresAt`；
+缺失、非法或已过期的 token 统一在验证入口清除，不存在永久有效兼容形态。
+Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `recallService`，
+不再接受 transcript 作为在线回退读源。
+`createMemoryCapture` 只接受 EventStore；已删除 transcript 测试 sink、空转的
+`replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式
+注入 SQLite-backed source，模块不再默认读取文件 transcript。Agent 的 product Memory
+写入说明固定为 thread scope，不再引导已退役的 project Memory 写入。
 
 ### 5.2 离线 / 工具（应保持出热路径）
 

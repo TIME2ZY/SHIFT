@@ -4,6 +4,13 @@ const test = require("node:test");
 const callbackRoutes = require("../../src/server/callback-routes.js");
 const { createStorage } = require("../../src/storage");
 
+function createCallbackRoutes(options) {
+  return callbackRoutes.createCallbackRoutes({
+    recallService: {},
+    ...options,
+  });
+}
+
 function makeReq(method, headers = {}) {
   return { method, headers };
 }
@@ -20,6 +27,13 @@ function makeSendJson(res) {
   };
 }
 
+test("createCallbackRoutes requires SQLite recallService", () => {
+  assert.throws(
+    () => callbackRoutes.createCallbackRoutes({ callbacks: {} }),
+    /recallService is required/
+  );
+});
+
 function makeMemoryHandle(storage, extras = {}) {
   const sseEvents = [];
   const tokens = new Map([
@@ -27,7 +41,7 @@ function makeMemoryHandle(storage, extras = {}) {
   ]);
   return {
     sseEvents,
-    handle: callbackRoutes.createCallbackRoutes({
+    handle: createCallbackRoutes({
       callbacks: {
         validateToken: () => true,
         getThread: () => ({
@@ -39,7 +53,6 @@ function makeMemoryHandle(storage, extras = {}) {
           return true;
         },
       },
-      transcript: {},
       appendToSession() {},
       getSession: () => ({ id: "s1" }),
       sendJson: extras.sendJson,
@@ -57,7 +70,7 @@ function makeMemoryHandle(storage, extras = {}) {
 test("handleCallbackRoutes posts callback messages after token validation", async () => {
   const res = makeRes();
   let appended = null;
-  const handle = callbackRoutes.createCallbackRoutes({
+  const handle = createCallbackRoutes({
     callbacks: {
       validateToken: () => true,
       postMessage: (sessionId, invocationId, content, options) => {
@@ -75,7 +88,6 @@ test("handleCallbackRoutes posts callback messages after token validation", asyn
         };
       },
     },
-    transcript: {},
     appendToSession() {},
     getSession: () => null,
     sendJson: makeSendJson(res),
@@ -107,12 +119,12 @@ test("handleCallbackRoutes posts callback messages after token validation", asyn
 
 test("handleCallbackRoutes lists invocations for a session", async () => {
   const res = makeRes();
-  const handle = callbackRoutes.createCallbackRoutes({
+  const handle = createCallbackRoutes({
     callbacks: {
       validateToken: () => true,
       postMessage: () => true,
     },
-    transcript: {
+    recallService: {
       listInvocationsWithMeta: async () => [{ invocationId: "i1" }],
     },
     appendToSession() {},
@@ -134,12 +146,11 @@ test("handleCallbackRoutes lists invocations for a session", async () => {
 test("recall-search requires callback authentication and forwards only trusted context", async () => {
   const res = makeRes();
   const calls = [];
-  const handle = callbackRoutes.createCallbackRoutes({
+  const handle = createCallbackRoutes({
     callbacks: {
       validateToken: (sessionId, invocationId, token) =>
         sessionId === "s1" && invocationId === "i1" && token === "tok",
     },
-    transcript: {},
     recallService: {
       searchForAgent: async (context, query) => {
         calls.push({ context, query });
@@ -187,9 +198,8 @@ test("recall-search requires callback authentication and forwards only trusted c
 
 test("recall-search rejects missing tokens and agent-controlled scope fields", async () => {
   const missingTokenRes = makeRes();
-  const missingTokenHandle = callbackRoutes.createCallbackRoutes({
+  const missingTokenHandle = createCallbackRoutes({
     callbacks: { validateToken: () => true },
-    transcript: {},
     recallService: { searchForAgent: async () => ({ hits: [] }) },
     sendJson: makeSendJson(missingTokenRes),
     readJsonBody: async () => ({
@@ -207,9 +217,8 @@ test("recall-search rejects missing tokens and agent-controlled scope fields", a
   assert.equal(missingTokenRes.statusCode, 400);
 
   const scopeRes = makeRes();
-  const scopeHandle = callbackRoutes.createCallbackRoutes({
+  const scopeHandle = createCallbackRoutes({
     callbacks: { validateToken: () => true },
-    transcript: {},
     recallService: { searchForAgent: async () => ({ hits: [] }) },
     sendJson: makeSendJson(scopeRes),
     readJsonBody: async () => ({
@@ -231,12 +240,12 @@ test("recall-search rejects missing tokens and agent-controlled scope fields", a
 
 test("handleCallbackRoutes returns 404 when invocation replay is missing", async () => {
   const res = makeRes();
-  const handle = callbackRoutes.createCallbackRoutes({
+  const handle = createCallbackRoutes({
     callbacks: {
       validateToken: () => true,
       postMessage: () => true,
     },
-    transcript: {
+    recallService: {
       readInvocationPage: async () => ({ total: 0, events: [], from: 0, limit: 200 }),
     },
     appendToSession() {},
@@ -260,12 +269,12 @@ test("handleCallbackRoutes returns 404 when invocation replay is missing", async
 test("handleCallbackRoutes lists only successful current-invocation memory evidence", async () => {
   const res = makeRes();
   const reads = [];
-  const handle = callbackRoutes.createCallbackRoutes({
+  const handle = createCallbackRoutes({
     callbacks: {
       validateToken: (sessionId, invocationId, token) =>
         sessionId === "s1" && invocationId === "i1" && token === "tok",
     },
-    transcript: {
+    recallService: {
       readInvocationPage: async (_threadId, _invocationId, options) => {
         reads.push(options);
         if (options.limit === 1) {
@@ -424,9 +433,8 @@ test("handleCallbackRoutes memory-write validates topic and availability", async
     assert.equal(JSON.parse(rejected.payload_json).reasonCode, "missing_topic");
 
     const unavailable = makeRes();
-    const noService = callbackRoutes.createCallbackRoutes({
+    const noService = createCallbackRoutes({
       callbacks: { validateToken: () => true },
-      transcript: {},
       appendToSession() {},
       getSession: () => ({ id: "s1" }),
       sendJson: makeSendJson(unavailable),

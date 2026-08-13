@@ -11,12 +11,10 @@ const MAX_MEMORY_CONTENT_CHARS = 2048;
  * `memoryService.writeMemoryCandidate` (callback/tool HTTP path).
  *
  * `memoryService` is intentionally not accepted: do not half-wire product
- * writes here. Pass `eventStore` in production; `transcript` is test-only sink.
+ * writes here. Collaboration events always use EventStore.
  */
 function createMemoryCapture({
-  transcript = null,
   eventStore = null,
-  allowTranscriptReplay = true,
   logger = console,
   idFactory = crypto.randomUUID,
   // Reject accidental half-wiring from older composition roots.
@@ -27,24 +25,18 @@ function createMemoryCapture({
       "createMemoryCapture does not accept memoryService; use memoryService.writeMemoryCandidate for product memory."
     );
   }
-  const hasTranscript = transcript && typeof transcript.appendEvent === "function";
   const hasEventStore = eventStore && typeof eventStore.append === "function";
-  if (!hasTranscript && !hasEventStore) {
-    throw new Error("Memory capture requires an eventStore (or transcript sink in tests).");
+  if (!hasEventStore) {
+    throw new Error("Memory capture requires an eventStore.");
   }
   function emitCollaborationEvent(threadId, invocationId, event) {
     const eventKind = event.kind === "window-seal" ? "window-sealed" : "handoff-captured";
-    if (hasEventStore) {
-      eventStore.append({
-        threadId,
-        invocationId,
-        kind: eventKind,
-        payload: event,
-      });
-      return;
-    }
-    // Test / offline sink only — production always wires eventStore.
-    transcript.appendEvent(threadId, invocationId, eventKind, event);
+    eventStore.append({
+      threadId,
+      invocationId,
+      kind: eventKind,
+      payload: event,
+    });
   }
 
   function persistCapture(input, eventInvocationId) {
@@ -148,19 +140,6 @@ function createMemoryCapture({
     return persistCapture(memoryInput, invocationId);
   }
 
-  async function replayThread(threadId) {
-    return {
-      threadId,
-      replayed: 0,
-      existing: 0,
-      failed: 0,
-      available: false,
-      reason: allowTranscriptReplay
-        ? "collaboration-events-are-not-memory"
-        : "transcript-replay-disabled",
-    };
-  }
-
   function safelyCapture(source, work) {
     try {
       return work();
@@ -174,7 +153,6 @@ function createMemoryCapture({
     captureHandoff: (input) => safelyCapture("handoff", () => captureHandoffUnsafe(input)),
     captureWindowSeal: (input) =>
       safelyCapture("window-seal", () => captureWindowSealUnsafe(input)),
-    replayThread,
   };
 }
 
