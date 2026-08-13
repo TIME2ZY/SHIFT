@@ -120,6 +120,7 @@ function baseDeps(res, overrides = {}) {
     },
     sessionBootstrap: {
       buildBootstrapPacket: async () => ({ packet: "", inject: { items: [], stats: {} } }),
+      buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
     agentIdentity: {
@@ -157,6 +158,20 @@ function baseDeps(res, overrides = {}) {
     parseA2AMentions: () => [],
     filterBenignStderr: (text) => text,
     runChildStream: async () => ({ code: 0, signal: null }),
+    durableRecorder: {
+      enabled: false,
+      ensureWindow: () => null,
+      startTrace: () => null,
+      completeTrace() {},
+      reconcileTraceHandoffs: () => 0,
+    },
+    eventStore: {
+      append: () => ({ ok: false, event: null, sqlite: false }),
+    },
+    memoryCapture: {
+      captureHandoff: () => ({ captured: false }),
+      captureWindowSeal: () => ({ captured: false }),
+    },
     getSession: () => ({ worktree: null, projectDir: "/root" }),
     setSessionWorktree: () => ({ worktree: null, projectDir: "/root" }),
     appendToSession() {},
@@ -168,6 +183,23 @@ function baseDeps(res, overrides = {}) {
     ...overrides,
   };
 }
+
+test("createChatRoutes requires authoritative persistence dependencies", () => {
+  const res = makeRes();
+  const deps = baseDeps(res);
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, durableRecorder: null }),
+    /durableRecorder is required/
+  );
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, eventStore: null }),
+    /eventStore is required/
+  );
+  assert.throws(
+    () => chatRoutes.createChatRoutes({ ...deps, memoryCapture: null }),
+    /memoryCapture is required/
+  );
+});
 
 test("handleChatRoutes rejects unsupported agents before starting chat", async () => {
   const res = makeRes();
@@ -189,15 +221,17 @@ test("handleChatRoutes rejects unsupported agents before starting chat", async (
 
 test("a slower older chat request cannot abort the newer request", async () => {
   const activeInvocations = new Map();
-  const pendingReplays = [];
+  const pendingBootstraps = [];
   const appended = [];
-  const memoryCapture = {
-    replayThread: () => new Promise((resolve) => pendingReplays.push(resolve)),
-  };
   const res1 = makeRes();
   const deps = baseDeps(res1, {
     activeInvocations,
-    memoryCapture,
+    sessionBootstrap: {
+      buildBootstrapPacket: () =>
+        new Promise((resolve) => pendingBootstraps.push(() => resolve({ packet: "", inject: {} }))),
+      buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+      buildIdentity: () => "<!-- Session Identity -->\n",
+    },
     contextHealth: {
       getAgentCapacity: () => 1000,
       makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
@@ -219,10 +253,10 @@ test("a slower older chat request cannot abort the newer request", async () => {
   const second = handler2(req2, res2, { pathname: "/api/chat" });
   await Promise.resolve();
 
-  assert.equal(pendingReplays.length, 2);
-  pendingReplays[1]();
+  assert.equal(pendingBootstraps.length, 2);
+  pendingBootstraps[1]();
   await second;
-  pendingReplays[0]();
+  pendingBootstraps[0]();
   await first;
 
   assert.equal(res1.statusCode, 409);
@@ -246,10 +280,12 @@ test("chat preparation failure closes the durable trace", async () => {
         getAgentCapacity: () => 1000,
         makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
       },
-      memoryCapture: {
-        replayThread: async () => {
+      sessionBootstrap: {
+        buildBootstrapPacket: async () => {
           throw Object.assign(new Error("recall unavailable"), { code: "recall_unavailable" });
         },
+        buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        buildIdentity: () => "<!-- Session Identity -->\n",
       },
       readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "go" }),
     })

@@ -1,4 +1,3 @@
-const transcript = require("./transcript");
 const {
   renderActiveMemoryCard,
   resolveA2AMemoryBudget,
@@ -52,10 +51,13 @@ function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
 
 async function buildDigest({
   sessionId,
-  invocationSource = transcript,
+  invocationSource,
   digestSource = null,
   logger = console,
 }) {
+  if (!invocationSource || typeof invocationSource.listInvocationsWithMeta !== "function") {
+    throw new TypeError("invocationSource is required");
+  }
   let semanticDigest = null;
   if (digestSource && typeof digestSource.get === "function") {
     try {
@@ -263,7 +265,7 @@ async function buildBootstrapPacket(opts) {
     agent,
     generation = 1,
     prompt = "",
-    invocationSource = transcript,
+    invocationSource,
     digestSource = null,
     retrieveSource = null,
     memorySource = null,
@@ -303,37 +305,6 @@ async function buildBootstrapPacket(opts) {
   };
 }
 
-/** Normalize legacy string or modern object returns for callers/tests. */
-function coerceBootstrapResult(result) {
-  if (typeof result === "string") {
-    return { packet: result, inject: emptyInject() };
-  }
-  if (result && typeof result.packet === "string") {
-    return {
-      packet: result.packet,
-      inject: {
-        items: Array.isArray(result.inject?.items) ? result.inject.items : [],
-        stats: result.inject?.stats || emptyInject().stats,
-      },
-    };
-  }
-  return { packet: "", inject: emptyInject() };
-}
-
-function coerceMemoryCardResult(result) {
-  if (typeof result === "string") {
-    return { rendered: result, items: [], stats: emptyInject().stats };
-  }
-  if (result && typeof result.rendered === "string") {
-    return {
-      rendered: result.rendered,
-      items: Array.isArray(result.items) ? result.items : [],
-      stats: result.stats || emptyInject().stats,
-    };
-  }
-  return { rendered: "", items: [], stats: emptyInject().stats };
-}
-
 function toInjectPreview(inject, { sessionId, agent, source } = {}) {
   const pack = inject && typeof inject === "object" ? inject : emptyInject();
   return {
@@ -351,8 +322,6 @@ module.exports = {
   buildIdentity,
   buildDigest,
   buildActiveMemoryCard,
-  coerceBootstrapResult,
-  coerceMemoryCardResult,
   toInjectPreview,
   emptyInject,
   RECALL_RULE,

@@ -56,10 +56,6 @@ const PROVIDERS = Object.fromEntries(
     return [adapter.id, adapter];
   })
 );
-const PROVIDER_RUNTIMES = Object.fromEntries(
-  Object.entries(PROVIDERS).map(([id, adapter]) => [id, adapter.createRuntime])
-);
-
 function getProviderAdapter(providerId) {
   const adapter = PROVIDERS[providerId];
   if (!adapter) {
@@ -369,8 +365,6 @@ function listSupportedProviders() {
 
 module.exports = {
   PROVIDERS,
-  // Compatibility alias for existing integrations.
-  PROVIDER_RUNTIMES,
   assertProviderAdapter,
   getProviderAdapter,
   validateProviderConfig,

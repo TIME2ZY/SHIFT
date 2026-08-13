@@ -128,7 +128,6 @@ function createServer(options = {}) {
   // Collaboration events only — product memory uses memoryService.writeMemoryCandidate.
   const memoryCapture = createMemoryCapture({
     eventStore,
-    allowTranscriptReplay: false,
     logger,
   });
   const collabTaskRegistry = createCollabTaskRegistry({

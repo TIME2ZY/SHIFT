@@ -72,6 +72,10 @@ test("buildDigest can read invocation metadata from SQLite-backed recall", async
   assert.doesNotMatch(digest, /第一个 invocation/);
 });
 
+test("buildDigest requires an explicit invocation source", async () => {
+  await assert.rejects(() => buildDigest({ sessionId: "thread-1" }), /invocationSource is required/);
+});
+
 test("buildDigest restores semantic thread state from SQLite", async () => {
   const digest = await buildDigest({
     sessionId: "thread-semantic",
@@ -110,7 +114,11 @@ test("buildDigest restores semantic thread state from SQLite", async () => {
 test(
   "buildDigest says 'first invocation' for empty session",
   withTempDir(async () => {
-    const digest = await buildDigest({ threadId: "t", sessionId: "empty-session" });
+    const digest = await buildDigest({
+      threadId: "t",
+      sessionId: "empty-session",
+      invocationSource: transcript,
+    });
     assert.match(digest, /<!-- Digest -->/);
     assert.match(digest, /第一个 invocation/);
     assert.match(digest, /尚无历史/);
@@ -127,7 +135,11 @@ test(
     transcript.appendEvent("s1", "i1", "invocation-end", { code: 0, sealerState: "active" });
     await transcript.flush();
 
-    const digest = await buildDigest({ threadId: "s1", sessionId: "s1" });
+    const digest = await buildDigest({
+      threadId: "s1",
+      sessionId: "s1",
+      invocationSource: transcript,
+    });
     assert.match(digest, /1 invocations in this session/);
     assert.match(digest, /i1/);
     assert.match(digest, /codex/);
@@ -143,7 +155,11 @@ test(
     transcript.appendEvent("s1", "i1", "invocation-start", { agent: "sage" });
     await transcript.flush();
 
-    const digest = await buildDigest({ threadId: "s1", sessionId: "s1" });
+    const digest = await buildDigest({
+      threadId: "s1",
+      sessionId: "s1",
+      invocationSource: transcript,
+    });
     assert.match(digest, /i1/);
     assert.match(digest, /in-flight/);
   })
@@ -252,6 +268,7 @@ test(
       threadId: "t1",
       sessionId: "s1",
       agent: { id: "sage", label: "小智" },
+      invocationSource: transcript,
       digestSource: {
         get() {
           return {
@@ -322,6 +339,7 @@ test(
       sessionId: "s1",
       agent: "sage",
       generation: 5,
+      invocationSource: transcript,
     });
     assert.match(result.packet, /Generation: 5/);
   })

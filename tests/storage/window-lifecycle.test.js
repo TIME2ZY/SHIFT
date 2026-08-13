@@ -3,6 +3,7 @@ const test = require("node:test");
 const { createStorage } = require("../../src/storage");
 const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createRecallService } = require("../../src/storage/recall-service");
+const { appendMessage } = require("../../src/storage/message-persistence");
 const {
   resolveResumeSessionId,
   upsertAgentProviderSession,
@@ -239,9 +240,15 @@ test("across 10 sealed windows original messages remain searchable and invocatio
         invocationId,
         createdAt: `2026-07-12T00:${String(generation).padStart(2, "0")}:01.000Z`,
       });
-      recorder.mirrorLastMessage(session, {
+      appendMessage(storage, {
+        id: `msg-${generation}`,
+        threadId: session.id,
         windowId: run.window.id,
         invocationId,
+        role: "assistant",
+        agentId: "codex",
+        content,
+        createdAt: `2026-07-12T00:${String(generation).padStart(2, "0")}:01.000Z`,
       });
       recorder.appendInvocationEvent(invocationId, "text.delta", { text: content });
       recorder.completeInvocation({ invocationId: invocationId, code: 0, signal: null });
@@ -315,7 +322,15 @@ test("deleting a thread archives it (soft) without destroying L0 evidence", () =
       content: "to be deleted",
       createdAt: "2026-07-12T00:00:01.000Z",
     });
-    recorder.mirrorLastMessage(session, { windowId: run.window.id });
+    appendMessage(storage, {
+      id: "msg-del",
+      threadId: session.id,
+      windowId: run.window.id,
+      invocationId: "inv-del",
+      role: "user",
+      content: "to be deleted",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
     recorder.appendInvocationEvent("inv-del", "text.delta", { text: "payload" });
     recorder.completeInvocation({ invocationId: "inv-del", code: 0, signal: null });
 
@@ -351,23 +366,6 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
     // Late dual-write from an in-flight callback / stream is suppressed in-process.
     assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
     assert.equal(recorder.completeInvocation({ invocationId: "inv-race", code: 0, signal: null }), null);
-    assert.equal(
-      recorder.mirrorLastMessage(
-        {
-          ...session,
-          messages: [
-            {
-              id: "msg-late",
-              role: "assistant",
-              content: "should not reappear",
-              createdAt: "2026-07-12T00:00:02.000Z",
-            },
-          ],
-        },
-        { invocationId: "inv-race" }
-      ),
-      null
-    );
     assert.equal(
       recorder.startInvocation({
         session,
@@ -487,33 +485,6 @@ test("FTS index corruption can be rebuilt from recall_items source projection", 
   }
 });
 
-test("replaying a migrated message does not create duplicate rows", () => {
-  const storage = createStorage({ file: ":memory:" });
-  const recorder = createDurableRecorder({ storage });
-  const session = sessionFixture();
-  const coord = baseCoordinate();
-  try {
-    const window = recorder.ensureWindow({ session, threadId: session.id, ...coord });
-    session.messages.push({
-      id: "msg-idempotent",
-      role: "user",
-      content: "same message twice",
-      createdAt: "2026-07-12T00:00:00.000Z",
-    });
-    recorder.mirrorLastMessage(session, { windowId: window.id });
-    recorder.mirrorLastMessage(session, { windowId: window.id });
-    assert.equal(storage.messages.listForThread(session.id).length, 1);
-    assert.equal(
-      storage.db.prepare("SELECT COUNT(*) AS c FROM messages WHERE id = ?").get("msg-idempotent").c,
-      1
-    );
-    assert.equal(storage.recall.search(session.id, "same message").length, 1);
-  } finally {
-    recorder.close();
-    storage.close();
-  }
-});
-
 test("fact writes roll back when the recall projection cannot be updated", () => {
   const storage = createStorage({ file: ":memory:" });
   const recorder = createDurableRecorder({ storage, logger: { error() {} } });
@@ -538,17 +509,6 @@ test("fact writes roll back when the recall projection cannot be updated", () =>
     );
     assert.equal(storage.invocations.listEvents("inv-atomic").length, 1);
 
-    session.messages.push({
-      id: "msg-atomic",
-      role: "assistant",
-      content: "must rollback",
-      createdAt: "2026-07-12T00:00:01.000Z",
-    });
-    assert.throws(
-      () => recorder.mirrorLastMessage(session, { windowId: run.window.id }),
-      /projection unavailable/
-    );
-    assert.equal(storage.messages.get("msg-atomic"), null);
     storage.recall.upsert = originalUpsert;
   } finally {
     recorder.close();

@@ -179,7 +179,7 @@ try {
           ? prev.handoffQualityByTarget[agent]
           : prev.handoffQuality || agentHandoff.evaluateHandoff(handoff);
       // Wave H1 Receive Bundle: memory card + policy banner + structured task + outbound card.
-      const a2aMemoryPackRaw = await sessionBootstrap.buildActiveMemoryCard({
+      const a2aMemoryPack = await sessionBootstrap.buildActiveMemoryCard({
         threadId: sessionId,
         prompt: [turnPrompt, handoff?.what, handoff?.next_action, prev.content]
           .filter(Boolean)
@@ -190,12 +190,6 @@ try {
           ? sessionBootstrap.resolveA2AMemoryBudget()
           : undefined,
       });
-      const a2aMemoryPack =
-        typeof sessionBootstrap.coerceMemoryCardResult === "function"
-          ? sessionBootstrap.coerceMemoryCardResult(a2aMemoryPackRaw)
-          : typeof a2aMemoryPackRaw === "string"
-            ? { rendered: a2aMemoryPackRaw, items: [], stats: {} }
-            : a2aMemoryPackRaw;
       const a2aMemoryCard = a2aMemoryPack.rendered;
       const receiveBundle = agentHandoff.renderReceiveBundle({
         handoff,

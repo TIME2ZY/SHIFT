@@ -21,7 +21,8 @@ related:
 本 ADR 冻结 SHIFT 的目标存储边界。SQLite 唯一真相源切换、恢复验收、fixture 隔离、
 真实 legacy 数据清理和在线兼容模式退役均已完成。产品 composition root 只接受 SQLite；
 thread/message/invocation、provider resume、memory 和 recall 均不再读写 legacy 文件。
-`files/dual` 只作为历史术语存在于离线 migrate、divergence audit 和脱敏 fixture 中。
+`files/dual` 只作为历史术语存在于本 ADR 和验收快照中；对应离线导入、差异审计、清理
+执行器及脱敏 fixture 已于 2026-08-13 正式退役。
 
 `docs/memory-data-contract.md` 继续作为记忆 schema、ownership、authority、purge 和
 projection 细节的规范。本 ADR 负责更高一层的全系统边界；两者冲突时必须先修改并重新
@@ -309,7 +310,8 @@ Trace 不得反向修正业务状态，audit 也不得作为在线 trace/handoff
 
 `sessions.json`、legacy provider session map 和旧 transcript 不作为生产迁移输入。
 切换期间它们保持只读，仅用于验证字段映射和新旧行为差异；正常服务不依赖它们，真实
-历史数据已按 §12.1 清除。确需覆盖 legacy 格式时，只保留最小化、脱敏的测试 fixture。
+历史数据已按 §12.1 清除。旧格式导入能力及其最小化测试 fixture 已在后续退役，不再作为
+当前兼容承诺。
 
 ## 9. 派生投影
 
@@ -446,7 +448,8 @@ event，或任何候选路径与权威数据库/canonical audit 目录重叠，�
 满足门槛后，可以直接永久删除旧 `sessions.json`、旧 transcript、旧 provider session map
 及其旧投影，无需先导入 SQLite。清理操作必须是独立、显式的变更，不得夹带在 schema
 migration 或服务启动逻辑中。最终只保留脱敏 fixture、差异审计摘要和清理记录，不保留
-真实历史业务内容。
+真实历史业务内容。该 fixture 仅用于当时的切换验收，已在 2026-08-13 随旧格式工具链退役；
+`docs/acceptance/005c-*` 与 `005d-*` 继续保留为历史验收快照。
 
 第五阶段 D 已于 2026-07-26 完成。旧 transcript 中混入的 161 条 canonical
 event 已通过 SQLite outbox 校验并幂等补入 active epoch 的受保护 audit archive，覆盖率
@@ -478,7 +481,7 @@ SHIFT_RAW_EVENT_LOG=off
 
 `SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
 outbox row，health 显示 `disabled`，不会形成无法投递的假积压。离线 migrate/audit
-测试可读取 fixture transcript，但它们不是产品服务的存储模式，也不参与在线读取。
+工具链退役前的测试曾读取 fixture transcript；当前不再保留该 fixture 或旧格式读取测试。
 canonical archive 固定从 `SHIFT_HOME/data/audit-transcripts` 派生；raw provider log 固定
 从 `SHIFT_HOME/data/raw-events` 派生。旧 `SHIFT_AUDIT_TRANSCRIPT_DIR`、
 `SHIFT_TRANSCRIPT_DIR` 和 `SHIFT_MEMORY_DB` 不再是在线路径入口。
@@ -529,7 +532,8 @@ event 通过 transactional outbox 幂等归档；health、retention、恢复演�
 - 旧 session read wrapper 已删除，产品直接使用 SQLite session service；
 - `dual-write-recorder` 已收敛并更名为 fail-closed durable recorder；
 - 产品不再读取 session-map、legacy invocation registry 或 legacy transcript；
-- dual audit、legacy migrate、cleanup tooling 和脱敏 fixture 仅保留为离线工具/测试。
+- dual audit、legacy file-format migrate、cleanup tooling 和脱敏 fixture 已完成使命并退役；
+  仅保留当前 SQLite 的审计、恢复、clean epoch 与旧安装数据库搬迁能力。
 
 project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决定，不是本次 SQLite
 真相源切换的关闭条件。新增功能不得扩大或重新激活平级双源范围。
@@ -589,7 +593,7 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 - materialization 需要审批、diff 和 source-hash 生命周期；
 - SQLite 成为正式依赖，数据库故障不能再由旧文件静默掩盖；
 - 永久删除必须同时处理数据库和审计归档；
-- 离线 legacy 工具和 fixture 仍需维护，但不会进入产品服务路径。
+- 已退役的离线 legacy 工具和 fixture 不再维护；SQLite 审计、恢复与安装迁移仍需维护。
 
 ## 18. 非目标
 

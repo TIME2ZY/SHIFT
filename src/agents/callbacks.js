@@ -63,16 +63,14 @@ function getThread(threadId) {
 }
 
 /**
- * Lazily remove expired tokens from a thread's token map.
+ * Lazily remove expired or malformed tokens from a thread's token map.
  * Mutates thread.tokens in place. Safe to call on a thread with no tokens.
- * Tokens without an `expiresAt` field are treated as non-expiring (legacy
- * entries that predate TTL).
  */
 function cleanExpiredTokens(thread) {
   if (!thread || !thread.tokens) return;
   const now = Date.now();
   for (const [id, record] of thread.tokens) {
-    if (record && typeof record.expiresAt === "number" && record.expiresAt <= now) {
+    if (!record || typeof record.expiresAt !== "number" || record.expiresAt <= now) {
       thread.tokens.delete(id);
     }
   }
@@ -110,10 +108,6 @@ function validateToken(threadId, invocationId, callbackToken) {
   cleanExpiredTokens(thread);
   const record = thread.tokens.get(invocationId);
   if (!record) return false;
-  if (typeof record.expiresAt === "number" && record.expiresAt <= Date.now()) {
-    thread.tokens.delete(invocationId);
-    return false;
-  }
   return record.callbackToken === callbackToken;
 }
 
@@ -406,7 +400,7 @@ node scripts/callback-client.js list-invocations
 - \`kind\`：\`decision\` | \`constraint\` | \`fact\`
 - \`topic\`：小写 ASCII 稳定主题，可用点号或连字符分段
 - \`content\`：10–500 字符，只表达一个结论
-- \`scope\`：\`thread\` | \`project\`
+- \`scope\`：固定为 \`thread\`
 - \`evidenceEventNo\`：可选；工具验证出的 fact 应引用当前 invocation 的成功事件
 
 示例：
@@ -416,7 +410,7 @@ node scripts/callback-client.js list-invocations
   "kind": "decision",
   "topic": "storage.authoritative",
   "content": "在线读写以 SQLite 为权威来源。",
-  "scope": "project"
+  "scope": "thread"
 }
 \`\`\`
 

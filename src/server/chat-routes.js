@@ -5,32 +5,6 @@ const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
 
-const NOOP_DURABLE_RECORDER = Object.freeze({
-  enabled: false,
-  ensureWindow: () => null,
-  sealWindow: () => null,
-  sealAndRotateWindow: () => null,
-  startInvocation: () => null,
-  startTrace: () => null,
-  appendInvocationEvent: () => false,
-  completeInvocation: () => null,
-  completeTrace: () => null,
-  reconcileTraceHandoffs: () => 0,
-  bindProviderSession: () => false,
-  addWindowUsage: () => false,
-  setWindowUsageSnapshot: () => false,
-});
-
-const NOOP_EVENT_STORE = Object.freeze({
-  append: () => ({ ok: false, event: null, sqlite: false }),
-});
-
-const NOOP_MEMORY_CAPTURE = Object.freeze({
-  captureHandoff: () => ({ captured: false }),
-  captureWindowSeal: () => ({ captured: false }),
-  replayThread: async () => ({ replayed: 0, existing: 0, failed: 0, available: false }),
-});
-
 function createChatRoutes({
   selfGitRoot,
   options,
@@ -68,9 +42,12 @@ function createChatRoutes({
   deliveryVerifier = null,
   logger = console,
 }) {
-  const durable = durableRecorder || NOOP_DURABLE_RECORDER;
-  const events = eventStore || durable.eventStore || NOOP_EVENT_STORE;
-  const memories = memoryCapture || NOOP_MEMORY_CAPTURE;
+  if (!durableRecorder) throw new TypeError("durableRecorder is required");
+  if (!eventStore) throw new TypeError("eventStore is required");
+  if (!memoryCapture) throw new TypeError("memoryCapture is required");
+  const durable = durableRecorder;
+  const events = eventStore;
+  const memories = memoryCapture;
   const log = logger || options?.logger || console;
   return async function handleChatRoutes(req, res, url) {
     if (req.method !== "POST" || url.pathname !== "/api/chat") {
@@ -230,15 +207,6 @@ function createChatRoutes({
       workspaceKey,
       capacityTokens: contextHealth.getAgentCapacity(requestedAgent),
     });
-    try {
-      await memories.replayThread(sessionId);
-    } catch (error) {
-      failPreparationTrace(error, "bootstrap");
-      if (activeInvocations.get(sessionId) === invocationController) {
-        activeInvocations.delete(sessionId);
-      }
-      throw error;
-    }
     if (
       invocationController.signal.aborted ||
       activeInvocations.get(sessionId) !== invocationController ||
@@ -275,14 +243,8 @@ function createChatRoutes({
         retrieveSource: recallService || null,
         memorySource: memoryService || null,
       });
-      const coerced =
-        typeof sessionBootstrap.coerceBootstrapResult === "function"
-          ? sessionBootstrap.coerceBootstrapResult(bootstrapResult)
-          : typeof bootstrapResult === "string"
-            ? { packet: bootstrapResult, inject: { items: [], stats: {} } }
-            : bootstrapResult;
-      bootstrapPacket = coerced.packet;
-      bootstrapInject = coerced.inject || bootstrapInject;
+      bootstrapPacket = bootstrapResult.packet;
+      bootstrapInject = bootstrapResult.inject || bootstrapInject;
     } catch (error) {
       failPreparationTrace(error, "bootstrap");
       if (activeInvocations.get(sessionId) === invocationController) {

@@ -227,11 +227,6 @@ function createThreadRepository(db) {
       })();
     },
 
-    /** @deprecated use archive(); kept as archive for safety */
-    delete(id) {
-      return this.archive(id);
-    },
-
     isPurged(threadId) {
       return Boolean(findPurged.get(threadId));
     },

@@ -131,7 +131,6 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 用户 / 系统 / A2A 通知  | `appendToSession` → `appendMessage`                 | sqlite-session-service | `user` / `a2a-*` / `system-notice`…  |
 | 助手终态正文            | `completeInvocation({ message })` → `appendMessage` | durable-recorder       | `assistant-final`                    |
 | Callback 中途 assistant | `appendToSession`                                   | callbacks              | **`assistant-callback`（B-3 显式）** |
-| 镜像末条                | `mirrorLastMessage`                                 | durable-recorder       | 沿用消息上的 type                    |
 | 物理 insert             | **仅** `message-persistence.appendMessage`          | 热路径                 | + recall upsert                      |
 
 **结论（message）— B-3 已落地（2026-08-07）：**
@@ -139,7 +138,9 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 契约写在 `message-persistence.js` 头部；`MESSAGE_TYPES` 再导出。
 - Callback **必须** `messageType: "assistant-callback"`，不得冒充 final。
 - 守卫测试：`tests/storage/message-write-path.test.js` 禁止 server/agents/session 直接 `.messages.append`。
-- 离线 `migrate-runtime` 仍可直写 repository（非热路径）。
+- Legacy 文件格式导入器已退役；在线与现存离线维护能力均不再通过该入口直写 message repository。
+- 已删除仅供测试/兼容使用的 `durableRecorder.mirrorLastMessage` 公开入口；在线消息只保留上述两类
+  用例入口并共享同一个物理写入口。
 
 ---
 
@@ -148,7 +149,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 类型                             | 入口                                                                     | 落点                               | 调用方                                            |
 | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------- |
 | **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队        | `shift_context` MCP → callback-routes 私有 bridge |
-| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部；migrate-runtime 离线                    |
+| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部                                          |
 | **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件** | a2a-finalize                                      |
 | **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件               | seal 路径（若接线）                               |
 | Recall / FTS / embedding         | 派生                                                                     | recall 表 / 向量                   | 投影只读查询为主                                  |
@@ -271,23 +272,36 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
 | agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer, transcript（若仍注入）                                                                                                                  |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                   |
 | worktree | manager, delivery-verifier                                                                                                                                         |
+
+在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
+`memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
+Bootstrap 与 Active Memory Card 分别只接受结构化 `{ packet, inject }` 和
+`{ rendered, items, stats }` 返回契约，不再兼容历史字符串返回值。
+Callback token 只存在于当前进程的 active thread 上下文，必须携带有效 `expiresAt`；
+缺失、非法或已过期的 token 统一在验证入口清除，不存在永久有效兼容形态。
+Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `recallService`，
+不再接受 transcript 作为在线回退读源。
+`createMemoryCapture` 只接受 EventStore；已删除 transcript 测试 sink、空转的
+`replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式
+注入 SQLite-backed source，模块不再默认读取文件 transcript。Agent 的 product Memory
+写入说明固定为 thread scope，不再引导已退役的 project Memory 写入。
 
 ### 5.2 离线 / 工具（应保持出热路径）
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                  | 引用方                 |
-| -------------------------------------------------- | --------------------- | ---------------------- |
-| `audit-dual-storage.js`                            | 历史 dual 对比        | scripts + tests        |
-| `legacy-session-reader.js`                         | 读旧 sessions         | offline dual audit     |
-| `legacy-cleanup-*.js`                              | 清理清单/执行         | plan/execute scripts   |
-| `migrate-runtime.js`                               | 文件→SQLite 迁移      | migrate script + tests |
-| `mixed-transcript-retirement.js`                   | 混合 transcript 归档  | archive/plan scripts   |
-| `clean-epoch.js`                                   | 新库 epoch            | prepare script + tests |
-| `recovery-drill.js` / `audit-storage.js`           | 恢复演练 / 完整性审计 | drill/audit scripts    |
-| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval   | scripts + tests        |
+| 模块（均在 `src/storage/offline/`）                | 用途                       | 引用方              |
+| -------------------------------------------------- | -------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁          | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                 | prepare script      |
+| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
+| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
+
+旧 sessions/invocations JSON、provider session-map 与 transcript 的导入、dual 对账、混合归档、
+清理执行器及其 fixture 已退役。`runtime-home` 仅迁移现存 `data/runtime/shift.sqlite` 安装，
+不导入旧业务文件格式。
 
 **禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
 
@@ -374,10 +388,10 @@ grep appendMessage|appendToSession → src/
 # Memory
 grep writeMemoryCandidate|captureHandoff|memories.create → src/
 
-# 热路径是否引用 legacy
+# 热路径不得重新引入已退役 legacy 工具名
 grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-12。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-08-13。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

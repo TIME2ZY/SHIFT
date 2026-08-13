@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createStorage } = require("../../src/storage");
+const { appendMessage } = require("../../src/storage/message-persistence");
 
 function sessionFixture() {
   return {
@@ -35,7 +36,15 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       content: "Remember this",
       createdAt: "2026-07-12T00:00:01.000Z",
     });
-    recorder.mirrorLastMessage(session, { windowId: window.id });
+    appendMessage(storage, {
+      id: "message-user",
+      threadId: session.id,
+      windowId: window.id,
+      role: "user",
+      agentId: "codex",
+      content: "Remember this",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
 
     const trace = recorder.startTrace({
       threadId: session.id,
@@ -136,7 +145,22 @@ test("completeInvocation covers abort, final, atomic rollback, and rejects missi
       content: "go",
       createdAt: "2026-07-12T00:00:01.000Z",
     });
-    recorder.mirrorLastMessage(session);
+    recorder.ensureWindow({
+      session,
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+    });
+    appendMessage(storage, {
+      id: "message-user",
+      threadId: session.id,
+      role: "user",
+      agentId: "codex",
+      content: "go",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
 
     recorder.startInvocation({
       session,
@@ -287,10 +311,21 @@ test("durable write failures are reported and fail closed", () => {
   storage.threads.upsert = () => {
     throw new Error("database unavailable");
   };
-  storage.threads.delete = () => {
+  storage.threads.archive = () => {
     throw new Error("database unavailable");
   };
-  assert.throws(() => recorder.mirrorThread(sessionFixture()), /database unavailable/);
+  assert.throws(
+    () =>
+      recorder.ensureWindow({
+        session: sessionFixture(),
+        threadId: "thread-1",
+        agentId: "codex",
+        providerKey: "codex:gpt-5.6-sol",
+        workspaceKey: "base:C:/repo",
+        capacityTokens: 200000,
+      }),
+    /database unavailable/
+  );
   assert.throws(() => recorder.archiveThread("thread-1"), /database unavailable/);
   assert.equal(errors.length, 2);
   assert.match(errors[0], /mirror thread failed: database unavailable/);

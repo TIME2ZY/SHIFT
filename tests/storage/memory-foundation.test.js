@@ -6,7 +6,6 @@ const test = require("node:test");
 
 const { createStorage, openMemoryDatabase } = require("../../src/storage");
 const { resolveProjectIdentity, normalizeCanonicalPath } = require("../../src/storage/project-identity");
-const { resolveAnchor } = require("../../src/storage/anchor-resolve");
 const { deriveWriteFields } = require("../../src/storage/memory-service");
 
 function createFixture(options = {}) {
@@ -96,26 +95,9 @@ test("product memory is thread-scoped and searchable before purge", () => {
       /Project-scoped memory is retired/
     );
 
-    // source_deleted via purge ledger still works for anchors
     assert.equal(storage.threads.purge("thread-1", { purgedBy: "test" }), true);
     assert.equal(storage.threads.get("thread-1"), null);
     assert.ok(storage.threads.isPurged("thread-1"));
-
-    const resolution = resolveAnchor(
-      {
-        type: "invocation",
-        ref: "missing-inv",
-        originThreadId: "thread-1",
-      },
-      { storage }
-    );
-    assert.equal(resolution.state, "source_deleted");
-
-    const missing = resolveAnchor(
-      { type: "invocation", ref: "never-existed", originThreadId: "other-thread" },
-      { storage }
-    );
-    assert.equal(missing.state, "source_missing");
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });

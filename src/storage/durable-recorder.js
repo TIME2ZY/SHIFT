@@ -320,34 +320,6 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     return result;
   }
 
-  function mirrorLastMessage(session, context = {}) {
-    if (!storage || !session || !isThreadWritable(session.id)) return null;
-    if (!Array.isArray(session.messages) || session.messages.length === 0) return null;
-    mirrorThread(session);
-    return attempt("mirror message", () =>
-      storage.transaction(() => {
-        const message = session.messages[session.messages.length - 1];
-        const invocation = context.invocationId
-          ? storage.invocations.get(context.invocationId)
-          : null;
-        const stored = appendMessage(storage, {
-          id: message.id,
-          threadId: session.id,
-          windowId: context.windowId || invocation?.windowId || null,
-          invocationId: invocation?.id || null,
-          sequenceNo: session.messages.length - 1,
-          role: message.role || "system",
-          agentId: message.agent || null,
-          content: typeof message.content === "string" ? message.content : "",
-          metadata: durableMessageMetadata(message),
-          createdAt: message.createdAt,
-          messageType: message.messageType,
-        });
-        return stored;
-      })
-    );
-  }
-
   function startInvocation(input) {
     if (!storage || !isThreadWritable(input.threadId)) {
       if (input.invocationId) events.markInvocationUnavailable(input.invocationId);
@@ -671,7 +643,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     });
     deletedThreads.add(threadId);
     events.markThreadDeleted(threadId);
-    return attempt("archive thread", () => storage.threads.delete(threadId));
+    return attempt("archive thread", () => storage.threads.archive(threadId));
   }
 
   function startTrace(input = {}) {
@@ -760,11 +732,9 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
   return {
     enabled: Boolean(storage),
     eventStore: events,
-    mirrorThread,
     ensureWindow,
     sealWindow,
     sealAndRotateWindow,
-    mirrorLastMessage,
     startInvocation,
     startTrace,
     acceptHandoff,
