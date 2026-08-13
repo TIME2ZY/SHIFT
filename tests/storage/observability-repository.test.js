@@ -108,6 +108,10 @@ test("observability health alerts when pending outbox exceeds threshold", () => 
     });
     const health = storage.observability.health({ now: "2026-08-01T00:10:00.000Z" });
     assert.ok(health.alerts.some((alert) => alert.code === "outbox_pending_age"));
+    assert.match(
+      health.alerts.find((alert) => alert.code === "outbox_pending_age").diagnostic.action,
+      /outbox flusher/
+    );
     assert.equal(health.state, "degraded");
   } finally {
     storage.close();

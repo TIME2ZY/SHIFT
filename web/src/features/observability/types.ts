@@ -121,3 +121,18 @@ export interface ObservabilityMetrics {
     }>;
   };
 }
+
+export interface ObservabilityHealth {
+  state: "available" | "degraded" | "unavailable";
+  authoritativeViolations: number | null;
+  alerts: Array<{
+    code: string;
+    severity: "error" | "warning";
+    count?: number;
+    value?: number;
+    threshold?: number;
+    lastOccurredAt?: string | null;
+    diagnostic: { title: string; action: string };
+  }>;
+  checks: Record<string, number | null> | null;
+}

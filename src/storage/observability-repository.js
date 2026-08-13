@@ -85,30 +85,38 @@ function createObservabilityRepository(db, dependencies = {}) {
       const outboxPendingAge = ageSeconds(oldestPending, now);
       const alerts = [];
       if (authoritativeViolations > 0) {
-        alerts.push({
-          code: "authoritative_completeness_violation",
-          severity: "error",
-          count: authoritativeViolations,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "authoritative_completeness_violation",
+            severity: "error",
+            count: authoritativeViolations,
+          })
+        );
       }
       if (telemetry.unresolvedFailures > 0) {
-        alerts.push({
-          code: "telemetry_write_failure",
-          severity: "warning",
-          count: telemetry.unresolvedFailures,
-          lastOccurredAt: telemetry.lastFailureAt,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "telemetry_write_failure",
+            severity: "warning",
+            count: telemetry.unresolvedFailures,
+            lastOccurredAt: telemetry.lastFailureAt,
+          })
+        );
       }
       if (spanMissingEnd > 0) {
-        alerts.push({ code: "span_missing_end", severity: "warning", count: spanMissingEnd });
+        alerts.push(
+          diagnosticAlert({ code: "span_missing_end", severity: "warning", count: spanMissingEnd })
+        );
       }
       if (outboxPendingAge != null && outboxPendingAge > outboxPendingAlertSeconds) {
-        alerts.push({
-          code: "outbox_pending_age",
-          severity: "warning",
-          value: outboxPendingAge,
-          threshold: outboxPendingAlertSeconds,
-        });
+        alerts.push(
+          diagnosticAlert({
+            code: "outbox_pending_age",
+            severity: "warning",
+            value: outboxPendingAge,
+            threshold: outboxPendingAlertSeconds,
+          })
+        );
       }
       return {
         state: alerts.length > 0 ? "degraded" : "available",
@@ -153,6 +161,33 @@ function createObservabilityRepository(db, dependencies = {}) {
       };
     },
   };
+}
+
+const ALERT_DIAGNOSTICS = Object.freeze({
+  authoritative_completeness_violation: {
+    title: "权威执行链不完整",
+    action: "打开失败 Trace，核对 Invocation 终态、Handoff target 与 invocation-end。",
+  },
+  telemetry_write_failure: {
+    title: "Memory 遥测写入失败",
+    action: "检查 telemetry 最后错误；业务事实仍有效，但相关 Memory 指标不完整。",
+  },
+  span_missing_end: {
+    title: "执行区段缺少结束事件",
+    action: "按 Trace 的 incomplete span 定位 tool 或 generation，并核对 Provider 终止路径。",
+  },
+  outbox_pending_age: {
+    title: "审计 Outbox 积压",
+    action: "检查审计 sink 与 outbox flusher；不得删除仍为 pending 的事件。",
+  },
+});
+
+function diagnosticAlert(alert) {
+  const diagnostic = ALERT_DIAGNOSTICS[alert.code] || {
+    title: alert.code,
+    action: "按告警代码检查对应的持久化事实。",
+  };
+  return { ...alert, diagnostic };
 }
 
 function metricsForWindow(db, dependencies, window) {

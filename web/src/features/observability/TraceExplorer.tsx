@@ -4,6 +4,7 @@ import type { TraceSummary } from "./types";
 import type { QualifiedRate } from "./types";
 import {
   useObservabilityMetricsQuery,
+  useObservabilityHealthQuery,
   useSessionTracesQuery,
   useTraceDetailQuery,
 } from "./queries";
@@ -44,6 +45,7 @@ export function TraceExplorer({
   sessionId?: string | null;
 }) {
   const metrics = useObservabilityMetricsQuery();
+  const health = useObservabilityHealthQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [state, setState] = useState<TraceSummary["state"] | "">("");
@@ -69,6 +71,27 @@ export function TraceExplorer({
 
   return (
     <div className="trace-explorer">
+      {health.data?.alerts.length ? (
+        <section className="trace-alert-center" aria-label="本地告警">
+          <header>
+            <strong>事故队列</strong>
+            <span>{health.data.alerts.length} 个需定位</span>
+          </header>
+          <ol>
+            {health.data.alerts.map((alert) => (
+              <li data-severity={alert.severity} key={alert.code}>
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{alert.diagnostic.title}</strong>
+                  <p>{alert.diagnostic.action}</p>
+                  <code>{alert.code}</code>
+                </div>
+                <b>{alert.count ?? alert.value ?? "!"}</b>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       <section className="trace-metrics" aria-label="近 24 小时协作指标">
         <header>
           <span>近 24 小时</span>
