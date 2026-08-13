@@ -138,7 +138,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 契约写在 `message-persistence.js` 头部；`MESSAGE_TYPES` 再导出。
 - Callback **必须** `messageType: "assistant-callback"`，不得冒充 final。
 - 守卫测试：`tests/storage/message-write-path.test.js` 禁止 server/agents/session 直接 `.messages.append`。
-- 离线 `migrate-runtime` 仍可直写 repository（非热路径）。
+- Legacy 文件格式导入器已退役；在线与现存离线维护能力均不再通过该入口直写 message repository。
 - 已删除仅供测试/兼容使用的 `durableRecorder.mirrorLastMessage` 公开入口；在线消息只保留上述两类
   用例入口并共享同一个物理写入口。
 
@@ -149,7 +149,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 类型                             | 入口                                                                     | 落点                               | 调用方                                            |
 | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------- |
 | **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队        | `shift_context` MCP → callback-routes 私有 bridge |
-| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部；migrate-runtime 离线                    |
+| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部                                          |
 | **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件** | a2a-finalize                                      |
 | **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件               | seal 路径（若接线）                               |
 | Recall / FTS / embedding         | 派生                                                                     | recall 表 / 向量                   | 投影只读查询为主                                  |
@@ -292,16 +292,16 @@ Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `rec
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                  | 引用方                 |
-| -------------------------------------------------- | --------------------- | ---------------------- |
-| `audit-dual-storage.js`                            | 历史 dual 对比        | scripts + tests        |
-| `legacy-session-reader.js`                         | 读旧 sessions         | offline dual audit     |
-| `legacy-cleanup-*.js`                              | 清理清单/执行         | plan/execute scripts   |
-| `migrate-runtime.js`                               | 文件→SQLite 迁移      | migrate script + tests |
-| `mixed-transcript-retirement.js`                   | 混合 transcript 归档  | archive/plan scripts   |
-| `clean-epoch.js`                                   | 新库 epoch            | prepare script + tests |
-| `recovery-drill.js` / `audit-storage.js`           | 恢复演练 / 完整性审计 | drill/audit scripts    |
-| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval   | scripts + tests        |
+| 模块（均在 `src/storage/offline/`）                | 用途                       | 引用方              |
+| -------------------------------------------------- | -------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁          | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                 | prepare script      |
+| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
+| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
+
+旧 sessions/invocations JSON、provider session-map 与 transcript 的导入、dual 对账、混合归档、
+清理执行器及其 fixture 已退役。`runtime-home` 仅迁移现存 `data/runtime/shift.sqlite` 安装，
+不导入旧业务文件格式。
 
 **禁止**从 `src/server` / `src/agents` require `storage/offline/*`。
 
@@ -388,7 +388,7 @@ grep appendMessage|appendToSession → src/
 # Memory
 grep writeMemoryCandidate|captureHandoff|memories.create → src/
 
-# 热路径是否引用 legacy
+# 热路径不得重新引入已退役 legacy 工具名
 grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```

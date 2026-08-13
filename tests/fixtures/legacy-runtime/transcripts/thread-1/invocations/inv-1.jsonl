@@ -1,5 +1,0 @@
-{"ts":"2026-01-01T00:00:02.000Z","kind":"invocation-start","payload":{"agent":"codex"}}
-{"ts":"2026-01-01T00:00:03.000Z","kind":"text.delta","payload":{"text":"synthetic fixture completed"}}
-{"ts":"2026-01-01T00:00:04.000Z","kind":"handoff","payload":{"to":"gemini","goal":"review synthetic fixture"}}
-{"ts":"2026-01-01T00:00:04.500Z","kind":"memory-captured","payload":{"id":"mem-1","threadId":"thread-1","kind":"handoff","status":"captured","content":"handoff codex to gemini for fixture review","createdBy":"codex","createdAt":"2026-01-01T00:00:04.500Z","captureKey":"handoff:inv-1:gemini:0"}}
-{"ts":"2026-01-01T00:00:06.000Z","kind":"invocation-end","payload":{"code":0,"signal":null}}
