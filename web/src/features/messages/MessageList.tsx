@@ -436,16 +436,14 @@ export function MessageList({
     if (isLatest) {
       isNavigatingRef.current = false;
       setFollowingLatest(true);
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
     } else {
       isNavigatingRef.current = true;
       setFollowingLatest(false);
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.focus({ preventScroll: true });
   }
+
 
   function handleMessageScroll() {
     const element = scrollRef.current;
