@@ -9,7 +9,9 @@ const { findEvents } = require("./lib/sse");
 const {
   evaluateObservabilitySnapshot,
   compareRestartSnapshots,
+  evaluatePhase3Release,
 } = require("./lib/observability-audit");
+const { startObservabilityReceiver } = require("./lib/observability-receiver");
 
 const PROMPT = [
   "这是一次 SHIFT Trace 真实链路验收，不修改仓库。",
@@ -30,9 +32,15 @@ async function main() {
   const dumpDir = createDumpDir(opts.dumpDir, "observability-acceptance");
   let harness = null;
   let restarted = null;
+  let receiver = null;
   let sessionId = "";
+  const priorExportEndpoint = process.env.SHIFT_OBSERVABILITY_EXPORT_ENDPOINT;
+  const priorExportProtocol = process.env.SHIFT_OBSERVABILITY_EXPORT_PROTOCOL;
   const startedAt = Date.now();
   try {
+    receiver = await startObservabilityReceiver();
+    process.env.SHIFT_OBSERVABILITY_EXPORT_ENDPOINT = receiver.endpoint;
+    process.env.SHIFT_OBSERVABILITY_EXPORT_PROTOCOL = "otlp-http";
     harness = await startHarness(opts, { dumpDir });
     const project = await harness.api.openProject(resolveProjectDir(opts));
     const session = await harness.api.createSession(project.projectKey);
@@ -57,6 +65,7 @@ async function main() {
       .filter(Boolean);
     const traces = await harness.api.listTraces(sessionId);
     const health = await harness.api.health();
+    const metrics = await harness.api.observabilityMetrics();
     const before = evaluateObservabilitySnapshot({
       traces,
       health: health.body,
@@ -71,9 +80,15 @@ async function main() {
 
     await harness.close();
     harness = null;
+    const phase3BeforeRestart = evaluatePhase3Release({
+      metrics: metrics.body,
+      health: health.body,
+      exportRequests: receiver.requests,
+    });
     restarted = await startHarness(opts, { dumpDir });
     const restoredTraces = await restarted.api.listTraces(sessionId);
     const restoredHealth = await restarted.api.health();
+    const restoredMetrics = await restarted.api.observabilityMetrics();
     const after = evaluateObservabilitySnapshot({
       traces: restoredTraces,
       health: restoredHealth.body,
@@ -81,13 +96,29 @@ async function main() {
       requireHandoff: true,
     });
     const restart = compareRestartSnapshots(before, after);
-    const hard = [...before.assertions, ...restart.assertions];
-    const passed = before.passed && restart.passed;
+    await restarted.close();
+    restarted = null;
+    const phase3AfterRestart = evaluatePhase3Release({
+      metrics: restoredMetrics.body,
+      health: restoredHealth.body,
+      exportRequests: receiver.requests,
+    });
+    const hard = [
+      ...before.assertions,
+      ...restart.assertions,
+      ...phase3BeforeRestart.assertions,
+      ...phase3AfterRestart.assertions,
+    ];
+    const passed =
+      before.passed && restart.passed && phase3BeforeRestart.passed && phase3AfterRestart.passed;
     writeJson(path.join(dumpDir, "after-restart.json"), {
       traces: restoredTraces,
       health: restoredHealth.body,
       audit: after,
       restart,
+      phase3BeforeRestart,
+      phase3AfterRestart,
+      exportRequestCount: receiver.requests.length,
     });
     writeReport(dumpDir, {
       title: "Live observability acceptance",
@@ -129,6 +160,9 @@ async function main() {
   } finally {
     await harness?.close().catch(() => {});
     await restarted?.close().catch(() => {});
+    await receiver?.close().catch(() => {});
+    restoreEnv("SHIFT_OBSERVABILITY_EXPORT_ENDPOINT", priorExportEndpoint);
+    restoreEnv("SHIFT_OBSERVABILITY_EXPORT_PROTOCOL", priorExportProtocol);
   }
   console.log(`[observability-live] report: ${path.join(dumpDir, "report.md")}`);
 }
@@ -137,3 +171,8 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
