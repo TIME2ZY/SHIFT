@@ -430,10 +430,16 @@ export function MessageList({
     const target = messageRefs.current.get(key);
     if (!target) return;
     setActiveMessageKey(key);
-    setFollowingLatest(key === latestMessageKey);
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    const isLatest = key === latestMessageKey;
+    setFollowingLatest(isLatest);
+    if (isLatest && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    } else {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
     target.focus({ preventScroll: true });
   }
+
 
   function handleMessageScroll() {
     const element = scrollRef.current;
