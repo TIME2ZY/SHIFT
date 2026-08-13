@@ -258,6 +258,10 @@ outbox_pending_age
 观测写入失败不得静默提升业务成功率。非权威 telemetry 失败可以不打断业务，但必须使相关
 Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入失败必须 fail closed。
 
+完整性检查只约束相应契约生效后的事实。`missing_trace_id` 以 migration 24 的实际
+`schema_migrations.applied_at` 为 applicability cutoff；更早的 Invocation 保留为历史诊断计数，
+不得补造 Trace，也不得使当前 health 永久 degraded。
+
 ## 8. Payload、隐私、采样与保留
 
 1. 结构性 lifecycle 元数据默认全量持久化；成功 payload 可以采样，错误/降级 payload 保留。
@@ -295,6 +299,35 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   成功率与“成功且相关结果完整召回”的比例，不把相关性推断成业务因果。
 - evaluator、数据集校验和报告均位于 offline/script 边界；在线 metrics 在结果未经过显式导入
   契约前继续保持严格 Recall、used 和 correct 为 `null`。
+
+### 8.3 Phase 2A Trace 查询与导出
+
+- Trace 搜索、状态/Agent/时间/失败筛选与分页必须在 Session-scoped 服务端 read model 完成；
+  Web 不跨 Session 扫描或自行构造另一份历史索引。
+- 导出只包含 Trace/Invocation/Handoff 结构元数据和 invocation event 的 allowlist 字段；默认不
+  复制 prompt、response、tool 参数、tool output、query、文件内容或环境变量。
+- 导出声明 format/version 与 capture policy，仍受可信 Session → Trace 隔离，且只读、不反写。
+
+### 8.4 Phase 2B 派生 Span 与 Link
+
+- generation span 从 Invocation + context window generation 派生；tool span 从同一 Invocation 的
+  `tool.started` / `tool.finished` 规范事件配对；recall span 从带 invocation_id 的 Memory telemetry
+  派生；Handoff link 从权威 Handoff target 绑定派生。
+- 不新增在线 span/span_link 写表。投影可重建且不得反写源表；payload 只暴露结构 allowlist。
+- 缺少 finish 的 tool 或未终止 generation 必须输出 `complete=false`，并计入 health 的
+  `span_missing_end`，不得静默补终态。
+
+### 8.5 Phase 2C 评估与反馈证据导入
+
+- 在线只接受两类显式导入：`labeled_recall_eval`（dataset ID/version、K、case/judgment 数、
+  Recall@K/MRR/nDCG@K）和 `memory_outcome_judgment`（现有 Invocation、可选 Memory、used、
+  correct、business outcome）。二者不得互相替代。
+- 每次导入必须提供稳定 import ID、producer、evidence ref 与 SHA-256 source hash；只存结构字段，
+  不接受原始 prompt/response/query/feedback 文本。source hash 幂等去重在唯一入口完成。
+- judgment 必须绑定同一 Thread 的现有 Invocation；Memory 如提供也必须归属该 Thread。`correct`
+  只有在 `used=true` 时允许判定，business outcome 只接受 `success | failure | unknown`。
+- strict Recall 指标读取最近一次 labeled eval；used/correct/business outcome 只以合格 judgment 为
+  分母，并暴露分子、分母及 unknown。不得从 Invocation/Handoff completed 自动推断。
 
 ## 9. Phase 0 实施边界
 

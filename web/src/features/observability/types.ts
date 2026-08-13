@@ -45,6 +45,42 @@ export interface TraceSummary {
   handoffCounts: Record<string, number>;
   invocations: ExecutionInvocation[];
   handoffs: ExecutionHandoff[];
+  spans?: TraceSpan[];
+  links?: TraceLink[];
+}
+
+export interface TraceSpan {
+  spanId: string;
+  invocationId: string;
+  parentSpanId: string | null;
+  kind: "generation" | "tool" | "recall";
+  name: string;
+  state: string;
+  complete: boolean;
+  startedAt: string | null;
+  endedAt: string | null;
+  attributes: Record<string, string | number | boolean | null>;
+}
+
+export interface TraceLink {
+  linkId: string;
+  kind: "handoff";
+  sourceSpanId: string;
+  targetSpanId: string;
+}
+
+export interface TraceSearchFilters {
+  state?: TraceSummary["state"] | "";
+  agentId?: string;
+  query?: string;
+  failuresOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TraceSearchResult {
+  traces: TraceSummary[];
+  page: { total: number; limit: number; offset: number };
 }
 
 export interface QualifiedRate {
@@ -66,7 +102,10 @@ export interface ObservabilityMetrics {
   };
   memory: {
     hitRate: QualifiedRate;
-    strictRecallAtK: QualifiedRate | null;
+    strictRecallAtK: (QualifiedRate & { cutoffK: number; mrr: number; ndcgAtK: number }) | null;
+    usedRate?: QualifiedRate | null;
+    correctRate?: QualifiedRate | null;
+    businessSuccessRate?: QualifiedRate | null;
     semantics: string;
   };
 }

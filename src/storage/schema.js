@@ -1018,6 +1018,50 @@ const MIGRATIONS = Object.freeze([
       INSERT INTO telemetry_sink_health (sink) VALUES ('memory_events');
     `,
   },
+  {
+    version: 27,
+    name: "observability_evidence_imports",
+    sql: `
+      CREATE TABLE observability_evidence_imports (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('labeled_recall_eval', 'memory_outcome_judgment')),
+        producer TEXT NOT NULL,
+        evidence_ref TEXT NOT NULL,
+        source_hash TEXT NOT NULL UNIQUE CHECK (length(source_hash) = 64),
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE recall_eval_imports (
+        import_id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL,
+        dataset_version TEXT NOT NULL,
+        cutoff_k INTEGER NOT NULL CHECK (cutoff_k > 0),
+        cases INTEGER NOT NULL CHECK (cases > 0),
+        relevant_judgments INTEGER NOT NULL CHECK (relevant_judgments > 0),
+        recall_at_k REAL NOT NULL CHECK (recall_at_k BETWEEN 0 AND 1),
+        mrr REAL NOT NULL CHECK (mrr BETWEEN 0 AND 1),
+        ndcg_at_k REAL NOT NULL CHECK (ndcg_at_k BETWEEN 0 AND 1),
+        FOREIGN KEY (import_id) REFERENCES observability_evidence_imports(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE memory_outcome_judgments (
+        import_id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        invocation_id TEXT NOT NULL,
+        memory_id TEXT,
+        used INTEGER CHECK (used IN (0, 1)),
+        correct INTEGER CHECK (correct IN (0, 1)),
+        business_outcome TEXT NOT NULL CHECK (business_outcome IN ('success', 'failure', 'unknown')),
+        FOREIGN KEY (import_id) REFERENCES observability_evidence_imports(id) ON DELETE CASCADE,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (invocation_id) REFERENCES invocations(id) ON DELETE CASCADE,
+        FOREIGN KEY (memory_id) REFERENCES memory_entries(id) ON DELETE SET NULL,
+        CHECK (correct IS NULL OR used = 1)
+      );
+
+      CREATE INDEX memory_outcome_judgments_thread ON memory_outcome_judgments(thread_id);
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

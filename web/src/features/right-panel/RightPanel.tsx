@@ -223,7 +223,7 @@ export function RightPanel({
             aria-labelledby="right-panel-tab-trace"
             tabIndex={0}
           >
-            <TraceExplorer traces={traces} agents={agents} />
+            <TraceExplorer traces={traces} agents={agents} sessionId={sessionId} />
           </section>
         ) : null}
       </div>

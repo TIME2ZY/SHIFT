@@ -2,6 +2,7 @@ const { openMemoryDatabase, withTransaction, checkpointMemoryDatabase } = requir
 const { createInvocationRepository } = require("./invocation-repository");
 const { createHandoffRepository } = require("./handoff-repository");
 const { createObservabilityRepository } = require("./observability-repository");
+const { createObservabilityEvidenceRepository } = require("./observability-evidence-repository");
 const { createEmbeddingRepository } = require("./embedding-repository");
 const { createExecutionReadModel } = require("./execution-read-model");
 const {
@@ -33,6 +34,7 @@ function createStorage(options = {}) {
     },
   });
   const memoryEvents = createMemoryEventRepository(db);
+  const observabilityEvidence = createObservabilityEvidenceRepository(db);
   storage = {
     db,
     threads: createThreadRepository(db),
@@ -41,7 +43,8 @@ function createStorage(options = {}) {
     traces: createTraceRunRepository(db),
     invocations: createInvocationRepository(db),
     handoffs: createHandoffRepository(db),
-    observability: createObservabilityRepository(db),
+    observabilityEvidence,
+    observability: createObservabilityRepository(db, { evidence: observabilityEvidence }),
     executions: createExecutionReadModel(db),
     collaborationTasks: createCollaborationTaskRepository(db),
     projects: createProjectRepository(db, options.projectRepositoryOptions),

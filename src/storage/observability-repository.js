@@ -1,6 +1,7 @@
 const SAMPLE_CLASSES = Object.freeze(["eligible", "pending", "censored", "unknown", "excluded"]);
+const { projectTraceSpans } = require("./trace-span-projection");
 
-function createObservabilityRepository(db) {
+function createObservabilityRepository(db, dependencies = {}) {
   const scalar = (sql, params = {}) => Number(db.prepare(sql).get(params)?.count || 0);
 
   return {
@@ -35,12 +36,17 @@ function createObservabilityRepository(db) {
     health(options = {}) {
       const now = validDate(options.now) || new Date();
       const outboxPendingAlertSeconds = positiveNumber(options.outboxPendingAlertSeconds, 300);
+      const traceContractAppliedAt = db
+        .prepare("SELECT applied_at FROM schema_migrations WHERE version = 24")
+        .get()?.applied_at;
       const oldestPending = db
         .prepare("SELECT MIN(created_at) AS value FROM storage_outbox WHERE status = 'pending'")
         .get()?.value;
       const checks = {
         missing_trace_id: scalar(
-          "SELECT COUNT(*) AS count FROM invocations WHERE trace_id IS NULL"
+          `SELECT COUNT(*) AS count FROM invocations
+           WHERE trace_id IS NULL AND started_at >= @traceContractAppliedAt`,
+          { traceContractAppliedAt }
         ),
         terminal_invocation_missing_end_event: scalar(`
           SELECT COUNT(*) AS count FROM invocations i
@@ -66,6 +72,14 @@ function createObservabilityRepository(db) {
           )
         `),
       };
+      const spanMissingEnd = db
+        .prepare("SELECT id FROM trace_runs WHERE state <> 'active' AND started_at >= @cutoff")
+        .all({ cutoff: traceContractAppliedAt })
+        .reduce(
+          (sum, row) =>
+            sum + projectTraceSpans(db, row.id).spans.filter((span) => !span.complete).length,
+          0
+        );
       const authoritativeViolations = Object.values(checks).reduce((sum, value) => sum + value, 0);
       const telemetry = telemetryHealth(db);
       const outboxPendingAge = ageSeconds(oldestPending, now);
@@ -85,6 +99,9 @@ function createObservabilityRepository(db) {
           lastOccurredAt: telemetry.lastFailureAt,
         });
       }
+      if (spanMissingEnd > 0) {
+        alerts.push({ code: "span_missing_end", severity: "warning", count: spanMissingEnd });
+      }
       if (outboxPendingAge != null && outboxPendingAge > outboxPendingAlertSeconds) {
         alerts.push({
           code: "outbox_pending_age",
@@ -97,17 +114,25 @@ function createObservabilityRepository(db) {
         state: alerts.length > 0 ? "degraded" : "available",
         checkedAt: now.toISOString(),
         authoritativeViolations,
+        applicability: { traceContractAppliedAt },
+        historical: {
+          invocation_missing_trace_before_contract: scalar(
+            `SELECT COUNT(*) AS count FROM invocations
+             WHERE trace_id IS NULL AND started_at < @traceContractAppliedAt`,
+            { traceContractAppliedAt }
+          ),
+        },
         alerts,
         telemetry,
         checks: {
           ...checks,
-          span_missing_end: null,
+          span_missing_end: spanMissingEnd,
           telemetry_write_failure: telemetry.unresolvedFailures,
           metric_projection_lag: 0,
           outbox_pending_age: outboxPendingAge,
         },
         capabilities: {
-          span_missing_end: "not_applicable_phase_0",
+          span_missing_end: "derived_from_canonical_events",
           telemetry_write_failure: "durable_sink_attempt_counters",
           metric_projection_lag: "live_sql_zero_lag",
         },
@@ -137,7 +162,12 @@ function createObservabilityRepository(db) {
       return {
         window,
         handoff: handoffMetrics(handoffs),
-        memory: memoryHitMetrics(memoryEvents, telemetryHealth(db, window)),
+        memory: memoryHitMetrics(
+          memoryEvents,
+          telemetryHealth(db, window),
+          dependencies.evidence?.latestRecallEval?.() || null,
+          dependencies.evidence?.judgmentMetrics?.(window) || null
+        ),
       };
     },
   };
@@ -216,7 +246,7 @@ function classifyHandoff(row) {
   return "eligible";
 }
 
-function memoryHitMetrics(rows, telemetry) {
+function memoryHitMetrics(rows, telemetry, strictRecallAtK, judgments) {
   const counts = { eligible: 0, pending: 0, censored: 0, unknown: 0, excluded: 0 };
   let hits = 0;
   const availability = { available: 0, degraded: 0, unavailable: 0, unknown: 0 };
@@ -235,9 +265,10 @@ function memoryHitMetrics(rows, telemetry) {
   return {
     hitRate: rateResult(hits, counts.eligible, counts),
     availability,
-    strictRecallAtK: null,
-    usedRate: null,
-    correctRate: null,
+    strictRecallAtK,
+    usedRate: judgments?.usedRate || null,
+    correctRate: judgments?.correctRate || null,
+    businessSuccessRate: judgments?.businessSuccessRate || null,
     completeness: telemetry.failed > 0 ? "incomplete" : "best_effort",
     telemetry,
     semantics: "non-empty delivered Memory result rate; not labeled Recall@K",

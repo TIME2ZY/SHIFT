@@ -303,10 +303,25 @@ Web 的“追踪”面板通过上述只读接口呈现 durable Trace 航线、�
 pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实；Memory
 hit rate 与严格 Recall@K 明确分栏，后者在没有标注集时显示为不可用。
 
+Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
+筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
+同一可信 Session scope，不建立前端历史索引或新的写入口。
+
+`trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
+Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
+详情 API 与 UI 消费该投影；不存在 span 写表，缺失结束事件由 `span_missing_end` health 暴露。
+
+`observability-evidence-repository.js` 是 labeled recall eval 与 Memory outcome judgment 的唯一导入
+入口，HTTP bridge 为 `POST /api/storage/observability/evidence`。导入只保存结构指标、可信坐标、
+evidence ref 与 source hash；metrics 从该证据读取严格 Recall、used/correct 与业务结果合格分母。
+
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
 由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行
 事实和 pending outbox 不进入该清理路径。
+
+Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用边界：更早且没有
+`trace_id` 的 Invocation 仅作为 `historical` 诊断计数，不参与当前告警，也不会被补造 Trace。
 
 ## 6. 事件类型 → 单一写入口
 

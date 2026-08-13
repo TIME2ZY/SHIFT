@@ -122,18 +122,37 @@ test("session trace routes are scoped and expose durable execution summaries", a
     getSession: (id) => (id === "s1" ? { id } : null),
     executionStorage: {
       executions: {
+        searchForThread: (_threadId, filters) => ({
+          traces: [{ traceId: "trace-1", state: filters.state || "failed" }],
+          page: { total: 1, limit: 20, offset: 0 },
+        }),
         listForThread: () => [{ traceId: "trace-1", state: "failed" }],
         inspect: (threadId, traceId) =>
           threadId === "s1" && traceId === "trace-1"
             ? { traceId, threadId, invocations: [], handoffs: [] }
             : null,
+        export: (threadId, traceId) =>
+          threadId === "s1" && traceId === "trace-1"
+            ? { format: "shift-trace-export", trace: { traceId } }
+            : null,
       },
     },
   });
-  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces"));
+  await handle(
+    makeReq("GET"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/traces?state=failed")
+  );
   assert.equal(res.body.traces[0].state, "failed");
+  assert.equal(res.body.page.total, 1);
   await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces/trace-1"));
   assert.equal(res.body.trace.traceId, "trace-1");
+  await handle(
+    makeReq("GET"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/traces/trace-1/export")
+  );
+  assert.equal(res.body.format, "shift-trace-export");
   await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/traces/missing"));
   assert.equal(res.statusCode, 404);
 });

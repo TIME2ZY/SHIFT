@@ -58,6 +58,20 @@ function createStorageRoutes({
       return true;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/storage/observability/evidence") {
+      try {
+        const result = storageContext.importObservabilityEvidence?.(await readJsonBody(req));
+        if (!result) {
+          sendJson(res, 503, { error: "Observability evidence import is unavailable." });
+          return true;
+        }
+        sendJson(res, result.imported ? 201 : 200, { evidence: result });
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
     const traceMatch = url.pathname.match(/^\/api\/storage\/observability\/traces\/([^/]+)$/);
     if (req.method === "GET" && traceMatch) {
       let traceId;

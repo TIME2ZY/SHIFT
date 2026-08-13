@@ -97,7 +97,7 @@ export function App() {
     null;
   const activeSessionId = activeSession?.id ?? null;
   const messages = useMessagesQuery(activeSessionId);
-  const traces = useSessionTracesQuery(activeSessionId);
+  const traces = useSessionTracesQuery(activeSessionId, { limit: 100 });
   const run = useSessionRun(activeSessionId);
   const selectedAgentId =
     (activeSessionId ? agentBySession[activeSessionId] : undefined) ||
@@ -355,7 +355,7 @@ export function App() {
             <MessageList
               sessionId={activeSessionId}
               messages={messages.data ?? []}
-              traces={traces.data ?? []}
+              traces={traces.data?.traces ?? []}
               agents={agents.data ?? []}
               run={run}
               isLoading={messages.isPending && Boolean(activeSessionId)}
@@ -392,7 +392,7 @@ export function App() {
             agents={agents.data ?? []}
             selectedAgentId={selectedAgentId}
             run={run}
-            traces={traces.data ?? []}
+            traces={traces.data?.traces ?? []}
             open={infoPanelOpen}
             onClose={closeInfoPanel}
             onAgentChange={selectAgent}

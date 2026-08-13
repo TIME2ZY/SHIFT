@@ -53,6 +53,19 @@ test("execution read model restores failure and handoff causality from SQLite", 
     const detail = storage.executions.inspect("thread-1", "trace-1");
     assert.ok(detail.invocations.at(-1).events.some((event) => event.kind === "invocation-end"));
     assert.equal(storage.executions.inspect("other-thread", "trace-1"), null);
+    const failed = storage.executions.searchForThread("thread-1", {
+      agentId: "grok",
+      failuresOnly: true,
+      query: "provider_exit_7",
+    });
+    assert.equal(failed.page.total, 1);
+    assert.equal(failed.traces[0].traceId, "trace-1");
+    assert.equal(storage.executions.searchForThread("other-thread").page.total, 0);
+    const exported = storage.executions.export("thread-1", "trace-1");
+    assert.equal(exported.capturePolicy, "structural-metadata-v1");
+    assert.equal(exported.trace.invocations.at(-1).events.at(-1).payload.code, 7);
+    assert.equal(exported.trace.invocations.at(-1).events.at(-1).payload.text, undefined);
+    assert.equal(storage.executions.export("other-thread", "trace-1"), null);
   } finally {
     recorder.close();
     storage.close();
