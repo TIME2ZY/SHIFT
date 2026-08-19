@@ -157,6 +157,26 @@ test("session trace routes are scoped and expose durable execution summaries", a
   assert.equal(res.statusCode, 404);
 });
 
+test("session audit summary combines the execution read model with billing usage", async () => {
+  const res = makeRes();
+  const handle = createHandler(res, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    getUsageSummary: () => ({ available: true, session: { totalTokens: 42 }, agents: [] }),
+    executionStorage: {
+      executions: {
+        auditSummary: (threadId) => ({
+          session: { id: threadId, title: "Audit" },
+          volume: { userTurns: 2, messages: 5, traces: 1, invocations: 2 },
+        }),
+      },
+    },
+  });
+  await handle(makeReq("GET"), res, new URL("http://127.0.0.1/api/sessions/s1/audit-summary"));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.summary.volume.userTurns, 2);
+  assert.equal(res.body.summary.usage.session.totalTokens, 42);
+});
+
 test("discarding a worktree clears only the Session runtime link", async () => {
   const res = makeRes();
   let cleared = null;

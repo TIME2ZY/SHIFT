@@ -74,6 +74,45 @@ function HandoffFunnel({
     </section>
   );
 }
+
+function MemoryDiagnostics({
+  memory,
+}: {
+  memory: import("./types").ObservabilityMetrics["memory"];
+}) {
+  const values = [
+    ["总结果命中", formatRate(memory.search.totalResultRate)],
+    ["平均 Memory 命中", formatAverage(memory.search.averageMemoryHits)],
+    ["平均注入", formatAverage(memory.injection.averageDelivered)],
+    ["预算丢弃", formatRate(memory.injection.budgetDropRate)],
+    ["截断", formatRate(memory.injection.truncationRate)],
+    ["旧契约排除", String(memory.applicability.historicalEventsExcluded)],
+  ];
+  return (
+    <section className="memory-diagnostics" aria-label="Memory 漏斗诊断">
+      <header>
+        <strong>Memory 漏斗诊断</strong>
+        <small>检索 → 注入 → 写入</small>
+      </header>
+      <dl>
+        {values.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function formatRate(rate: QualifiedRate) {
+  return rate.value == null ? "—" : `${Math.round(rate.value * 100)}%`;
+}
+
+function formatAverage(value: number | null) {
+  return value == null ? "—" : value.toFixed(1);
+}
 function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
 }
@@ -170,6 +209,7 @@ export function TraceExplorer({
                 ) : null}
               </dl>
               <HandoffFunnel funnel={metrics.data.handoff.funnel} />
+              <MemoryDiagnostics memory={metrics.data.memory} />
               {metrics.data.comparison?.indicators?.length ? (
                 <div className="trace-trend" aria-label="与前一窗口对比">
                   {metrics.data.comparison.indicators.map((indicator) => (
@@ -190,6 +230,9 @@ export function TraceExplorer({
                 </span>
                 <span>
                   创建 <strong>{metrics.data.memory.write.created}</strong>
+                </span>
+                <span>
+                  未变化 <strong>{metrics.data.memory.write.unchanged}</strong>
                 </span>
                 <span>
                   替代 <strong>{metrics.data.memory.write.superseded}</strong>

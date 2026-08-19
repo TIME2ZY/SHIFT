@@ -32,6 +32,29 @@ function createSessionRoutes({
   }
 
   return async function handleSessionRoutes(req, res, url) {
+    const auditSummaryMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/audit-summary$/
+    );
+    if (auditSummaryMatch && req.method === "GET") {
+      const sessionId = auditSummaryMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      const summary = executionStorage?.executions?.auditSummary?.(sessionId) || null;
+      if (!summary) {
+        sendJson(res, 503, { error: "Session audit summary is unavailable." });
+        return true;
+      }
+      const usage = getUsageSummary
+        ? getUsageSummary(sessionId)
+        : usageStorage
+          ? buildUsageSummary(usageStorage, sessionId)
+          : { available: false, session: {}, agents: [] };
+      sendJson(res, 200, { summary: { ...summary, usage } });
+      return true;
+    }
+
     const tracesMatch = url.pathname.match(/^\/api\/sessions\/([a-zA-Z0-9_-]+)\/traces$/);
     if (tracesMatch && req.method === "GET") {
       const sessionId = tracesMatch[1];

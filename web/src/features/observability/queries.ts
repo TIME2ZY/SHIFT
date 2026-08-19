@@ -3,10 +3,19 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import {
   getObservabilityHealth,
   getObservabilityMetrics,
+  getSessionAuditSummary,
   inspectSessionTrace,
   listSessionTraces,
 } from "./api";
 import type { TraceSearchFilters } from "./types";
+
+export function useSessionAuditSummaryQuery(sessionId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.sessions.auditSummary(sessionId || ""),
+    queryFn: ({ signal }) => getSessionAuditSummary(sessionId!, signal),
+    enabled: Boolean(sessionId),
+  });
+}
 
 export function useSessionTracesQuery(sessionId: string | null, filters: TraceSearchFilters = {}) {
   return useQuery({

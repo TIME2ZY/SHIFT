@@ -2,6 +2,8 @@ import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
 import { useMemoriesQuery } from "../memory/queries";
 import { TraceExplorer } from "./TraceExplorer";
+import { SessionAuditOverview } from "./SessionAuditOverview";
+import { useSessionAuditSummaryQuery } from "./queries";
 
 export function AuditPage({
   sessionId,
@@ -16,6 +18,7 @@ export function AuditPage({
   sessionTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const memories = useMemoriesQuery(sessionId, true);
+  const summary = useSessionAuditSummaryQuery(sessionId);
 
   return (
     <main id="main-content" className="audit-page">
@@ -29,6 +32,18 @@ export function AuditPage({
           </p>
         </div>
       </header>
+
+      {summary.data ? <SessionAuditOverview summary={summary.data} agents={agents} /> : null}
+      {summary.isPending && sessionId ? (
+        <section className="audit-overview audit-overview-loading" aria-live="polite">
+          正在汇总会话证据…
+        </section>
+      ) : null}
+      {summary.error ? (
+        <p className="react-panel-error" role="alert">
+          会话证据概览暂不可用：{summary.error.message}
+        </p>
+      ) : null}
 
       <div className="audit-layout">
         <section

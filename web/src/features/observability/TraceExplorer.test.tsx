@@ -231,6 +231,8 @@ describe("TraceExplorer", () => {
     expect(await screen.findByText("Handoff 完成")).toBeInTheDocument();
     expect(await screen.findByText("系统健康")).toBeInTheDocument();
     expect(screen.getByText("Handoff 证据轨道")).toBeInTheDocument();
+    expect(screen.getByText("Memory 漏斗诊断")).toBeInTheDocument();
+    expect(screen.getByText("未变化")).toBeInTheDocument();
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
     expect(screen.getByText("需标注集")).toBeInTheDocument();
     expect(screen.getByText("-25pp")).toBeInTheDocument();

@@ -337,6 +337,12 @@ Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Ag
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
 同一可信 Session scope，不建立前端历史索引或新的写入口。
 
+Session 审计概览由 `execution-read-model.auditSummary` 直接聚合 SQLite Thread、Message、Trace、
+Invocation、Handoff、规范 Tool event、Memory telemetry 与 active Memory；公开只读入口为
+`/api/sessions/:sessionId/audit-summary`，由 Session route 合并既有 billing usage summary。用户轮次
+固定为该 Thread 内 user Message 的 `COUNT(DISTINCT COALESCE(client_turn_id, id))`；累计执行时长
+只求和已有 `ended_at` 的 Trace，最近状态明确标记为 latest Trace state，不伪造 Session 终态。
+
 `observability-repository.metrics` 同时读取当前窗口与紧邻的等长前序窗口，按显式最小样本量和
 下降阈值派生 `stable | regressed | unknown`；不持久化聚合结果。health alerts 携带确定性的
 诊断标题和操作建议，Web 事故队列只读消费这些派生输出，不形成修复状态机。

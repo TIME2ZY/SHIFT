@@ -83,6 +83,50 @@ export interface TraceSearchResult {
   page: { total: number; limit: number; offset: number };
 }
 
+export interface SessionAuditSummary {
+  session: {
+    id: string;
+    title: string;
+    projectKey: string | null;
+    projectDir: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  volume: { userTurns: number; messages: number; traces: number; invocations: number };
+  execution: {
+    traces: Record<"active" | "completed" | "failed" | "aborted", number>;
+    invocations: Record<"active" | "completed" | "failed" | "aborted", number>;
+    retries: number;
+    terminalDurationMs: number;
+    firstStartedAt: string | null;
+    lastActivityAt: string;
+    latestTrace: {
+      traceId: string;
+      state: "active" | "completed" | "failed" | "aborted";
+      terminalReason: string | null;
+      failureStage: string | null;
+      errorCode: string | null;
+      startedAt: string;
+      endedAt: string | null;
+    } | null;
+  };
+  collaboration: {
+    agentIds: string[];
+    handoffs: number;
+    acceptedHandoffs: number;
+    maxHandoffDepth: number;
+  };
+  tools: {
+    calls: number;
+    completed: number;
+    failed: number;
+    incomplete: number;
+    orphanFinishes: number;
+  };
+  memory: { searches: number; injections: number; writes: number; active: number };
+  usage: UsageSummary;
+}
+
 export interface QualifiedRate {
   value: number | null;
   numerator: number;
@@ -175,3 +219,4 @@ export interface ObservabilityHealth {
   }>;
   checks: Record<string, number | null> | null;
 }
+import type { UsageSummary } from "../usage/types";

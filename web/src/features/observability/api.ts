@@ -2,9 +2,18 @@ import { apiRequest } from "../../shared/api/client";
 import type {
   ObservabilityHealth,
   ObservabilityMetrics,
+  SessionAuditSummary,
   TraceSearchFilters,
   TraceSearchResult,
 } from "./types";
+
+export async function getSessionAuditSummary(sessionId: string, signal?: AbortSignal) {
+  const response = await apiRequest<{ summary: SessionAuditSummary }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/audit-summary`,
+    { signal }
+  );
+  return response.summary;
+}
 
 export async function listSessionTraces(
   sessionId: string,
