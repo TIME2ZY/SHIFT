@@ -1,3 +1,5 @@
+import type { UsageSummary } from "../usage/types";
+
 export interface ExecutionOutcome {
   terminalReason: string | null;
   failureStage: string | null;
@@ -29,6 +31,16 @@ export interface ExecutionHandoff {
   routeStatus: string;
   receiveStatus: string;
   completeStatus: string;
+  reason: string;
+  depth: number;
+  duplicateOf: string | null;
+  repairOf: string | null;
+  phaseId: string | null;
+  policy: string | null;
+  createdAt: string;
+  enqueuedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
   outcome: ExecutionOutcome;
 }
 
@@ -40,6 +52,12 @@ export interface TraceSummary {
   state: "active" | "completed" | "failed" | "aborted";
   startedAt: string;
   endedAt: string | null;
+  request: {
+    messageId: string;
+    turnNumber: number;
+    preview: string;
+    createdAt: string;
+  } | null;
   outcome: ExecutionOutcome;
   invocationCounts: Record<string, number>;
   handoffCounts: Record<string, number>;
@@ -219,4 +237,3 @@ export interface ObservabilityHealth {
   }>;
   checks: Record<string, number | null> | null;
 }
-import type { UsageSummary } from "../usage/types";

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import type { AgentSummary } from "../agents/types";
-import type { TraceSummary } from "./types";
+import type { ExecutionHandoff, ExecutionInvocation, TraceSpan, TraceSummary } from "./types";
 import type { QualifiedRate } from "./types";
 import {
   useObservabilityMetricsQuery,
@@ -117,12 +118,221 @@ function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
 }
 
-function duration(trace: TraceSummary) {
-  const started = Date.parse(trace.startedAt);
-  const ended = Date.parse(trace.endedAt || "");
-  if (!Number.isFinite(started) || !Number.isFinite(ended)) return "进行中";
+function elapsed(startedAt: string | null, endedAt: string | null) {
+  const started = Date.parse(startedAt || "");
+  const ended = Date.parse(endedAt || "");
+  if (!Number.isFinite(started)) return "时间未知";
+  if (!Number.isFinite(ended)) return "进行中";
   const ms = Math.max(0, ended - started);
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+}
+
+function clock(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleTimeString() : "—";
+}
+
+function isBranchedRoute(invocations: ExecutionInvocation[]) {
+  const childCounts = new Map<string, number>();
+  return invocations.some((invocation, index) => {
+    if (!invocation.parentInvocationId) return index > 0;
+    childCounts.set(
+      invocation.parentInvocationId,
+      (childCounts.get(invocation.parentInvocationId) || 0) + 1
+    );
+    return (
+      childCounts.get(invocation.parentInvocationId)! > 1 ||
+      invocations[index - 1]?.invocationId !== invocation.parentInvocationId
+    );
+  });
+}
+
+function InvocationBadge({
+  invocation,
+  label,
+}: {
+  invocation: ExecutionInvocation;
+  label(id: string): string;
+}) {
+  return (
+    <div className="trace-hop-badge">
+      <span className="trace-hop-dot" aria-hidden="true" />
+      <strong>{label(invocation.agentId)}</strong>
+      <small>{invocation.state}</small>
+    </div>
+  );
+}
+
+function InvocationRoute({
+  invocations,
+  label,
+}: {
+  invocations: ExecutionInvocation[];
+  label(id: string): string;
+}) {
+  if (!isBranchedRoute(invocations)) {
+    return (
+      <div className="trace-route-line" aria-label="Agent 执行航线">
+        {invocations.map((invocation, index) => (
+          <div className="trace-hop" data-state={invocation.state} key={invocation.invocationId}>
+            {index ? <span className="trace-connector">→</span> : null}
+            <InvocationBadge invocation={invocation} label={label} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const byParent = new Map<string | null, ExecutionInvocation[]>();
+  for (const invocation of invocations) {
+    const parent = invocations.some((item) => item.invocationId === invocation.parentInvocationId)
+      ? invocation.parentInvocationId
+      : null;
+    byParent.set(parent, [...(byParent.get(parent) || []), invocation]);
+  }
+  const visited = new Set<string>();
+  const rows: Array<{ invocation: ExecutionInvocation; depth: number }> = [];
+  const visit = (invocation: ExecutionInvocation, depth: number) => {
+    if (visited.has(invocation.invocationId)) return;
+    visited.add(invocation.invocationId);
+    rows.push({ invocation, depth });
+    for (const child of byParent.get(invocation.invocationId) || []) visit(child, depth + 1);
+  };
+  for (const root of byParent.get(null) || []) visit(root, 0);
+  for (const invocation of invocations) visit(invocation, 0);
+
+  return (
+    <ol className="trace-route-tree" aria-label="Agent 父子执行树">
+      {rows.map(({ invocation, depth }) => (
+        <li
+          data-state={invocation.state}
+          key={invocation.invocationId}
+          style={{ "--trace-depth": depth } as CSSProperties}
+        >
+          <span className="trace-tree-relation">{depth ? `子调用 · 深度 ${depth}` : "根调用"}</span>
+          <InvocationBadge invocation={invocation} label={label} />
+          <code title={invocation.invocationId}>{invocation.invocationId.slice(-8)}</code>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function InvocationEvidence({ invocations }: { invocations: ExecutionInvocation[] }) {
+  return (
+    <section className="trace-evidence" aria-label="Invocation 执行证据">
+      <header>
+        <strong>Invocation 证据</strong>
+        <small>开始 → 终态</small>
+      </header>
+      <ol>
+        {invocations.map((invocation) => (
+          <li data-state={invocation.state} key={invocation.invocationId}>
+            <div>
+              <code title={invocation.invocationId}>{invocation.invocationId.slice(-8)}</code>
+              <strong>{invocation.triggerType || "unknown trigger"}</strong>
+              <span>{elapsed(invocation.startedAt, invocation.endedAt)}</span>
+            </div>
+            <small>
+              {clock(invocation.startedAt)} → {clock(invocation.endedAt)} · {invocation.state}
+            </small>
+            {invocation.outcome.errorCode ? (
+              <b>{invocation.outcome.errorCode}</b>
+            ) : (
+              <small>{invocation.outcome.terminalReason || "尚无终态原因"}</small>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function HandoffEvidence({ handoffs }: { handoffs: ExecutionHandoff[] }) {
+  if (!handoffs.length) return null;
+  return (
+    <section className="trace-evidence trace-handoff-evidence" aria-label="Handoff 执行证据">
+      <header>
+        <strong>Handoff 证据</strong>
+        <small>路由 → 接收 → 完成</small>
+      </header>
+      <ol>
+        {handoffs.map((handoff) => (
+          <li data-state={handoff.completeStatus} key={handoff.handoffId}>
+            <div>
+              <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
+              <strong>
+                {handoff.sourceAgent} → {handoff.targetAgent}
+              </strong>
+              <span>深度 {handoff.depth}</span>
+            </div>
+            <small>{handoff.reason || "未记录原因"}</small>
+            <small>
+              {handoff.routeStatus} / {handoff.receiveStatus} / {handoff.completeStatus}
+            </small>
+            <small>
+              记录 {clock(handoff.createdAt)} · 入队 {clock(handoff.enqueuedAt)} · 启动{" "}
+              {clock(handoff.startedAt)} · 完成 {clock(handoff.completedAt)}
+            </small>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function SpanEvidence({ spans }: { spans: TraceSpan[] }) {
+  if (!spans.length) return null;
+  return (
+    <section className="trace-spans" aria-label="派生执行区段">
+      <header>
+        <strong>Tool / Recall 区段</strong>
+        <small>{spans.filter((span) => !span.complete).length} incomplete</small>
+      </header>
+      <ol>
+        {spans.map((span) => {
+          const attributes = Object.entries(span.attributes || {}).filter(
+            ([, value]) => value != null
+          );
+          return (
+            <li
+              data-kind={span.kind}
+              data-complete={span.complete || undefined}
+              data-state={span.state}
+              key={span.spanId}
+            >
+              <div className="trace-span-main">
+                <span className="trace-span-kind">{span.kind}</span>
+                <strong className="trace-span-name">{span.name}</strong>
+                <small className="trace-span-status">
+                  {span.state === "orphaned"
+                    ? "orphan finish"
+                    : span.complete
+                      ? span.state
+                      : "missing end"}
+                </small>
+              </div>
+              <small>
+                {clock(span.startedAt)} → {clock(span.endedAt)} ·{" "}
+                {elapsed(span.startedAt, span.endedAt)}
+              </small>
+              {attributes.length ? (
+                <dl>
+                  {attributes.map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key}</dt>
+                      <dd title={String(value)}>{String(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 }
 
 export function TraceExplorer({
@@ -153,6 +363,8 @@ export function TraceExplorer({
     [selectedId, visible]
   );
   const detail = useTraceDetailQuery(sessionId, selected?.traceId || null);
+  const selectedInvocations = detail.data?.invocations || selected?.invocations || [];
+  const selectedHandoffs = detail.data?.handoffs || selected?.handoffs || [];
   const label = (id: string) => agents.find((agent) => agent.id === id)?.label || id;
 
   return (
@@ -316,11 +528,23 @@ export function TraceExplorer({
                 key={trace.traceId}
               >
                 <span className="trace-ledger-mark" aria-hidden="true" />
-                <span>
-                  <strong>{stateLabel(trace.state)}</strong>
-                  <small>{new Date(trace.startedAt).toLocaleTimeString()}</small>
+                <span className="trace-ledger-copy">
+                  <span>
+                    <strong>
+                      {trace.request
+                        ? `第 ${trace.request.turnNumber} 轮`
+                        : `请求 #${trace.requestAttempt}`}
+                    </strong>
+                    <small>{stateLabel(trace.state)}</small>
+                  </span>
+                  <b>{trace.request?.preview || "未关联用户消息"}</b>
+                  <small>
+                    {trace.invocations.map((invocation) => label(invocation.agentId)).join(" → ") ||
+                      "未记录 Agent"}
+                    {` · ${trace.invocationCounts.total || 0}I / ${trace.handoffCounts.total || 0}H`}
+                  </small>
                 </span>
-                <code>{duration(trace)}</code>
+                <code>{elapsed(trace.startedAt, trace.endedAt)}</code>
               </button>
             ))}
           </div>
@@ -350,35 +574,16 @@ export function TraceExplorer({
                   ) : null}
                 </div>
               </header>
-              <div className="trace-route-line" aria-label="Agent 执行航线">
-                {selected.invocations.map((invocation, index) => (
-                  <div
-                    className="trace-hop"
-                    data-state={invocation.state}
-                    key={invocation.invocationId}
-                  >
-                    {index ? (
-                      <span className="trace-connector" aria-hidden="true">
-                        <svg
-                          viewBox="0 0 20 12"
-                          width="16"
-                          height="10"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                        >
-                          <path d="M1 6h14M11 2l4 4-4 4" />
-                        </svg>
-                      </span>
-                    ) : null}
-                    <div className="trace-hop-badge">
-                      <span className="trace-hop-dot" aria-hidden="true" />
-                      <strong>{label(invocation.agentId)}</strong>
-                      <small>{invocation.state}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {selected.request ? (
+                <section className="trace-request-evidence" aria-label="用户请求证据">
+                  <span>第 {selected.request.turnNumber} 轮</span>
+                  <p>{selected.request.preview}</p>
+                  <code title={selected.request.messageId}>
+                    {selected.request.messageId.slice(-8)}
+                  </code>
+                </section>
+              ) : null}
+              <InvocationRoute invocations={selectedInvocations} label={label} />
               {selected.outcome.errorCode ? (
                 <div className="trace-breakpoint">
                   <span>断点</span>
@@ -402,31 +607,9 @@ export function TraceExplorer({
                   </dd>
                 </div>
               </dl>
-              {detail.data?.spans?.length ? (
-                <section className="trace-spans" aria-label="派生执行区段">
-                  <header>
-                    <strong>执行区段</strong>
-                    <small>
-                      {detail.data.spans.filter((span) => !span.complete).length} incomplete
-                    </small>
-                  </header>
-                  <ol>
-                    {detail.data.spans.map((span) => (
-                      <li
-                        data-kind={span.kind}
-                        data-complete={span.complete || undefined}
-                        key={span.spanId}
-                      >
-                        <span className="trace-span-kind">{span.kind}</span>
-                        <strong className="trace-span-name">{span.name}</strong>
-                        <small className="trace-span-status">
-                          {span.complete ? span.state : "missing end"}
-                        </small>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-              ) : null}
+              <InvocationEvidence invocations={selectedInvocations} />
+              <HandoffEvidence handoffs={selectedHandoffs} />
+              <SpanEvidence spans={detail.data?.spans || []} />
             </article>
           ) : null}
         </div>

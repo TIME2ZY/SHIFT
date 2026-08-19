@@ -22,6 +22,12 @@ const base = {
   startedAt: "2026-08-13T00:00:00.000Z",
   endedAt: "2026-08-13T00:00:01.000Z",
   rootInvocationId: "i1",
+  request: {
+    messageId: "message-user-1",
+    turnNumber: 1,
+    preview: "构建审计工作台",
+    createdAt: "2026-08-13T00:00:00.000Z",
+  },
   invocationCounts: { total: 1, failed: 0 },
   handoffCounts: { total: 0, accepted: 0, failed: 0 },
   handoffs: [],
@@ -59,8 +65,16 @@ describe("TraceExplorer", () => {
             )
           );
         }
+        if (/\/api\/sessions\/s1\/traces\/[^?]+/.test(url)) {
+          const traceId = new URL(url, "http://shift.local").pathname.split("/").at(-1);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ trace: traces.find((trace) => trace.traceId === traceId) })
+            )
+          );
+        }
         if (url.includes("/api/sessions/") && url.includes("/traces")) {
-          return Promise.resolve(new Response(JSON.stringify({ traces, page: { total: 2 } })));
+          return Promise.resolve(new Response(JSON.stringify({ traces, page: { total: 3 } })));
         }
         return Promise.resolve(
           new Response(
@@ -118,7 +132,10 @@ describe("TraceExplorer", () => {
                   businessSuccessRate: null,
                   completeness: "best_effort",
                   telemetry: { failed: 0, lastFailureAt: null, lastError: null },
-                  applicability: { contractAppliedAt: base.startedAt, historicalExcluded: 0 },
+                  applicability: {
+                    contractAppliedAt: base.startedAt,
+                    historicalEventsExcluded: 0,
+                  },
                   semantics: "separate online metrics",
                 },
                 comparison: {
@@ -183,6 +200,83 @@ describe("TraceExplorer", () => {
       },
       {
         ...base,
+        traceId: "trace-branched",
+        state: "completed",
+        request: {
+          ...base.request,
+          messageId: "message-user-2",
+          turnNumber: 2,
+          preview: "并行检查两个实现分支",
+        },
+        invocationCounts: { total: 3, failed: 0 },
+        outcome: {
+          terminalReason: "request-completed",
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [
+          {
+            invocationId: "root",
+            traceId: "trace-branched",
+            agentId: "codex",
+            state: "completed",
+            parentInvocationId: null,
+            triggerMessageId: "message-user-2",
+            triggerType: "user-message",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+          {
+            invocationId: "branch-b",
+            traceId: "trace-branched",
+            agentId: "grok",
+            state: "completed",
+            parentInvocationId: "root",
+            triggerMessageId: null,
+            triggerType: "handoff",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+          {
+            invocationId: "branch-a",
+            traceId: "trace-branched",
+            agentId: "codex",
+            state: "completed",
+            parentInvocationId: "root",
+            triggerMessageId: null,
+            triggerType: "handoff",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+        ],
+      },
+      {
+        ...base,
         traceId: "trace-failed",
         state: "failed",
         requestAttempt: 2,
@@ -192,6 +286,32 @@ describe("TraceExplorer", () => {
           errorCode: "provider_exit_7",
           retryable: false,
         },
+        spans: [
+          {
+            spanId: "tool:i2:failed-tool",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "tool",
+            name: "failed-tool",
+            state: "failed",
+            complete: true,
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            attributes: { toolId: "failed-tool", status: "failed" },
+          },
+          {
+            spanId: "tool:i2:orphan-tool",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "tool",
+            name: "orphan-tool",
+            state: "orphaned",
+            complete: false,
+            startedAt: null,
+            endedAt: base.endedAt,
+            attributes: { toolId: "orphan-tool", orphanFinish: true },
+          },
+        ],
         invocationCounts: { total: 1, failed: 1 },
         invocations: [
           {
@@ -240,7 +360,12 @@ describe("TraceExplorer", () => {
     expect(screen.getAllByText(/1\/2 · pending 1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Codex")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
-    expect(screen.getByText("provider_exit_7")).toBeInTheDocument();
+    expect(screen.getAllByText("provider_exit_7")).toHaveLength(2);
     expect(screen.getByText("Grok")).toBeInTheDocument();
+    expect(screen.getAllByText("failed-tool")).toHaveLength(2);
+    expect(screen.getByText("orphan finish")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
+    expect(screen.getByRole("list", { name: "Agent 父子执行树" })).toBeInTheDocument();
+    expect(screen.getAllByText("子调用 · 深度 1")).toHaveLength(2);
   });
 });

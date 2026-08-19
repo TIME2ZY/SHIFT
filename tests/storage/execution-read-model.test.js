@@ -18,7 +18,7 @@ test("execution read model restores failure and handoff causality from SQLite", 
       generation: 1,
       capacityTokens: 1000,
     });
-    storage.traces.start({ id: "trace-1", threadId: "thread-1" });
+    storage.traces.start({ id: "trace-1", threadId: "thread-1", clientTurnId: "turn-1" });
     storage.invocations.start({
       id: "source-1",
       threadId: "thread-1",
@@ -92,6 +92,12 @@ test("execution read model restores failure and handoff causality from SQLite", 
     recorder.completeInvocation({ invocationId: "target-1", code: 7, reason: "provider-failed" });
 
     const traces = storage.executions.listForThread("thread-1");
+    assert.deepEqual(traces[0].request, {
+      messageId: "message-user-1",
+      turnNumber: 1,
+      preview: "Build it",
+      createdAt: storage.messages.get("message-user-1").createdAt,
+    });
     assert.equal(traces[0].invocations.at(-1).outcome.errorCode, "provider_exit_7");
     assert.equal(traces[0].handoffs[0].completeStatus, "failed");
     const detail = storage.executions.inspect("thread-1", "trace-1");
@@ -107,6 +113,9 @@ test("execution read model restores failure and handoff causality from SQLite", 
     assert.equal(storage.executions.searchForThread("other-thread").page.total, 0);
     const exported = storage.executions.export("thread-1", "trace-1");
     assert.equal(exported.capturePolicy, "structural-metadata-v1");
+    assert.equal(exported.trace.request.messageId, "message-user-1");
+    assert.equal(exported.trace.request.preview, undefined);
+    assert.equal(JSON.stringify(exported).includes("Build it"), false);
     assert.equal(exported.trace.invocations.at(-1).events.at(-1).payload.code, 7);
     assert.equal(exported.trace.invocations.at(-1).events.at(-1).payload.text, undefined);
     assert.equal(storage.executions.export("other-thread", "trace-1"), null);

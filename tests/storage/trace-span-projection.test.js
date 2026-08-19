@@ -109,3 +109,58 @@ test("span projection and health expose unfinished tool spans", () => {
     storage.close();
   }
 });
+
+test("span projection preserves failed tools and treats orphan finishes as incomplete", () => {
+  const storage = fixture();
+  try {
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.started",
+      createdAt: "2026-08-13T00:00:01.000Z",
+      payload: { toolId: "failed-tool", toolName: "shell" },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.finished",
+      createdAt: "2026-08-13T00:00:02.000Z",
+      payload: { toolId: "failed-tool", toolName: "shell", status: "failed" },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.finished",
+      createdAt: "2026-08-13T00:00:03.000Z",
+      payload: { toolId: "orphan-tool", toolName: "write", status: "ok" },
+    });
+
+    const tools = projectTraceSpans(storage.db, "trace-1").spans.filter(
+      (span) => span.kind === "tool"
+    );
+    assert.deepEqual(
+      tools.map((span) => ({
+        id: span.attributes.toolId,
+        state: span.state,
+        complete: span.complete,
+        startedAt: span.startedAt,
+        orphanFinish: span.attributes.orphanFinish,
+      })),
+      [
+        {
+          id: "failed-tool",
+          state: "failed",
+          complete: true,
+          startedAt: "2026-08-13T00:00:01.000Z",
+          orphanFinish: false,
+        },
+        {
+          id: "orphan-tool",
+          state: "orphaned",
+          complete: false,
+          startedAt: null,
+          orphanFinish: true,
+        },
+      ]
+    );
+  } finally {
+    storage.close();
+  }
+});

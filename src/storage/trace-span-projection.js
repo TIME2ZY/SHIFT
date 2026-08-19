@@ -90,6 +90,8 @@ function projectToolSpans(traceId, invocation, events) {
 }
 
 function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
+  const orphanFinish = Boolean(finished && !started);
+  const failed = finished && ["error", "failed"].includes(payload.status);
   return {
     spanId: `tool:${invocationId}:${toolId}`,
     traceId,
@@ -97,11 +99,16 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
     parentSpanId: `generation:${invocationId}`,
     kind: "tool",
     name: payload.toolName || payload.tool_name || "tool",
-    state: finished ? (payload.status === "error" ? "failed" : "completed") : "active",
-    startedAt: started?.created_at || finished?.created_at || null,
+    state: orphanFinish ? "orphaned" : finished ? (failed ? "failed" : "completed") : "active",
+    startedAt: started?.created_at || null,
     endedAt: finished?.created_at || null,
-    complete: Boolean(finished),
-    attributes: { toolId, toolKind: payload.toolKind || null, status: payload.status || null },
+    complete: Boolean(finished && started),
+    attributes: {
+      toolId,
+      toolKind: payload.toolKind || null,
+      status: payload.status || null,
+      orphanFinish,
+    },
   };
 }
 

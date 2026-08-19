@@ -5,6 +5,16 @@ import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
 
+function formatMemoryDate(value: string | number | undefined) {
+  if (value == null) return "时间未记录";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : "时间未记录";
+}
+
+function shortId(value: string) {
+  return value.length > 12 ? value.slice(-8) : value;
+}
+
 export function AuditPage({
   sessionId,
   sessionTitle,
@@ -90,6 +100,52 @@ export function AuditPage({
                 </header>
                 {memory.topic ? <strong>{memory.topic}</strong> : null}
                 <p>{memory.content}</p>
+                <dl className="audit-memory-provenance">
+                  <div>
+                    <dt>创建</dt>
+                    <dd>{formatMemoryDate(memory.createdAt)}</dd>
+                  </div>
+                  {memory.sourceInvocationId ? (
+                    <div>
+                      <dt>来源 Invocation</dt>
+                      <dd title={memory.sourceInvocationId}>
+                        {shortId(memory.sourceInvocationId)}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {memory.sourceMessageId ? (
+                    <div>
+                      <dt>来源消息</dt>
+                      <dd title={memory.sourceMessageId}>{shortId(memory.sourceMessageId)}</dd>
+                    </div>
+                  ) : null}
+                  {memory.createdBy ? (
+                    <div>
+                      <dt>创建者</dt>
+                      <dd>{memory.createdBy}</dd>
+                    </div>
+                  ) : null}
+                  {typeof memory.metadata?.evidenceKind === "string" ? (
+                    <div>
+                      <dt>证据类型</dt>
+                      <dd>{memory.metadata.evidenceKind}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt>证据锚点</dt>
+                    <dd>{Array.isArray(memory.anchors) ? memory.anchors.length : 0}</dd>
+                  </div>
+                  {memory.supersededBy ? (
+                    <div>
+                      <dt>被替代为</dt>
+                      <dd title={memory.supersededBy}>{shortId(memory.supersededBy)}</dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt>使用证据</dt>
+                    <dd>未标注</dd>
+                  </div>
+                </dl>
               </article>
             ))}
           </div>

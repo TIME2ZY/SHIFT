@@ -28,6 +28,26 @@ function createExecutionReadModel(db) {
       SUM(CASE WHEN complete_status = 'pending' THEN 1 ELSE 0 END) AS pending
     FROM handoffs WHERE trace_id = ?
   `);
+  const findRequestByTurn = db.prepare(`
+    SELECT m.id, m.content, m.created_at, m.sequence_no,
+      (SELECT COUNT(DISTINCT COALESCE(prior.client_turn_id, prior.id))
+       FROM messages prior
+       WHERE prior.thread_id = m.thread_id AND prior.role = 'user'
+         AND prior.sequence_no <= m.sequence_no) AS turn_number
+    FROM messages m
+    WHERE m.thread_id = @threadId AND m.role = 'user' AND m.client_turn_id = @clientTurnId
+    ORDER BY m.sequence_no LIMIT 1
+  `);
+  const findRequestByTrigger = db.prepare(`
+    SELECT m.id, m.content, m.created_at, m.sequence_no,
+      (SELECT COUNT(DISTINCT COALESCE(prior.client_turn_id, prior.id))
+       FROM messages prior
+       WHERE prior.thread_id = m.thread_id AND prior.role = 'user'
+         AND prior.sequence_no <= m.sequence_no) AS turn_number
+    FROM messages m JOIN invocations i ON i.trigger_message_id = m.id
+    WHERE i.id = @rootInvocationId AND m.thread_id = @threadId AND m.role = 'user'
+    LIMIT 1
+  `);
   const findAuditThread = db.prepare(`
     SELECT id, title, project_dir, project_key, last_agent_id, created_at, updated_at
     FROM threads WHERE id = ? AND deleted_at IS NULL
@@ -126,11 +146,32 @@ function createExecutionReadModel(db) {
       rootInvocationId: row.root_invocation_id,
       startedAt: row.started_at,
       endedAt: row.ended_at,
+      request: traceRequest(row),
       outcome: outcome(row),
       invocationCounts: numericCounts(countInvocations.get(row.id)),
       handoffCounts: numericCounts(countHandoffs.get(row.id)),
       invocations: invocationRows.map(invocationSummary),
       handoffs: handoffRows.map(handoffSummary),
+    };
+  }
+
+  function traceRequest(row) {
+    const params = {
+      threadId: row.thread_id,
+      clientTurnId: row.client_turn_id,
+      rootInvocationId: row.root_invocation_id,
+    };
+    const request = row.client_turn_id
+      ? findRequestByTurn.get(params)
+      : row.root_invocation_id
+        ? findRequestByTrigger.get(params)
+        : null;
+    if (!request) return null;
+    return {
+      messageId: request.id,
+      turnNumber: Number(request.turn_number || 0),
+      preview: previewText(request.content, 180),
+      createdAt: request.created_at,
     };
   }
 
@@ -275,6 +316,13 @@ function createExecutionReadModel(db) {
         exportedAt: new Date().toISOString(),
         trace: {
           ...detail,
+          request: detail.request
+            ? {
+                messageId: detail.request.messageId,
+                turnNumber: detail.request.turnNumber,
+                createdAt: detail.request.createdAt,
+              }
+            : null,
           invocations: detail.invocations.map((invocation) => ({
             ...invocation,
             events: invocation.events.map((event) => ({
@@ -336,6 +384,11 @@ function structuralPayload(payload) {
 
 function cleanString(value, max) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+}
+
+function previewText(value, max) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
 function optionalDate(value, name) {

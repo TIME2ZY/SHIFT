@@ -322,8 +322,10 @@ Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Consol
 与 completed；旧的 scheduling / execution / endToEnd 三个重叠公开字段已退出。
 
 Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
-pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实。右侧会话栏
-只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
+pending/unknown 分类的 Handoff 与 Memory 指标。Trace 航线只用 `parentInvocationId` 表达父子因果，
+简单链横向展示，分支链切换为父子树；durable Handoff 作为独立阶段证据展示。Memory 卡片只展示
+既有 row 的来源 Invocation、Message、创建者与 evidence anchor，不把检索或注入推断为实际使用。
+界面不自行聚合或缓存业务事实。右侧会话栏只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
 
 Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 MCP write。`memory_searched`
 只由经认证的 `searchForAgent` 完成后写入；通用 `searchSession` 不写 MCP 审计。`memory_injected`
@@ -335,7 +337,9 @@ Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 M
 
 Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
-同一可信 Session scope，不建立前端历史索引或新的写入口。
+同一可信 Session scope，不建立前端历史索引或新的写入口。列表和详情中的轮次与请求预览由
+`execution-read-model` 引用同 Thread 的权威 user Message 并限长生成；无法建立可信关联时返回
+`request: null`，不补造摘要或第二套 Trace 数据。
 
 Session 审计概览由 `execution-read-model.auditSummary` 直接聚合 SQLite Thread、Message、Trace、
 Invocation、Handoff、规范 Tool event、Memory telemetry 与 active Memory；公开只读入口为

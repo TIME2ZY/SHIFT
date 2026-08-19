@@ -10,6 +10,12 @@ export interface MemoryItem {
   status?: string;
   scope?: string;
   createdAt?: string | number;
+  sourceMessageId?: string | null;
+  sourceInvocationId?: string | null;
+  createdBy?: string | null;
+  supersededBy?: string | null;
+  metadata?: Record<string, unknown> | null;
+  anchors?: unknown[] | null;
 }
 
 interface MemoryResponse {

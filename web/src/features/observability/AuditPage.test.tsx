@@ -57,7 +57,18 @@ vi.mock("../memory/queries", () => ({
   useMemoriesQuery: () => ({
     data: {
       memories: [
-        { id: "memory-1", kind: "decision", topic: "存储", content: "SQLite 是唯一真相源。" },
+        {
+          id: "memory-1",
+          kind: "decision",
+          topic: "存储",
+          content: "SQLite 是唯一真相源。",
+          createdAt: "2026-08-20T00:00:00.000Z",
+          sourceInvocationId: "invocation-source-1",
+          sourceMessageId: "message-source-1",
+          createdBy: "codex",
+          metadata: { evidenceKind: "assistant-output" },
+          anchors: [{ messageId: "message-source-1" }],
+        },
       ],
     },
     isPending: false,
@@ -90,6 +101,10 @@ describe("AuditPage", () => {
     expect(screen.getByText("1 Trace")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "当前 Memory" })).toBeInTheDocument();
     expect(screen.getByText("SQLite 是唯一真相源。")).toBeInTheDocument();
+    expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
+    expect(screen.getByText("assistant-output")).toBeInTheDocument();
+    expect(screen.getByText("使用证据")).toBeInTheDocument();
+    expect(screen.getByText("未标注")).toBeInTheDocument();
     expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
   });
 });
