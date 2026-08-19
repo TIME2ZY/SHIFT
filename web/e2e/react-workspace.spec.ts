@@ -539,7 +539,7 @@ test("locates a durable failure after refresh and exports structural metadata", 
 
   await page.getByRole("button", { name: "审计", exact: true }).click();
   const tracePanel = page.getByRole("region", { name: "在线运行观测" });
-  await expect(tracePanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(tracePanel.locator(".trace-breakpoint").getByText("provider_exit_7")).toBeVisible();
   await expect(tracePanel.getByText("Gemini generation")).toBeVisible();
   await tracePanel.getByRole("button", { name: "只看断点" }).click();
   await expect
@@ -553,6 +553,8 @@ test("locates a durable failure after refresh and exports structural metadata", 
 
   await page.reload();
   const restoredPanel = page.getByRole("region", { name: "在线运行观测" });
-  await expect(restoredPanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(
+    restoredPanel.locator(".trace-breakpoint").getByText("provider_exit_7")
+  ).toBeVisible();
   await expect(restoredPanel.getByText("Gemini generation")).toBeVisible();
 });
