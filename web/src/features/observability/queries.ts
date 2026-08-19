@@ -16,11 +16,11 @@ export function useSessionTracesQuery(sessionId: string | null, filters: TraceSe
   });
 }
 
-export function useObservabilityMetricsQuery(enabled = true) {
+export function useObservabilityMetricsQuery(threadId: string | null, enabled = true) {
   return useQuery({
-    queryKey: queryKeys.observability.metrics,
-    queryFn: ({ signal }) => getObservabilityMetrics(signal),
-    enabled,
+    queryKey: queryKeys.observability.metrics(threadId),
+    queryFn: ({ signal }) => getObservabilityMetrics(threadId!, signal),
+    enabled: enabled && Boolean(threadId),
   });
 }
 

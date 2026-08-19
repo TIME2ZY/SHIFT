@@ -163,7 +163,26 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         json: {
           metrics: {
             window: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
-            handoff: { scheduling: rate, execution: rate, endToEnd: rate },
+            scope: { kind: "thread", threadId: "audit-trace" },
+            handoff: {
+              completion: rate,
+              funnel: {
+                attempted: 0,
+                accepted: 0,
+                enqueued: 0,
+                started: 0,
+                completed: 0,
+                losses: {
+                  duplicate: 0,
+                  alreadyCompleted: 0,
+                  rejected: 0,
+                  notEnqueued: 0,
+                  notStarted: 0,
+                  executionFailed: 0,
+                  aborted: 0,
+                },
+              },
+            },
             memory: {
               search: {
                 availabilityRate: rate,
@@ -200,7 +219,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
               dropThreshold: 0.1,
               indicators: [
                 {
-                  metric: "handoff.endToEnd",
+                  metric: "handoff.completion",
                   state: "unknown",
                   delta: null,
                   current: { value: 0.5, numerator: 1, denominator: 2 },

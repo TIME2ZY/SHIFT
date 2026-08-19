@@ -59,13 +59,17 @@ describe("TraceExplorer", () => {
             )
           );
         }
+        if (url.includes("/api/sessions/") && url.includes("/traces")) {
+          return Promise.resolve(new Response(JSON.stringify({ traces, page: { total: 2 } })));
+        }
         return Promise.resolve(
           new Response(
             JSON.stringify({
               metrics: {
                 window: { from: base.startedAt, to: base.endedAt },
+                scope: { kind: "thread", threadId: "s1" },
                 handoff: {
-                  scheduling: {
+                  completion: {
                     value: 0.5,
                     numerator: 1,
                     denominator: 2,
@@ -74,23 +78,21 @@ describe("TraceExplorer", () => {
                     unknown: 0,
                     excluded: 0,
                   },
-                  execution: {
-                    value: 1,
-                    numerator: 2,
-                    denominator: 2,
-                    pending: 1,
-                    censored: 0,
-                    unknown: 0,
-                    excluded: 0,
-                  },
-                  endToEnd: {
-                    value: 0.5,
-                    numerator: 1,
-                    denominator: 2,
-                    pending: 1,
-                    censored: 0,
-                    unknown: 0,
-                    excluded: 0,
+                  funnel: {
+                    attempted: 3,
+                    accepted: 2,
+                    enqueued: 2,
+                    started: 1,
+                    completed: 1,
+                    losses: {
+                      duplicate: 1,
+                      alreadyCompleted: 0,
+                      rejected: 0,
+                      notEnqueued: 0,
+                      notStarted: 0,
+                      executionFailed: 1,
+                      aborted: 0,
+                    },
                   },
                 },
                 memory: {
@@ -125,7 +127,7 @@ describe("TraceExplorer", () => {
                   dropThreshold: 0.1,
                   indicators: [
                     {
-                      metric: "handoff.endToEnd",
+                      metric: "handoff.completion",
                       state: "regressed",
                       delta: -0.25,
                       current: { value: 0.5, numerator: 1, denominator: 2 },
@@ -218,6 +220,7 @@ describe("TraceExplorer", () => {
       <QueryClientProvider client={new QueryClient()}>
         <TraceExplorer
           traces={traces}
+          sessionId="s1"
           agents={[
             { id: "codex", label: "Codex" },
             { id: "grok", label: "Grok" },
@@ -225,8 +228,9 @@ describe("TraceExplorer", () => {
         />
       </QueryClientProvider>
     );
-    expect(await screen.findByText("Handoff 调度")).toBeInTheDocument();
-    expect(await screen.findByText("事故队列")).toBeInTheDocument();
+    expect(await screen.findByText("Handoff 完成")).toBeInTheDocument();
+    expect(await screen.findByText("系统健康")).toBeInTheDocument();
+    expect(screen.getByText("Handoff 证据轨道")).toBeInTheDocument();
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
     expect(screen.getByText("需标注集")).toBeInTheDocument();
     expect(screen.getByText("-25pp")).toBeInTheDocument();

@@ -121,6 +121,14 @@ test("judgment import binds coordinates and keeps unknown samples out of rates",
     assert.equal(metrics.memory.businessSuccessRate.unknown, 1);
     assert.equal(
       storage.observability.metrics({
+        threadId: "other",
+        from: "2026-08-12T00:00:00.000Z",
+        to: "2026-08-13T00:00:00.000Z",
+      }).memory.usedRate,
+      null
+    );
+    assert.equal(
+      storage.observability.metrics({
         from: "2000-01-01T00:00:00.000Z",
         to: "2000-01-02T00:00:00.000Z",
       }).memory.usedRate,

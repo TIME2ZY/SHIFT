@@ -95,10 +95,25 @@ export interface QualifiedRate {
 
 export interface ObservabilityMetrics {
   window: { from: string; to: string };
+  scope: { kind: "thread" | "system"; threadId: string | null };
   handoff: {
-    scheduling: QualifiedRate;
-    execution: QualifiedRate;
-    endToEnd: QualifiedRate;
+    completion: QualifiedRate;
+    funnel: {
+      attempted: number;
+      accepted: number;
+      enqueued: number;
+      started: number;
+      completed: number;
+      losses: {
+        duplicate: number;
+        alreadyCompleted: number;
+        rejected: number;
+        notEnqueued: number;
+        notStarted: number;
+        executionFailed: number;
+        aborted: number;
+      };
+    };
   };
   memory: {
     search: {
@@ -127,6 +142,8 @@ export interface ObservabilityMetrics {
     usedRate?: QualifiedRate | null;
     correctRate?: QualifiedRate | null;
     businessSuccessRate?: QualifiedRate | null;
+    completeness: "best_effort" | "incomplete" | "unknown";
+    telemetry: Record<string, unknown> | null;
     semantics: string;
     applicability: { contractAppliedAt: string | null; historicalEventsExcluded: number };
   };
@@ -135,7 +152,7 @@ export interface ObservabilityMetrics {
     minSamples: number;
     dropThreshold: number;
     indicators: Array<{
-      metric: "handoff.endToEnd" | "memory.searchHitRate";
+      metric: "handoff.completion" | "memory.searchHitRate";
       state: "stable" | "regressed" | "unknown";
       delta: number | null;
       current: Pick<QualifiedRate, "value" | "numerator" | "denominator">;

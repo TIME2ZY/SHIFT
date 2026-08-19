@@ -22,6 +22,58 @@ function Rate({ label, rate }: { label: string; rate: QualifiedRate }) {
     </div>
   );
 }
+
+function HandoffFunnel({
+  funnel,
+}: {
+  funnel: import("./types").ObservabilityMetrics["handoff"]["funnel"];
+}) {
+  const stages = [
+    ["已记录", funnel.attempted],
+    ["已接受", funnel.accepted],
+    ["已入队", funnel.enqueued],
+    ["已启动", funnel.started],
+    ["已完成", funnel.completed],
+  ] as const;
+  const lossCandidates = [
+    ["重复", funnel.losses.duplicate],
+    ["已完成", funnel.losses.alreadyCompleted],
+    ["路由拒绝", funnel.losses.rejected],
+    ["未入队", funnel.losses.notEnqueued],
+    ["未启动", funnel.losses.notStarted],
+    ["执行失败", funnel.losses.executionFailed],
+    ["中止", funnel.losses.aborted],
+  ] as const;
+  const losses = lossCandidates.filter(([, value]) => value > 0);
+  return (
+    <section className="handoff-funnel" aria-label="Handoff 执行漏斗">
+      <header>
+        <strong>Handoff 证据轨道</strong>
+        <small>仅统计已写入 SQLite 的路由记录</small>
+      </header>
+      <ol>
+        {stages.map(([label, value], index) => (
+          <li key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+            {index < stages.length - 1 ? <i aria-hidden="true" /> : null}
+          </li>
+        ))}
+      </ol>
+      <div className="handoff-losses" aria-label="Handoff 损失原因">
+        {losses.length ? (
+          losses.map(([label, value]) => (
+            <span key={label}>
+              {label} <strong>{value}</strong>
+            </span>
+          ))
+        ) : (
+          <span>当前窗口没有已知损失</span>
+        )}
+      </div>
+    </section>
+  );
+}
 function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
 }
@@ -43,7 +95,7 @@ export function TraceExplorer({
   agents: AgentSummary[];
   sessionId?: string | null;
 }) {
-  const metrics = useObservabilityMetricsQuery();
+  const metrics = useObservabilityMetricsQuery(sessionId || null);
   const health = useObservabilityHealthQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -66,12 +118,12 @@ export function TraceExplorer({
 
   return (
     <div className="trace-explorer">
-      {/* ── 模块 1: 健康告警与指标概览大屏 ── */}
+      {/* ── 模块 1: 系统健康与当前会话指标 ── */}
       <div className="trace-metrics-banner">
         {health.data?.alerts.length ? (
-          <section className="trace-alert-center" aria-label="本地告警">
+          <section className="trace-alert-center" aria-label="系统健康告警">
             <header>
-              <strong>事故队列</strong>
+              <strong>系统健康</strong>
               <span>{health.data.alerts.length} 个需定位</span>
             </header>
             <ol>
@@ -90,18 +142,16 @@ export function TraceExplorer({
           </section>
         ) : null}
 
-        <section className="trace-metrics" aria-label="近 24 小时协作指标">
+        <section className="trace-metrics" aria-label="当前会话近 24 小时协作指标">
           <header>
             <span>近 24 小时</span>
-            <strong>合格样本指标</strong>
+            <strong>当前会话 · 合格样本</strong>
           </header>
           {metrics.error ? <p className="react-panel-error">指标暂不可用。</p> : null}
           {metrics.data ? (
             <>
               <dl>
-                <Rate label="Handoff 调度" rate={metrics.data.handoff.scheduling} />
-                <Rate label="Handoff 执行" rate={metrics.data.handoff.execution} />
-                <Rate label="Handoff 端到端" rate={metrics.data.handoff.endToEnd} />
+                <Rate label="Handoff 完成" rate={metrics.data.handoff.completion} />
                 <Rate label="MCP 检索可用率" rate={metrics.data.memory.search.availabilityRate} />
                 <Rate label="Memory 层命中率" rate={metrics.data.memory.search.memoryHitRate} />
                 <Rate
@@ -119,11 +169,12 @@ export function TraceExplorer({
                   <Rate label="业务成功率" rate={metrics.data.memory.businessSuccessRate} />
                 ) : null}
               </dl>
+              <HandoffFunnel funnel={metrics.data.handoff.funnel} />
               {metrics.data.comparison?.indicators?.length ? (
                 <div className="trace-trend" aria-label="与前一窗口对比">
                   {metrics.data.comparison.indicators.map((indicator) => (
                     <span data-state={indicator.state} key={indicator.metric}>
-                      {indicator.metric === "handoff.endToEnd" ? "Handoff" : "Memory 检索"}
+                      {indicator.metric === "handoff.completion" ? "Handoff" : "Memory 检索"}
                       <strong>
                         {indicator.state === "unknown"
                           ? "样本不足"
@@ -154,7 +205,7 @@ export function TraceExplorer({
         {metrics.data ? (
           <section className="trace-offline-eval" aria-label="离线 Recall 评估">
             <header>
-              <span>离线评估</span>
+              <span>全局离线评估</span>
               <strong>不属于近 24 小时窗口</strong>
             </header>
             <div>

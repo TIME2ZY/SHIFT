@@ -43,9 +43,10 @@ export async function inspectSessionTrace(
   return response.trace;
 }
 
-export async function getObservabilityMetrics(signal?: AbortSignal) {
+export async function getObservabilityMetrics(threadId: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ threadId });
   const response = await apiRequest<{ metrics: ObservabilityMetrics }>(
-    "/api/storage/observability/metrics",
+    `/api/storage/observability/metrics?${params}`,
     { signal }
   );
   return response.metrics;

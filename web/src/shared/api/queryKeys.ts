@@ -1,6 +1,6 @@
 export const queryKeys = {
   observability: {
-    metrics: ["observability", "metrics"] as const,
+    metrics: (threadId: string | null) => ["observability", "metrics", threadId] as const,
   },
   agents: {
     all: ["agents"] as const,

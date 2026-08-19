@@ -146,7 +146,7 @@ function structuralSnapshot(health, metrics) {
     },
     metrics: {
       window: metrics?.window || null,
-      handoffEndToEnd: compactRate(metrics?.handoff?.endToEnd),
+      handoffCompletion: compactRate(metrics?.handoff?.completion),
       memorySearchHitRate: compactRate(metrics?.memory?.search?.memoryHitRate),
       memoryInjectionCoverageRate: compactRate(metrics?.memory?.injection?.coverageRate),
       regressions: (metrics?.comparison?.indicators || []).map((item) => ({

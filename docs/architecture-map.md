@@ -272,7 +272,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
 | agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                   |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                    |
 | worktree | manager, delivery-verifier                                                                                                                                         |
 
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
@@ -292,10 +292,10 @@ Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `rec
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                       | 引用方              |
-| -------------------------------------------------- | -------------------------- | ------------------- |
-| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁          | migrate-home script |
-| `clean-epoch.js`                                   | 新库 epoch                 | prepare script      |
+| 模块（均在 `src/storage/offline/`）                | 用途                         | 引用方              |
+| -------------------------------------------------- | ---------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁           | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                   | prepare script      |
 | `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
 | `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
 
@@ -314,6 +314,12 @@ Session-scoped `/api/sessions/:sessionId/traces*` 查询、详情和导出路径
 source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP search 可用率与 Memory 层命中、
 实际 injection 可用率与覆盖率、MCP write 结果计数；严格 Recall、used 与 correct 在无标注或证据
 时保持 `null`。旧 storage-level Trace detail 路由已删除。
+
+`/api/storage/observability/metrics` 接受可选 `threadId` 并将 Thread scope 与时间窗一起下推到
+Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Console 必须传当前 Thread，
+而 system health 继续由 `/api/storage/health` 独立展示。Handoff 公开主指标为 eligible accepted
+样本的 `completion`，诊断漏斗从 durable source rows 展示 attempted、accepted、enqueued、started
+与 completed；旧的 scheduling / execution / endToEnd 三个重叠公开字段已退出。
 
 Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
 pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实。右侧会话栏

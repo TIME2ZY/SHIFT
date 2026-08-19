@@ -28,7 +28,7 @@ test("exporter is disabled by default and sends only structural aggregates", asy
     },
     {
       window: { from: "a", to: "b" },
-      handoff: { endToEnd: { value: 0.5, numerator: 1, denominator: 2 } },
+      handoff: { completion: { value: 0.5, numerator: 1, denominator: 2 } },
       memory: { search: { memoryHitRate: { value: 1, numerator: 2, denominator: 2 } } },
       comparison: {
         indicators: [{ metric: "memory.searchHitRate", state: "stable", delta: 0 }],

@@ -50,6 +50,7 @@ function createStorageRoutes({
         const metrics = storageContext.observabilityMetrics?.({
           from: url.searchParams.get("from"),
           to: url.searchParams.get("to"),
+          threadId: url.searchParams.get("threadId"),
         });
         if (!metrics) {
           sendJson(res, 503, { error: "Observability metrics are unavailable." });
