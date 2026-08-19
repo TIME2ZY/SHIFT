@@ -3741,10 +3741,10 @@ body {
 .audit-overview {
   margin: 0 24px 18px;
   overflow: hidden;
-  border: 1px solid rgba(135, 176, 214, 0.18);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  background: rgba(9, 17, 25, 0.72);
-  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.14);
+  background: var(--surface-instrument);
+  box-shadow: var(--shadow-sm);
 }
 
 .audit-overview > header {
@@ -3753,7 +3753,7 @@ body {
   justify-content: space-between;
   gap: 24px;
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(135, 176, 214, 0.12);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .audit-overview > header span {
@@ -3806,7 +3806,7 @@ body {
   gap: 5px;
   min-width: 0;
   padding: 16px;
-  border-right: 1px solid rgba(135, 176, 214, 0.1);
+  border-right: 1px solid var(--border-subtle);
 }
 
 .audit-overview-fact:last-child {
@@ -3877,7 +3877,7 @@ body {
   }
 
   .audit-overview-fact:nth-child(3n) {
-    border-right: 1px solid rgba(135, 176, 214, 0.1);
+    border-right: 1px solid var(--border-subtle);
   }
 
   .audit-overview-fact:nth-child(2n) {
