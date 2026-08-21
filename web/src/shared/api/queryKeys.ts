@@ -1,6 +1,6 @@
 export const queryKeys = {
   observability: {
-    metrics: ["observability", "metrics"] as const,
+    metrics: (threadId: string | null) => ["observability", "metrics", threadId] as const,
   },
   agents: {
     all: ["agents"] as const,
@@ -16,6 +16,7 @@ export const queryKeys = {
     detail: (sessionId: string) => ["sessions", sessionId] as const,
     messages: (sessionId: string) => ["sessions", sessionId, "messages"] as const,
     usage: (sessionId: string) => ["sessions", sessionId, "usage"] as const,
+    auditSummary: (sessionId: string) => ["sessions", sessionId, "audit-summary"] as const,
     memories: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
     memoryInject: (sessionId: string) => ["sessions", sessionId, "memory-inject"] as const,
     traces: (sessionId: string) => ["sessions", sessionId, "traces"] as const,

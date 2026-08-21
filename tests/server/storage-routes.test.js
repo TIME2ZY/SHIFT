@@ -60,7 +60,9 @@ test("observability metrics endpoint preserves sample counts and time window", a
       mode: "sqlite",
       observabilityMetrics: (window) => ({
         window,
-        handoff: { endToEnd: { value: 0.5, numerator: 1, denominator: 2, pending: 1, unknown: 0 } },
+        handoff: {
+          completion: { value: 0.5, numerator: 1, denominator: 2, pending: 1, unknown: 0 },
+        },
         memory: {
           search: { memoryHitRate: { value: 1, numerator: 2, denominator: 2 } },
           strictRecallAtK: null,
@@ -73,12 +75,15 @@ test("observability metrics endpoint preserves sample counts and time window", a
   await handle(
     { method: "GET" },
     res,
-    new URL("http://127.0.0.1/api/storage/observability/metrics?from=2026-08-01&to=2026-08-02")
+    new URL(
+      "http://127.0.0.1/api/storage/observability/metrics?from=2026-08-01&to=2026-08-02&threadId=s1"
+    )
   );
   assert.equal(res.status, 200);
-  assert.equal(res.body.metrics.handoff.endToEnd.denominator, 2);
+  assert.equal(res.body.metrics.handoff.completion.denominator, 2);
   assert.equal(res.body.metrics.memory.strictRecallAtK, null);
   assert.equal(res.body.metrics.window.from, "2026-08-01");
+  assert.equal(res.body.metrics.window.threadId, "s1");
 });
 
 test("observability metrics endpoint rejects invalid windows", async () => {

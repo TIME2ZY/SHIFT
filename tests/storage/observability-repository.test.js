@@ -153,6 +153,7 @@ test("handoff metrics classify eligible pending and excluded samples", () => {
       agentId: "grok",
       startedAt: "2026-08-01T01:00:01.000Z",
     });
+    storage.handoffs.markEnqueued(first.record.handoffId, "2026-08-01T01:00:00.500Z");
     storage.handoffs.bindTargetInvocation(first.record.handoffId, "target-ok");
     storage.invocations.finish("target-ok", {
       state: "completed",
@@ -177,11 +178,143 @@ test("handoff metrics classify eligible pending and excluded samples", () => {
       from: "2026-08-01T00:00:00.000Z",
       to: "2026-08-02T00:00:00.000Z",
     });
-    assert.equal(metrics.handoff.endToEnd.numerator, 1);
-    assert.equal(metrics.handoff.endToEnd.denominator, 1);
-    assert.equal(metrics.handoff.endToEnd.pending, 1);
-    assert.equal(metrics.handoff.endToEnd.excluded, 1);
+    assert.equal(metrics.handoff.completion.numerator, 1);
+    assert.equal(metrics.handoff.completion.denominator, 1);
+    assert.equal(metrics.handoff.completion.pending, 1);
+    assert.equal(metrics.handoff.completion.excluded, 1);
+    assert.deepEqual(metrics.handoff.funnel, {
+      attempted: 3,
+      accepted: 2,
+      enqueued: 1,
+      started: 1,
+      completed: 1,
+      losses: {
+        duplicate: 0,
+        alreadyCompleted: 1,
+        rejected: 0,
+        notEnqueued: 0,
+        notStarted: 0,
+        executionFailed: 0,
+        aborted: 0,
+      },
+    });
     assert.equal(metrics.handoff.semantics.businessOutcome, null);
+  } finally {
+    storage.close();
+  }
+});
+
+test("observability metrics scope Handoff and Memory samples to one thread", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage);
+    storage.threads.create({ id: "thread-2", title: "Other", projectDir: process.cwd() });
+    const window = storage.windows.create({
+      id: "window-2",
+      threadId: "thread-2",
+      agentId: "codex",
+      providerKey: "codex",
+      workspaceKey: process.cwd(),
+      generation: 1,
+      capacityTokens: 1000,
+    });
+    storage.traces.start({
+      id: "trace-2",
+      threadId: "thread-2",
+      startedAt: "2026-08-01T00:00:00.000Z",
+    });
+    storage.invocations.start({
+      id: "source-2",
+      threadId: "thread-2",
+      traceId: "trace-2",
+      windowId: window.id,
+      agentId: "codex",
+      startedAt: "2026-08-01T00:00:00.000Z",
+    });
+    storage.handoffs.accept({
+      id: "handoff-thread-2",
+      sourceInvocationId: "source-2",
+      targetAgentId: "grok",
+      contentHash: "other-thread",
+      createdAt: "2026-08-01T01:00:00.000Z",
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_searched",
+      threadId: "thread-2",
+      invocationId: "source-2",
+      agentId: "codex",
+      operationKey: "search:thread-2",
+      payloadVersion: 1,
+      createdAt: "2026-08-01T01:00:00.000Z",
+      payload: {
+        requestedLayers: ["memory"],
+        totalHits: 1,
+        memoryHits: 1,
+        availability: { state: "available" },
+      },
+    });
+    const metrics = storage.observability.metrics({
+      threadId: "thread-1",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
+    });
+    assert.deepEqual(metrics.scope, { kind: "thread", threadId: "thread-1" });
+    assert.equal(metrics.handoff.funnel.attempted, 0);
+    assert.equal(metrics.memory.search.memoryHitRate.denominator, 0);
+    assert.equal(metrics.memory.completeness, "unknown");
+    assert.equal(metrics.memory.telemetry, null);
+  } finally {
+    storage.close();
+  }
+});
+
+test("handoff funnel preserves stage order and reconciles malformed terminal rows", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage);
+    const accepted = storage.handoffs.accept({
+      id: "handoff-malformed",
+      sourceInvocationId: "source-1",
+      targetAgentId: "grok",
+      contentHash: "malformed",
+      createdAt: "2026-08-01T01:00:00.000Z",
+    });
+    storage.db
+      .prepare(
+        "UPDATE handoffs SET complete_status = 'completed', completed_at = ?, receive_status = 'not_started' WHERE id = ?"
+      )
+      .run("2026-08-01T01:01:00.000Z", accepted.record.handoffId);
+    storage.db
+      .prepare(
+        `INSERT INTO handoffs (
+          id, thread_id, trace_id, source_invocation_id, source_agent_id, target_agent_id,
+          parse_status, route_status, receive_status, complete_status, reason, depth,
+          content_hash, source, created_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'parsed', 'rejected', 'not_started', 'failed', ?, 1, ?, 'chat', ?, ?)`
+      )
+      .run(
+        "handoff-rejected",
+        "thread-1",
+        "trace-1",
+        "source-1",
+        "codex",
+        "gemini",
+        "policy",
+        "rejected",
+        "2026-08-01T02:00:00.000Z",
+        "2026-08-01T02:00:00.000Z"
+      );
+    const funnel = storage.observability.metrics({
+      threadId: "thread-1",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
+    }).handoff.funnel;
+    assert.ok(funnel.attempted >= funnel.accepted);
+    assert.ok(funnel.accepted >= funnel.enqueued);
+    assert.ok(funnel.enqueued >= funnel.started);
+    assert.ok(funnel.started >= funnel.completed);
+    assert.equal(funnel.losses.notEnqueued, 1);
+    assert.equal(funnel.losses.rejected, 1);
   } finally {
     storage.close();
   }
@@ -267,9 +400,8 @@ test("metrics compare equal windows and fail closed on small samples", () => {
     assert.equal(
       storage.observability
         .metrics({ from: "2026-08-02T00:00:00.000Z", to: "2026-08-03T00:00:00.000Z" })
-        .comparison.indicators.find(
-          (indicator) => indicator.metric === "memory.searchHitRate"
-        ).state,
+        .comparison.indicators.find((indicator) => indicator.metric === "memory.searchHitRate")
+        .state,
       "unknown"
     );
   } finally {

@@ -22,6 +22,12 @@ const base = {
   startedAt: "2026-08-13T00:00:00.000Z",
   endedAt: "2026-08-13T00:00:01.000Z",
   rootInvocationId: "i1",
+  request: {
+    messageId: "message-user-1",
+    turnNumber: 1,
+    preview: "构建审计工作台",
+    createdAt: "2026-08-13T00:00:00.000Z",
+  },
   invocationCounts: { total: 1, failed: 0 },
   handoffCounts: { total: 0, accepted: 0, failed: 0 },
   handoffs: [],
@@ -59,13 +65,25 @@ describe("TraceExplorer", () => {
             )
           );
         }
+        if (/\/api\/sessions\/s1\/traces\/[^?]+/.test(url)) {
+          const traceId = new URL(url, "http://shift.local").pathname.split("/").at(-1);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ trace: traces.find((trace) => trace.traceId === traceId) })
+            )
+          );
+        }
+        if (url.includes("/api/sessions/") && url.includes("/traces")) {
+          return Promise.resolve(new Response(JSON.stringify({ traces, page: { total: 3 } })));
+        }
         return Promise.resolve(
           new Response(
             JSON.stringify({
               metrics: {
                 window: { from: base.startedAt, to: base.endedAt },
+                scope: { kind: "thread", threadId: "s1" },
                 handoff: {
-                  scheduling: {
+                  completion: {
                     value: 0.5,
                     numerator: 1,
                     denominator: 2,
@@ -74,23 +92,21 @@ describe("TraceExplorer", () => {
                     unknown: 0,
                     excluded: 0,
                   },
-                  execution: {
-                    value: 1,
-                    numerator: 2,
-                    denominator: 2,
-                    pending: 1,
-                    censored: 0,
-                    unknown: 0,
-                    excluded: 0,
-                  },
-                  endToEnd: {
-                    value: 0.5,
-                    numerator: 1,
-                    denominator: 2,
-                    pending: 1,
-                    censored: 0,
-                    unknown: 0,
-                    excluded: 0,
+                  funnel: {
+                    attempted: 3,
+                    accepted: 2,
+                    enqueued: 2,
+                    started: 1,
+                    completed: 1,
+                    losses: {
+                      duplicate: 1,
+                      alreadyCompleted: 0,
+                      rejected: 0,
+                      notEnqueued: 0,
+                      notStarted: 0,
+                      executionFailed: 1,
+                      aborted: 0,
+                    },
                   },
                 },
                 memory: {
@@ -116,7 +132,10 @@ describe("TraceExplorer", () => {
                   businessSuccessRate: null,
                   completeness: "best_effort",
                   telemetry: { failed: 0, lastFailureAt: null, lastError: null },
-                  applicability: { contractAppliedAt: base.startedAt, historicalExcluded: 0 },
+                  applicability: {
+                    contractAppliedAt: base.startedAt,
+                    historicalEventsExcluded: 0,
+                  },
                   semantics: "separate online metrics",
                 },
                 comparison: {
@@ -125,7 +144,7 @@ describe("TraceExplorer", () => {
                   dropThreshold: 0.1,
                   indicators: [
                     {
-                      metric: "handoff.endToEnd",
+                      metric: "handoff.completion",
                       state: "regressed",
                       delta: -0.25,
                       current: { value: 0.5, numerator: 1, denominator: 2 },
@@ -181,6 +200,83 @@ describe("TraceExplorer", () => {
       },
       {
         ...base,
+        traceId: "trace-branched",
+        state: "completed",
+        request: {
+          ...base.request,
+          messageId: "message-user-2",
+          turnNumber: 2,
+          preview: "并行检查两个实现分支",
+        },
+        invocationCounts: { total: 3, failed: 0 },
+        outcome: {
+          terminalReason: "request-completed",
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [
+          {
+            invocationId: "root",
+            traceId: "trace-branched",
+            agentId: "codex",
+            state: "completed",
+            parentInvocationId: null,
+            triggerMessageId: "message-user-2",
+            triggerType: "user-message",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+          {
+            invocationId: "branch-b",
+            traceId: "trace-branched",
+            agentId: "grok",
+            state: "completed",
+            parentInvocationId: "root",
+            triggerMessageId: null,
+            triggerType: "handoff",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+          {
+            invocationId: "branch-a",
+            traceId: "trace-branched",
+            agentId: "codex",
+            state: "completed",
+            parentInvocationId: "root",
+            triggerMessageId: null,
+            triggerType: "handoff",
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            exitCode: 0,
+            signal: null,
+            outcome: {
+              terminalReason: "assistant-final",
+              failureStage: null,
+              errorCode: null,
+              retryable: null,
+            },
+          },
+        ],
+      },
+      {
+        ...base,
         traceId: "trace-failed",
         state: "failed",
         requestAttempt: 2,
@@ -190,6 +286,32 @@ describe("TraceExplorer", () => {
           errorCode: "provider_exit_7",
           retryable: false,
         },
+        spans: [
+          {
+            spanId: "tool:i2:failed-tool",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "tool",
+            name: "failed-tool",
+            state: "failed",
+            complete: true,
+            startedAt: base.startedAt,
+            endedAt: base.endedAt,
+            attributes: { toolId: "failed-tool", status: "failed" },
+          },
+          {
+            spanId: "tool:i2:orphan-tool",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "tool",
+            name: "orphan-tool",
+            state: "orphaned",
+            complete: false,
+            startedAt: null,
+            endedAt: base.endedAt,
+            attributes: { toolId: "orphan-tool", orphanFinish: true },
+          },
+        ],
         invocationCounts: { total: 1, failed: 1 },
         invocations: [
           {
@@ -218,6 +340,7 @@ describe("TraceExplorer", () => {
       <QueryClientProvider client={new QueryClient()}>
         <TraceExplorer
           traces={traces}
+          sessionId="s1"
           agents={[
             { id: "codex", label: "Codex" },
             { id: "grok", label: "Grok" },
@@ -225,8 +348,11 @@ describe("TraceExplorer", () => {
         />
       </QueryClientProvider>
     );
-    expect(await screen.findByText("Handoff 调度")).toBeInTheDocument();
-    expect(await screen.findByText("事故队列")).toBeInTheDocument();
+    expect(await screen.findByText("Handoff 完成")).toBeInTheDocument();
+    expect(await screen.findByText("系统健康")).toBeInTheDocument();
+    expect(screen.getByText("Handoff 证据轨道")).toBeInTheDocument();
+    expect(screen.getByText("Memory 漏斗诊断")).toBeInTheDocument();
+    expect(screen.getByText("未变化")).toBeInTheDocument();
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
     expect(screen.getByText("需标注集")).toBeInTheDocument();
     expect(screen.getByText("-25pp")).toBeInTheDocument();
@@ -234,7 +360,12 @@ describe("TraceExplorer", () => {
     expect(screen.getAllByText(/1\/2 · pending 1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Codex")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
-    expect(screen.getByText("provider_exit_7")).toBeInTheDocument();
+    expect(screen.getAllByText("provider_exit_7")).toHaveLength(2);
     expect(screen.getByText("Grok")).toBeInTheDocument();
+    expect(screen.getAllByText("failed-tool")).toHaveLength(2);
+    expect(screen.getByText("orphan finish")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
+    expect(screen.getByRole("list", { name: "Agent 父子执行树" })).toBeInTheDocument();
+    expect(screen.getAllByText("子调用 · 深度 1")).toHaveLength(2);
   });
 });

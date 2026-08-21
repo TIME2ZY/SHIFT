@@ -272,7 +272,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
 | agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                   |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                    |
 | worktree | manager, delivery-verifier                                                                                                                                         |
 
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
@@ -292,10 +292,10 @@ Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `rec
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                       | 引用方              |
-| -------------------------------------------------- | -------------------------- | ------------------- |
-| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁          | migrate-home script |
-| `clean-epoch.js`                                   | 新库 epoch                 | prepare script      |
+| 模块（均在 `src/storage/offline/`）                | 用途                         | 引用方              |
+| -------------------------------------------------- | ---------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁           | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                   | prepare script      |
 | `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
 | `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
 
@@ -315,9 +315,17 @@ source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP s
 实际 injection 可用率与覆盖率、MCP write 结果计数；严格 Recall、used 与 correct 在无标注或证据
 时保持 `null`。旧 storage-level Trace detail 路由已删除。
 
+`/api/storage/observability/metrics` 接受可选 `threadId` 并将 Thread scope 与时间窗一起下推到
+Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Console 必须传当前 Thread，
+而 system health 继续由 `/api/storage/health` 独立展示。Handoff 公开主指标为 eligible accepted
+样本的 `completion`，诊断漏斗从 durable source rows 展示 attempted、accepted、enqueued、started
+与 completed；旧的 scheduling / execution / endToEnd 三个重叠公开字段已退出。
+
 Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
-pending/unknown 分类的 Handoff 与 Memory 指标。界面不自行聚合或缓存业务事实。右侧会话栏
-只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
+pending/unknown 分类的 Handoff 与 Memory 指标。Trace 航线只用 `parentInvocationId` 表达父子因果，
+简单链横向展示，分支链切换为父子树；durable Handoff 作为独立阶段证据展示。Memory 卡片只展示
+既有 row 的来源 Invocation、Message、创建者与 evidence anchor，不把检索或注入推断为实际使用。
+界面不自行聚合或缓存业务事实。右侧会话栏只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
 
 Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 MCP write。`memory_searched`
 只由经认证的 `searchForAgent` 完成后写入；通用 `searchSession` 不写 MCP 审计。`memory_injected`
@@ -329,7 +337,15 @@ Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 M
 
 Session Trace 列表由 `execution-read-model.searchForThread` 执行状态、Agent、时间、错误与分页
 筛选；`execution-read-model.export` 提供 `structural-metadata-v1` 脱敏 JSON 导出。两者复用
-同一可信 Session scope，不建立前端历史索引或新的写入口。
+同一可信 Session scope，不建立前端历史索引或新的写入口。列表和详情中的轮次与请求预览由
+`execution-read-model` 引用同 Thread 的权威 user Message 并限长生成；无法建立可信关联时返回
+`request: null`，不补造摘要或第二套 Trace 数据。
+
+Session 审计概览由 `execution-read-model.auditSummary` 直接聚合 SQLite Thread、Message、Trace、
+Invocation、Handoff、规范 Tool event、Memory telemetry 与 active Memory；公开只读入口为
+`/api/sessions/:sessionId/audit-summary`，由 Session route 合并既有 billing usage summary。用户轮次
+固定为该 Thread 内 user Message 的 `COUNT(DISTINCT COALESCE(client_turn_id, id))`；累计执行时长
+只求和已有 `ended_at` 的 Trace，最近状态明确标记为 latest Trace state，不伪造 Session 终态。
 
 `observability-repository.metrics` 同时读取当前窗口与紧邻的等长前序窗口，按显式最小样本量和
 下降阈值派生 `stable | regressed | unknown`；不持久化聚合结果。health alerts 携带确定性的

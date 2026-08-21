@@ -204,6 +204,23 @@ Handoff 分成三组，不提供无定义的单一“成功率”：
 当前 `handoff-metrics.ok_rate` 只表示 packet quality，不得命名为端到端成功率。
 Invocation `completed` 也只证明执行闭合，不证明业务结果正确。
 
+在线 Audit Console 的 Handoff 主指标固定为执行完成率：
+
+```text
+completed eligible accepted Handoffs / eligible accepted Handoffs
+```
+
+诊断漏斗按 durable `handoffs` source rows 展示 `attempted → accepted → enqueued → started
+→ completed` 的阶段数量，并单列 duplicate、already completed、未入队、未启动、执行失败和
+aborted；历史或导入数据中确有 durable rejected row 时单列 rejected。由于 phase/task/max-depth
+等策略拒绝通常发生在 durable accept 之前，当前漏斗不得将这些未落库决策计入 route attempts 或
+伪造“策略拒绝”数量；若未来需要 accepted / all policy attempts，必须先为所有策略决策定义单一
+SQLite 权威写入口并再次更新本 ADR。
+
+Audit Console 默认使用当前 Thread 作用域；全局指标必须显式标记为 system scope。时间窗与
+Thread scope 必须同时下推到 SQLite 聚合，Web 不得从 Trace 列表自行计算成功率。严格 Recall
+评估仍是独立离线全局证据，不随 Thread scope 改写。
+
 ### 6.3 Memory / Recall 指标
 
 在线漏斗保持：

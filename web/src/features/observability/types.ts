@@ -1,3 +1,5 @@
+import type { UsageSummary } from "../usage/types";
+
 export interface ExecutionOutcome {
   terminalReason: string | null;
   failureStage: string | null;
@@ -29,6 +31,16 @@ export interface ExecutionHandoff {
   routeStatus: string;
   receiveStatus: string;
   completeStatus: string;
+  reason: string;
+  depth: number;
+  duplicateOf: string | null;
+  repairOf: string | null;
+  phaseId: string | null;
+  policy: string | null;
+  createdAt: string;
+  enqueuedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
   outcome: ExecutionOutcome;
 }
 
@@ -40,6 +52,12 @@ export interface TraceSummary {
   state: "active" | "completed" | "failed" | "aborted";
   startedAt: string;
   endedAt: string | null;
+  request: {
+    messageId: string;
+    turnNumber: number;
+    preview: string;
+    createdAt: string;
+  } | null;
   outcome: ExecutionOutcome;
   invocationCounts: Record<string, number>;
   handoffCounts: Record<string, number>;
@@ -83,6 +101,50 @@ export interface TraceSearchResult {
   page: { total: number; limit: number; offset: number };
 }
 
+export interface SessionAuditSummary {
+  session: {
+    id: string;
+    title: string;
+    projectKey: string | null;
+    projectDir: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  volume: { userTurns: number; messages: number; traces: number; invocations: number };
+  execution: {
+    traces: Record<"active" | "completed" | "failed" | "aborted", number>;
+    invocations: Record<"active" | "completed" | "failed" | "aborted", number>;
+    retries: number;
+    terminalDurationMs: number;
+    firstStartedAt: string | null;
+    lastActivityAt: string;
+    latestTrace: {
+      traceId: string;
+      state: "active" | "completed" | "failed" | "aborted";
+      terminalReason: string | null;
+      failureStage: string | null;
+      errorCode: string | null;
+      startedAt: string;
+      endedAt: string | null;
+    } | null;
+  };
+  collaboration: {
+    agentIds: string[];
+    handoffs: number;
+    acceptedHandoffs: number;
+    maxHandoffDepth: number;
+  };
+  tools: {
+    calls: number;
+    completed: number;
+    failed: number;
+    incomplete: number;
+    orphanFinishes: number;
+  };
+  memory: { searches: number; injections: number; writes: number; active: number };
+  usage: UsageSummary;
+}
+
 export interface QualifiedRate {
   value: number | null;
   numerator: number;
@@ -95,10 +157,25 @@ export interface QualifiedRate {
 
 export interface ObservabilityMetrics {
   window: { from: string; to: string };
+  scope: { kind: "thread" | "system"; threadId: string | null };
   handoff: {
-    scheduling: QualifiedRate;
-    execution: QualifiedRate;
-    endToEnd: QualifiedRate;
+    completion: QualifiedRate;
+    funnel: {
+      attempted: number;
+      accepted: number;
+      enqueued: number;
+      started: number;
+      completed: number;
+      losses: {
+        duplicate: number;
+        alreadyCompleted: number;
+        rejected: number;
+        notEnqueued: number;
+        notStarted: number;
+        executionFailed: number;
+        aborted: number;
+      };
+    };
   };
   memory: {
     search: {
@@ -127,6 +204,8 @@ export interface ObservabilityMetrics {
     usedRate?: QualifiedRate | null;
     correctRate?: QualifiedRate | null;
     businessSuccessRate?: QualifiedRate | null;
+    completeness: "best_effort" | "incomplete" | "unknown";
+    telemetry: Record<string, unknown> | null;
     semantics: string;
     applicability: { contractAppliedAt: string | null; historicalEventsExcluded: number };
   };
@@ -135,7 +214,7 @@ export interface ObservabilityMetrics {
     minSamples: number;
     dropThreshold: number;
     indicators: Array<{
-      metric: "handoff.endToEnd" | "memory.searchHitRate";
+      metric: "handoff.completion" | "memory.searchHitRate";
       state: "stable" | "regressed" | "unknown";
       delta: number | null;
       current: Pick<QualifiedRate, "value" | "numerator" | "denominator">;

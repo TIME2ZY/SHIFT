@@ -149,6 +149,61 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
+    if (url.pathname === "/api/sessions/session-1/audit-summary" && method === "GET") {
+      await route.fulfill({
+        json: {
+          summary: {
+            session: {
+              id: "session-1",
+              title: "React E2E",
+              projectKey: "project-1",
+              projectDir: "C:/repo",
+              createdAt: "2026-08-13T00:00:00.000Z",
+              updatedAt: "2026-08-13T00:05:00.000Z",
+            },
+            volume: { userTurns: 2, messages: 6, traces: 2, invocations: 3 },
+            execution: {
+              traces: { active: 0, completed: 1, failed: 1, aborted: 0 },
+              invocations: { active: 0, completed: 2, failed: 1, aborted: 0 },
+              retries: 1,
+              terminalDurationMs: 63000,
+              firstStartedAt: "2026-08-13T00:00:00.000Z",
+              lastActivityAt: "2026-08-13T00:05:00.000Z",
+              latestTrace: {
+                traceId: "trace-failed",
+                state: "failed",
+                terminalReason: "request-error",
+                failureStage: "provider_run",
+                errorCode: "provider_exit_7",
+                startedAt: "2026-08-13T00:04:57.000Z",
+                endedAt: "2026-08-13T00:05:00.000Z",
+              },
+            },
+            collaboration: {
+              agentIds: ["gemini", "grok"],
+              handoffs: 1,
+              acceptedHandoffs: 1,
+              maxHandoffDepth: 1,
+            },
+            tools: {
+              calls: 2,
+              completed: 1,
+              failed: 1,
+              incomplete: 0,
+              orphanFinishes: 0,
+            },
+            memory: { searches: 1, injections: 1, writes: 1, active: 1 },
+            usage: {
+              available: true,
+              session: { totalTokens: 321, costUsd: 0.02 },
+              agents: [],
+            },
+          },
+        },
+      });
+      return;
+    }
+
     if (url.pathname === "/api/storage/observability/metrics" && method === "GET") {
       const rate = {
         value: 0.5,
@@ -163,7 +218,26 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         json: {
           metrics: {
             window: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-13T00:00:00.000Z" },
-            handoff: { scheduling: rate, execution: rate, endToEnd: rate },
+            scope: { kind: "thread", threadId: "audit-trace" },
+            handoff: {
+              completion: rate,
+              funnel: {
+                attempted: 0,
+                accepted: 0,
+                enqueued: 0,
+                started: 0,
+                completed: 0,
+                losses: {
+                  duplicate: 0,
+                  alreadyCompleted: 0,
+                  rejected: 0,
+                  notEnqueued: 0,
+                  notStarted: 0,
+                  executionFailed: 0,
+                  aborted: 0,
+                },
+              },
+            },
             memory: {
               search: {
                 availabilityRate: rate,
@@ -200,7 +274,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
               dropThreshold: 0.1,
               indicators: [
                 {
-                  metric: "handoff.endToEnd",
+                  metric: "handoff.completion",
                   state: "unknown",
                   delta: null,
                   current: { value: 0.5, numerator: 1, denominator: 2 },
@@ -465,7 +539,7 @@ test("locates a durable failure after refresh and exports structural metadata", 
 
   await page.getByRole("button", { name: "审计", exact: true }).click();
   const tracePanel = page.getByRole("region", { name: "在线运行观测" });
-  await expect(tracePanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(tracePanel.locator(".trace-breakpoint").getByText("provider_exit_7")).toBeVisible();
   await expect(tracePanel.getByText("Gemini generation")).toBeVisible();
   await tracePanel.getByRole("button", { name: "只看断点" }).click();
   await expect
@@ -479,6 +553,8 @@ test("locates a durable failure after refresh and exports structural metadata", 
 
   await page.reload();
   const restoredPanel = page.getByRole("region", { name: "在线运行观测" });
-  await expect(restoredPanel.getByText("provider_exit_7")).toBeVisible();
+  await expect(
+    restoredPanel.locator(".trace-breakpoint").getByText("provider_exit_7")
+  ).toBeVisible();
   await expect(restoredPanel.getByText("Gemini generation")).toBeVisible();
 });

@@ -10,13 +10,65 @@ vi.mock("./TraceExplorer", () => ({
 
 vi.mock("./queries", () => ({
   useSessionTracesQuery: () => ({ data: { traces: [] }, isPending: false, error: null }),
+  useSessionAuditSummaryQuery: () => ({
+    data: {
+      session: {
+        id: "session-1",
+        title: "审计测试",
+        projectKey: "project-1",
+        projectDir: "C:/project",
+        createdAt: "2026-08-20T00:00:00.000Z",
+        updatedAt: "2026-08-20T00:01:00.000Z",
+      },
+      volume: { userTurns: 2, messages: 5, traces: 1, invocations: 2 },
+      execution: {
+        traces: { active: 0, completed: 1, failed: 0, aborted: 0 },
+        invocations: { active: 0, completed: 2, failed: 0, aborted: 0 },
+        retries: 0,
+        terminalDurationMs: 62000,
+        firstStartedAt: "2026-08-20T00:00:00.000Z",
+        lastActivityAt: "2026-08-20T00:01:02.000Z",
+        latestTrace: {
+          traceId: "trace-1",
+          state: "completed",
+          terminalReason: "assistant-final",
+          failureStage: null,
+          errorCode: null,
+          startedAt: "2026-08-20T00:00:00.000Z",
+          endedAt: "2026-08-20T00:01:02.000Z",
+        },
+      },
+      collaboration: {
+        agentIds: ["codex"],
+        handoffs: 1,
+        acceptedHandoffs: 1,
+        maxHandoffDepth: 1,
+      },
+      tools: { calls: 2, completed: 2, failed: 0, incomplete: 0, orphanFinishes: 0 },
+      memory: { searches: 1, injections: 1, writes: 1, active: 1 },
+      usage: { available: true, session: { totalTokens: 1200, costUsd: 0.12 }, agents: [] },
+    },
+    isPending: false,
+    error: null,
+  }),
 }));
 
 vi.mock("../memory/queries", () => ({
   useMemoriesQuery: () => ({
     data: {
       memories: [
-        { id: "memory-1", kind: "decision", topic: "存储", content: "SQLite 是唯一真相源。" },
+        {
+          id: "memory-1",
+          kind: "decision",
+          topic: "存储",
+          content: "SQLite 是唯一真相源。",
+          createdAt: "2026-08-20T00:00:00.000Z",
+          sourceInvocationId: "invocation-source-1",
+          sourceMessageId: "message-source-1",
+          createdBy: "codex",
+          metadata: { evidenceKind: "assistant-output" },
+          anchors: [{ messageId: "message-source-1" }],
+        },
       ],
     },
     isPending: false,
@@ -40,10 +92,19 @@ describe("AuditPage", () => {
       </QueryClientProvider>
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "运行与 Memory 审计" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "运行与 Memory 审计" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Trace 工作台")).toBeInTheDocument();
+    expect(screen.getByText("会话证据概览")).toBeInTheDocument();
+    expect(screen.getByText("2 轮")).toBeInTheDocument();
+    expect(screen.getByText("1 Trace")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "当前 Memory" })).toBeInTheDocument();
     expect(screen.getByText("SQLite 是唯一真相源。")).toBeInTheDocument();
+    expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
+    expect(screen.getByText("assistant-output")).toBeInTheDocument();
+    expect(screen.getByText("使用证据")).toBeInTheDocument();
+    expect(screen.getByText("未标注")).toBeInTheDocument();
     expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
   });
 });

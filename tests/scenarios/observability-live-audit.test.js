@@ -52,7 +52,7 @@ test("phase three release gate requires trend alerts and redacted exporter deliv
   const report = evaluatePhase3Release({
     metrics: {
       comparison: {
-        indicators: [{ metric: "handoff.endToEnd" }, { metric: "memory.searchHitRate" }],
+        indicators: [{ metric: "handoff.completion" }, { metric: "memory.searchHitRate" }],
       },
     },
     health: {
@@ -65,7 +65,7 @@ test("phase three release gate requires trend alerts and redacted exporter deliv
           snapshot: {
             schema: "shift-observability-snapshot-v1",
             health: { state: "available" },
-            metrics: { handoffEndToEnd: { value: 1 } },
+            metrics: { handoffCompletion: { value: 1 } },
           },
         },
       },

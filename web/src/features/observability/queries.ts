@@ -3,10 +3,19 @@ import { queryKeys } from "../../shared/api/queryKeys";
 import {
   getObservabilityHealth,
   getObservabilityMetrics,
+  getSessionAuditSummary,
   inspectSessionTrace,
   listSessionTraces,
 } from "./api";
 import type { TraceSearchFilters } from "./types";
+
+export function useSessionAuditSummaryQuery(sessionId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.sessions.auditSummary(sessionId || ""),
+    queryFn: ({ signal }) => getSessionAuditSummary(sessionId!, signal),
+    enabled: Boolean(sessionId),
+  });
+}
 
 export function useSessionTracesQuery(sessionId: string | null, filters: TraceSearchFilters = {}) {
   return useQuery({
@@ -16,11 +25,11 @@ export function useSessionTracesQuery(sessionId: string | null, filters: TraceSe
   });
 }
 
-export function useObservabilityMetricsQuery(enabled = true) {
+export function useObservabilityMetricsQuery(threadId: string | null, enabled = true) {
   return useQuery({
-    queryKey: queryKeys.observability.metrics,
-    queryFn: ({ signal }) => getObservabilityMetrics(signal),
-    enabled,
+    queryKey: queryKeys.observability.metrics(threadId),
+    queryFn: ({ signal }) => getObservabilityMetrics(threadId!, signal),
+    enabled: enabled && Boolean(threadId),
   });
 }
 

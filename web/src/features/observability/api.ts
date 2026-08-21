@@ -2,9 +2,18 @@ import { apiRequest } from "../../shared/api/client";
 import type {
   ObservabilityHealth,
   ObservabilityMetrics,
+  SessionAuditSummary,
   TraceSearchFilters,
   TraceSearchResult,
 } from "./types";
+
+export async function getSessionAuditSummary(sessionId: string, signal?: AbortSignal) {
+  const response = await apiRequest<{ summary: SessionAuditSummary }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/audit-summary`,
+    { signal }
+  );
+  return response.summary;
+}
 
 export async function listSessionTraces(
   sessionId: string,
@@ -43,9 +52,10 @@ export async function inspectSessionTrace(
   return response.trace;
 }
 
-export async function getObservabilityMetrics(signal?: AbortSignal) {
+export async function getObservabilityMetrics(threadId: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ threadId });
   const response = await apiRequest<{ metrics: ObservabilityMetrics }>(
-    "/api/storage/observability/metrics",
+    `/api/storage/observability/metrics?${params}`,
     { signal }
   );
   return response.metrics;

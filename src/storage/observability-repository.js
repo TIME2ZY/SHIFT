@@ -149,9 +149,10 @@ function createObservabilityRepository(db, dependencies = {}) {
 
     metrics(options = {}) {
       const window = metricWindow(options);
-      const current = metricsForWindow(db, dependencies, window);
+      const scope = metricScope(options);
+      const current = metricsForWindow(db, dependencies, window, scope);
       const baselineWindow = previousWindow(window);
-      const baseline = metricsForWindow(db, dependencies, baselineWindow);
+      const baseline = metricsForWindow(db, dependencies, baselineWindow, scope);
       return {
         ...current,
         comparison: compareMetrics(current, baseline, {
@@ -190,16 +191,18 @@ function diagnosticAlert(alert) {
   return { ...alert, diagnostic };
 }
 
-function metricsForWindow(db, dependencies, window) {
+function metricsForWindow(db, dependencies, window, scope) {
+  const scopeClause = scope.threadId ? " AND thread_id = @threadId" : "";
+  const params = { ...window, threadId: scope.threadId };
   const handoffs = db
     .prepare(
       `
           SELECT * FROM handoffs
-          WHERE created_at >= @from AND created_at < @to
+          WHERE created_at >= @from AND created_at < @to${scopeClause}
           ORDER BY created_at, id
         `
     )
-    .all(window);
+    .all(params);
   const memoryContractAppliedAt = db
     .prepare("SELECT applied_at FROM schema_migrations WHERE version = 29")
     .get()?.applied_at;
@@ -212,20 +215,21 @@ function metricsForWindow(db, dependencies, window) {
             AND operation_key IS NOT NULL
             AND invocation_id IS NOT NULL
             AND agent_id IS NOT NULL
-            AND created_at >= @from AND created_at < @to
+            AND created_at >= @from AND created_at < @to${scopeClause}
           ORDER BY id
         `
     )
-    .all(window);
+    .all(params);
   return {
     window,
+    scope,
     handoff: handoffMetrics(handoffs),
     memory: memoryMetrics(
       memoryEvents,
-      telemetryHealth(db, window),
+      scope.threadId ? null : telemetryHealth(db, window),
       dependencies.evidence?.latestRecallEval?.() || null,
-      dependencies.evidence?.judgmentMetrics?.(window) || null,
-      memoryMetricApplicability(db, memoryContractAppliedAt)
+      dependencies.evidence?.judgmentMetrics?.(window, scope) || null,
+      memoryMetricApplicability(db, memoryContractAppliedAt, scope)
     ),
   };
 }
@@ -238,8 +242,12 @@ function previousWindow(window) {
 
 function compareMetrics(current, baseline, options) {
   const definitions = [
-    ["handoff.endToEnd", current.handoff.endToEnd, baseline.handoff.endToEnd],
-    ["memory.searchHitRate", current.memory.search.memoryHitRate, baseline.memory.search.memoryHitRate],
+    ["handoff.completion", current.handoff.completion, baseline.handoff.completion],
+    [
+      "memory.searchHitRate",
+      current.memory.search.memoryHitRate,
+      baseline.memory.search.memoryHitRate,
+    ],
   ];
   return {
     baselineWindow: baseline.window,
@@ -308,28 +316,41 @@ function handoffMetrics(rows) {
   const eligible = rows.filter((_, index) => classified[index] === "eligible");
   const acceptedEligible = eligible.filter((row) => row.route_status === "accepted");
   return {
-    scheduling: rateResult(
-      acceptedEligible.filter((row) => row.receive_status === "started").length,
-      acceptedEligible.length,
-      counts
-    ),
-    execution: rateResult(
+    completion: rateResult(
       acceptedEligible.filter((row) => row.complete_status === "completed").length,
       acceptedEligible.length,
       counts
     ),
-    endToEnd: rateResult(
-      acceptedEligible.filter(
-        (row) => row.receive_status === "started" && row.complete_status === "completed"
-      ).length,
-      acceptedEligible.length,
-      counts
-    ),
+    funnel: handoffFunnel(rows),
     semantics: {
-      scheduling: "accepted Handoffs whose target Invocation durably started",
-      execution: "eligible accepted Handoffs whose target completed",
-      endToEnd: "eligible accepted Handoffs with target started and completed",
+      completion: "eligible accepted Handoffs whose target Invocation completed",
+      funnel: "durable Handoff source rows only; pre-accept policy rejections are not observed",
       businessOutcome: null,
+    },
+  };
+}
+
+function handoffFunnel(rows) {
+  const accepted = rows.filter((row) => row.route_status === "accepted");
+  const enqueued = accepted.filter((row) => row.enqueued_at);
+  const started = enqueued.filter((row) => row.receive_status === "started");
+  return {
+    attempted: rows.length,
+    accepted: accepted.length,
+    enqueued: enqueued.length,
+    started: started.length,
+    completed: started.filter((row) => row.complete_status === "completed").length,
+    losses: {
+      duplicate: rows.filter((row) => row.route_status === "duplicate").length,
+      alreadyCompleted: rows.filter((row) => row.route_status === "already_completed").length,
+      rejected: rows.filter((row) => row.route_status === "rejected").length,
+      notEnqueued: accepted.filter((row) => !row.enqueued_at && row.complete_status !== "pending")
+        .length,
+      notStarted: enqueued.filter(
+        (row) => row.receive_status !== "started" && row.complete_status !== "pending"
+      ).length,
+      executionFailed: started.filter((row) => row.complete_status === "failed").length,
+      aborted: started.filter((row) => row.complete_status === "aborted").length,
     },
   };
 }
@@ -360,7 +381,8 @@ function memoryMetrics(rows, telemetry, strictRecallAtK, judgments, applicabilit
     usedRate: judgments?.usedRate || null,
     correctRate: judgments?.correctRate || null,
     businessSuccessRate: judgments?.businessSuccessRate || null,
-    completeness: telemetry.failed > 0 ? "incomplete" : "best_effort",
+    completeness:
+      telemetry == null ? "unknown" : telemetry.failed > 0 ? "incomplete" : "best_effort",
     telemetry,
     applicability,
     semantics: "MCP search, delivered injection, and MCP write results are separate online metrics",
@@ -372,8 +394,9 @@ function memorySearchMetrics(rows) {
   const availability = availabilityCounts(parsed);
   const attempted = parsed.length;
   const available = parsed.filter((payload) => payload?.availability?.state === "available");
-  const memoryEligible = available.filter((payload) =>
-    Array.isArray(payload.requestedLayers) && payload.requestedLayers.includes("memory")
+  const memoryEligible = available.filter(
+    (payload) =>
+      Array.isArray(payload.requestedLayers) && payload.requestedLayers.includes("memory")
   );
   const knownAttempts = attempted - availability.unknown;
   const unavailableAttempts = availability.degraded + availability.unavailable;
@@ -409,7 +432,8 @@ function memoryInjectionMetrics(rows) {
   const delivered = available.reduce((sum, payload) => sum + Number(payload.delivered || 0), 0);
   const selected = available.reduce((sum, payload) => sum + Number(payload.selected || 0), 0);
   const budgetDropped = available.reduce(
-    (sum, payload) => sum + Math.max(0, Number(payload.selected || 0) - Number(payload.delivered || 0)),
+    (sum, payload) =>
+      sum + Math.max(0, Number(payload.selected || 0) - Number(payload.delivered || 0)),
     0
   );
   const knownAttempts = attempted - availability.unknown;
@@ -447,7 +471,8 @@ function availabilityCounts(payloads) {
   const counts = { available: 0, degraded: 0, unavailable: 0, unknown: 0 };
   for (const payload of payloads) {
     const state = payload?.availability?.state;
-    if (state === "available" || state === "degraded" || state === "unavailable") counts[state] += 1;
+    if (state === "available" || state === "degraded" || state === "unavailable")
+      counts[state] += 1;
     else counts.unknown += 1;
   }
   return counts;
@@ -465,15 +490,17 @@ function simpleRate(numerator, denominator, classification = {}) {
   };
 }
 
-function memoryMetricApplicability(db, appliedAt) {
+function memoryMetricApplicability(db, appliedAt, scope) {
+  const scopeClause = scope.threadId ? " AND thread_id = @threadId" : "";
   return {
     contractAppliedAt: appliedAt || null,
     historicalEventsExcluded: scalarCount(
       db,
       `SELECT COUNT(*) AS count FROM memory_events
        WHERE event_type IN ('memory_searched', 'memory_injected')
-         AND (payload_version IS NULL OR operation_key IS NULL OR invocation_id IS NULL OR agent_id IS NULL)`,
-      {}
+         AND (payload_version IS NULL OR operation_key IS NULL OR invocation_id IS NULL OR agent_id IS NULL)
+         ${scopeClause}`,
+      { threadId: scope.threadId }
     ),
   };
 }
@@ -536,6 +563,16 @@ function metricWindow(options) {
   const fromDate = validDate(options.from) || new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
   if (fromDate >= toDate) throw new Error("Metric window requires from < to.");
   return { from: fromDate.toISOString(), to: toDate.toISOString() };
+}
+
+function metricScope(options) {
+  if (options.threadId == null || options.threadId === "") {
+    return { kind: "system", threadId: null };
+  }
+  if (typeof options.threadId !== "string" || options.threadId.length > 200) {
+    throw new Error("Metric threadId is invalid.");
+  }
+  return { kind: "thread", threadId: options.threadId };
 }
 
 function validDate(value) {

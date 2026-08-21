@@ -51,8 +51,11 @@ function createObservabilityEvidenceRepository(db) {
         .get();
       return row ? mapRecall(row) : null;
     },
-    judgmentMetrics(window = null) {
-      const where = window ? "WHERE i.created_at >= @from AND i.created_at < @to" : "";
+    judgmentMetrics(window = null, scope = {}) {
+      const filters = [];
+      if (window) filters.push("i.created_at >= @from AND i.created_at < @to");
+      if (scope.threadId) filters.push("j.thread_id = @threadId");
+      const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
       const row = db
         .prepare(
           `
@@ -68,7 +71,7 @@ function createObservabilityEvidenceRepository(db) {
         ${where}
       `
         )
-        .get(window || {});
+        .get({ ...(window || {}), threadId: scope.threadId || null });
       if (Number(row.total || 0) === 0) return null;
       return {
         usedRate: rate(row.used_yes, row.used_known, row.total - row.used_known),
