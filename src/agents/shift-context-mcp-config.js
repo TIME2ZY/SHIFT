@@ -7,6 +7,8 @@ const SHIFT_CONTEXT_TOOLS = Object.freeze([
   "memory_write",
   "memory_evidence_list",
   "recall_search",
+  "list_platform_skills",
+  "load_platform_skill",
 ]);
 const SHIFT_CONTEXT_ENV_KEYS = Object.freeze([
   "SHIFT_API_URL",
@@ -92,8 +94,8 @@ function antigravityMcpConfigPath(env = process.env) {
 function isOwnedShiftContextConfig(value) {
   return Boolean(
     value &&
-      Array.isArray(value.args) &&
-      value.args.some((arg) => path.basename(String(arg)) === "shift-context-mcp.js")
+    Array.isArray(value.args) &&
+    value.args.some((arg) => path.basename(String(arg)) === "shift-context-mcp.js")
   );
 }
 
@@ -114,9 +116,7 @@ function ensureAntigravityShiftContextConfig(env = process.env) {
     throw new Error(`Cannot register Shift MCP because ${file} is not a JSON object.`);
   }
   const servers =
-    config.mcpServers && typeof config.mcpServers === "object"
-      ? { ...config.mcpServers }
-      : {};
+    config.mcpServers && typeof config.mcpServers === "object" ? { ...config.mcpServers } : {};
   const existing = servers[SHIFT_CONTEXT_SERVER_NAME];
   if (existing && !isOwnedShiftContextConfig(existing)) {
     throw new Error(

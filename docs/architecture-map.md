@@ -161,6 +161,9 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 模块头文档区分 collaboration event vs product memory 行。
 - Agent 面向的 Memory / Recall 公开工具只有 `shift_context` MCP 的 `memory_write`、
   `memory_evidence_list`、`recall_search`；`callback-client` 不再提供 Memory 命令。
+- 同一 `shift_context` 还提供只读 `list_platform_skills` / `load_platform_skill`，
+  走 `src/server/skills.js` 读取仓库 `skills/*/SKILL.md`，不经过 callback HTTP，
+  也不是第二套 Skill 权威源。
 - `scripts/shift-context-mcp.js` 使用 token 绑定的私有 HTTP bridge：
   `/api/callbacks/memory-write`、`/api/callbacks/memory-evidence`、
   `/api/callbacks/recall-search`。它们不是第二套 Agent 公开语义，最终仍进入
@@ -183,6 +186,25 @@ invocation 的 `SHIFT_*` 环境传入：
 Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都注入当前 invocation 的
 `SHIFT_*` 凭据；旧 `--plugin-dir` 与仓库内 Grok MCP 插件已删除。Antigravity 项目插件不是
 在线路径；全局注册合并既有 server，若同名 server 不属于 SHIFT 则显式失败。
+
+---
+
+### 3.4.2 Skill 投递
+
+| 步骤            | 入口                                                                                                                        | 落点                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| 加载 / 索引     | **仅** `src/server/skills.js`（`skills/*/SKILL.md`）                                                                        | 进程内 cache                                             |
+| 隔离 worktree   | `agents/skill-materialize.js` ← `skills.prepareSkillDelivery` ← `chat-routes` 在 `runWorkspace` 确定后、start invocation 前 | `{worktree}/.agents/skills/<name>/SKILL.md` 副本（copy） |
+| MCP 按需        | `list_platform_skills` / `load_platform_skill`                                                                              | 同一 loader 的只读视图                                   |
+| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A `receiving-review` 仍按 turn allow-list 注入                                              | 用户消息 / receive bundle                                |
+
+**结论（skill）：**
+
+- 权威源只有仓库 `skills/*/SKILL.md`。worktree `.agents/skills` 是派生投递，禁止回读覆盖权威，也禁止写入 `project_dir` 或 `~/.codex` / `~/.grok`。
+- 物化公开入口只有 `materializePlatformSkills`；`ensureWorktree` 不挂钩。
+- 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 只留短 catalog，不再灌 `APPLICATION SKILL` 全文。
+- 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 全文注入，请求不 500。
+- Prompt 全文注入的删除条件：Codex 与 OpenCode 在 SHIFT 隔离 worktree cwd 下能稳定列出平台 skill 后，再默认关闭 `augmentPrompt` 匹配注入。本版本只降级，不删除 fallback。
 
 ---
 
@@ -252,6 +274,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | D7  | Memory 双语义            | collaboration event ≠ product Memory；禁止半接线       | 已收口 |
 | D8  | Collab 任务 vs Handoff   | 两者分别为 SQLite 权威事实，不互相借表表达             | 已收口 |
 | D9  | worktree 双地图          | session Map 与 manager 文件职责分离                    | 接受   |
+| D10 | Skill 投递双通道         | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2   | 过渡   |
 
 **已收敛（保护，勿回退）：**
 
@@ -270,7 +293,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | 区域     | 代表模块                                                                                                                                                           |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
-| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, invoke-*                                                                    |
+| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                               |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
 | session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                    |
 | worktree | manager, delivery-verifier                                                                                                                                         |

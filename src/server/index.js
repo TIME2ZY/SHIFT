@@ -36,6 +36,9 @@ const {
   matchSkills,
   loadSkills,
   augmentPrompt,
+  prepareSkillDelivery,
+  listSkillIndex,
+  getSkillByName,
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 } = skills;
@@ -273,6 +276,7 @@ function createServer(options = {}) {
     readJsonBody,
     buildChatArgs,
     augmentPrompt,
+    prepareSkillDelivery,
     getMaxA2ADepth,
     parseA2AMentions,
     filterBenignStderr,
@@ -384,6 +388,9 @@ module.exports = {
   loadSkills,
   matchSkills,
   augmentPrompt,
+  prepareSkillDelivery,
+  listSkillIndex,
+  getSkillByName,
   parseSkillFrontmatter,
   buildAugmentedPrompt,
 };

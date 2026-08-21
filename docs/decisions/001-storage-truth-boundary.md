@@ -97,11 +97,14 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | 项目源码和配置内容                      | Git 工作区文件                   | SQLite evidence index                 |
 | Worktree 实际存在性和内容               | Git                              | SQLite 中的 session 关联信息          |
 | Agent identity                          | `src/agents/identities/*.md`     | 解析后的内存/API 数据                 |
-| Skill 定义                              | `skills/*.md`                    | 解析后的内存/API 数据                 |
+| Skill 定义                              | `skills/*/SKILL.md`              | 解析后的内存/API 数据                 |
 | Recall/FTS/passages                     | SQLite 派生投影                  | 可重建，不可反向成为真相              |
 | Trace spans、links、聚合指标            | SQLite 派生投影                  | 可重建，不可反向成为业务状态          |
 | Digest/summary/injection card           | SQLite 派生投影或运行时结果      | 导航信息，不是原始证据                |
 | 环境配置                                | 进程环境、`.env`、明确的配置文件 | 进程内解析对象                        |
+
+隔离 worktree 上的 `.agents/skills/<name>/SKILL.md` 只是平台 Skill 的可重建投递副本，
+不得回读覆盖 `skills/*/SKILL.md`。
 
 当前产品的“SQLite”同时表示逻辑数据库边界和一个正式物理数据库：
 `SHIFT_HOME/data/shift.sqlite`。不得按 Project 创建平行数据库，也不得让在线服务通过另一
