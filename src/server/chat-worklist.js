@@ -204,20 +204,15 @@ try {
         memoryCard: a2aMemoryCard,
         includeOutboundCard: true,
       });
-      const a2aSkillNames = [];
-      if (
-        agentHandoff.shouldInjectReceivingReview({
-          targetAgentId: agent,
-          fromAgentId: prev.agent,
-          handoff,
-          quality,
-          text: receiveBundle.text,
-        })
-      ) {
-        a2aSkillNames.push("receiving-review");
-      }
-      // Turn-forced skills still inject even when native worktree delivery succeeded.
-      // receiving-review is hop-specific; CLI discovery cannot know this turn needs it.
+      const a2aSkillNames = agentHandoff.playbookSkillNamesForHop({
+        targetAgentId: agent,
+        fromAgentId: prev.agent,
+        intent: quality?.intent,
+        handoff,
+        quality,
+        text: receiveBundle.text,
+      });
+      // Turn-forced playbooks still inject even when native worktree delivery succeeded.
       const a2aSkills = augmentPrompt(receiveBundle.text, useWorktree, {
         skillNames: a2aSkillNames,
       });

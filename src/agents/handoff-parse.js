@@ -10,14 +10,10 @@ const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
 const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
-const {
-  WORKFLOW_ROLES,
-  agentsWithCapability,
-  agentIdsForRole,
-} = require("./role-contracts");
+const { WORKFLOW_ROLES, agentIdsForRole } = require("./role-contracts");
 
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
 
 function parseHandoffBlocks(text) {
   if (!text || typeof text !== "string") return [];

@@ -267,7 +267,7 @@ const HANDOFF_INTENTS = Object.freeze([
  * Empty list means "no default restriction documented here".
  */
 const DEFAULT_PHASE_AGENT_ALLOWLIST = Object.freeze({
-  discuss: Object.freeze(["gemini", "codex"]),
+  discuss: Object.freeze(["gemini", "codex", "grok", "opencode"]),
   implement: Object.freeze(["grok"]),
   review: Object.freeze(["opencode"]),
   // OpenCode packages an approved diff; Codex performs outcome acceptance.

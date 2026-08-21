@@ -105,11 +105,14 @@ test("repo skills load from skills/*/SKILL.md", () => {
     loaded.map((s) => s.name),
     [
       "a2a-handoff",
+      "code-review-deliver",
       "cross-agent-handoff",
+      "implementation-plan",
       "memory-write",
       "merge-approval-gate",
       "receiving-review",
       "requesting-review",
+      "solution-baseline-acceptance",
       "uncertainty-ask",
     ]
   );

@@ -196,7 +196,7 @@ Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都�
 | 加载 / 索引     | **仅** `src/server/skills.js`（`skills/*/SKILL.md`）                                                                        | 进程内 cache                                             |
 | 隔离 worktree   | `agents/skill-materialize.js` ← `skills.prepareSkillDelivery` ← `chat-routes` 在 `runWorkspace` 确定后、start invocation 前 | `{worktree}/.agents/skills/<name>/SKILL.md` 副本（copy） |
 | MCP 按需        | `list_platform_skills` / `load_platform_skill`                                                                              | 同一 loader 的只读视图                                   |
-| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A `receiving-review` 仍按 turn allow-list 注入                                              | 用户消息 / receive bundle                                |
+| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A hop 由 `playbookSkillNamesForHop` 强制注入对应 playbook                                    | 用户消息 / receive bundle                                |
 
 **结论（skill）：**
 
@@ -205,6 +205,7 @@ Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都�
 - 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 只留短 catalog，不再灌 `APPLICATION SKILL` 全文。
 - 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 全文注入，请求不 500。
 - Prompt 全文注入的删除条件：Codex 与 OpenCode 在 SHIFT 隔离 worktree cwd 下能稳定列出平台 skill 后，再默认关闭 `augmentPrompt` 匹配注入。本版本只降级，不删除 fallback。
+- 身份只保留人设；`implementation_plan` / 验收 / 交付模板在 `skills/`。可接收 intent 的真相源是 `role-contracts.js`（C1：Grok/OpenCode 可收 `discuss`；Codex 不加 `review`，Gemini 不加 `plan`）。A2A hop 通过 `playbookSkillNamesForHop` 强制注入对应 skill。
 
 ---
 

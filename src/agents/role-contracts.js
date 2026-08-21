@@ -37,14 +37,14 @@ const AGENT_ROLE_CONTRACTS = Object.freeze({
   }),
   grok: freezeContract({
     role: WORKFLOW_ROLES.IMPLEMENTER,
-    capabilities: ["plan", "implement", "fix", "recall"],
-    phases: ["implement", "recall"],
+    capabilities: ["plan", "implement", "fix", "discuss", "recall"],
+    phases: ["discuss", "implement", "recall"],
     responsibilities: ["concrete_change_plan", "implement", "test", "change_summary"],
   }),
   opencode: freezeContract({
     role: WORKFLOW_ROLES.REVIEWER_DELIVERER,
-    capabilities: ["review", "deliver", "recall"],
-    phases: ["review", "deliver", "recall"],
+    capabilities: ["review", "deliver", "discuss", "recall"],
+    phases: ["discuss", "review", "deliver", "recall"],
     responsibilities: ["code_review", "review_follow_up", "commit", "push", "pull_request"],
   }),
 });

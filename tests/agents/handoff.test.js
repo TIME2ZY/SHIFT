@@ -427,6 +427,45 @@ test("shouldInjectReceivingReview for implementer after reviewer", () => {
   );
 });
 
+test("playbookSkillNamesForHop injects hop-specific template skills", () => {
+  assert.deepEqual(
+    handoff.playbookSkillNamesForHop({
+      targetAgentId: "grok",
+      intent: "plan",
+    }),
+    ["implementation-plan"]
+  );
+  assert.deepEqual(
+    handoff.playbookSkillNamesForHop({
+      targetAgentId: "opencode",
+      intent: "review",
+    }),
+    ["code-review-deliver"]
+  );
+  assert.deepEqual(
+    handoff.playbookSkillNamesForHop({
+      targetAgentId: "codex",
+      intent: "accept",
+    }),
+    ["solution-baseline-acceptance"]
+  );
+  assert.deepEqual(
+    handoff.playbookSkillNamesForHop({
+      targetAgentId: "grok",
+      fromAgentId: "opencode",
+      intent: "fix",
+    }),
+    ["receiving-review"]
+  );
+  assert.deepEqual(
+    handoff.playbookSkillNamesForHop({
+      targetAgentId: "gemini",
+      intent: "discuss",
+    }),
+    []
+  );
+});
+
 test("renderHandoffTask appendix uses controlled budget for ok packs", () => {
   const h = parseHandoffBody("what: w\nwhy: y\nnext_action: n\nfiles:\n  - a.js");
   const body = "x".repeat(6000) + "KEEP_END";

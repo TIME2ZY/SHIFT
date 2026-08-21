@@ -3,13 +3,11 @@ const { DEFAULT_PHASE_AGENT_ALLOWLIST } = require("../shared/collab-contracts");
 const {
   DEFAULT_INTENT_AGENT_ALLOWLIST,
   WORKFLOW_ROLES,
-  agentsWithCapability,
   agentIdsForRole,
 } = require("./role-contracts");
 
-const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 
 const POLICY_MODES = Object.freeze(["soft", "balanced", "strict"]);
 const DECISIONS = Object.freeze({
@@ -58,15 +56,17 @@ function resolveCollabPhase(input = {}) {
   if (intent === "review") return "review";
   if (intent === "discuss") return "discuss";
   if (intent === "recall") return "recall";
-  if (intent === "fix") return "implement";
-  if (intent === "plan" || intent === "implement") return "implement";
+  if (intent === "fix" || intent === "implement") return "implement";
+  if (intent === "plan") {
+    return IMPLEMENTER_AGENT_IDS.has(to) || !to ? "implement" : "discuss";
+  }
   if (REVIEWER_AGENT_IDS.has(to)) return "review";
   if (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to)) {
     return "implement";
   }
   // Worktree / explicit implement intent → implement phase.
-  // Merely targeting an implementer without worktree stays "discuss" so
-  // discuss_blocks_implementer can fire (prevents discuss→grok implement leak).
+  // Targeting an implementer without worktree and without implement/plan/fix
+  // stays discuss so Grok can join discussion without entering implement.
   if (input.useWorktree) return "implement";
   return "discuss";
 }
@@ -105,26 +105,7 @@ function evaluatePhaseRoute(input = {}) {
     };
   }
 
-  // discuss: do not route to implementers (avoids discuss→grok implement leak)
-  if (phase === "discuss" && IMPLEMENTER_AGENT_IDS.has(to)) {
-    return {
-      ok: false,
-      phase,
-      reason: "discuss_blocks_implementer",
-      allowed: [...allowed],
-    };
-  }
-
-  if (phase === "discuss" && DELIVERY_AGENT_IDS.has(to)) {
-    return {
-      ok: false,
-      phase,
-      reason: "discuss_blocks_delivery",
-      allowed: [...allowed],
-    };
-  }
-
-  // discuss: reviewers optional; default allowlist is gemini/codex
+  // discuss: reviewers optional; default allowlist includes all four agents
   if (allowed.length > 0 && !allowed.includes(to)) {
     // implement phase may still hand to reviewer even if allowlist is implement-only
     if (phase === "implement" && REVIEWER_AGENT_IDS.has(to)) {
@@ -206,12 +187,6 @@ function decidePolicy(input = {}) {
         // Soft: discuss→implementer becomes degraded route (still visible) except hard worktree require
         if (phaseCheck.reason === "implement_requires_worktree") {
           return DECISIONS.REJECT;
-        }
-        if (
-          phaseCheck.reason === "discuss_blocks_implementer" ||
-          phaseCheck.reason === "discuss_blocks_delivery"
-        ) {
-          return DECISIONS.ALLOW_DEGRADED;
         }
         // not in allowlist: soft still degrades rather than hard reject
         return DECISIONS.ALLOW_DEGRADED;
