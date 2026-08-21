@@ -89,6 +89,7 @@ async function runChatWorklist(ctx) {
     turnPrompt,
     skillNames,
     augmentedPrompt,
+    nativeSkillDelivery = false,
     bootstrapPacket,
     bootstrapInject,
     apiUrl,
@@ -215,7 +216,8 @@ try {
       ) {
         a2aSkillNames.push("receiving-review");
       }
-      // Bundle already includes handoff task + compact outbound card; skills wrap it.
+      // Turn-forced skills still inject even when native worktree delivery succeeded.
+      // receiving-review is hop-specific; CLI discovery cannot know this turn needs it.
       const a2aSkills = augmentPrompt(receiveBundle.text, useWorktree, {
         skillNames: a2aSkillNames,
       });
@@ -304,6 +306,11 @@ try {
     }
     promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
     let promptForAgent = promptParts.filter(Boolean).join("\n\n");
+    if (i === 0 && nativeSkillDelivery) {
+      log.info?.(
+        `[skills] native worktree delivery at ${runWorkspace.worktreeDir}; prompt fallback skipped`
+      );
+    }
 
     // Tracker from open window *before* this prompt (for PRE projection).
     let healthTracker = contextHealth.makeTracker(agent, {

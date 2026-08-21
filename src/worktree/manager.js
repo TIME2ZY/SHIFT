@@ -98,7 +98,7 @@ function excludeGeneratedFiles(worktreeDir) {
   const excludePath = runGit(["rev-parse", "--git-path", "info/exclude"], worktreeDir);
   fs.mkdirSync(path.dirname(excludePath), { recursive: true });
   const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf8") : "";
-  const entries = [".env.local", `${LOCAL_STATE_DIR}/`];
+  const entries = [".env.local", `${LOCAL_STATE_DIR}/`, ".agents/skills/"];
   const missing = entries.filter((entry) => !existing.split(/\r?\n/).includes(entry));
   if (missing.length > 0) {
     fs.appendFileSync(

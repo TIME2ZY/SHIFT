@@ -1,9 +1,11 @@
+const path = require("node:path");
 const { assertValidOpaqueId } = require("./id-policy");
 const { ENV } = require("../shared/brand");
 const { createRunObservability } = require("../agents/run-observability");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
+const { prepareSkillDelivery: defaultPrepareSkillDelivery } = require("./skills");
 
 function createChatRoutes({
   selfGitRoot,
@@ -27,6 +29,7 @@ function createChatRoutes({
   readJsonBody,
   buildChatArgs,
   augmentPrompt,
+  prepareSkillDelivery = defaultPrepareSkillDelivery,
   getMaxA2ADepth,
   parseA2AMentions,
   filterBenignStderr,
@@ -220,7 +223,34 @@ function createChatRoutes({
       return true;
     }
 
-    const { augmentedPrompt, skillNames } = augmentPrompt(turnPrompt, useWorktree);
+    const isolatedWorkspace =
+      Boolean(useWorktree && activeWorktree) &&
+      path.resolve(runWorkspace.worktreeDir) !== path.resolve(sessionProjectDir);
+    let skillDelivery;
+    try {
+      skillDelivery = prepareSkillDelivery({
+        workspaceDir: runWorkspace.worktreeDir,
+        projectDir: sessionProjectDir,
+        useWorktree,
+        isolated: isolatedWorkspace,
+        rawPrompt: turnPrompt,
+      });
+    } catch (error) {
+      log.warn?.(`[skills] delivery failed: ${error.message}`);
+      skillDelivery = augmentPrompt(turnPrompt, useWorktree);
+      skillDelivery = {
+        ...skillDelivery,
+        nativeDelivery: false,
+        materialize: { ok: false, method: "skipped", targets: [], errors: [error.message] },
+      };
+    }
+    if (!skillDelivery.nativeDelivery && skillDelivery.materialize?.errors?.length) {
+      log.warn?.(
+        `[skills] native materialize failed; using prompt fallback: ${skillDelivery.materialize.errors.join("; ")}`
+      );
+    }
+    const { augmentedPrompt, skillNames } = skillDelivery;
+    const nativeSkillDelivery = skillDelivery.nativeDelivery === true;
     const protocol = req.headers["x-forwarded-proto"] || "http";
     const apiUrl = process.env[ENV.API_URL] || `${protocol}://${req.headers.host}`;
     const worklist = [requestedAgent];
@@ -401,6 +431,7 @@ function createChatRoutes({
       turnPrompt,
       skillNames,
       augmentedPrompt,
+      nativeSkillDelivery,
       bootstrapPacket,
       bootstrapInject,
       apiUrl,

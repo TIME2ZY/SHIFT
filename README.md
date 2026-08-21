@@ -209,7 +209,7 @@ web/
 scripts/        开发、审计、迁移、评测和 live scenario
 tests/          Node.js 单元、集成与存储测试
 docs/           数据契约、ADR 和阶段验收记录
-skills/         注入给 Agent 的协作与交接规则
+skills/         平台协作 Skill（`skills/<name>/SKILL.md`）；运行时物化到隔离 worktree 供 CLI 发现
 ```
 
 ## 开发与验证

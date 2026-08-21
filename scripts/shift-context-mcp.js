@@ -2,6 +2,7 @@
 
 const readline = require("node:readline");
 const crypto = require("node:crypto");
+const skills = require("../src/server/skills");
 
 const SERVER_NAME = "shift-context";
 const SERVER_VERSION = "0.1.0";
@@ -107,6 +108,48 @@ const RECALL_SEARCH_TOOL = Object.freeze({
   },
   annotations: {
     title: "Search Shift recall",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+});
+
+const LIST_PLATFORM_SKILLS_TOOL = Object.freeze({
+  name: "list_platform_skills",
+  description:
+    "List SHIFT platform collaboration skills. Use load_platform_skill to read a skill body.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+  annotations: {
+    title: "List platform skills",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+});
+
+const LOAD_PLATFORM_SKILL_TOOL = Object.freeze({
+  name: "load_platform_skill",
+  description: "Load one SHIFT platform skill by exact name. Name must be a listed platform skill.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        minLength: 1,
+        maxLength: 80,
+      },
+    },
+    required: ["name"],
+    additionalProperties: false,
+  },
+  annotations: {
+    title: "Load platform skill",
     readOnlyHint: true,
     destructiveHint: false,
     idempotentHint: true,
@@ -347,10 +390,62 @@ function validateRecallSearchArguments(args) {
   }
 }
 
+function validateListPlatformSkillsArguments(args) {
+  if (args == null) return;
+  if (typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("list_platform_skills arguments must be an object.");
+  }
+  const unknown = Object.keys(args);
+  if (unknown.length > 0) {
+    throw new Error(`list_platform_skills received unknown fields: ${unknown.join(", ")}.`);
+  }
+}
+
+function validateLoadPlatformSkillArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("load_platform_skill arguments must be an object.");
+  }
+  const unknown = Object.keys(args).filter((key) => key !== "name");
+  if (unknown.length > 0) {
+    throw new Error(`load_platform_skill received unknown fields: ${unknown.join(", ")}.`);
+  }
+  if (typeof args.name !== "string" || args.name.trim().length < 1 || args.name.length > 80) {
+    throw new Error("load_platform_skill name must be a string of 1 to 80 characters.");
+  }
+}
+
+function listPlatformSkills(
+  args = {},
+  { env = process.env, listSkillIndex = skills.listSkillIndex } = {}
+) {
+  requireShiftContext(env);
+  validateListPlatformSkillsArguments(args);
+  return { skills: listSkillIndex() };
+}
+
+function loadPlatformSkill(
+  args,
+  { env = process.env, getSkillByName = skills.getSkillByName } = {}
+) {
+  requireShiftContext(env);
+  validateLoadPlatformSkillArguments(args);
+  const skill = getSkillByName(args.name.trim());
+  if (!skill) {
+    throw new Error(`Unknown platform skill "${args.name.trim()}".`);
+  }
+  return {
+    name: skill.name,
+    description: skill.description,
+    body: skill.body,
+  };
+}
+
 function createRequestHandler({
   memoryWrite = callMemoryWrite,
   memoryEvidenceList = callMemoryEvidenceList,
   recallSearch = callRecallSearch,
+  listPlatformSkills: listPlatformSkillsImpl = listPlatformSkills,
+  loadPlatformSkill: loadPlatformSkillImpl = loadPlatformSkill,
 } = {}) {
   return async function handleRequest(request) {
     if (!request || request.jsonrpc !== "2.0" || typeof request.method !== "string") {
@@ -370,7 +465,13 @@ function createRequestHandler({
 
     if (request.method === "tools/list") {
       return jsonRpcResult(request.id, {
-        tools: [MEMORY_WRITE_TOOL, MEMORY_EVIDENCE_LIST_TOOL, RECALL_SEARCH_TOOL],
+        tools: [
+          MEMORY_WRITE_TOOL,
+          MEMORY_EVIDENCE_LIST_TOOL,
+          RECALL_SEARCH_TOOL,
+          LIST_PLATFORM_SKILLS_TOOL,
+          LOAD_PLATFORM_SKILL_TOOL,
+        ],
       });
     }
 
@@ -379,7 +480,9 @@ function createRequestHandler({
       if (
         toolName !== MEMORY_WRITE_TOOL.name &&
         toolName !== MEMORY_EVIDENCE_LIST_TOOL.name &&
-        toolName !== RECALL_SEARCH_TOOL.name
+        toolName !== RECALL_SEARCH_TOOL.name &&
+        toolName !== LIST_PLATFORM_SKILLS_TOOL.name &&
+        toolName !== LOAD_PLATFORM_SKILL_TOOL.name
       ) {
         return jsonRpcError(request.id, -32602, "Unknown tool.");
       }
@@ -389,8 +492,12 @@ function createRequestHandler({
           result = await memoryWrite(request.params?.arguments || {});
         } else if (toolName === MEMORY_EVIDENCE_LIST_TOOL.name) {
           result = await memoryEvidenceList(request.params?.arguments || {});
-        } else {
+        } else if (toolName === RECALL_SEARCH_TOOL.name) {
           result = await recallSearch(request.params?.arguments || {});
+        } else if (toolName === LIST_PLATFORM_SKILLS_TOOL.name) {
+          result = await listPlatformSkillsImpl(request.params?.arguments || {});
+        } else {
+          result = await loadPlatformSkillImpl(request.params?.arguments || {});
         }
         return jsonRpcResult(request.id, {
           content: [{ type: "text", text: JSON.stringify(result) }],
@@ -450,13 +557,19 @@ module.exports = {
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
   RECALL_SEARCH_TOOL,
+  LIST_PLATFORM_SKILLS_TOOL,
+  LOAD_PLATFORM_SKILL_TOOL,
   requireShiftContext,
   callMemoryWrite,
   callMemoryEvidenceList,
   callRecallSearch,
+  listPlatformSkills,
+  loadPlatformSkill,
   validateMemoryWriteArguments,
   validateMemoryEvidenceListArguments,
   validateRecallSearchArguments,
+  validateListPlatformSkillsArguments,
+  validateLoadPlatformSkillArguments,
   createRequestHandler,
   jsonRpcResult,
   jsonRpcError,

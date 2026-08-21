@@ -1738,6 +1738,70 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
   );
 });
 
+test("isolated worktree chat uses native skill delivery instead of full prompt injection", async () => {
+  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-skill-base-"));
+  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-skill-wt-"));
+  const prompts = [];
+
+  await withServer(
+    {
+      worktreeManager: {
+        ensureWorktree({ sessionId }) {
+          return {
+            sessionId,
+            baseDir,
+            worktreeDir,
+            branch: `codex/session-${sessionId}`,
+            status: "active",
+            createdAt: "2026-06-30T00:00:00.000Z",
+          };
+        },
+      },
+      spawnRunner(command, args) {
+        prompts.push(args[args.length - 1]);
+        const child = createMockChild();
+        process.nextTick(() => {
+          child.stdout.write(
+            JSON.stringify({
+              type: "text.delta",
+              agent: "opencode",
+              invocationId: "skill-native-1",
+              text: "ok",
+            }) + "\n"
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl) => {
+      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
+        result.json()
+      );
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agent: "opencode",
+          prompt: "hello native skills",
+          sessionId: session.id,
+          useWorktree: true,
+        }),
+      });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+  );
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /PLATFORM SKILL CATALOG/);
+  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: a2a-handoff/);
+  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: memory-write/);
+  assert.ok(fs.existsSync(path.join(worktreeDir, ".agents", "skills", "a2a-handoff", "SKILL.md")));
+  fs.rmSync(baseDir, { recursive: true, force: true });
+  fs.rmSync(worktreeDir, { recursive: true, force: true });
+});
+
 test("chat endpoint treats useWorktree as a per-run permission gate after a worktree already exists", async () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-toggle-"));
   const worktreeDir = path.join(os.tmpdir(), "server-worktree-toggle-session");

@@ -5,11 +5,16 @@ const {
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
   RECALL_SEARCH_TOOL,
+  LIST_PLATFORM_SKILLS_TOOL,
+  LOAD_PLATFORM_SKILL_TOOL,
   callMemoryWrite,
   callMemoryEvidenceList,
   callRecallSearch,
+  listPlatformSkills,
+  loadPlatformSkill,
   createRequestHandler,
 } = require("../../scripts/shift-context-mcp");
+const { listSkillIndex } = require("../../src/server/skills");
 const { shiftContextMcpConfigArgs } = require("../../src/agents/providers/codex");
 
 const ENV = {
@@ -39,6 +44,8 @@ test("shift context MCP exposes memory write and current evidence discovery", as
     MEMORY_WRITE_TOOL,
     MEMORY_EVIDENCE_LIST_TOOL,
     RECALL_SEARCH_TOOL,
+    LIST_PLATFORM_SKILLS_TOOL,
+    LOAD_PLATFORM_SKILL_TOOL,
   ]);
   assert.deepEqual(MEMORY_WRITE_TOOL.inputSchema.required, ["kind", "topic", "content", "scope"]);
   assert.equal(MEMORY_WRITE_TOOL.inputSchema.additionalProperties, false);
@@ -271,8 +278,67 @@ test("Codex invocation config registers the per-invocation MCP bridge", () => {
   );
   assert.ok(
     args.includes(
-      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search"]'
+      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search","list_platform_skills","load_platform_skill"]'
     )
   );
   assert.ok(args.some((value) => value.includes("SHIFT_CALLBACK_TOKEN")));
+});
+
+test("platform skill MCP tools expose index and bodies through tools/call", async () => {
+  const handle = createRequestHandler({
+    listPlatformSkills: async () => ({ skills: [{ name: "demo", description: "d" }] }),
+    loadPlatformSkill: async (args) => {
+      if (args.name !== "demo") throw new Error(`Unknown platform skill "${args.name}".`);
+      return { name: "demo", description: "d", body: "BODY" };
+    },
+  });
+
+  const listed = await handle({
+    jsonrpc: "2.0",
+    id: 11,
+    method: "tools/call",
+    params: { name: "list_platform_skills", arguments: {} },
+  });
+  assert.equal(listed.result.isError, false);
+  assert.deepEqual(listed.result.structuredContent, {
+    skills: [{ name: "demo", description: "d" }],
+  });
+
+  const loaded = await handle({
+    jsonrpc: "2.0",
+    id: 12,
+    method: "tools/call",
+    params: { name: "load_platform_skill", arguments: { name: "demo" } },
+  });
+  assert.equal(loaded.result.isError, false);
+  assert.equal(loaded.result.structuredContent.body, "BODY");
+
+  const rejected = await handle({
+    jsonrpc: "2.0",
+    id: 13,
+    method: "tools/call",
+    params: { name: "load_platform_skill", arguments: { name: "../secret" } },
+  });
+  assert.equal(rejected.result.isError, true);
+  assert.match(rejected.result.content[0].text, /Unknown platform skill/);
+});
+
+test("list_platform_skills matches the skills loader index", () => {
+  const result = listPlatformSkills({}, { env: ENV });
+  assert.deepEqual(result.skills, listSkillIndex());
+  assert.ok(result.skills.some((skill) => skill.name === "a2a-handoff"));
+});
+
+test("load_platform_skill returns a known body and rejects traversal", () => {
+  const loaded = loadPlatformSkill({ name: "a2a-handoff" }, { env: ENV });
+  assert.equal(loaded.name, "a2a-handoff");
+  assert.ok(String(loaded.body || "").length > 0);
+  assert.throws(
+    () => loadPlatformSkill({ name: "../secret" }, { env: ENV }),
+    /Unknown platform skill/
+  );
+  assert.throws(
+    () => loadPlatformSkill({ name: "not-a-real-skill" }, { env: ENV }),
+    /Unknown platform skill/
+  );
 });
