@@ -11,6 +11,8 @@ triggers:
 
 # 交接必须写 WHY
 
+路由格式与全员字段见 `a2a-handoff`。本 skill 只强调 why / next_action，避免空交接。
+
 **针对的弱点**：AI 缺乏持久记忆 — 每次对话从零开始，接手方不知道为什么这样改。
 
 平台解析 ` ```handoff ` 块；缺软必填会标 degraded，但不阻断路由。

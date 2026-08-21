@@ -44,36 +44,43 @@ test("renderIdentityBlock includes markers, role meta, and body", () => {
   assert.match(block, /<!-- \/Agent Identity -->/);
   assert.match(block, /Role: reviewer_deliverer/);
   assert.match(block, /Workflow role: reviewer_deliverer/);
-  assert.match(block, /Workflow capabilities: review, deliver, recall/);
+  assert.match(block, /Workflow capabilities: review, deliver, discuss, recall/);
   assert.match(block, /Duties:/);
   assert.match(block, /Boundaries:/);
   assert.match(block, /你是 \*\*OpenCode/);
   assert.ok(!block.includes("你是 **Grok"), "must not leak other agent bodies");
 });
 
-test("identity packs encode the agreed four-agent responsibility split", () => {
+test("identity packs stay thin personas without playbook fences", () => {
   const codex = renderIdentityBlock("codex");
   const gemini = renderIdentityBlock("gemini");
   const grok = renderIdentityBlock("grok");
   const opencode = renderIdentityBlock("opencode");
 
-  assert.match(codex, /开始与末尾把关/);
-  assert.match(codex, /用户最初目标.*收敛方案/);
-  assert.match(gemini, /正常可行/);
-  assert.match(gemini, /不为新奇而新奇/);
-  assert.match(grok, /第一轮只读检查/);
-  assert.match(grok, /尚未修改/);
-  assert.match(opencode, /commit、push 和 PR/);
+  assert.match(codex, /开始与末尾的把关者/);
+  assert.match(codex, /证据优先/);
+  assert.match(gemini, /不为新奇而发散|不猎奇/);
+  assert.match(grok, /不表演性附和/);
+  assert.match(opencode, /证据优先/);
   assert.match(opencode, /不替代 Codex/);
+
+  for (const block of [codex, gemini, grok, opencode]) {
+    assert.doesNotMatch(block, /```implementation_plan/);
+    assert.doesNotMatch(block, /```solution_baseline/);
+    assert.doesNotMatch(block, /```final_acceptance/);
+    assert.doesNotMatch(block, /```code_review/);
+    assert.doesNotMatch(block, /```delivery_receipt/);
+    assert.doesNotMatch(block, /# 工作方式/);
+  }
 });
 
-test("Codex identity instructs bounded searches and explicit runtime log access", () => {
-  const block = renderIdentityBlock("codex");
-
-  assert.match(block, /src.*public.*tests.*scripts.*docs/);
-  assert.match(block, /200 行/);
-  assert.match(block, /rg --no-ignore/);
-  assert.match(block, /data\/runtime/);
+test("search conventions live in AGENTS.md rather than Codex identity", () => {
+  const identity = renderIdentityBlock("codex");
+  assert.doesNotMatch(identity, /rg --no-ignore/);
+  assert.doesNotMatch(identity, /data\/runtime/);
+  const agentsMd = fs.readFileSync(path.join(__dirname, "../../AGENTS.md"), "utf8");
+  assert.match(agentsMd, /搜索与读取/);
+  assert.match(agentsMd, /data\/runtime/);
 });
 
 test("renderIdentityBlock falls back when file missing", () => {
@@ -147,7 +154,7 @@ test("publicIdentities returns metadata without body", () => {
   assert.equal(coder.label, "Grok");
   assert.ok(Array.isArray(coder.duties));
   assert.equal(coder.workflowRole, "implementer");
-  assert.deepEqual(coder.workflowCapabilities, ["plan", "implement", "fix", "recall"]);
+  assert.deepEqual(coder.workflowCapabilities, ["plan", "implement", "fix", "discuss", "recall"]);
   assert.ok(coder.workflowResponsibilities.includes("change_summary"));
   assert.equal("body" in coder, false);
 });

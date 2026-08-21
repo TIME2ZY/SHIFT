@@ -135,6 +135,18 @@ tests/                回归测试，负责钉住意图
 - 修改前先阅读调用方与现有测试，禁止盲写平行实现。
 - 未经要求不得顺手扩大重构范围或新增 Markdown 文档。
 
+### 搜索与读取
+
+在本仓库搜索或阅读代码时：
+
+- 默认限定在 `src`、`web`、`public`、`tests`、`scripts`、`docs`、`skills`
+- 不要递归搜索 `data/runtime`、`output`、`node_modules`、`.playwright-cli`
+- 搜索结果默认限制在 200 行以内；先定位文件，再按局部行范围读取
+- 只有任务明确涉及运行日志时才搜索 `data/runtime`；该目录被 `.rgignore` 排除，需显式使用 `rg --no-ignore`
+- 不要一次输出完整大文件、完整 transcript 或整个日志目录
+
+这些约定属于本仓库工程纪律，不是 Agent 人设。其他项目以该项目自己的 `AGENTS.md` 为准。
+
 ---
 
 ## 5. 变更分级

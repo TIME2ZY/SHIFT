@@ -32,7 +32,7 @@ test("every catalog agent has one immutable workflow role contract", () => {
 
 test("handoff intents map to the intended receiving agents", () => {
   assert.deepEqual(Object.keys(DEFAULT_INTENT_AGENT_ALLOWLIST), HANDOFF_INTENTS);
-  assert.deepEqual(agentsWithCapability("discuss"), ["codex", "gemini"]);
+  assert.deepEqual(agentsWithCapability("discuss"), ["codex", "gemini", "grok", "opencode"]);
   assert.deepEqual(agentsWithCapability("plan"), ["grok"]);
   assert.deepEqual(agentsWithCapability("implement"), ["grok"]);
   assert.deepEqual(agentsWithCapability("fix"), ["grok"]);
@@ -40,6 +40,25 @@ test("handoff intents map to the intended receiving agents", () => {
   assert.deepEqual(agentsWithCapability("deliver"), ["opencode"]);
   assert.deepEqual(agentsWithCapability("accept"), ["codex"]);
   assert.deepEqual(agentsWithCapability("recall"), ["codex", "gemini", "grok", "opencode"]);
+});
+
+test("C1 does not grant gate-owning intents to the wrong roles", () => {
+  assert.equal(agentCanReceiveIntent("gemini", "implement"), false);
+  assert.equal(agentCanReceiveIntent("gemini", "plan"), false);
+  assert.equal(agentCanReceiveIntent("gemini", "deliver"), false);
+  assert.equal(agentCanReceiveIntent("gemini", "accept"), false);
+  assert.equal(agentCanReceiveIntent("gemini", "review"), false);
+  assert.equal(agentCanReceiveIntent("codex", "review"), false);
+  assert.equal(agentCanReceiveIntent("codex", "implement"), false);
+  assert.equal(agentCanReceiveIntent("codex", "deliver"), false);
+  assert.equal(agentCanReceiveIntent("grok", "deliver"), false);
+  assert.equal(agentCanReceiveIntent("grok", "accept"), false);
+  assert.equal(agentCanReceiveIntent("grok", "review"), false);
+  assert.equal(agentCanReceiveIntent("opencode", "implement"), false);
+  assert.equal(agentCanReceiveIntent("opencode", "plan"), false);
+  assert.equal(agentCanReceiveIntent("opencode", "accept"), false);
+  assert.equal(agentCanReceiveIntent("grok", "discuss"), true);
+  assert.equal(agentCanReceiveIntent("opencode", "discuss"), true);
 });
 
 test("role and capability helpers normalize ids without granting unknown work", () => {

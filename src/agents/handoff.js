@@ -27,12 +27,7 @@ const {
   toMatchesRoute,
   hasValue,
 } = require("./handoff-parse");
-const {
-  WORKFLOW_ROLES,
-  agentsWithCapability,
-  agentIdsForRole,
-} = require("./role-contracts");
-
+const { WORKFLOW_ROLES, agentsWithCapability, agentIdsForRole } = require("./role-contracts");
 
 const DEFAULT_APPENDIX_CHARS = 5000;
 /** No handoff fence: even more of the prior text is the only payload. */
@@ -62,9 +57,12 @@ const APPENDIX_ANCHORS = [
 ];
 
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
 const LEAD_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.LEAD));
-const DISCUSSION_AGENT_IDS = new Set(agentsWithCapability("discuss"));
+const DISCUSSION_AGENT_IDS = new Set([
+  ...agentIdsForRole(WORKFLOW_ROLES.LEAD),
+  ...agentIdsForRole(WORKFLOW_ROLES.DISCUSSION_PARTNER),
+]);
 const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 
 /**
@@ -199,6 +197,34 @@ function shouldInjectReceivingReview(opts = {}) {
   return /request-changes|approve-with-nits|\bp0\b|\bp1\b|review\s*意见|修改意见|请修|fix these|blocking/.test(
     blob
   );
+}
+
+/**
+ * Turn-forced platform skills for one A2A hop. Native CLI discovery cannot know
+ * which playbook this hop needs; identity no longer contains the fenced templates.
+ *
+ * @param {{ targetAgentId?: string, fromAgentId?: string, intent?: string, handoff?: Handoff | null, quality?: object, text?: string }} opts
+ * @returns {string[]}
+ */
+function playbookSkillNamesForHop(opts = {}) {
+  const target = String(opts.targetAgentId || "")
+    .trim()
+    .toLowerCase();
+  const intent = normalizeIntent(opts.intent || opts.quality?.intent || opts.handoff?.intent);
+  const names = [];
+  if (target === "grok" && (intent === "plan" || intent === "implement")) {
+    names.push("implementation-plan");
+  }
+  if (target === "opencode" && (intent === "review" || intent === "deliver")) {
+    names.push("code-review-deliver");
+  }
+  if (target === "codex" && intent === "accept") {
+    names.push("solution-baseline-acceptance");
+  }
+  if (shouldInjectReceivingReview(opts)) {
+    names.push("receiving-review");
+  }
+  return names;
 }
 
 /**
@@ -554,6 +580,7 @@ module.exports = {
   renderA2AHandoffCard,
   selectAppendix,
   shouldInjectReceivingReview,
+  playbookSkillNamesForHop,
   summarizeHandoff,
   normalizeTo,
   toMatchesRoute,

@@ -123,6 +123,8 @@ test("explicit intents resolve the five workflow phases without changing the rev
   assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
   assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "codex" }).ok, false);
   assert.equal(evaluatePhaseRoute({ intent: "accept", toAgent: "codex" }).ok, true);
+  assert.equal(evaluatePhaseRoute({ intent: "discuss", toAgent: "grok" }).ok, true);
+  assert.equal(evaluatePhaseRoute({ intent: "discuss", toAgent: "opencode" }).ok, true);
 });
 
 test("intent capabilities distinguish roles that share the deliver phase", () => {
@@ -138,6 +140,10 @@ test("intent capabilities distinguish roles that share the deliver phase", () =>
 
   assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "grok" }).ok, true);
   assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "gemini" }).ok, false);
+  assert.equal(
+    evaluatePhaseRoute({ intent: "plan", toAgent: "gemini" }).reason,
+    "target_lacks_intent_capability"
+  );
   assert.equal(evaluatePhaseRoute({ intent: "fix", toAgent: "grok" }).ok, true);
   assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
 });

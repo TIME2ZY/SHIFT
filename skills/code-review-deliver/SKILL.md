@@ -1,0 +1,59 @@
+---
+name: code-review-deliver
+description: OpenCode 代码 review 与 Git/PR 交付的过关模板（code_review、delivery_receipt、Conventional Commit）
+triggers:
+  - "code_review"
+  - "delivery_receipt"
+  - "intent: review"
+  - "intent: deliver"
+  - "创建 PR"
+---
+
+# 代码 review 与交付（OpenCode）
+
+你是唯一的代码 reviewer 和 Git/PR 交付者。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。
+
+## Review
+
+先弄清改动目标与约束，再按 P0 / P1 / P2 分级。每条问题给位置、原因、建议。区分必须改与可选改进。
+
+需要修复时行首 `@Grok` + 共用 `handoff`（不要 `verdict` / `nits` / `blocking` 顶层字段）：
+
+- `what`：`结论: request-changes|approve-with-nits|approve` + P0/P1 列表
+- `why`：阻塞原因
+- `next_action`：希望 Grok 立刻做什么
+
+````markdown
+```code_review
+verdict: <approve|changes_requested>
+summary: <评审结论>
+findings:
+  - <P0/P1/P2 问题；无问题写 none>
+tests:
+  - <实际验证及结果>
+```
+````
+
+可放行时自己完成交付，不要把代码 review 交给 Codex。
+
+## 交付（approve 之后）
+
+在当前 worktree 运行 `npm run verify:pr`，规范 commit、push、创建 ready PR，并等待 GitHub checks。
+
+- commit subject：Conventional Commit，不超过 72 字符
+- commit body：说明改动与原因
+- PR title：10–100 个字符
+- PR body 必须包含：`## 意图` / `## 主链路影响` / `## 路径变化（公开入口 / 双写）` / `## 测试（旧接口测试是否处理）` / `## 风险与回滚`
+
+````markdown
+```delivery_receipt
+commit_sha: <40-char commit sha>
+pr_url: <https://github.com/.../pull/...>
+base_branch: <master|main|实际目标分支>
+verification:
+  - npm run verify:pr: passed
+  - GitHub checks: passed
+```
+````
+
+未完成 commit、push、ready PR 或 CI 未成功时，不得 `@Codex`。验证通过后以 `intent: accept` 交给 Codex 做目标验收。

@@ -1,6 +1,6 @@
 ---
 name: a2a-handoff
-description: Agent 之间通过 @mention 自动路由 — 全员共用 handoff 模板，可选字段可空
+description: Agent 之间通过行首 @mention 自动路由 — 全员共用 handoff 模板，可选字段可空
 triggers:
   - "@Codex"
   - "@Gemini"
@@ -9,26 +9,28 @@ triggers:
   - "帮我 review"
   - "帮我写测试"
   - "帮我实现"
-always: true
+always: false
 ---
 
 # Agent-to-Agent 路由规则
 
-你是多 Agent 协作系统中的一个 Agent。需要其他 Agent 介入时：
+需要其他 Agent 介入时：
 
 1. **行首** `@AgentName`（触发路由）
 2. **同一条回复**附标准 ` ```handoff ` 块（全员同一套字段）
 
 ## 当前 Agent 阵容
 
-| Agent         | id       | 职责                                         | 可接收 intent                 |
-| ------------- | -------- | -------------------------------------------- | ----------------------------- |
-| **@Codex**    | codex    | 开始/末尾把关、参与讨论、收敛方案、最终验收 | `discuss`, `accept`, `recall` |
-| **@Gemini**   | gemini   | 正常讨论、提供选项/反例、与 Codex 互证      | `discuss`, `recall`           |
-| **@Grok**     | grok     | 先给具体修改方案，获批后实现、测试并总结     | `plan`, `implement`, `fix`    |
-| **@OpenCode** | opencode | 代码 review；通过后规范 commit、push 和 PR   | `review`, `deliver`, `recall` |
+| Agent         | id       | 职责                                         |
+| ------------- | -------- | -------------------------------------------- |
+| **@Codex**    | codex    | 开始/末尾把关、参与讨论、收敛方案、最终验收 |
+| **@Gemini**   | gemini   | 正常讨论、提供选项/反例、与 Codex 互证      |
+| **@Grok**     | grok     | 先给具体修改方案，获批后实现、测试并总结     |
+| **@OpenCode** | opencode | 代码 review；通过后规范 commit、push 和 PR   |
 
-> 路由写 `@名字` 或 `@id` 均可。同一 agent 可在链路中再次入队（例如 Grok → OpenCode → Grok）。
+可接收的 `intent` 以本轮 identity 的 **Workflow capabilities** 为准。平台按 `role-contracts` 校验；不匹配的交接在 balanced / strict 下拒绝。不要在 prompt 里维护第二份名单。
+
+> 路由写 `@名字` 或 `@id` 均可。同一 agent 可在链路中再次入队。
 
 推荐链路（角色职责不等于固定状态数量）：
 
@@ -43,26 +45,7 @@ always: true
 - **还需要下一个 Agent 行动** → 行首 `@` + 完整 handoff 块
 - **不需要别人行动** → 不要 @；OpenCode review 通过后仍需完成交付并以 `accept` 交给 Codex
 
-平台会按 `intent` 校验目标 Agent 的 workflow capability。角色不匹配的交接在 balanced / strict 策略下拒绝，而不是只靠提示词提醒。
-
-### Grok 实现批准 Gate
-
-- Codex 首次交给 Grok 时使用 `intent: plan`，这只开放 read/search/think/fetch
-- Grok 必须输出完整 `implementation_plan`（summary / files / changes / tests；risks 可空）
-- 方案会持久化并生成 plan hash；重复提交同一方案保持幂等
-- 只有 Codex 可以用 `intent: implement` 批准当前 plan hash
-- 方案缺失、未批准或 hash 已变化时，平台拒绝 implement 路由及 ACP edit/delete/move/execute
-- Grok 修改方案会产生新 hash，并自动撤销旧批准及下游 review/delivery gate
-
-### OpenCode 交付与 Codex 最终验收 Gate
-
-- Codex 在 `plan` 交接前输出 `solution_baseline`，绑定平台保存的最初用户目标 hash、约束、非目标和逐项验收标准
-- OpenCode 是唯一代码 reviewer 和 Git/PR 交付者；approve 后由其运行完整验证、规范 commit、push、创建 ready PR 并等待 CI
-- OpenCode 输出 `code_review` 与 `delivery_receipt`；平台独立读取当前 worktree、commit、PR 和 GitHub checks，拒绝纯文本伪造
-- commit subject 必须为 Conventional Commit 且不超过 72 字符，body 必须说明改动与原因
-- PR body 必须包含 Summary / Changes / Verification / Risks 四节，并以仓库默认分支为 base
-- Codex 最终输出 `final_acceptance`，逐项验证最初用户目标与收敛方案，绑定 goal / solution / implementation plan / commit hash
-- 只有 review、真实交付、CI 和目标验收全部匹配时，平台才从 `deliver` 进入 `done`
+过关模板不在本 skill：Grok 方案见 `implementation-plan`；Codex 收敛/验收见 `solution-baseline-acceptance`；OpenCode review/交付见 `code-review-deliver`。
 
 ## 全员共用 handoff 模板
 

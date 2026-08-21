@@ -10,11 +10,7 @@
 
 const crypto = require("node:crypto");
 const { COLLAB_TASK_STATES } = require("../shared/collab-contracts");
-const {
-  WORKFLOW_ROLES,
-  agentsWithCapability,
-  agentIdsForRole,
-} = require("./role-contracts");
+const { WORKFLOW_ROLES, agentsWithCapability, agentIdsForRole } = require("./role-contracts");
 const { normalizeIntent } = require("./handoff");
 const {
   IMPLEMENTATION_GATE_STATUS,
@@ -33,9 +29,12 @@ const {
   hashUserGoal,
 } = require("./workflow-gates");
 
-const REVIEWER_AGENT_IDS = new Set(agentsWithCapability("review"));
+const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
 const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const DISCUSSION_AGENT_IDS = new Set(agentsWithCapability("discuss"));
+const DISCUSSION_AGENT_IDS = new Set([
+  ...agentIdsForRole(WORKFLOW_ROLES.LEAD),
+  ...agentIdsForRole(WORKFLOW_ROLES.DISCUSSION_PARTNER),
+]);
 const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
 const LEAD_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.LEAD));
 
@@ -391,11 +390,7 @@ function createCollabTaskRegistry(options = {}) {
   function requireImplementationPlan(task, input = {}) {
     const requestHash = String(input.requestHash || "").trim() || null;
     const current = task.implementationGate;
-    if (
-      current &&
-      !input.force &&
-      (!requestHash || requestHash === current.requestHash)
-    ) {
+    if (current && !input.force && (!requestHash || requestHash === current.requestHash)) {
       return false;
     }
 
@@ -632,8 +627,14 @@ function createCollabTaskRegistry(options = {}) {
 
     if (intent === "discuss") {
       next = STATE.DISCUSS;
-    } else if (["plan", "implement", "fix"].includes(intent)) {
+    } else if (
+      intent === "implement" ||
+      intent === "fix" ||
+      (intent === "plan" && isImplementer(to))
+    ) {
       next = STATE.IMPLEMENT;
+    } else if (intent === "plan") {
+      next = STATE.DISCUSS;
     } else if (intent === "review") {
       next = STATE.REVIEW;
     } else if (intent === "deliver" || intent === "accept") {

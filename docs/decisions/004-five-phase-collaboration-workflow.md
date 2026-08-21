@@ -85,7 +85,7 @@ Phase allowlist 只表达某阶段有哪些参与者，不能区分同处 `deliv
 Codex 最终验收。因此运行时还必须按 handoff `intent` 校验接收方 capability：
 
 ```text
-discuss:   codex, gemini
+discuss:   codex, gemini, grok, opencode
 plan:      grok
 implement: grok
 fix:       grok
@@ -94,6 +94,11 @@ deliver:   opencode
 accept:    codex
 recall:    all four agents
 ```
+
+`capabilities` 只表示谁可以被 handoff 到该 intent。阶段主人和硬 gate 仍按
+`WORKFLOW_ROLES`：仅 Grok 驱动 implement/plan 门禁，仅 OpenCode 驱动 code review /
+deliver，仅 Codex 发出 implement 批准与最终 accept。不得用 capability 冒充角色
+（例如不得因「可讨论」就把 Grok 当成 discussion_partner）。
 
 四个角色的单一机器真相源是 `src/agents/role-contracts.js`。Agent catalog、identity prompt、
 handoff 角色集合和路由策略必须从该契约派生，避免提示词职责与平台实际权限漂移。
