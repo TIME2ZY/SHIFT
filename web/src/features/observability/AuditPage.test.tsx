@@ -74,6 +74,11 @@ vi.mock("../memory/queries", () => ({
     isPending: false,
     error: null,
   }),
+  useMemoryUsageQuery: () => ({
+    data: { "memory-1": { searched: 2, injected: 1 } },
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("AuditPage", () => {
@@ -104,7 +109,7 @@ describe("AuditPage", () => {
     expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
     expect(screen.getByText("assistant-output")).toBeInTheDocument();
     expect(screen.getByText("使用证据")).toBeInTheDocument();
-    expect(screen.getByText("未标注")).toBeInTheDocument();
+    expect(screen.getByText("检索 2 · 注入 1")).toBeInTheDocument();
     expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
   });
 });

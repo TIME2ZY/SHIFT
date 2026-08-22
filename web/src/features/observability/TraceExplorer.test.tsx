@@ -311,6 +311,42 @@ describe("TraceExplorer", () => {
             endedAt: base.endedAt,
             attributes: { toolId: "orphan-tool", orphanFinish: true },
           },
+          {
+            spanId: "recall:1",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "recall",
+            name: "memory_searched",
+            state: "completed",
+            complete: true,
+            startedAt: base.startedAt,
+            endedAt: base.startedAt,
+            attributes: {
+              totalHits: 3,
+              memoryHits: 2,
+              delivered: 0,
+              availability: "available",
+              requestedLayers: ["memory", "message"],
+            },
+          },
+          {
+            spanId: "recall:2",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "recall",
+            name: "memory_injected",
+            state: "completed",
+            complete: true,
+            startedAt: base.startedAt,
+            endedAt: base.startedAt,
+            attributes: {
+              totalHits: 0,
+              memoryHits: 0,
+              delivered: 2,
+              availability: "available",
+              requestedLayers: [],
+            },
+          },
         ],
         invocationCounts: { total: 1, failed: 1 },
         invocations: [
@@ -362,8 +398,12 @@ describe("TraceExplorer", () => {
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
     expect(screen.getAllByText("provider_exit_7")).toHaveLength(2);
     expect(screen.getByText("Grok")).toBeInTheDocument();
-    expect(screen.getAllByText("failed-tool")).toHaveLength(2);
-    expect(screen.getByText("orphan finish")).toBeInTheDocument();
+    expect(screen.getByText("工具执行")).toBeInTheDocument();
+    expect(screen.getByText(/2 次调用 · 1 失败 · 1 孤儿 · 1 未闭合/)).toBeInTheDocument();
+    expect(screen.getByText("Memory 检索 / 注入")).toBeInTheDocument();
+    expect(screen.getByText("1 次检索 · 1 次注入")).toBeInTheDocument();
+    expect(screen.getByText("命中 3（Memory 2）")).toBeInTheDocument();
+    expect(screen.getByText("delivered 2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
     expect(screen.getByRole("list", { name: "Agent 父子执行树" })).toBeInTheDocument();
     expect(screen.getAllByText("子调用 · 深度 1")).toHaveLength(2);

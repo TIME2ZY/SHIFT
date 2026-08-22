@@ -344,6 +344,11 @@ source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP s
 实际 injection 可用率与覆盖率、MCP write 结果计数；严格 Recall、used 与 correct 在无标注或证据
 时保持 `null`。旧 storage-level Trace detail 路由已删除。
 
+`GET /api/memories/usage?sessionId=` 是 Memory 使用证据的只读聚合入口：从
+`memory_searched` / `memory_injected` 事件 payload 的 `memoryIds` 派生每条 Memory 的
+被检索 / 被注入计数，供审计页 Memory 卡片展示；不写库、不建立第二真相源。审计页 Trace
+详情展示 Memory 检索 / 注入证据与工具执行汇总，逐条工具过程只在主会话展示。
+
 `/api/storage/observability/metrics` 接受可选 `threadId` 并将 Thread scope 与时间窗一起下推到
 Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Console 必须传当前 Thread，
 而 system health 继续由 `/api/storage/health` 独立展示。Handoff 公开主指标为 eligible accepted

@@ -3127,6 +3127,42 @@ body {
   border-left-color: var(--warning);
 }
 
+.trace-memory-evidence li {
+  border-left-color: var(--accent);
+}
+
+.trace-tool-summary {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--space-2);
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+.trace-tool-summary > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.trace-tool-summary > header strong {
+  color: var(--text-primary);
+  font: 600 11px/1 var(--font-mono);
+}
+.trace-tool-summary > header small {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+.trace-tool-summary p {
+  margin: 0;
+  color: var(--text-secondary);
+  font: 11px/1.4 var(--font-mono);
+}
+.trace-tool-summary p[data-anomaly] {
+  color: var(--warning);
+}
+
 .trace-spans {
   display: grid;
   gap: var(--space-2);
