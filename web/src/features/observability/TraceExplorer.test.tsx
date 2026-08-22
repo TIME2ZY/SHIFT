@@ -393,7 +393,6 @@ describe("TraceExplorer", () => {
     expect(screen.getByText("需标注集")).toBeInTheDocument();
     expect(screen.getByText("-25pp")).toBeInTheDocument();
     expect(screen.getByText("样本不足")).toBeInTheDocument();
-    expect(screen.getAllByText(/1\/2 · pending 1/).length).toBeGreaterThan(0);
     expect(screen.getByText("Codex")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
     expect(screen.getAllByText("provider_exit_7")).toHaveLength(2);

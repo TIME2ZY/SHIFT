@@ -13,13 +13,11 @@ import { exportSessionTrace } from "./api";
 
 function Rate({ label, rate }: { label: string; rate: QualifiedRate }) {
   const value = rate.value == null ? "—" : `${Math.round(rate.value * 100)}%`;
+  const detail = `${rate.numerator}/${rate.denominator} · pending ${rate.pending} · unknown ${rate.unknown}`;
   return (
-    <div className="trace-metric">
+    <div className="trace-metric" title={detail}>
       <dt>{label}</dt>
       <dd>{value}</dd>
-      <small>
-        {rate.numerator}/{rate.denominator} · pending {rate.pending} · unknown {rate.unknown}
-      </small>
     </div>
   );
 }
@@ -411,14 +409,16 @@ export function TraceExplorer({
           </section>
         ) : null}
 
-        <section className="trace-metrics" aria-label="当前会话近 24 小时协作指标">
-          <header>
-            <span>时间窗 · 近 24 小时</span>
-            <strong>当前会话 · 合格样本</strong>
-          </header>
-          {metrics.error ? <p className="react-panel-error">指标暂不可用。</p> : null}
-          {metrics.data ? (
-            <>
+        {metrics.data ? (
+          <details className="trace-metrics-panel">
+            <summary>
+              <span>时间窗 · 近 24 小时 · 合格样本</span>
+              <strong>
+                Handoff 完成 {formatRate(metrics.data.handoff.completion)} · 写入{" "}
+                {metrics.data.memory.write.calls} 次
+              </strong>
+            </summary>
+            <section className="trace-metrics" aria-label="当前会话近 24 小时协作指标">
               <dl>
                 <Rate label="Handoff 完成" rate={metrics.data.handoff.completion} />
                 <Rate label="MCP 检索可用率" rate={metrics.data.memory.search.availabilityRate} />
@@ -471,31 +471,30 @@ export function TraceExplorer({
                   拒绝 <strong>{metrics.data.memory.write.rejected}</strong>
                 </span>
               </div>
-            </>
-          ) : null}
-        </section>
+            </section>
 
-        {metrics.data ? (
-          <section className="trace-offline-eval" aria-label="离线 Recall 评估">
-            <header>
-              <span>作用域 · 全局</span>
-              <strong>离线评估 · 不属于近 24 小时窗口</strong>
-            </header>
-            <div>
-              <strong>严格 Recall@K</strong>
-              <b>
-                {metrics.data.memory.strictRecallAtK
-                  ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
-                  : "需标注集"}
-              </b>
-              <small>
-                {metrics.data.memory.strictRecallAtK
-                  ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
-                  : "在线命中率不能替代相关性 Recall"}
-              </small>
-            </div>
-          </section>
+            <section className="trace-offline-eval" aria-label="离线 Recall 评估">
+              <header>
+                <span>作用域 · 全局</span>
+                <strong>离线评估 · 不属于近 24 小时窗口</strong>
+              </header>
+              <div>
+                <strong>严格 Recall@K</strong>
+                <b>
+                  {metrics.data.memory.strictRecallAtK
+                    ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
+                    : "需标注集"}
+                </b>
+                <small>
+                  {metrics.data.memory.strictRecallAtK
+                    ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
+                    : "在线命中率不能替代相关性 Recall"}
+                </small>
+              </div>
+            </section>
+          </details>
         ) : null}
+        {metrics.error ? <p className="react-panel-error">指标暂不可用。</p> : null}
       </div>
 
       {/* ── 模块 2: Trace 链路追溯工作台（工具栏 + 左右分栏） ── */}

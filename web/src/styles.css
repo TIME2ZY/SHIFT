@@ -2620,23 +2620,22 @@ body {
 }
 
 .handoff-funnel {
-  margin: 12px;
-  padding: 12px;
-  border: 1px solid rgba(82, 162, 255, 0.18);
-  border-radius: 10px;
-  background: linear-gradient(110deg, rgba(31, 62, 92, 0.28), rgba(14, 23, 33, 0.12));
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
 }
 
 .handoff-funnel > header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .handoff-funnel > header small {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 .handoff-funnel ol {
@@ -2652,25 +2651,25 @@ body {
   display: grid;
   gap: 3px;
   min-width: 0;
-  padding: 9px 20px 9px 10px;
-  border-block: 1px solid rgba(82, 162, 255, 0.2);
-  background: rgba(82, 162, 255, 0.06);
+  padding: 9px var(--space-3) 9px 10px;
+  border-block: 1px solid var(--border-subtle);
+  background: var(--surface-instrument);
 }
 
 .handoff-funnel li:first-child {
-  border-left: 1px solid rgba(82, 162, 255, 0.2);
+  border-left: 1px solid var(--border-subtle);
   border-radius: 6px 0 0 6px;
 }
 
 .handoff-funnel li:last-child {
-  border-right: 1px solid rgba(82, 162, 255, 0.2);
+  border-right: 1px solid var(--border-subtle);
   border-radius: 0 6px 6px 0;
-  background: rgba(75, 205, 151, 0.09);
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-instrument));
 }
 
 .handoff-funnel li span,
 .handoff-losses {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 11px;
 }
 
@@ -2687,9 +2686,9 @@ body {
   right: -5px;
   width: 9px;
   height: 9px;
-  border-top: 1px solid rgba(82, 162, 255, 0.42);
-  border-right: 1px solid rgba(82, 162, 255, 0.42);
-  background: #101923;
+  border-top: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+  background: var(--surface-canvas);
   transform: translateY(-50%) rotate(45deg);
 }
 
@@ -2703,7 +2702,7 @@ body {
 .handoff-losses span {
   padding: 3px 7px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-instrument);
 }
 
 .handoff-losses strong {
@@ -2712,23 +2711,22 @@ body {
 }
 
 .memory-diagnostics {
-  margin: 0 12px 12px;
-  border: 1px solid rgba(143, 126, 216, 0.17);
-  border-radius: 9px;
-  background: rgba(117, 92, 190, 0.045);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
 }
 
 .memory-diagnostics > header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 11px;
-  border-bottom: 1px solid rgba(143, 126, 216, 0.12);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .memory-diagnostics > header small {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 10px;
 }
 
@@ -2740,8 +2738,8 @@ body {
 
 .memory-diagnostics dl div {
   min-width: 0;
-  padding: 10px 11px;
-  border-right: 1px solid rgba(143, 126, 216, 0.1);
+  padding: var(--space-2) var(--space-3);
+  border-right: 1px solid var(--border-subtle);
 }
 
 .memory-diagnostics dl div:last-child {
@@ -2750,7 +2748,7 @@ body {
 
 .memory-diagnostics dt {
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3161,6 +3159,96 @@ body {
 }
 .trace-tool-summary p[data-anomaly] {
   color: var(--warning);
+}
+
+.trace-metrics-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+}
+.trace-metrics-panel > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  cursor: pointer;
+  list-style: none;
+}
+.trace-metrics-panel > summary::-webkit-details-marker {
+  display: none;
+}
+.trace-metrics-panel > summary::before {
+  content: "+";
+  color: var(--text-tertiary);
+  font: 600 12px/1 var(--font-mono);
+}
+.trace-metrics-panel[open] > summary::before {
+  content: "−";
+}
+.trace-metrics-panel > summary span {
+  color: var(--accent);
+  font: 10px/1 var(--font-mono);
+  text-transform: uppercase;
+}
+.trace-metrics-panel > summary strong {
+  color: var(--text-secondary);
+  font: 12px/1.3 var(--font-mono);
+}
+.trace-metrics-panel .trace-metrics,
+.trace-metrics-panel .trace-offline-eval {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.audit-memory-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+.audit-memory-card-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px var(--space-2);
+  width: 100%;
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.audit-memory-card-summary span {
+  color: var(--accent);
+  font: 600 10px/1 var(--font-mono);
+  text-transform: uppercase;
+}
+.audit-memory-card-summary strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audit-memory-card-summary small {
+  color: var(--text-tertiary);
+  font: 10px/1 var(--font-mono);
+}
+.audit-memory-card-detail {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px dashed var(--border-subtle);
+}
+.audit-memory-card-detail p {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .trace-spans {
@@ -3709,34 +3797,39 @@ body {
 .audit-page-header {
   display: flex;
   max-width: 1480px;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-5);
-  margin: 0 auto var(--space-5);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 auto var(--space-4);
 }
 
-.audit-page-header h1 {
-  margin: 0;
-  font: 650 clamp(23px, 3vw, 34px)/1.15 var(--font-ui);
-  letter-spacing: -0.025em;
-}
-
-.audit-page-header p {
-  max-width: 760px;
-  margin: var(--space-2) 0 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.audit-page-eyebrow {
-  display: block;
-  margin-bottom: var(--space-2);
+.audit-page-chip {
+  display: inline-flex;
+  max-width: 320px;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 var(--space-3);
   overflow: hidden;
-  color: var(--text-tertiary);
-  font: 600 12px/1.2 var(--font-ui);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-instrument);
+  color: var(--text-secondary);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.audit-page-chip-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.audit-page-chip-hint {
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: right;
 }
 
 .audit-page-actions {
@@ -3775,10 +3868,11 @@ body {
 }
 
 .audit-overview {
-  margin: 0 24px 18px;
+  max-width: 1480px;
+  margin: 0 auto var(--space-4);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--surface-instrument);
   box-shadow: var(--shadow-sm);
 }
@@ -3787,8 +3881,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 14px 16px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -3806,7 +3900,7 @@ body {
 
 .audit-overview > header dl {
   display: flex;
-  gap: 20px;
+  gap: var(--space-4);
   margin: 0;
 }
 
@@ -3894,10 +3988,6 @@ body {
 }
 
 @media (max-width: 720px) {
-  .audit-overview {
-    margin-inline: 14px;
-  }
-
   .audit-overview > header,
   .audit-overview > header dl {
     align-items: stretch;
@@ -3938,10 +4028,6 @@ body {
   overflow: auto;
 }
 
-.audit-memory-card {
-  display: grid;
-  gap: var(--space-2);
-}
 .audit-memory-provenance {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
