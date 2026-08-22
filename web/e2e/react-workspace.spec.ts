@@ -448,7 +448,7 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
 
   await expect(page.getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "审计", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "运行与 Memory 审计" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "在线运行观测" })).toBeVisible();
 
   await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
@@ -463,7 +463,8 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
   await page.getByRole("button", { name: "审计", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "运行与 Memory 审计" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "在线运行观测" })).toBeVisible();
+  await page.locator(".react-memory-list").getByRole("button", { name: /React 迁移/ }).click();
   await expect(
     page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
   ).toBeVisible();
@@ -540,7 +541,9 @@ test("locates a durable failure after refresh and exports structural metadata", 
   await page.getByRole("button", { name: "审计", exact: true }).click();
   const tracePanel = page.getByRole("region", { name: "在线运行观测" });
   await expect(tracePanel.locator(".trace-breakpoint").getByText("provider_exit_7")).toBeVisible();
-  await expect(tracePanel.getByText("Gemini generation")).toBeVisible();
+  await expect(
+    tracePanel.locator('.trace-waterfall-row[data-kind="generation"]').getByText("Gemini")
+  ).toBeVisible();
   await tracePanel.getByRole("button", { name: "只看断点" }).click();
   await expect
     .poll(() => state.traceQueries.some((query) => query.includes("failuresOnly=1")))
@@ -556,5 +559,7 @@ test("locates a durable failure after refresh and exports structural metadata", 
   await expect(
     restoredPanel.locator(".trace-breakpoint").getByText("provider_exit_7")
   ).toBeVisible();
-  await expect(restoredPanel.getByText("Gemini generation")).toBeVisible();
+  await expect(
+    restoredPanel.locator('.trace-waterfall-row[data-kind="generation"]').getByText("Gemini")
+  ).toBeVisible();
 });
