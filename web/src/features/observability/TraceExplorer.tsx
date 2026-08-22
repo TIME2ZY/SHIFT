@@ -1,5 +1,4 @@
 import { Fragment, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { ExecutionHandoff, ExecutionInvocation, TraceSpan, TraceSummary } from "./types";
 import type { QualifiedRate } from "./types";
@@ -125,95 +124,23 @@ function elapsed(startedAt: string | null, endedAt: string | null) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
 }
 
-function clock(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleTimeString() : "—";
-}
-
-function isBranchedRoute(invocations: ExecutionInvocation[]) {
-  const childCounts = new Map<string, number>();
-  return invocations.some((invocation, index) => {
-    if (!invocation.parentInvocationId) return index > 0;
-    childCounts.set(
-      invocation.parentInvocationId,
-      (childCounts.get(invocation.parentInvocationId) || 0) + 1
-    );
-    return (
-      childCounts.get(invocation.parentInvocationId)! > 1 ||
-      invocations[index - 1]?.invocationId !== invocation.parentInvocationId
-    );
-  });
-}
-
-function InvocationBadge({
-  invocation,
-  label,
-}: {
-  invocation: ExecutionInvocation;
-  label(id: string): string;
-}) {
-  return (
-    <div className="trace-hop-badge">
-      <span className="trace-hop-dot" aria-hidden="true" />
-      <strong>{label(invocation.agentId)}</strong>
-      <small>{invocation.state}</small>
-    </div>
-  );
-}
-
-function InvocationRoute({
+function AgentChain({
   invocations,
   label,
 }: {
   invocations: ExecutionInvocation[];
   label(id: string): string;
 }) {
-  if (!isBranchedRoute(invocations)) {
-    return (
-      <div className="trace-route-line" aria-label="Agent 执行航线">
-        {invocations.map((invocation, index) => (
-          <div className="trace-hop" data-state={invocation.state} key={invocation.invocationId}>
-            {index ? <span className="trace-connector">→</span> : null}
-            <InvocationBadge invocation={invocation} label={label} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  const byParent = new Map<string | null, ExecutionInvocation[]>();
-  for (const invocation of invocations) {
-    const parent = invocations.some((item) => item.invocationId === invocation.parentInvocationId)
-      ? invocation.parentInvocationId
-      : null;
-    byParent.set(parent, [...(byParent.get(parent) || []), invocation]);
-  }
-  const visited = new Set<string>();
-  const rows: Array<{ invocation: ExecutionInvocation; depth: number }> = [];
-  const visit = (invocation: ExecutionInvocation, depth: number) => {
-    if (visited.has(invocation.invocationId)) return;
-    visited.add(invocation.invocationId);
-    rows.push({ invocation, depth });
-    for (const child of byParent.get(invocation.invocationId) || []) visit(child, depth + 1);
-  };
-  for (const root of byParent.get(null) || []) visit(root, 0);
-  for (const invocation of invocations) visit(invocation, 0);
-
+  if (invocations.length < 2) return null;
   return (
-    <ol className="trace-route-tree" aria-label="Agent 父子执行树">
-      {rows.map(({ invocation, depth }) => (
-        <li
-          data-state={invocation.state}
-          key={invocation.invocationId}
-          style={{ "--trace-depth": depth } as CSSProperties}
-        >
-          <span className="trace-tree-relation">{depth ? `子调用 · 深度 ${depth}` : "根调用"}</span>
-          <InvocationBadge invocation={invocation} label={label} />
-          <code title={invocation.invocationId}>{invocation.invocationId.slice(-8)}</code>
-        </li>
+    <p className="trace-route-agents">
+      {invocations.map((invocation, index) => (
+        <Fragment key={invocation.invocationId}>
+          {index ? <span aria-hidden="true">→</span> : null}
+          <em data-state={invocation.state}>{label(invocation.agentId)}</em>
+        </Fragment>
       ))}
-    </ol>
+    </p>
   );
 }
 
@@ -279,7 +206,11 @@ function TraceWaterfall({
           return (
             <Fragment key={invocation.invocationId}>
               {index > 0 && handoff ? (
-                <li className="trace-waterfall-hop" data-state={handoff.completeStatus}>
+                <li
+                  className="trace-waterfall-hop"
+                  data-state={handoff.completeStatus}
+                  title={`${handoff.reason || "未记录原因"} · ${handoff.routeStatus} / ${handoff.receiveStatus} / ${handoff.completeStatus}`}
+                >
                   <div className="trace-waterfall-label">
                     <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
                     <span>
@@ -312,112 +243,42 @@ function TraceWaterfall({
                 <small>{elapsed(invocation.startedAt, invocation.endedAt)}</small>
                 {invocation.outcome.errorCode ? <b>{invocation.outcome.errorCode}</b> : null}
               </li>
-              {children.map((span) => (
-                <li
-                  className="trace-waterfall-row"
-                  data-kind={span.kind}
-                  data-state={span.state}
-                  key={span.spanId}
-                >
-                  <div className="trace-waterfall-label">
-                    <strong title={span.name}>{span.name}</strong>
-                    <small>{span.kind}</small>
-                  </div>
-                  <div className="trace-waterfall-track">
-                    <i
-                      data-kind={span.kind}
-                      data-state={span.state}
-                      style={{
-                        left: `${position(span.startedAt)}%`,
-                        width: `${width(span.startedAt, span.endedAt)}%`,
-                      }}
-                    />
-                  </div>
-                  <small>{elapsed(span.startedAt, span.endedAt)}</small>
-                </li>
-              ))}
+              {children.map((span) => {
+                const attributes = span.attributes || {};
+                const isInjection = span.name === "memory_injected";
+                const detail = isInjection
+                  ? `delivered ${Number(attributes.delivered || 0)}`
+                  : `命中 ${Number(attributes.totalHits || 0)}（Memory ${Number(
+                      attributes.memoryHits || 0
+                    )}）`;
+                return (
+                  <li
+                    className="trace-waterfall-row"
+                    data-kind={span.kind}
+                    data-state={span.state}
+                    key={span.spanId}
+                  >
+                    <div className="trace-waterfall-label">
+                      <strong title={span.name}>
+                        {isInjection ? "Memory 注入" : "Memory 检索"}
+                      </strong>
+                      <small>{detail}</small>
+                    </div>
+                    <div className="trace-waterfall-track">
+                      <i
+                        data-kind={span.kind}
+                        data-state={span.state}
+                        style={{
+                          left: `${position(span.startedAt)}%`,
+                          width: `${width(span.startedAt, span.endedAt)}%`,
+                        }}
+                      />
+                    </div>
+                    <small>{elapsed(span.startedAt, span.endedAt)}</small>
+                  </li>
+                );
+              })}
             </Fragment>
-          );
-        })}
-      </ol>
-    </section>
-  );
-}
-
-function HandoffEvidence({ handoffs }: { handoffs: ExecutionHandoff[] }) {
-  if (!handoffs.length) return null;
-  return (
-    <section className="trace-evidence trace-handoff-evidence" aria-label="Handoff 执行证据">
-      <header>
-        <strong>Handoff 证据</strong>
-        <small>路由 → 接收 → 完成</small>
-      </header>
-      <ol>
-        {handoffs.map((handoff) => (
-          <li data-state={handoff.completeStatus} key={handoff.handoffId}>
-            <div>
-              <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
-              <strong>
-                {handoff.sourceAgent} → {handoff.targetAgent}
-              </strong>
-              <span>深度 {handoff.depth}</span>
-            </div>
-            <small>{handoff.reason || "未记录原因"}</small>
-            <small>
-              {handoff.routeStatus} / {handoff.receiveStatus} / {handoff.completeStatus}
-            </small>
-            <small>
-              记录 {clock(handoff.createdAt)} · 入队 {clock(handoff.enqueuedAt)} · 启动{" "}
-              {clock(handoff.startedAt)} · 完成 {clock(handoff.completedAt)}
-            </small>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
-function MemoryRecallEvidence({ spans }: { spans: TraceSpan[] }) {
-  const recalls = spans.filter((span) => span.kind === "recall");
-  if (!recalls.length) return null;
-  const injections = recalls.filter((span) => span.name === "memory_injected");
-  const searches = recalls.filter((span) => span.name === "memory_searched");
-  return (
-    <section className="trace-evidence trace-memory-evidence" aria-label="Memory 检索与注入证据">
-      <header>
-        <strong>Memory 检索 / 注入</strong>
-        <small>
-          {searches.length} 次检索 · {injections.length} 次注入
-        </small>
-      </header>
-      <ol>
-        {recalls.map((span) => {
-          const attributes = span.attributes || {};
-          const isInjection = span.name === "memory_injected";
-          return (
-            <li data-kind="recall" key={span.spanId}>
-              <div>
-                <strong>{isInjection ? "注入" : "检索"}</strong>
-                <span>
-                  {isInjection
-                    ? `delivered ${Number(attributes.delivered || 0)}`
-                    : `命中 ${Number(attributes.totalHits || 0)}（Memory ${Number(
-                        attributes.memoryHits || 0
-                      )}）`}
-                </span>
-              </div>
-              <small>
-                {[
-                  attributes.availability ? `可用性 ${attributes.availability}` : null,
-                  Array.isArray(attributes.requestedLayers) && attributes.requestedLayers.length
-                    ? `层 ${attributes.requestedLayers.join("/")}`
-                    : null,
-                  attributes.truncated ? "截断" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "无附加属性"}
-              </small>
-            </li>
           );
         })}
       </ol>
@@ -698,7 +559,7 @@ export function TraceExplorer({
                   </code>
                 </section>
               ) : null}
-              <InvocationRoute invocations={selectedInvocations} label={label} />
+              <AgentChain invocations={selectedInvocations} label={label} />
               {selected.outcome.errorCode ? (
                 <div className="trace-breakpoint">
                   <span>断点</span>
@@ -715,8 +576,6 @@ export function TraceExplorer({
                   (selected.invocationCounts.failed || 0) + (selected.handoffCounts.failed || 0)
                 }
               />
-              <HandoffEvidence handoffs={selectedHandoffs} />
-              <MemoryRecallEvidence spans={detail.data?.spans || []} />
               <ToolSpanSummary spans={detail.data?.spans || []} />
             </article>
           ) : null}

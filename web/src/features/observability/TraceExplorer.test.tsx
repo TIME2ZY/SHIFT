@@ -400,12 +400,12 @@ describe("TraceExplorer", () => {
     expect(screen.getByText("执行时间轴")).toBeInTheDocument();
     expect(screen.getByText("工具执行")).toBeInTheDocument();
     expect(screen.getByText(/2 次调用 · 1 失败 · 1 孤儿 · 1 未闭合/)).toBeInTheDocument();
-    expect(screen.getByText("Memory 检索 / 注入")).toBeInTheDocument();
-    expect(screen.getByText("1 次检索 · 1 次注入")).toBeInTheDocument();
+    expect(screen.getAllByText("Memory 检索").length).toBeGreaterThan(0);
     expect(screen.getByText("命中 3（Memory 2）")).toBeInTheDocument();
+    expect(screen.getAllByText("Memory 注入").length).toBeGreaterThan(0);
     expect(screen.getByText("delivered 2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
-    expect(screen.getByRole("list", { name: "Agent 父子执行树" })).toBeInTheDocument();
-    expect(screen.getAllByText("子调用 · 深度 1")).toHaveLength(2);
+    expect(screen.getByText("3 Invocation · 0 Handoff · 无失败")).toBeInTheDocument();
+    expect(screen.getAllByText("handoff").length).toBe(2);
   });
 });

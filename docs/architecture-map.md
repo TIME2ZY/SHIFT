@@ -356,9 +356,11 @@ Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Consol
 与 completed；旧的 scheduling / execution / endToEnd 三个重叠公开字段已退出。
 
 Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
-pending/unknown 分类的 Handoff 与 Memory 指标。Trace 航线只用 `parentInvocationId` 表达父子因果，
-简单链横向展示，分支链切换为父子树；durable Handoff 作为独立阶段证据展示。Memory 卡片只展示
-既有 row 的来源 Invocation、Message、创建者与 evidence anchor，不把检索或注入推断为实际使用。
+pending/unknown 分类的 Handoff 与 Memory 指标。Trace 详情以单条 waterfall 时间轴表达因果：每次
+模型 invocation 一条 generation 行，Memory 检索 / 注入为其子行，durable Handoff 渲染为 generation
+之间的连接行；逐条工具过程只在主会话展示，审计页仅保留工具执行汇总。Memory 卡片展示既有 row 的
+来源 Invocation、Message、创建者与 evidence anchor，并从 `memory_events` 使用证据聚合展示被检索 /
+被注入次数（只读派生，不回写）。
 界面不自行聚合或缓存业务事实。右侧会话栏只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
 
 Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 MCP write。`memory_searched`
