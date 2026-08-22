@@ -2854,32 +2854,51 @@ body {
 
 .trace-ledger button {
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: 10px minmax(48px, auto) minmax(0, 1fr) auto;
   gap: var(--space-2);
-  align-items: center;
+  align-items: baseline;
   padding: 8px 10px 8px 0;
   color: var(--text-secondary);
   text-align: left;
 }
 
-.trace-ledger-copy {
+.trace-ledger-turn {
+  display: grid;
+  gap: 2px;
+}
+
+.trace-ledger-turn strong {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.trace-ledger-preview {
+  display: grid;
+  gap: 2px;
   min-width: 0;
 }
 
-.trace-ledger-copy > span {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.trace-ledger-copy > b {
+.trace-ledger-preview b {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 500;
-  line-height: 1.35;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-ledger-preview small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-ledger-elapsed {
+  justify-self: end;
+  color: var(--text-tertiary);
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -2904,12 +2923,7 @@ body {
 .trace-ledger button[data-state="active"] .trace-ledger-mark {
   background: var(--warning);
 }
-.trace-ledger button > span:nth-child(2) {
-  display: grid;
-  gap: 3px;
-}
-.trace-ledger small,
-.trace-ledger code {
+.trace-ledger small {
   color: var(--text-tertiary);
   font-size: 10px;
 }
@@ -3159,6 +3173,100 @@ body {
 }
 .trace-tool-summary p[data-anomaly] {
   color: var(--warning);
+}
+
+.trace-waterfall {
+  display: grid;
+  gap: var(--space-2);
+}
+.trace-waterfall > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.trace-waterfall > header strong {
+  font-size: 11px;
+}
+.trace-waterfall > header small {
+  color: var(--text-tertiary);
+  font: 10px/1 var(--font-mono);
+}
+.trace-waterfall ol {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trace-waterfall-row,
+.trace-waterfall-hop {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 4px 0;
+}
+.trace-waterfall-hop {
+  padding: 2px 0;
+  border-top: 1px dashed var(--border-subtle);
+}
+.trace-waterfall-label {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.trace-waterfall-label strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-waterfall-label small,
+.trace-waterfall-label code,
+.trace-waterfall-row > small {
+  color: var(--text-tertiary);
+  font: 9px/1.2 var(--font-mono);
+}
+.trace-waterfall-hop .trace-waterfall-label {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+}
+.trace-waterfall-hop[data-state="failed"] span,
+.trace-waterfall-row[data-state="failed"] > small {
+  color: var(--danger);
+}
+.trace-waterfall-track {
+  position: relative;
+  height: 12px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+}
+.trace-waterfall-track i {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 2px;
+  border-radius: 2px;
+}
+.trace-waterfall-track i[data-kind="generation"] {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.trace-waterfall-track i[data-kind="generation"][data-state="failed"],
+.trace-waterfall-track i[data-kind="generation"][data-state="aborted"] {
+  background: color-mix(in srgb, var(--danger) 60%, transparent);
+}
+.trace-waterfall-track i[data-kind="generation"][data-state="active"] {
+  background: color-mix(in srgb, var(--warning) 60%, transparent);
+}
+.trace-waterfall-track i[data-kind="recall"] {
+  background: color-mix(in srgb, var(--success) 55%, transparent);
+}
+.trace-waterfall-row > b {
+  color: var(--danger);
+  font: 9px/1 var(--font-mono);
 }
 
 .trace-metrics-panel {

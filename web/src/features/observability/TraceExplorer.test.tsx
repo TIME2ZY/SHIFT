@@ -393,10 +393,11 @@ describe("TraceExplorer", () => {
     expect(screen.getByText("需标注集")).toBeInTheDocument();
     expect(screen.getByText("-25pp")).toBeInTheDocument();
     expect(screen.getByText("样本不足")).toBeInTheDocument();
-    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
-    expect(screen.getAllByText("provider_exit_7")).toHaveLength(2);
-    expect(screen.getByText("Grok")).toBeInTheDocument();
+    expect(screen.getAllByText("provider_exit_7").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Grok").length).toBeGreaterThan(0);
+    expect(screen.getByText("执行时间轴")).toBeInTheDocument();
     expect(screen.getByText("工具执行")).toBeInTheDocument();
     expect(screen.getByText(/2 次调用 · 1 失败 · 1 孤儿 · 1 未闭合/)).toBeInTheDocument();
     expect(screen.getByText("Memory 检索 / 注入")).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { ExecutionHandoff, ExecutionInvocation, TraceSpan, TraceSummary } from "./types";
@@ -217,31 +217,128 @@ function InvocationRoute({
   );
 }
 
-function InvocationEvidence({ invocations }: { invocations: ExecutionInvocation[] }) {
+function TraceWaterfall({
+  invocations,
+  recallSpans,
+  handoffs,
+  label,
+  failures,
+}: {
+  invocations: ExecutionInvocation[];
+  recallSpans: TraceSpan[];
+  handoffs: ExecutionHandoff[];
+  label(id: string): string;
+  failures: number;
+}) {
+  const validStart = (value: string | null) => {
+    const time = Date.parse(value || "");
+    return Number.isFinite(time) ? time : null;
+  };
+  const times = [
+    ...invocations.map((invocation) => validStart(invocation.startedAt)),
+    ...invocations.map((invocation) => validStart(invocation.endedAt)),
+    ...recallSpans.map((span) => validStart(span.startedAt)),
+    ...recallSpans.map((span) => validStart(span.endedAt)),
+  ].filter((time): time is number => time != null);
+  if (!times.length) return null;
+  const traceStart = Math.min(...times);
+  const traceEnd = Math.max(...times);
+  const total = Math.max(1, traceEnd - traceStart);
+  const position = (value: string | null) => {
+    const time = validStart(value);
+    return time == null ? 0 : ((time - traceStart) / total) * 100;
+  };
+  const width = (from: string | null, to: string | null) => {
+    const a = validStart(from);
+    const b = validStart(to);
+    if (a == null) return 0.5;
+    const end = b == null ? Math.max(a + 1, traceEnd) : b;
+    return Math.max(0.5, ((end - a) / total) * 100);
+  };
+  const handoffBySource = new Map(
+    handoffs
+      .filter((handoff) => handoff.sourceInvocationId)
+      .map((handoff) => [handoff.sourceInvocationId, handoff])
+  );
+
   return (
-    <section className="trace-evidence" aria-label="Invocation 执行证据">
+    <section className="trace-waterfall" aria-label="执行时间轴">
       <header>
-        <strong>Invocation 证据</strong>
-        <small>开始 → 终态</small>
+        <strong>执行时间轴</strong>
+        <small>
+          {invocations.length} Invocation · {handoffs.length} Handoff ·{" "}
+          {failures ? `${failures} 失败` : "无失败"}
+        </small>
       </header>
       <ol>
-        {invocations.map((invocation) => (
-          <li data-state={invocation.state} key={invocation.invocationId}>
-            <div>
-              <code title={invocation.invocationId}>{invocation.invocationId.slice(-8)}</code>
-              <strong>{invocation.triggerType || "unknown trigger"}</strong>
-              <span>{elapsed(invocation.startedAt, invocation.endedAt)}</span>
-            </div>
-            <small>
-              {clock(invocation.startedAt)} → {clock(invocation.endedAt)} · {invocation.state}
-            </small>
-            {invocation.outcome.errorCode ? (
-              <b>{invocation.outcome.errorCode}</b>
-            ) : (
-              <small>{invocation.outcome.terminalReason || "尚无终态原因"}</small>
-            )}
-          </li>
-        ))}
+        {invocations.map((invocation, index) => {
+          const handoff = handoffBySource.get(invocation.invocationId);
+          const children = recallSpans.filter(
+            (span) => span.invocationId === invocation.invocationId
+          );
+          return (
+            <Fragment key={invocation.invocationId}>
+              {index > 0 && handoff ? (
+                <li className="trace-waterfall-hop" data-state={handoff.completeStatus}>
+                  <div className="trace-waterfall-label">
+                    <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
+                    <span>
+                      {label(handoff.sourceAgent)} → {label(handoff.targetAgent)}
+                    </span>
+                  </div>
+                  <div className="trace-waterfall-track" aria-hidden="true" />
+                  <small>{handoff.completeStatus}</small>
+                </li>
+              ) : null}
+              <li
+                className="trace-waterfall-row"
+                data-kind="generation"
+                data-state={invocation.state}
+              >
+                <div className="trace-waterfall-label">
+                  <strong>{label(invocation.agentId)}</strong>
+                  <small>{invocation.triggerType || "invocation"}</small>
+                </div>
+                <div className="trace-waterfall-track">
+                  <i
+                    data-kind="generation"
+                    data-state={invocation.state}
+                    style={{
+                      left: `${position(invocation.startedAt)}%`,
+                      width: `${width(invocation.startedAt, invocation.endedAt)}%`,
+                    }}
+                  />
+                </div>
+                <small>{elapsed(invocation.startedAt, invocation.endedAt)}</small>
+                {invocation.outcome.errorCode ? <b>{invocation.outcome.errorCode}</b> : null}
+              </li>
+              {children.map((span) => (
+                <li
+                  className="trace-waterfall-row"
+                  data-kind={span.kind}
+                  data-state={span.state}
+                  key={span.spanId}
+                >
+                  <div className="trace-waterfall-label">
+                    <strong title={span.name}>{span.name}</strong>
+                    <small>{span.kind}</small>
+                  </div>
+                  <div className="trace-waterfall-track">
+                    <i
+                      data-kind={span.kind}
+                      data-state={span.state}
+                      style={{
+                        left: `${position(span.startedAt)}%`,
+                        width: `${width(span.startedAt, span.endedAt)}%`,
+                      }}
+                    />
+                  </div>
+                  <small>{elapsed(span.startedAt, span.endedAt)}</small>
+                </li>
+              ))}
+            </Fragment>
+          );
+        })}
       </ol>
     </section>
   );
@@ -545,23 +642,24 @@ export function TraceExplorer({
                 key={trace.traceId}
               >
                 <span className="trace-ledger-mark" aria-hidden="true" />
-                <span className="trace-ledger-copy">
-                  <span>
-                    <strong>
-                      {trace.request
-                        ? `第 ${trace.request.turnNumber} 轮`
-                        : `请求 #${trace.requestAttempt}`}
-                    </strong>
-                    <small>{stateLabel(trace.state)}</small>
-                  </span>
+                <span className="trace-ledger-turn">
+                  <strong>
+                    {trace.request
+                      ? `第 ${trace.request.turnNumber} 轮`
+                      : `请求 #${trace.requestAttempt}`}
+                  </strong>
+                  <small>{stateLabel(trace.state)}</small>
+                </span>
+                <span className="trace-ledger-preview">
                   <b>{trace.request?.preview || "未关联用户消息"}</b>
                   <small>
                     {trace.invocations.map((invocation) => label(invocation.agentId)).join(" → ") ||
                       "未记录 Agent"}
-                    {` · ${trace.invocationCounts.total || 0}I / ${trace.handoffCounts.total || 0}H`}
                   </small>
                 </span>
-                <code>{elapsed(trace.startedAt, trace.endedAt)}</code>
+                <code className="trace-ledger-elapsed">
+                  {elapsed(trace.startedAt, trace.endedAt)}
+                </code>
               </button>
             ))}
           </div>
@@ -608,23 +706,15 @@ export function TraceExplorer({
                   <small>{selected.outcome.failureStage || selected.outcome.terminalReason}</small>
                 </div>
               ) : null}
-              <dl className="trace-facts">
-                <div>
-                  <dt>Invocation</dt>
-                  <dd>{selected.invocationCounts.total || 0}</dd>
-                </div>
-                <div>
-                  <dt>Handoff</dt>
-                  <dd>{selected.handoffCounts.accepted || 0}</dd>
-                </div>
-                <div>
-                  <dt>失败</dt>
-                  <dd>
-                    {(selected.invocationCounts.failed || 0) + (selected.handoffCounts.failed || 0)}
-                  </dd>
-                </div>
-              </dl>
-              <InvocationEvidence invocations={selectedInvocations} />
+              <TraceWaterfall
+                invocations={selectedInvocations}
+                recallSpans={(detail.data?.spans || []).filter((span) => span.kind === "recall")}
+                handoffs={selectedHandoffs}
+                label={label}
+                failures={
+                  (selected.invocationCounts.failed || 0) + (selected.handoffCounts.failed || 0)
+                }
+              />
               <HandoffEvidence handoffs={selectedHandoffs} />
               <MemoryRecallEvidence spans={detail.data?.spans || []} />
               <ToolSpanSummary spans={detail.data?.spans || []} />
