@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
-import { useMemoriesQuery } from "../memory/queries";
+import { useMemoriesQuery, useMemoryUsageQuery } from "../memory/queries";
 import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
@@ -13,6 +13,11 @@ function formatMemoryDate(value: string | number | undefined) {
 
 function shortId(value: string) {
   return value.length > 12 ? value.slice(-8) : value;
+}
+
+function usageEvidence(usage: { searched: number; injected: number } | undefined) {
+  if (!usage) return "未被检索";
+  return `检索 ${usage.searched} · 注入 ${usage.injected}`;
 }
 
 export function AuditPage({
@@ -28,7 +33,9 @@ export function AuditPage({
   sessionTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const memories = useMemoriesQuery(sessionId, true);
+  const memoryUsage = useMemoryUsageQuery(sessionId, true);
   const summary = useSessionAuditSummaryQuery(sessionId);
+  const usageOf = (id: string) => memoryUsage.data?.[id];
 
   return (
     <main id="main-content" className="audit-page">
@@ -143,7 +150,7 @@ export function AuditPage({
                   ) : null}
                   <div>
                     <dt>使用证据</dt>
-                    <dd>未标注</dd>
+                    <dd>{usageEvidence(usageOf(memory.id))}</dd>
                   </div>
                 </dl>
               </article>

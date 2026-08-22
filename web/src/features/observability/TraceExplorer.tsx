@@ -282,55 +282,73 @@ function HandoffEvidence({ handoffs }: { handoffs: ExecutionHandoff[] }) {
   );
 }
 
-function SpanEvidence({ spans }: { spans: TraceSpan[] }) {
-  if (!spans.length) return null;
+function MemoryRecallEvidence({ spans }: { spans: TraceSpan[] }) {
+  const recalls = spans.filter((span) => span.kind === "recall");
+  if (!recalls.length) return null;
+  const injections = recalls.filter((span) => span.name === "memory_injected");
+  const searches = recalls.filter((span) => span.name === "memory_searched");
   return (
-    <section className="trace-spans" aria-label="派生执行区段">
+    <section className="trace-evidence trace-memory-evidence" aria-label="Memory 检索与注入证据">
       <header>
-        <strong>Tool / Recall 区段</strong>
-        <small>{spans.filter((span) => !span.complete).length} incomplete</small>
+        <strong>Memory 检索 / 注入</strong>
+        <small>
+          {searches.length} 次检索 · {injections.length} 次注入
+        </small>
       </header>
       <ol>
-        {spans.map((span) => {
-          const attributes = Object.entries(span.attributes || {}).filter(
-            ([, value]) => value != null
-          );
+        {recalls.map((span) => {
+          const attributes = span.attributes || {};
+          const isInjection = span.name === "memory_injected";
           return (
-            <li
-              data-kind={span.kind}
-              data-complete={span.complete || undefined}
-              data-state={span.state}
-              key={span.spanId}
-            >
-              <div className="trace-span-main">
-                <span className="trace-span-kind">{span.kind}</span>
-                <strong className="trace-span-name">{span.name}</strong>
-                <small className="trace-span-status">
-                  {span.state === "orphaned"
-                    ? "orphan finish"
-                    : span.complete
-                      ? span.state
-                      : "missing end"}
-                </small>
+            <li data-kind="recall" key={span.spanId}>
+              <div>
+                <strong>{isInjection ? "注入" : "检索"}</strong>
+                <span>
+                  {isInjection
+                    ? `delivered ${Number(attributes.delivered || 0)}`
+                    : `命中 ${Number(attributes.totalHits || 0)}（Memory ${Number(
+                        attributes.memoryHits || 0
+                      )}）`}
+                </span>
               </div>
               <small>
-                {clock(span.startedAt)} → {clock(span.endedAt)} ·{" "}
-                {elapsed(span.startedAt, span.endedAt)}
+                {[
+                  attributes.availability ? `可用性 ${attributes.availability}` : null,
+                  Array.isArray(attributes.requestedLayers) && attributes.requestedLayers.length
+                    ? `层 ${attributes.requestedLayers.join("/")}`
+                    : null,
+                  attributes.truncated ? "截断" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "无附加属性"}
               </small>
-              {attributes.length ? (
-                <dl>
-                  {attributes.map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{key}</dt>
-                      <dd title={String(value)}>{String(value)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : null}
             </li>
           );
         })}
       </ol>
+    </section>
+  );
+}
+
+function ToolSpanSummary({ spans }: { spans: TraceSpan[] }) {
+  const tools = spans.filter((span) => span.kind === "tool");
+  if (!tools.length) return null;
+  const failed = tools.filter((span) => span.state === "failed").length;
+  const orphaned = tools.filter((span) => span.state === "orphaned").length;
+  const incomplete = tools.filter((span) => !span.complete).length;
+  const anomalies = [failed ? `${failed} 失败` : null, orphaned ? `${orphaned} 孤儿` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <section className="trace-tool-summary" aria-label="工具执行汇总">
+      <header>
+        <strong>工具执行</strong>
+        <small>完整过程见主会话</small>
+      </header>
+      <p data-anomaly={anomalies ? "true" : undefined}>
+        {tools.length} 次调用{anomalies ? ` · ${anomalies}` : " · 全部正常"}
+        {incomplete ? ` · ${incomplete} 未闭合` : ""}
+      </p>
     </section>
   );
 }
@@ -395,7 +413,7 @@ export function TraceExplorer({
 
         <section className="trace-metrics" aria-label="当前会话近 24 小时协作指标">
           <header>
-            <span>近 24 小时</span>
+            <span>时间窗 · 近 24 小时</span>
             <strong>当前会话 · 合格样本</strong>
           </header>
           {metrics.error ? <p className="react-panel-error">指标暂不可用。</p> : null}
@@ -460,8 +478,8 @@ export function TraceExplorer({
         {metrics.data ? (
           <section className="trace-offline-eval" aria-label="离线 Recall 评估">
             <header>
-              <span>全局离线评估</span>
-              <strong>不属于近 24 小时窗口</strong>
+              <span>作用域 · 全局</span>
+              <strong>离线评估 · 不属于近 24 小时窗口</strong>
             </header>
             <div>
               <strong>严格 Recall@K</strong>
@@ -609,7 +627,8 @@ export function TraceExplorer({
               </dl>
               <InvocationEvidence invocations={selectedInvocations} />
               <HandoffEvidence handoffs={selectedHandoffs} />
-              <SpanEvidence spans={detail.data?.spans || []} />
+              <MemoryRecallEvidence spans={detail.data?.spans || []} />
+              <ToolSpanSummary spans={detail.data?.spans || []} />
             </article>
           ) : null}
         </div>

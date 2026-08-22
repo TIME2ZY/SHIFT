@@ -61,6 +61,29 @@ export function useMemoriesQuery(sessionId: string | null, enabled: boolean) {
   });
 }
 
+export interface MemoryUsageEntry {
+  searched: number;
+  injected: number;
+}
+
+export type MemoryUsage = Record<string, MemoryUsageEntry>;
+
+async function listMemoryUsage(sessionId: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ sessionId });
+  const response = await apiRequest<{ usage: MemoryUsage }>(`/api/memories/usage?${query}`, {
+    signal,
+  });
+  return response.usage || {};
+}
+
+export function useMemoryUsageQuery(sessionId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.sessions.memoryUsage(sessionId ?? ""),
+    queryFn: ({ signal }) => listMemoryUsage(sessionId!, signal),
+    enabled: enabled && Boolean(sessionId),
+  });
+}
+
 export function useMemoryInjectQuery(sessionId: string | null) {
   return useQuery({
     queryKey: queryKeys.sessions.memoryInject(sessionId ?? ""),
