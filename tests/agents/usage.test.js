@@ -2,6 +2,21 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { normalizeUsage, createUsageAccumulator } = require("../../src/agents/usage");
 
+test("normalizeUsage understands ACP thoughtTokens and cachedReadTokens", () => {
+  const usage = normalizeUsage({
+    inputTokens: 100,
+    cachedReadTokens: 20,
+    outputTokens: 30,
+    thoughtTokens: 10,
+    totalTokens: 140,
+  });
+  assert.equal(usage.inputTokens, 100);
+  assert.equal(usage.cachedInputTokens, 20);
+  assert.equal(usage.reasoningTokens, 10);
+  assert.equal(usage.outputTokens, 40);
+  assert.equal(usage.totalTokens, 140);
+});
+
 test("normalizeUsage understands snake_case and nested OpenCode tokens", () => {
   assert.deepEqual(
     normalizeUsage({

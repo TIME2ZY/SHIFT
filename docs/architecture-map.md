@@ -187,6 +187,11 @@ Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都�
 `SHIFT_*` 凭据；旧 `--plugin-dir` 与仓库内 Grok MCP 插件已删除。Antigravity 项目插件不是
 在线路径；全局注册合并既有 server，若同名 server 不属于 SHIFT 则显式失败。
 
+Grok ACP billing usage 只从 `acp.prompt_result` 映射为一条 `usage.update`：优先
+`result.usage`（ACP PromptResponse 实验字段），否则 `result._meta.usage`（Grok 当前
+wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双计。标准
+`sessionUpdate: usage_update` 只更新上下文占用 / 窗口容量，不写入 billing totals。
+
 ---
 
 ### 3.4.2 Skill 投递
@@ -196,7 +201,7 @@ Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都�
 | 加载 / 索引     | **仅** `src/server/skills.js`（`skills/*/SKILL.md`）                                                                        | 进程内 cache                                             |
 | 隔离 worktree   | `agents/skill-materialize.js` ← `skills.prepareSkillDelivery` ← `chat-routes` 在 `runWorkspace` 确定后、start invocation 前 | `{worktree}/.agents/skills/<name>/SKILL.md` 副本（copy） |
 | MCP 按需        | `list_platform_skills` / `load_platform_skill`                                                                              | 同一 loader 的只读视图                                   |
-| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A hop 由 `playbookSkillNamesForHop` 强制注入对应 playbook                                    | 用户消息 / receive bundle                                |
+| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A hop 由 `playbookSkillNamesForHop` 强制注入对应 playbook                                   | 用户消息 / receive bundle                                |
 
 **结论（skill）：**
 
