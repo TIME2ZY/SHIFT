@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { createProviderRuntime, buildProviderTransportInvocation } = require("../../src/agents/providers");
+const {
+  createProviderRuntime,
+  buildProviderTransportInvocation,
+} = require("../../src/agents/providers");
 const {
   preferredPermission,
   decideAcpPermission,
@@ -30,10 +33,7 @@ test("ACP runtime maps message, thought, and tool lifecycle to canonical events"
   const seen = [];
   const push = (update) => {
     seen.push(
-      ...runtime.transform(
-        { type: "acp.session_update", sessionId: "acp-session", update },
-        ctx
-      )
+      ...runtime.transform({ type: "acp.session_update", sessionId: "acp-session", update }, ctx)
     );
   };
 
@@ -325,6 +325,149 @@ test("ACP prompt result usage maps to the shared usage event", () => {
   assert.equal(usage.totalTokens, 140);
 });
 
+test("ACP prompt result usage reads Grok _meta.usage when top-level usage is absent", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.prompt_result",
+      sessionId: "grok-meta-usage",
+      result: {
+        stopReason: "end_turn",
+        _meta: {
+          inputTokens: 17097,
+          outputTokens: 165,
+          totalTokens: 17262,
+          cachedReadTokens: 13824,
+          reasoningTokens: 127,
+          costUsdTicks: 207144000,
+          usage: {
+            inputTokens: 31028,
+            outputTokens: 218,
+            totalTokens: 31246,
+            cachedReadTokens: 25088,
+            reasoningTokens: 177,
+            costUsdTicks: 207144000,
+            modelCalls: 2,
+            numTurns: 2,
+          },
+        },
+      },
+    },
+    ctx
+  );
+  const usageEvents = events.filter((event) => event.type === "usage.update");
+  assert.equal(usageEvents.length, 1);
+  const usage = usageEvents[0];
+  assert.equal(usage.inputTokens, 31028);
+  assert.equal(usage.cachedInputTokens, 25088);
+  assert.equal(usage.outputTokens, 218);
+  assert.equal(usage.reasoningTokens, 177);
+  assert.equal(usage.totalTokens, 31246);
+  assert.equal(usage.costUsd, undefined);
+});
+
+test("ACP prompt result fills reasoning from _meta.usage when top-level usage omits it", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.prompt_result",
+      sessionId: "usage-reasoning-fill",
+      result: {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens: 31028,
+          outputTokens: 218,
+          cachedReadTokens: 25088,
+          totalTokens: 31246,
+        },
+        _meta: {
+          usage: {
+            inputTokens: 31028,
+            outputTokens: 218,
+            cachedReadTokens: 25088,
+            reasoningTokens: 177,
+            totalTokens: 31246,
+          },
+        },
+      },
+    },
+    ctx
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.equal(usage.inputTokens, 31028);
+  assert.equal(usage.outputTokens, 218);
+  assert.equal(usage.reasoningTokens, 177);
+  assert.equal(usage.totalTokens, 31246);
+});
+
+test("ACP prompt result usage prefers top-level usage over _meta.usage", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.prompt_result",
+      sessionId: "usage-priority",
+      result: {
+        stopReason: "end_turn",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+        },
+        _meta: {
+          usage: {
+            inputTokens: 31028,
+            outputTokens: 218,
+            totalTokens: 31246,
+          },
+        },
+      },
+    },
+    ctx
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.equal(usage.inputTokens, 100);
+  assert.equal(usage.outputTokens, 20);
+  assert.equal(usage.totalTokens, 120);
+});
+
+test("ACP prompt result without usage does not emit a zero usage.update", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.prompt_result",
+      sessionId: "no-usage",
+      result: { stopReason: "end_turn" },
+    },
+    ctx
+  );
+  assert.equal(events.filter((event) => event.type === "usage.update").length, 0);
+});
+
+test("ACP usage_update maps context occupancy and does not write billing totals", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = runtime.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "context-usage",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 4096,
+        size: 200000,
+        cost: { currency: "USD", amount: 0.02 },
+      },
+    },
+    ctx
+  );
+  const usage = events.find((event) => event.type === "usage.update");
+  assert.equal(usage.contextTokens, 4096);
+  assert.equal(usage.contextWindowTokens, 200000);
+  assert.equal(usage.contextTokensExact, true);
+  assert.equal(usage.costUsd, 0.02);
+  assert.equal(usage.inputTokens, undefined);
+  assert.equal(usage.outputTokens, undefined);
+  assert.equal(usage.totalTokens, undefined);
+});
+
 test("ACP session reuse selects session/load only when both id and capability exist", () => {
   assert.equal(
     shouldLoadAcpSession(
@@ -340,10 +483,7 @@ test("ACP session reuse selects session/load only when both id and capability ex
     ),
     false
   );
-  assert.equal(
-    shouldLoadAcpSession({}, { agentCapabilities: { loadSession: true } }),
-    false
-  );
+  assert.equal(shouldLoadAcpSession({}, { agentCapabilities: { loadSession: true } }), false);
 });
 
 test("ACP new and load requests carry the same current MCP descriptors", () => {

@@ -6,6 +6,8 @@ const ALIASES = Object.freeze({
   cachedInputTokens: [
     "cachedInputTokens",
     "cached_input_tokens",
+    "cachedReadTokens",
+    "cached_read_tokens",
     "cacheReadInputTokens",
     "cache_read_input_tokens",
     "cacheRead",
@@ -24,6 +26,8 @@ const ALIASES = Object.freeze({
     "reasoning_tokens",
     "reasoningOutputTokens",
     "reasoning_output_tokens",
+    "thoughtTokens",
+    "thought_tokens",
     "thinkingTokens",
     "thinking",
     "thinking_tokens",

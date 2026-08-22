@@ -32,7 +32,8 @@ function toolResult(update) {
  */
 function acpToolMeta(update) {
   const meta = update && update._meta && typeof update._meta === "object" ? update._meta : null;
-  const tool = meta && meta["x.ai/tool"] && typeof meta["x.ai/tool"] === "object" ? meta["x.ai/tool"] : null;
+  const tool =
+    meta && meta["x.ai/tool"] && typeof meta["x.ai/tool"] === "object" ? meta["x.ai/tool"] : null;
   if (!tool) return {};
   return {
     name: typeof tool.name === "string" && tool.name.trim() ? tool.name.trim() : undefined,
@@ -88,6 +89,46 @@ function optionalToolDisplayFields(current) {
   if (current.label) fields.label = current.label;
   if (current.toolKind) fields.toolKind = current.toolKind;
   return fields;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function firstFiniteToken(source, keys) {
+  if (!isPlainObject(source)) return undefined;
+  for (const key of keys) {
+    const number = Number(source[key]);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+  return undefined;
+}
+
+/**
+ * ACP PromptResponse.usage is the official billing source. Grok currently
+ * puts the same turn counters on result._meta.usage instead. Flattened
+ * _meta.inputTokens is last-call only and must not replace nested usage.
+ */
+function usageFromPromptResult(result) {
+  if (!isPlainObject(result)) return null;
+  const meta = isPlainObject(result._meta) ? result._meta : null;
+  const official = isPlainObject(result.usage) ? result.usage : null;
+  const vendor = meta && isPlainObject(meta.usage) ? meta.usage : null;
+  if (!official && !vendor) return null;
+  if (!official) return vendor;
+  if (firstFiniteToken(official, ["thoughtTokens", "reasoningTokens"]) !== undefined || !vendor) {
+    return official;
+  }
+  const vendorReasoning = firstFiniteToken(vendor, ["thoughtTokens", "reasoningTokens"]);
+  return vendorReasoning === undefined
+    ? official
+    : { ...official, reasoningTokens: vendorReasoning };
+}
+
+function usdCostFromUpdate(update) {
+  if (update?.cost?.currency !== "USD") return undefined;
+  const amount = Number(update.cost.amount);
+  return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
 }
 
 function createAcpRuntime(_config = {}) {
@@ -198,23 +239,10 @@ function createAcpRuntime(_config = {}) {
         ];
       }
       if (event.type === "acp.prompt_result") {
-        const usage = event.result?.usage;
-        if (!usage || typeof usage !== "object") return [];
-        const usageEvent = makeUsageEvent(
-          base(ctx),
-          {
-            inputTokens: usage.inputTokens,
-            cachedInputTokens: usage.cachedReadTokens,
-            outputTokens: usage.outputTokens,
-            reasoningTokens: usage.thoughtTokens,
-            totalTokens: usage.totalTokens,
-          },
-          {
-            scope: "turn",
-            mode: "cumulative",
-            reasoningOutputMode: "additional",
-          }
-        );
+        const usageEvent = makeUsageEvent(base(ctx), usageFromPromptResult(event.result), {
+          scope: "turn",
+          mode: "cumulative",
+        });
         return [...flushBuffers(ctx, true), ...(usageEvent ? [usageEvent] : [])];
       }
       if (event.type !== "acp.session_update") {
@@ -265,21 +293,28 @@ function createAcpRuntime(_config = {}) {
                 : [],
             }),
           ];
-        case "usage_update":
-          return [
-            ...flushBuffers(ctx, true),
-            makeEvent("usage.update", {
-              ...base(ctx),
+        case "usage_update": {
+          const occupancy = Number(update.used);
+          const hasOccupancy = Number.isFinite(occupancy) && occupancy >= 0;
+          const costUsd = usdCostFromUpdate(update);
+          if (!hasOccupancy && costUsd === undefined) {
+            return flushBuffers(ctx, true);
+          }
+          const usageEvent = makeUsageEvent(
+            base(ctx),
+            {
+              ...(hasOccupancy ? { contextTokens: occupancy } : {}),
+              contextWindowTokens: update.size,
+              ...(costUsd !== undefined ? { costUsd } : {}),
+            },
+            {
               scope: "turn",
               mode: "cumulative",
-              totalTokens: Number(update.used || 0),
-              contextTokens: Number.isFinite(update.size) ? update.size : null,
-              contextTokensExact: true,
-              ...(update.cost?.currency === "USD" && Number.isFinite(update.cost.amount)
-                ? { costUsd: update.cost.amount }
-                : {}),
-            }),
-          ];
+              contextTokensExact: hasOccupancy,
+            }
+          );
+          return [...flushBuffers(ctx, true), ...(usageEvent ? [usageEvent] : [])];
+        }
         case "user_message_chunk":
         case "available_commands_update":
         case "current_mode_update":
