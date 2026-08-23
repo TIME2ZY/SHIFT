@@ -244,8 +244,9 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 - Web 不再公开 Workspace / Diff 页面；worktree 仍是后端执行隔离与交付校验机制，聊天仅保留
   文件变更摘要，审计页占用原工作区顶级入口；
   `/api/project` 与会话创建后修改目录的 UI 已删除。
-- live 场景与 Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
+- Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
+  （旧 `scripts/live/` 真实 CLI 场景已整体移除，待以独立 sandbox 项目方案重建。）
 - 产品 Memory 对 Agent 只公开 `shift_context` MCP；其私有 HTTP bridge 使用
   `/api/callbacks/memory-write`，已删除 `/api/callbacks/memory-upsert` 兼容别名及 CLI/测试入口。
 - Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。

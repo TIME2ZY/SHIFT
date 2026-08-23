@@ -35,10 +35,7 @@
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "storage:init-home": "node scripts/init-storage-home.js",
-    "storage:migrate-home": "node scripts/migrate-storage-home.js",
-    "test:live:solo-grok": "node scripts/live/run-solo-grok.js",
-    "test:live:multi-collab": "node scripts/live/run-multi-collab.js",
-    "test:live:observability": "node scripts/live/run-observability-acceptance.js"
+    "storage:migrate-home": "node scripts/migrate-storage-home.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
