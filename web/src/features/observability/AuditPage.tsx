@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
-import { useMemoriesQuery } from "../memory/queries";
+import type { MemoryItem } from "../memory/queries";
+import { useMemoriesQuery, useMemoryUsageQuery } from "../memory/queries";
 import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
@@ -13,6 +15,11 @@ function formatMemoryDate(value: string | number | undefined) {
 
 function shortId(value: string) {
   return value.length > 12 ? value.slice(-8) : value;
+}
+
+function usageEvidence(usage: { searched: number; injected: number } | undefined) {
+  if (!usage) return "未被检索";
+  return `检索 ${usage.searched} · 注入 ${usage.injected}`;
 }
 
 export function AuditPage({
@@ -28,19 +35,25 @@ export function AuditPage({
   sessionTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const memories = useMemoriesQuery(sessionId, true);
+  const memoryUsage = useMemoryUsageQuery(sessionId, true);
   const summary = useSessionAuditSummaryQuery(sessionId);
+  const usageOf = (id: string) => memoryUsage.data?.[id];
 
   return (
     <main id="main-content" className="audit-page">
       <header className="audit-page-header">
-        <div className="audit-page-header-info">
-          <span className="audit-page-eyebrow">审计 · {sessionTitle}</span>
-          <h1>运行与 Memory 审计</h1>
-          <p>
-            核对 Agent 执行链、MCP 检索、自动注入和写入结果。Memory 由 Agent
-            自动抽取，不设人工审核状态。
-          </p>
-        </div>
+        <span className="audit-page-chip">{sessionTitle}</span>
+        {sessionId ? (
+          <span className="audit-page-chip audit-page-chip-id" title={sessionId}>
+            {shortId(sessionId)}
+          </span>
+        ) : null}
+        {summary.data ? (
+          <span className="audit-page-chip">
+            最后活动 {formatMemoryDate(summary.data.execution.lastActivityAt)}
+          </span>
+        ) : null}
+        <span className="audit-page-chip-hint">Memory 由 Agent 自动抽取，不设人工审核状态。</span>
       </header>
 
       {summary.data ? <SessionAuditOverview summary={summary.data} agents={agents} /> : null}
@@ -93,64 +106,80 @@ export function AuditPage({
           ) : null}
           <div className="react-memory-list">
             {memories.data?.memories.map((memory) => (
-              <article key={memory.id} className="audit-memory-card">
-                <header>
-                  <span>{memory.kind || "memory"}</span>
-                  <small>{memory.scope || memory.status || "active"}</small>
-                </header>
-                {memory.topic ? <strong>{memory.topic}</strong> : null}
-                <p>{memory.content}</p>
-                <dl className="audit-memory-provenance">
-                  <div>
-                    <dt>创建</dt>
-                    <dd>{formatMemoryDate(memory.createdAt)}</dd>
-                  </div>
-                  {memory.sourceInvocationId ? (
-                    <div>
-                      <dt>来源 Invocation</dt>
-                      <dd title={memory.sourceInvocationId}>
-                        {shortId(memory.sourceInvocationId)}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {memory.sourceMessageId ? (
-                    <div>
-                      <dt>来源消息</dt>
-                      <dd title={memory.sourceMessageId}>{shortId(memory.sourceMessageId)}</dd>
-                    </div>
-                  ) : null}
-                  {memory.createdBy ? (
-                    <div>
-                      <dt>创建者</dt>
-                      <dd>{memory.createdBy}</dd>
-                    </div>
-                  ) : null}
-                  {typeof memory.metadata?.evidenceKind === "string" ? (
-                    <div>
-                      <dt>证据类型</dt>
-                      <dd>{memory.metadata.evidenceKind}</dd>
-                    </div>
-                  ) : null}
-                  <div>
-                    <dt>证据锚点</dt>
-                    <dd>{Array.isArray(memory.anchors) ? memory.anchors.length : 0}</dd>
-                  </div>
-                  {memory.supersededBy ? (
-                    <div>
-                      <dt>被替代为</dt>
-                      <dd title={memory.supersededBy}>{shortId(memory.supersededBy)}</dd>
-                    </div>
-                  ) : null}
-                  <div>
-                    <dt>使用证据</dt>
-                    <dd>未标注</dd>
-                  </div>
-                </dl>
-              </article>
+              <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
             ))}
           </div>
         </aside>
       </div>
     </main>
+  );
+}
+
+function MemoryCard({
+  memory,
+  usage,
+}: {
+  memory: MemoryItem;
+  usage: { searched: number; injected: number } | undefined;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <article className="audit-memory-card">
+      <button
+        type="button"
+        className="audit-memory-card-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span>{memory.kind || "memory"}</span>
+        {memory.topic ? <strong>{memory.topic}</strong> : null}
+        <small>{usageEvidence(usage)}</small>
+      </button>
+      {expanded ? (
+        <div className="audit-memory-card-detail">
+          <p>{memory.content}</p>
+          <dl className="audit-memory-provenance">
+            <div>
+              <dt>创建</dt>
+              <dd>{formatMemoryDate(memory.createdAt)}</dd>
+            </div>
+            {memory.sourceInvocationId ? (
+              <div>
+                <dt>来源 Invocation</dt>
+                <dd title={memory.sourceInvocationId}>{shortId(memory.sourceInvocationId)}</dd>
+              </div>
+            ) : null}
+            {memory.sourceMessageId ? (
+              <div>
+                <dt>来源消息</dt>
+                <dd title={memory.sourceMessageId}>{shortId(memory.sourceMessageId)}</dd>
+              </div>
+            ) : null}
+            {memory.createdBy ? (
+              <div>
+                <dt>创建者</dt>
+                <dd>{memory.createdBy}</dd>
+              </div>
+            ) : null}
+            {typeof memory.metadata?.evidenceKind === "string" ? (
+              <div>
+                <dt>证据类型</dt>
+                <dd>{memory.metadata.evidenceKind}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>证据锚点</dt>
+              <dd>{Array.isArray(memory.anchors) ? memory.anchors.length : 0}</dd>
+            </div>
+            {memory.supersededBy ? (
+              <div>
+                <dt>被替代为</dt>
+                <dd title={memory.supersededBy}>{shortId(memory.supersededBy)}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      ) : null}
+    </article>
   );
 }

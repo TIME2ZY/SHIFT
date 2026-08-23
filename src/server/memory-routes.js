@@ -56,6 +56,30 @@ function createMemoryRoutes({
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/memories/usage") {
+      const sessionId = url.searchParams.get("sessionId") || url.searchParams.get("threadId");
+      if (!sessionId || !isValidOpaqueId(sessionId)) {
+        sendJson(res, 400, { error: "sessionId is required." });
+        return true;
+      }
+      if (getSession && !getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      if (!storage?.memoryEvents?.usageForThread) {
+        sendJson(res, 503, { error: "Memory usage telemetry is unavailable." });
+        return true;
+      }
+      try {
+        const usage = storage.memoryEvents.usageForThread(sessionId);
+        sendJson(res, 200, { sessionId, usage });
+      } catch (error) {
+        logger.error?.(`[memory-api] usage failed: ${error.message}`);
+        sendJson(res, 400, { error: error.message });
+      }
+      return true;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/memories") {
       const sessionId = url.searchParams.get("sessionId") || url.searchParams.get("threadId");
       if (!sessionId || !isValidOpaqueId(sessionId)) {

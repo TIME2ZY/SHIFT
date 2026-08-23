@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AuditPage } from "./AuditPage";
@@ -74,6 +75,11 @@ vi.mock("../memory/queries", () => ({
     isPending: false,
     error: null,
   }),
+  useMemoryUsageQuery: () => ({
+    data: { "memory-1": { searched: 2, injected: 1 } },
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("AuditPage", () => {
@@ -92,19 +98,38 @@ describe("AuditPage", () => {
       </QueryClientProvider>
     );
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: "运行与 Memory 审计" })
-    ).toBeInTheDocument();
+    expect(screen.getByText("审计测试")).toBeInTheDocument();
     expect(screen.getByText("Trace 工作台")).toBeInTheDocument();
     expect(screen.getByText("会话证据概览")).toBeInTheDocument();
     expect(screen.getByText("2 轮")).toBeInTheDocument();
     expect(screen.getByText("1 Trace")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "当前 Memory" })).toBeInTheDocument();
+    expect(screen.getByText("存储")).toBeInTheDocument();
+    expect(screen.getByText("检索 2 · 注入 1")).toBeInTheDocument();
+    expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
+  });
+
+  it("discloses memory provenance only after expanding the card", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <AuditPage
+          sessionId="session-1"
+          sessionTitle="审计测试"
+          agents={[{ id: "codex", label: "Codex" }]}
+          onOpenChat={() => undefined}
+          onOpenSessions={() => undefined}
+          sessionTriggerRef={createRef<HTMLButtonElement>()}
+        />
+      </QueryClientProvider>
+    );
+
+    expect(screen.queryByText("SQLite 是唯一真相源。")).not.toBeInTheDocument();
+    expect(screen.queryByText("来源 Invocation")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /存储/ }));
     expect(screen.getByText("SQLite 是唯一真相源。")).toBeInTheDocument();
     expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
     expect(screen.getByText("assistant-output")).toBeInTheDocument();
-    expect(screen.getByText("使用证据")).toBeInTheDocument();
-    expect(screen.getByText("未标注")).toBeInTheDocument();
-    expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
   });
 });

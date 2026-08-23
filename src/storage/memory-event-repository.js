@@ -29,6 +29,12 @@ function createMemoryEventRepository(db) {
     ORDER BY id DESC
     LIMIT ?
   `);
+  const listUsageByThread = db.prepare(`
+    SELECT event_type, payload_json FROM memory_events
+    WHERE thread_id = ? AND event_type IN ('memory_searched', 'memory_injected')
+    ORDER BY id DESC
+    LIMIT ?
+  `);
   const listByType = db.prepare(`
     SELECT * FROM memory_events
     WHERE event_type = ?
@@ -131,6 +137,27 @@ function createMemoryEventRepository(db) {
     listForThread(threadId, options = {}) {
       if (!threadId) return [];
       return listByThread.all(threadId, normalizeLimit(options.limit, 100)).map(mapEvent);
+    },
+
+    /**
+     * Aggregate per-memory usage evidence from search/inject telemetry.
+     * memoryIds live in the event payload (one event covers many memories);
+     * the memory_id column is only set for single-memory lifecycle rows.
+     */
+    usageForThread(threadId, options = {}) {
+      if (!threadId) return {};
+      const usage = {};
+      for (const row of listUsageByThread.all(threadId, normalizeLimit(options.limit, 1000))) {
+        const payload = parsePayload(row.payload_json);
+        const memoryIds = Array.isArray(payload?.memoryIds) ? payload.memoryIds : [];
+        const field = row.event_type === "memory_injected" ? "injected" : "searched";
+        for (const memoryId of memoryIds) {
+          if (typeof memoryId !== "string" || !memoryId) continue;
+          usage[memoryId] = usage[memoryId] || { searched: 0, injected: 0 };
+          usage[memoryId][field] += 1;
+        }
+      }
+      return usage;
     },
 
     listByType(eventType, options = {}) {

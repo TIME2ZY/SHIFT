@@ -77,7 +77,7 @@ export interface TraceSpan {
   complete: boolean;
   startedAt: string | null;
   endedAt: string | null;
-  attributes: Record<string, string | number | boolean | null>;
+  attributes: Record<string, string | number | boolean | Array<string> | null>;
 }
 
 export interface TraceLink {
