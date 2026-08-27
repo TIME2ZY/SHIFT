@@ -270,6 +270,7 @@ function createChatRoutes({
         prompt: turnPrompt,
         invocationSource: recallService,
         digestSource: storage?.digests || null,
+        windowSealSource: storage || null,
         retrieveSource: recallService || null,
         memorySource: memoryService || null,
       });

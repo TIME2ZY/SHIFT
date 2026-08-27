@@ -6,6 +6,7 @@ const {
   resolveRelatedMemoryLimit,
 } = require("../storage/memory-inject");
 const { slimInjectItems } = require("../storage/memory-metrics");
+const { readLatestWindowSealEvent } = require("../storage/memory-capture");
 
 // Recall rule injected into the first agent's prompt of each session. Modeled
 // after cat-cafe-tutorials lesson 08 "Session Chain" — the goal is to prevent
@@ -51,8 +52,10 @@ function buildIdentity({ threadId, sessionId, agent, generation = 1 }) {
 
 async function buildDigest({
   sessionId,
+  threadId = null,
   invocationSource,
   digestSource = null,
+  windowSealSource = null,
   logger = console,
 }) {
   if (!invocationSource || typeof invocationSource.listInvocationsWithMeta !== "function") {
@@ -79,6 +82,20 @@ async function buildDigest({
     `<!-- Digest -->`,
     `<!-- ${invocations.length} invocations in this session so far -->`,
   ];
+  const sealEvent = readLatestWindowSealEvent(windowSealSource, threadId || sessionId);
+  const sealContent =
+    sealEvent?.payload?.content ||
+    sealEvent?.content ||
+    (typeof sealEvent?.payload === "string" ? sealEvent.payload : "");
+  if (typeof sealContent === "string" && sealContent.trim()) {
+    lines.push(
+      `<!-- Window Seal Resume -->`,
+      `上一 window 已 seal，provider session 已放弃。以下续工包是协作事件，不是产品 Memory。`,
+      sealContent.trim(),
+      `<!-- /Window Seal Resume -->`,
+      ``
+    );
+  }
   if (semanticDigest) {
     lines.push(
       `## SQLite 恢复的 thread 状态`,
@@ -267,6 +284,7 @@ async function buildBootstrapPacket(opts) {
     prompt = "",
     invocationSource,
     digestSource = null,
+    windowSealSource = null,
     retrieveSource = null,
     memorySource = null,
     memoryBudgetChars = resolveMemoryBudget(),
@@ -293,6 +311,7 @@ async function buildBootstrapPacket(opts) {
     sessionId,
     invocationSource,
     digestSource,
+    windowSealSource,
     logger,
   });
   const packet = [identity, memoryPack.rendered, digest, RECALL_RULE, ""].join("\n");

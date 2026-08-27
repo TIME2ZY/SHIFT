@@ -500,6 +500,11 @@ async function runChatWorklist(ctx) {
           reason: "pre-call-projected",
           assistantContent: "",
           invocationState: "pre-call-rotate",
+          userGoal: turnPrompt,
+          events:
+            typeof storage?.invocations?.listEvents === "function"
+              ? storage.invocations.listEvents(invocationId)
+              : [],
         });
         if (capture?.captured) {
           sendSse(res, "window-sealed", capture.event);
@@ -694,6 +699,11 @@ async function runChatWorklist(ctx) {
           partial,
           invocationState: partial ? "sealed-partial" : "sealed-complete",
           sealMeta,
+          userGoal: turnPrompt,
+          events:
+            typeof storage?.invocations?.listEvents === "function"
+              ? storage.invocations.listEvents(activeInvocationId)
+              : [],
         });
         if (capture?.captured) {
           sendSse(res, "window-sealed", capture.event);
