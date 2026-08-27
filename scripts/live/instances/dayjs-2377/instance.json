@@ -1,0 +1,12 @@
+{
+  "id": "dayjs-2377",
+  "repo": "https://github.com/iamkun/dayjs",
+  "baseCommit": "5f3f8786c796cd432fe6bcb6966a810daea89203",
+  "issueFile": "issue.md",
+  "testPatch": "test.patch",
+  "installCommand": "npm ci",
+  "testArgs": ["test/plugin/duration.test.js", "--coverage=false"],
+  "testFile": "test/plugin/duration.test.js",
+  "failToPass": ["should handle floating point rounding errors"],
+  "sourceAllowPrefixes": ["src/"]
+}

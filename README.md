@@ -226,7 +226,7 @@ skills/         平台协作 Skill（`skills/<name>/SKILL.md`）；运行时物�
 | `npm run test:web:e2e`  | Playwright 核心浏览器流程    |
 | `npm run build:web`     | 构建 React 前端到 `dist/web` |
 
-`npm run verify:pr` 会运行上述静态检查、后端测试、Web 测试、浏览器 E2E 和生产构建；本地与 GitHub PR 使用同一门禁。真实 Provider 的 live 验收场景已被移除，替代方案见 `docs/architecture-map.md`。
+`npm run verify:pr` 会运行上述静态检查、后端测试、Web 测试、浏览器 E2E 和生产构建；本地与 GitHub PR 使用同一门禁。真实 Provider 的 live 验收（`npm run test:live:issue-fix`，在独立 sandbox 仓库上修真实 issue）保持手工执行，避免普通 PR 依赖外部凭据。
 
 ---
 

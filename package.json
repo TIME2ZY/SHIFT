@@ -35,7 +35,8 @@
     "drill:storage:recovery": "node scripts/drill-sqlite-recovery.js",
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "storage:init-home": "node scripts/init-storage-home.js",
-    "storage:migrate-home": "node scripts/migrate-storage-home.js"
+    "storage:migrate-home": "node scripts/migrate-storage-home.js",
+    "test:live:issue-fix": "node scripts/live/run-issue-fix.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

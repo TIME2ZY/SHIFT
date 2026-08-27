@@ -100,6 +100,8 @@ async function withServer(options, fn) {
     : [];
   const serverOptions = { ...options };
   delete serverOptions.initialSessionIds;
+  const patchStorage = serverOptions.patchStorage;
+  delete serverOptions.patchStorage;
   const memoryDbFile = path.join(tmpDir, "shift.sqlite");
   prepareCleanEpoch({ file: memoryDbFile });
   let projectKey;
@@ -117,22 +119,31 @@ async function withServer(options, fn) {
   if (!prevTranscriptDir) {
     process.env.SHIFT_TRANSCRIPT_DIR = path.join(tmpDir, "transcripts");
   }
-  const server = createServer({
-    memoryDbFile,
-    worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
-    uiToken: TEST_UI_TOKEN,
-    ...serverOptions,
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  projectKeysByOrigin.set(origin, projectKey);
-
+  let liveStorage = null;
   try {
-    await fn(origin, { memoryDbFile, projectKey });
+    if (typeof patchStorage === "function") {
+      liveStorage = createStorage({ file: memoryDbFile });
+      patchStorage(liveStorage);
+      serverOptions.storage = liveStorage;
+    }
+    const server = createServer({
+      memoryDbFile,
+      worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
+      uiToken: TEST_UI_TOKEN,
+      ...serverOptions,
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    projectKeysByOrigin.set(origin, projectKey);
+    try {
+      await fn(origin, { memoryDbFile, projectKey });
+    } finally {
+      projectKeysByOrigin.delete(origin);
+      await new Promise((resolve) => server.close(resolve));
+      await server.closeStorageContext?.();
+    }
   } finally {
-    projectKeysByOrigin.delete(origin);
-    await new Promise((resolve) => server.close(resolve));
-    await server.closeStorageContext?.();
+    liveStorage?.close();
     if (!prevTranscriptDir) {
       delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
@@ -3024,6 +3035,218 @@ test("empty exact-context emergency completes old invocation before one-shot rep
         } finally {
           storage.close();
         }
+      }
+    );
+  } finally {
+    if (previousCapacity === undefined) delete process.env.SHIFT_TEST_CAPACITY;
+    else process.env.SHIFT_TEST_CAPACITY = previousCapacity;
+  }
+});
+
+test("stream handler failure closes the invocation as failed without crashing the server", async () => {
+  await withServer(
+    {
+      spawnRunner() {
+        const child = createMockChild();
+        child.kill = () => {
+          process.nextTick(() => child.emit("close", null, "SIGTERM"));
+          return true;
+        };
+        process.nextTick(() => {
+          child.stdout.write(
+            `${JSON.stringify({
+              type: "text.delta",
+              agent: "codex",
+              invocationId: "inv-stream-fail",
+              text: "partial ",
+            })}\n`
+          );
+          // Pipe failure mid-stream must not escape as an uncaught exception.
+          child.stdout.emit("error", new Error("EMFILE: too many open files"));
+        });
+        return child;
+      },
+    },
+    async (baseUrl, { memoryDbFile }) => {
+      const created = await createProjectSession(baseUrl).then((response) => response.json());
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: created.session.id,
+          agent: "codex",
+          prompt: "hello",
+        }),
+      });
+      const body = await response.text();
+      assert.match(body, /event: error/);
+      assert.match(body, /stdout stream failed/);
+      assert.match(body, /invocation closed as failed/);
+      assert.doesNotMatch(body, /event: done/);
+
+      const storage = createStorage({ file: memoryDbFile });
+      try {
+        const invocations = storage.invocations.listForThread(created.session.id);
+        assert.equal(invocations.length, 1);
+        assert.equal(invocations[0].state, "failed");
+        assert.equal(invocations[0].terminalReason, "stream-handler-failed");
+        assert.equal(invocations[0].failureStage, "stream_handler");
+        assert.equal(invocations[0].errorCode, "stream_handler_failed");
+        assert.ok(invocations[0].isTerminal);
+      } finally {
+        storage.close();
+      }
+
+      // The failure must stay request-scoped: the server keeps serving.
+      const agentsResponse = await fetch(`${baseUrl}/api/agents`);
+      assert.equal(agentsResponse.status, 200);
+    }
+  );
+});
+
+function patchAppendEventToFail(storage, failingKinds) {
+  const kinds = new Set(failingKinds);
+  const original = storage.invocations.appendEvent.bind(storage.invocations);
+  storage.invocations.appendEvent = (event) => {
+    if (kinds.has(event.kind)) {
+      throw new Error(`sqlite persist failed: ${event.kind}`);
+    }
+    return original(event);
+  };
+}
+
+test("buffered stream persist failure closes as stream-handler-failed without crashing the server", async () => {
+  await withServer(
+    {
+      patchStorage(storage) {
+        patchAppendEventToFail(storage, ["text.delta"]);
+      },
+      spawnRunner() {
+        const child = createMockChild();
+        child.kill = () => {
+          process.nextTick(() => child.emit("close", 0, null));
+          return true;
+        };
+        process.nextTick(() => {
+          child.stdout.write(
+            `${JSON.stringify({
+              type: "text.delta",
+              agent: "codex",
+              invocationId: "inv-persist-flush",
+              text: "partial ",
+            })}\n`
+          );
+          child.emit("close", 0, null);
+        });
+        return child;
+      },
+    },
+    async (baseUrl, { memoryDbFile }) => {
+      const created = await createProjectSession(baseUrl).then((response) => response.json());
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: created.session.id,
+          agent: "codex",
+          prompt: "hello",
+        }),
+      });
+      const body = await response.text();
+      assert.match(body, /event: error/);
+      assert.match(body, /invocation closed as failed/);
+      assert.doesNotMatch(body, /event: done/);
+      assert.doesNotMatch(body, /Invocation .* is not active/);
+
+      const storage = createStorage({ file: memoryDbFile });
+      try {
+        const invocations = storage.invocations.listForThread(created.session.id);
+        assert.equal(invocations.length, 1);
+        assert.equal(invocations[0].state, "failed");
+        assert.equal(invocations[0].terminalReason, "stream-handler-failed");
+        assert.equal(invocations[0].failureStage, "stream_handler");
+        assert.equal(invocations[0].errorCode, "stream_handler_failed");
+        assert.ok(invocations[0].isTerminal);
+      } finally {
+        storage.close();
+      }
+
+      const agentsResponse = await fetch(`${baseUrl}/api/agents`);
+      assert.equal(agentsResponse.status, 200);
+    }
+  );
+});
+
+test("persist failure during empty emergency does not replay a second invocation", async () => {
+  const previousCapacity = process.env.SHIFT_TEST_CAPACITY;
+  process.env.SHIFT_TEST_CAPACITY = "1000";
+  let attempt = 0;
+  try {
+    await withServer(
+      {
+        initialSessionIds: ["session-persist-empty-emergency"],
+        patchStorage(storage) {
+          patchAppendEventToFail(storage, ["usage.update"]);
+        },
+        spawnRunner() {
+          attempt += 1;
+          const child = createMockChild();
+          child.kill = () => {
+            process.nextTick(() => child.emit("close", null, "SIGTERM"));
+            return true;
+          };
+          process.nextTick(() => {
+            child.stdout.write(
+              `${JSON.stringify({
+                type: "usage.update",
+                agent: "codex",
+                invocationId: "provider-inv-persist",
+                scope: "turn",
+                mode: "cumulative",
+                counterScope: "provider-session",
+                inputTokens: 900,
+                outputTokens: 90,
+                totalTokens: 990,
+                contextTokens: 990,
+                contextTokensExact: true,
+              })}\n`
+            );
+            child.stdout.write("\n");
+          });
+          return child;
+        },
+      },
+      async (baseUrl, { memoryDbFile }) => {
+        const response = await fetch(`${baseUrl}/api/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "session-persist-empty-emergency",
+            agent: "codex",
+            prompt: "continue",
+          }),
+        });
+        const body = await response.text();
+        assert.match(body, /event: error/);
+        assert.match(body, /invocation closed as failed/);
+        assert.doesNotMatch(body, /replayed successfully/);
+        assert.doesNotMatch(body, /Invocation .* is not active/);
+        assert.equal(attempt, 1);
+
+        const storage = createStorage({ file: memoryDbFile });
+        try {
+          const invocations = storage.invocations.listForThread("session-persist-empty-emergency");
+          assert.equal(invocations.length, 1);
+          assert.equal(invocations[0].state, "failed");
+          assert.equal(invocations[0].terminalReason, "stream-handler-failed");
+          assert.equal(invocations[0].failureStage, "stream_handler");
+          assert.ok(invocations[0].isTerminal);
+        } finally {
+          storage.close();
+        }
+
+        const agentsResponse = await fetch(`${baseUrl}/api/agents`);
+        assert.equal(agentsResponse.status, 200);
       }
     );
   } finally {

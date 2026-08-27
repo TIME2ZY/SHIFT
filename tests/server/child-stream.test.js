@@ -129,3 +129,104 @@ test("child stream parses the final event without a trailing newline", async () 
   await completed;
   assert.deepEqual(events, [{ type: "text.delta", text: "完成" }]);
 });
+
+function createRecordingRes() {
+  const res = new EventEmitter();
+  const frames = [];
+  res.write = (chunk) => {
+    frames.push(String(chunk));
+    return true;
+  };
+  return { res, frames };
+}
+
+test("onEvent failures are isolated instead of crashing the process", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const kills = [];
+  child.kill = (sig) => kills.push(sig);
+  const { res, frames } = createRecordingRes();
+  const events = [];
+  const completed = runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    res,
+    onStdout() {},
+    onEvent(event) {
+      if (event.text === "boom") throw new Error("durable write failed");
+      events.push(event);
+    },
+    onStderr() {},
+  });
+
+  child.stdout.emit("data", Buffer.from('{"type":"text.delta","text":"ok"}\n', "utf8"));
+  child.stdout.emit("data", Buffer.from('{"type":"text.delta","text":"boom"}\n', "utf8"));
+  // Events after the failure and late stderr must be dropped.
+  child.stdout.emit("data", Buffer.from('{"type":"text.delta","text":"dropped"}\n', "utf8"));
+  child.stderr.emit("data", Buffer.from("late stderr", "utf8"));
+  child.emit("close", null, "SIGTERM");
+
+  const result = await completed;
+  assert.deepEqual(events, [{ type: "text.delta", text: "ok" }]);
+  assert.ok(result.streamError, "expected streamError on the result");
+  assert.equal(result.streamError.origin, "event handler");
+  assert.match(result.streamError.message, /durable write failed/);
+  assert.ok(kills.includes("SIGTERM"), "expected the agent child to be stopped");
+  const sseText = frames.join("");
+  assert.ok(sseText.includes("event: error"), "expected an SSE error frame");
+  assert.ok(
+    sseText.includes("event handler failed"),
+    "expected the SSE error frame to name the failed handler"
+  );
+});
+
+test("onStderr failures are isolated instead of crashing the process", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const { res } = createRecordingRes();
+  const completed = runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    res,
+    onStdout() {},
+    onEvent() {},
+    onStderr() {
+      throw new Error("stderr persistence failed");
+    },
+  });
+
+  child.stderr.emit("data", Buffer.from("warning text", "utf8"));
+  child.emit("close", 0, null);
+
+  const result = await completed;
+  assert.ok(result.streamError);
+  assert.equal(result.streamError.origin, "stderr handler");
+  assert.match(result.streamError.message, /stderr persistence failed/);
+});
+
+test("pipe stream errors are captured instead of crashing the process", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const { res } = createRecordingRes();
+  const completed = runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    res,
+    onStdout() {},
+    onEvent() {},
+    onStderr() {},
+  });
+
+  child.stdout.emit("error", new Error("EMFILE: too many open files"));
+  child.emit("close", 1, null);
+
+  const result = await completed;
+  assert.ok(result.streamError);
+  assert.equal(result.streamError.origin, "stdout stream");
+  assert.match(result.streamError.message, /EMFILE/);
+});

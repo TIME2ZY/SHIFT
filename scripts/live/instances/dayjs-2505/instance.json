@@ -1,0 +1,12 @@
+{
+  "id": "dayjs-2505",
+  "repo": "https://github.com/iamkun/dayjs",
+  "baseCommit": "1547bffb048e5a2a716cd39b79ffd52e51e21777",
+  "issueFile": "issue.md",
+  "testPatch": "test.patch",
+  "installCommand": "npm ci",
+  "testArgs": ["test/plugin/utc-utcOffset.test.js", "--coverage=false"],
+  "testFile": "test/plugin/utc-utcOffset.test.js",
+  "failToPass": ["cloning dates modified with utcOffset"],
+  "sourceAllowPrefixes": ["src/"]
+}

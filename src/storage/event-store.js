@@ -1,4 +1,5 @@
 const { eventPlainText } = require("./event-plain-text");
+const { withSqliteBusyRetry } = require("./sqlite-retry");
 
 /**
  * Authoritative invocation event sink.
@@ -6,11 +7,7 @@ const { eventPlainText } = require("./event-plain-text");
  * SQLite is the only online write target. Canonical JSONL audit output is
  * produced asynchronously from the transactional outbox.
  */
-function createEventStore({
-  storage,
-  auditTranscript = true,
-  logger = console,
-} = {}) {
+function createEventStore({ storage, auditTranscript = true, logger = console } = {}) {
   if (!storage?.invocations || typeof storage.transaction !== "function") {
     throw new Error("SQLite event store requires durable storage.");
   }
@@ -150,10 +147,11 @@ function createEventStore({
       return { event, outboxId };
     };
 
-    // Nested transactions become savepoints under better-sqlite3, so this is
-    // safe both standalone and when already inside start/finish transactions.
-    // storage.transaction(fn) runs immediately and returns fn's result.
-    const stored = storage.transaction(writeEvent);
+    // Nested transactions are savepoints; SQLITE_BUSY is retried, then rethrown.
+    const stored = withSqliteBusyRetry(() => storage.transaction(writeEvent), {
+      operation: "append invocation event",
+      logger,
+    });
 
     return {
       ok: true,

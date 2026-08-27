@@ -81,14 +81,14 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.1 Invocation 生命周期（start / event / finish）
 
-| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                               | 落库                                                              |
-| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| start               | `durableRecorder.startInvocation`                             | **仅** `chat-routes`（含 retry 再 start）                                                                | `invocations` + `invocation-start` event                          |
-| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件                       | `invocation_events` + outbox                                      |
-| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / empty-under-seal / empty-emergency） | 有 `message` → 原子 finish+assistant-final；无 `message` → 仅终态 |
-| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                             | 同上                                                              |
-| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | chat-routes 请求结束 `finally`                                                                           | 强制 `failed`/`aborted`（非产品成功路径）                         |
-| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                         | 避免长期 `active`                                                 |
+| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                       | 落库                                                              |
+| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| start               | `durableRecorder.startInvocation`                             | **仅** `chat-routes`（含 retry 再 start）                                                                                        | `invocations` + `invocation-start` event                          |
+| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件                                               | `invocation_events` + outbox                                      |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / empty-under-seal / empty-emergency / stream-handler-failed） | 有 `message` → 原子 finish+assistant-final；无 `message` → 仅终态 |
+| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                     | 同上                                                              |
+| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | chat-routes 请求结束 `finally`                                                                                                   | 强制 `failed`/`aborted`（非产品成功路径）                         |
+| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                 | 避免长期 `active`                                                 |
 
 **结论（终态）— B-1 已落地（2026-08-07）：**
 
@@ -96,6 +96,13 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 底层 `finishInvocation` / `finishWithAssistantMessage` 仅为模块私有实现，公开 recorder 不再导出。
 - 分支决策（何时带 message、何时 aborted）仍在 chat-routes；B-1 收口的是**写入口**，不是把业务 if 全部下沉（避免夹带行为变更）。
 - Callback **仍不** finish invocation；孤儿 reconcile 仍走 force 终端 API。
+- 流式回调（`child-stream` 的 onEvent / onStderr / 管道 error）失败不会以 uncaughtException
+  击穿进程：`runChildStream` 捕获后停止子进程并在结果上携带 `streamError`。chat-worklist 在
+  `flushAll`、usage 写入和 empty-emergency replay **之前**检查该错误，转为
+  `stream-handler-failed`（`failureStage: stream_handler`）；流结束后的 persist flush 抛错
+  同样收口为该终态，不落入 `request-error-orphan`，也不再开一轮 invocation。
+  `eventStore.append` 与 durable-recorder 使用同一 `withSqliteBusyRetry` 锁竞争重试策略；
+  重试耗尽仍显式上抛。
 
 ---
 
@@ -246,7 +253,12 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
   `/api/project` 与会话创建后修改目录的 UI 已删除。
 - Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
-  （旧 `scripts/live/` 真实 CLI 场景已整体移除，待以独立 sandbox 项目方案重建。）
+- 真实 CLI live 场景位于 `scripts/live/`（issue-fix）：sandbox 是独立克隆的上游仓库
+  @ 实例 base commit，`project_dir` 绑定 sandbox 而非 SHIFT 仓库本身。live 默认使用
+  `output/live/.../shift-home` 隔离 SQLite，不写入交互式 `SHIFT_HOME`；`--use-default-home`
+  才选择 UI 库。硬断言（F2P 红→绿、diff 只碰 src、invocation 终态、消息持久化）
+  的判定逻辑在 `scripts/live/lib/assertions.js`，其确定性测试为 `tests/live/sandbox-assert.test.js`
+  与 `tests/live/harness.test.js`。
 - 产品 Memory 对 Agent 只公开 `shift_context` MCP；其私有 HTTP bridge 使用
   `/api/callbacks/memory-write`，已删除 `/api/callbacks/memory-upsert` 兼容别名及 CLI/测试入口。
 - Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
