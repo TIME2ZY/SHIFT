@@ -36,9 +36,7 @@
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "storage:init-home": "node scripts/init-storage-home.js",
     "storage:migrate-home": "node scripts/migrate-storage-home.js",
-    "test:live:solo-grok": "node scripts/live/run-solo-grok.js",
-    "test:live:multi-collab": "node scripts/live/run-multi-collab.js",
-    "test:live:observability": "node scripts/live/run-observability-acceptance.js"
+    "test:live:issue-fix": "node scripts/live/run-issue-fix.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

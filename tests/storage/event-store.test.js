@@ -155,6 +155,79 @@ test("event store propagates SQLite write failures so outer transactions roll ba
   }
 });
 
+test("event store retries transient SQLITE_BUSY before surfacing append failures", () => {
+  const storage = createStorage({ file: ":memory:" });
+  seedInvocation(storage);
+  const originalAppendEvent = storage.invocations.appendEvent.bind(storage.invocations);
+  let busyThrowsLeft = 1;
+  storage.invocations.appendEvent = (...args) => {
+    if (busyThrowsLeft > 0) {
+      busyThrowsLeft -= 1;
+      const error = new Error("database is locked");
+      error.code = "SQLITE_BUSY";
+      throw error;
+    }
+    return originalAppendEvent(...args);
+  };
+  const warnings = [];
+  const eventStore = createEventStore({
+    storage,
+    logger: { warn: (message) => warnings.push(message), error: () => {} },
+  });
+
+  try {
+    eventStore.registerInvocation("inv-1", "thread-1");
+    const result = eventStore.append({
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      kind: "text.delta",
+      payload: { text: "retry me" },
+    });
+    assert.equal(result.sqlite, true);
+    assert.equal(busyThrowsLeft, 0);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /append invocation event busy/);
+    assert.equal(storage.invocations.listEvents("inv-1").length, 1);
+  } finally {
+    storage.invocations.appendEvent = originalAppendEvent;
+    eventStore.close();
+    storage.close();
+  }
+});
+
+test("event store surfaces non-busy append failures after the retry policy", () => {
+  const storage = createStorage({ file: ":memory:" });
+  seedInvocation(storage);
+  const originalAppendEvent = storage.invocations.appendEvent.bind(storage.invocations);
+  let attempts = 0;
+  storage.invocations.appendEvent = () => {
+    attempts += 1;
+    const error = new Error("disk I/O error");
+    error.code = "SQLITE_IOERR";
+    throw error;
+  };
+  const eventStore = createEventStore({ storage, logger: { warn: () => {}, error: () => {} } });
+
+  try {
+    eventStore.registerInvocation("inv-1", "thread-1");
+    assert.throws(
+      () =>
+        eventStore.append({
+          threadId: "thread-1",
+          invocationId: "inv-1",
+          kind: "text.delta",
+          payload: { text: "fail me" },
+        }),
+      /disk I\/O error/
+    );
+    assert.equal(attempts, 1, "non-retryable errors must not be retried");
+  } finally {
+    storage.invocations.appendEvent = originalAppendEvent;
+    eventStore.close();
+    storage.close();
+  }
+});
+
 test("sqlite audit transcript can be disabled without disabling authoritative events", () => {
   const storage = createStorage({ file: ":memory:" });
   seedInvocation(storage);

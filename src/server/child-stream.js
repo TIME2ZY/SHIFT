@@ -68,6 +68,8 @@ function runChildStream({
     let killTimer;
     let lastActivity = Date.now();
     let stdoutBuffer = "";
+    // Uncaught data/error on these pipes would kill the process.
+    let streamFailure = null;
     const stdoutDecoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
 
@@ -89,11 +91,15 @@ function runChildStream({
     };
 
     const processStdoutText = (text) => {
-      if (!text) return;
+      if (!text || streamFailure) return;
       noteEncoding(text, "stdout");
       if (typeof onEvent !== "function") {
-        onStdout(text);
-        if (onHealth) onHealth(text.length);
+        try {
+          onStdout(text);
+          if (onHealth) onHealth(text.length);
+        } catch (error) {
+          failStream("stdout handler", error);
+        }
         return;
       }
 
@@ -115,9 +121,14 @@ function runChildStream({
           if (typeof event.text === "string") noteEncoding(event.text, "event.text");
           if (typeof event.data === "string") noteEncoding(event.data, "event.data");
         }
-        onEvent(event);
-        if (onHealth && event.type === "text.delta") {
-          onHealth(String(event.text || "").length);
+        try {
+          onEvent(event);
+          if (onHealth && event.type === "text.delta") {
+            onHealth(String(event.text || "").length);
+          }
+        } catch (error) {
+          failStream("event handler", error);
+          return;
         }
       }
     };
@@ -129,6 +140,18 @@ function runChildStream({
       killTimer = setTimeout(() => {
         if (!closed) child.kill("SIGKILL");
       }, graceMs);
+    };
+
+    const failStream = (origin, error) => {
+      if (streamFailure) return;
+      const message = error instanceof Error ? error.message : String(error);
+      streamFailure = { origin, message };
+      console.error(`[child-stream] ${origin} failed: ${message}`);
+      sendSse(res, "error", {
+        message: `Agent stream ${origin} failed: ${message}`,
+        retryable: true,
+      });
+      stopChild(`Stopping agent process after ${origin} failure.`);
     };
     const abortHandler = () => stopChild("Invocation aborted by client or session conflict.");
     const onResClose = () => stopChild("Client disconnected.");
@@ -163,12 +186,21 @@ function runChildStream({
         stopChild("Stop requested by caller (context sealed).");
         return;
       }
+      if (streamFailure) return;
       const text = decodeChunk(stderrDecoder, chunk);
       if (text) {
         noteEncoding(text, "stderr");
-        onStderr(text);
+        try {
+          onStderr(text);
+        } catch (error) {
+          failStream("stderr handler", error);
+        }
       }
     });
+
+    // Unhandled 'error' on a pipe stream would crash the process.
+    child.stdout.on("error", (error) => failStream("stdout stream", error));
+    child.stderr.on("error", (error) => failStream("stderr stream", error));
 
     child.on("error", (error) => sendSse(res, "error", { message: error.message }));
     child.on("close", (code, closeSignal) => {
@@ -177,9 +209,13 @@ function runChildStream({
         processStdoutText("\n");
       }
       const stderrRemainder = stderrDecoder.end();
-      if (stderrRemainder) {
+      if (stderrRemainder && !streamFailure) {
         noteEncoding(stderrRemainder, "stderr");
-        onStderr(stderrRemainder);
+        try {
+          onStderr(stderrRemainder);
+        } catch (error) {
+          failStream("stderr handler", error);
+        }
       }
       closed = true;
       clearTimeout(killTimer);
@@ -191,6 +227,7 @@ function runChildStream({
         signal: closeSignal,
         encoding: encodingTracker.snapshot(),
         cwd: workDir,
+        streamError: streamFailure,
       });
     });
   });

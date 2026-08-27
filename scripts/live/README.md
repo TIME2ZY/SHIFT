@@ -1,152 +1,102 @@
 # Live scenarios（真实 CLI，不进 `npm test`）
 
-用 **真实 Grok CLI** 在 **与日常相同的 runtime DB** 上自动打多轮对话，验证记忆注入、window seal 等管道在真对话里是否立得住。
+用**真实 Agent CLI** 在**独立 sandbox 真实开源仓库**上修复真实 GitHub issue，验证 SHIFT 主链路
+（project 绑定 → chat → SSE → invocation 终态 → SQLite 持久化）在真实协作中立得住。
 
-|      | `npm test`      | Live                                  |
-| ---- | --------------- | ------------------------------------- |
-| CLI  | mock            | **真 grok**                           |
-| DB   | 测试夹具 / 内存 | **默认 `data/runtime`**（与 UI 同库） |
-| 入口 | `npm test`      | `npm run test:live:solo-grok`         |
+|        | `npm test`      | Live                                                                     |
+| ------ | --------------- | ------------------------------------------------------------------------ |
+| CLI    | mock            | **真 codex / grok**                                                      |
+| 靶项目 | 测试夹具        | **真实仓库 @ base commit**（dayjs）                                      |
+| DB     | 临时目录 / 内存 | **隔离 `output/live/.../shift-home`**（`--use-default-home` 才用 UI 库） |
+| 入口   | `npm test`      | `npm run test:live:issue-fix`                                            |
+
+## 场景：issue-fix（S1）
+
+对每个实例：
+
+1. **Sandbox 准备**：克隆上游仓库 → checkout 实例 base commit → 应用 F2P 测试补丁并提交 → 安装依赖
+2. **红灯预检**：跑项目测试，要求恰好 F2P 测试失败、其余全绿（否则实例无效，exit 2）
+3. **open Project → create Session**：sandbox 作为 `project_dir` 绑定进 SHIFT
+4. **chat**：真实 issue 文本作为用户消息交给 Agent，Agent 在 sandbox 里修 bug
+5. **硬断言**：
+   - L6 chat outcome：agent-exit 0、assistant 非空、invocation 终态 `completed`
+   - L7 durable trace / messages 持久化（user + assistant-final）
+   - L8 diff 范围：sandbox 只允许改 `src/**`（碰测试文件即失败）
+   - L9 F2P 全绿 + 无 P2P 回归
+
+## 实例清单（SWE-bench 语义）
+
+`scripts/live/instances/<id>/`：
+
+- `instance.json` — repo、baseCommit、failToPass 测试名、allowPrefixes
+- `issue.md` — 原始 issue 文本（用户消息）
+- `test.patch` — 来自上游修复 PR 的测试补丁（仅测试文件）
+
+已收录（均已在 Windows 本机验证红→绿）：
+
+| 实例         | issue                                      | base      |
+| ------------ | ------------------------------------------ | --------- |
+| `dayjs-2505` | `.utcOffset(0, true)` clone 与原实例不一致 | `1547bff` |
+| `dayjs-2377` | duration `toISOString()` 浮点尾数泄漏      | `5f3f878` |
 
 ## 前置
 
-1. Node 20+
-2. 本机 `grok` 在 PATH 上，且已 `XAI_API_KEY` 或 `grok login`
-3. 已准备 clean epoch 库（与 `npm start` 相同），例如：
-
-```bash
-npm run prepare:storage:epoch -- --db data/runtime/shift.sqlite
-```
-
-4. **不要**指望 live 使用隔离库：写入的 session / memory **会留在真实 runtime**，可在浏览器里打开同一会话继续聊。
-
-## 50K 上下文窗（seal）
-
-Grok 模型 profile 为 500K；live 默认逻辑窗 **`SHIFT_TEST_CAPACITY=50000`**。
-
-该 env 必须在 **server 进程** 内生效：
-
-```powershell
-# 终端 1
-$env:SHIFT_TEST_CAPACITY = "50000"
-npm start
-
-# 终端 2 — attach（默认）
-$env:SHIFT_UI_TOKEN = "<与页面/服务相同的 token>"
-npm run test:live:solo-grok
-```
-
-若未设置 `SHIFT_UI_TOKEN`，可从浏览器加载的页面 meta / 或启动日志侧自行固定 token。  
-建议在 `.env` 中设置固定 `SHIFT_UI_TOKEN=...`，start 与 live 共用。
-
-### spawn 模式（同库、脚本自起服务）
-
-```powershell
-$env:SHIFT_TEST_CAPACITY = "50000"   # 也会被 --capacity 写入
-npm run test:live:solo-grok -- --mode spawn
-```
-
-spawn **仍使用默认 runtime 路径**（不建 tmp DB），仅额外包装 spawn 以落盘完整 prompt。
+1. Node 20+、git
+2. 目标 Agent CLI 在 PATH（默认 codex，可用 `--agent grok`）
+3. 网络可达 GitHub（克隆仓库）；可用 `--source <本地克隆>` 离线复用
+4. sandbox 依赖安装默认 `npm ci`；可用 `--node-modules <路径>` junction 复用缓存加速
+5. 仅当使用 `--use-default-home` 时需要已初始化的交互式 runtime DB：`npm run storage:init-home`
 
 ## 命令
 
-```bash
-# 只检查环境 + 打印话术
-npm run test:live:solo-grok -- --dry-run
+```powershell
+# 只打印计划与 prompt，不调用任何 CLI
+npm run test:live:issue-fix -- --dry-run
 
-# 默认 attach
-npm run test:live:solo-grok -- --ui-token "$SHIFT_UI_TOKEN"
+# 单实例（默认 codex）
+npm run test:live:issue-fix -- --instance dayjs-2505
 
-# 续跑已有会话
-npm run test:live:solo-grok -- --session-id <id>
+# 换 Agent / 离线仓库源 / 复用 node_modules
+npm run test:live:issue-fix -- --instance dayjs-2377 --agent grok --source D:\cache\dayjs --node-modules D:\cache\dayjs\node_modules
 
-# 未 seal 则失败 / 无 product memory 则失败
-npm run test:live:solo-grok -- --require-seal --strict-memory
+# 全部实例
+npm run test:live:issue-fix
+
+# 显式写入交互式 SHIFT_HOME（与 npm start 同库）
+npm run test:live:issue-fix -- --instance dayjs-2505 --use-default-home
 ```
-
-## 场景：`solo-grok-auth`
-
-固定 **用户** 话术（登录鉴权讨论 → 规格堆上下文 → 回顾），**Grok 回复完全真实**。
-
-默认最多 12 轮填充 + 1 轮回顾；中途 `event: sealed` 则提前进入回顾。
 
 ## 产物
 
-写入 `output/live/solo-grok-<timestamp>/`（`output/` 已 gitignore）：
+`output/live/issue-fix-<timestamp>/`（`output/` 已 gitignore）：
 
-- `report.md` / `report.json`
-- `session-id.txt`
-- `turns/`、`sse/`、`assistant/`
-- `prompts/`（仅 spawn 模式）
-- `snapshot-memories.json` 等
+- `shift-home/` — 本轮隔离 runtime（`--use-default-home` 时不创建）
+- `<instance>/report.md` / `report.json` — 判定与逐项断言
+- `<instance>/target/` — sandbox 仓库本体（保留现场，可在浏览器里继续聊）
+- `<instance>/jest-before.json` / `jest-after.json` — 修复前后逐测试结果
+- `<instance>/chat-sse.txt`、`chat-summary.json`、`messages.json`
+- `<instance>/agent.patch`、`changed-files.json`、`session-id.txt`
 
-## 验收（严格）
+## 验收
 
-主验收只认 **clean run**（单次进程、无 `--session-id` / `--start-from`）：
+主验收只认 **clean run**（单次进程、无续跑）。所有硬断言通过即 exit 0。
 
-| 标志              | 含义                                                    |
-| ----------------- | ------------------------------------------------------- |
-| `cleanRunPassed`  | 连续跑通且硬断言全过 — **唯一主验收**                   |
-| `resumeRunPassed` | 仅当 `--allow-resume` 时，续跑可 exit 0（恢复能力测试） |
+| Code | 含义                                                   |
+| ---- | ------------------------------------------------------ |
+| 0    | 全部实例通过                                           |
+| 1    | 硬断言失败或运行错误                                   |
+| 2    | Preflight 失败（CLI 缺失、未知实例、实例红灯预检不过） |
+| 3    | chat 超时                                              |
 
-硬断言要点：
-
-- **L0** 禁止用续跑冒充 clean pass
-- **L9** seal 触发轮必须有非空回答或 `seal-and-replayed`（禁止空 assistant）
-- **L10 / L10b** 禁止空 assistant-final
-- **L11** 重放不得重复持久化 user message
-- **F-*** 期望事实（24h TTL、无 refresh、SQLite…），非「回答看起来很长」
-
-确定性单测（进 `npm test`）：`tests/scenarios/live-assert.test.js`  
-（fake 投影 / seal 边界表在 `context-budget.js`，不依赖真 Grok。）
-
-## Exit code
-
-| Code | 含义                                             |
-| ---- | ------------------------------------------------ |
-| 0    | 硬断言通过（resume 须带 `--allow-resume`）       |
-| 1    | 硬断言失败、空 assistant、续跑未授权、或运行错误 |
-| 2    | Preflight 失败                                   |
-| 3    | 超时                                             |
-| 4    | `--strict-memory` 下软断言失败                   |
+确定性单测（进 `npm test`）：`tests/live/sandbox-assert.test.js`、`tests/live/harness.test.js`
+（断言语义与 harness 隔离不依赖真 CLI。）
 
 ## 费用与时间
 
-真模型、多轮、可能 high reasoning：可能 **数十分钟** 并产生 API 费用。先用 `--dry-run` 确认话术。
+真模型 + 真仓库：单实例约 5–20 分钟并产生 API 费用。先用 `--dry-run` 确认 prompt。
 
----
+## 后续场景（规划中，未实现）
 
-## 多 Agent 串行协作（`test:live:multi-collab`）
-
-讨论环 **22K**（Gemini↔Codex，不改代码）→ 实现环 **48K**（Grok↔OpenCode，**useWorktree=true**）→ 回顾。
-
-```powershell
-# 推荐 spawn：同进程内切换 SHIFT_TEST_CAPACITY
-npm run test:live:multi-collab -- --mode spawn
-
-# 只打印话术
-npm run test:live:multi-collab -- --mode spawn --dry-run
-
-# 覆盖 capacity
-npm run test:live:multi-collab -- --mode spawn --discuss-capacity 22000 --implement-capacity 48000
-```
-
-| 幕        | capacity | worktree | Agent          |
-| --------- | -------- | -------- | -------------- |
-| discuss   | 22000    | off      | gemini, codex  |
-| implement | 48000    | **on**   | grok, opencode |
-| recall    | 48000    | off      | codex          |
-
-整场 **不因首次 seal 结束**；每幕跑完脚本内全部用户轮。断言见 `lib/multi-assert.js`（四角出现、A2A、seal 轮非空答等）。
-
-**要求：** 本机 PATH 上有对应 CLI（gemini/antigravity、codex、grok、opencode）。
-
-## Trace / Observability Phase 3 发布门禁
-
-```powershell
-npm run test:live:observability -- --mode spawn
-```
-
-该场景使用真实 Grok→Codex Handoff，随后重启同一服务并重新读取 Session Trace。报告会核对
-SSE invocation ID、durable Trace/Invocation/Handoff、terminal outcome 与 storage health，并写入
-`output/live/observability-acceptance-*/`。只有 `cleanRunPassed=true` 才允许发布观测能力变更。
+- S2 多 Agent + worktree 交付（handoff 恰好消费一次、主 repo 干净）
+- S3 seal + 重启恢复
+- S4 观测门禁（durable trace 完整性发布 gate）
