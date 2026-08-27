@@ -157,6 +157,74 @@ test("session trace routes are scoped and expose durable execution summaries", a
   assert.equal(res.statusCode, 404);
 });
 
+test("collaboration snapshot is a session-scoped read of the durable task", async () => {
+  const missing = makeRes();
+  const missingHandle = createHandler(missing);
+  await missingHandle(
+    makeReq("GET"),
+    missing,
+    new URL("http://127.0.0.1/api/sessions/s1/collaboration")
+  );
+  assert.equal(missing.statusCode, 404);
+
+  const empty = makeRes();
+  const emptyHandle = createHandler(empty, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    collabTaskRegistry: { getTask: () => null },
+  });
+  await emptyHandle(
+    makeReq("GET"),
+    empty,
+    new URL("http://127.0.0.1/api/sessions/s1/collaboration")
+  );
+  assert.equal(empty.statusCode, 200);
+  assert.deepEqual(empty.body, { collaboration: null });
+
+  const pending = makeRes();
+  const pendingHandle = createHandler(pending, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    collabTaskRegistry: {
+      getTask: () => ({
+        phase: "implement",
+        goal: "Fix utcOffset clone",
+        lastFrom: "codex",
+        lastTo: "grok",
+        updatedAt: "2026-08-27T01:00:00.000Z",
+        implementationGate: { status: "pending_approval", planHash: "plan-1" },
+        artifacts: { implementationPlan: { hash: "plan-1", summary: "Clone first" } },
+      }),
+      implementationPermission: () => ({
+        allowed: false,
+        reason: "implementation_plan_not_approved",
+        status: "pending_approval",
+        planHash: "plan-1",
+      }),
+    },
+  });
+  await pendingHandle(
+    makeReq("GET"),
+    pending,
+    new URL("http://127.0.0.1/api/sessions/s1/collaboration")
+  );
+  assert.equal(pending.statusCode, 200);
+  assert.equal(pending.body.collaboration.phase, "implement");
+  assert.equal(pending.body.collaboration.implementation.allowed, false);
+  assert.equal(pending.body.collaboration.blocker, "implementation_plan_not_approved");
+
+  const write = makeRes();
+  const writeHandle = createHandler(write, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    collabTaskRegistry: { getTask: () => ({ phase: "discuss" }) },
+  });
+  const handled = await writeHandle(
+    makeReq("POST"),
+    write,
+    new URL("http://127.0.0.1/api/sessions/s1/collaboration")
+  );
+  assert.equal(handled, false);
+  assert.equal(write.statusCode, 0);
+});
+
 test("session audit summary combines the execution read model with billing usage", async () => {
   const res = makeRes();
   const handle = createHandler(res, {

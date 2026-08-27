@@ -1,3 +1,4 @@
+const { projectCollaboration } = require("../storage/collaboration-read-model");
 const { buildUsageSummary } = require("../storage/usage-summary");
 const { projectInvocationProcess } = require("./invocation-process");
 
@@ -14,6 +15,7 @@ function createSessionRoutes({
   usageStorage,
   recallService,
   executionStorage,
+  collabTaskRegistry = null,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -32,6 +34,31 @@ function createSessionRoutes({
   }
 
   return async function handleSessionRoutes(req, res, url) {
+    const collaborationMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration$/
+    );
+    if (collaborationMatch && req.method === "GET") {
+      const sessionId = collaborationMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      const task =
+        collabTaskRegistry && typeof collabTaskRegistry.getTask === "function"
+          ? collabTaskRegistry.getTask(sessionId)
+          : null;
+      if (!task) {
+        sendJson(res, 200, { collaboration: null });
+        return true;
+      }
+      const permission =
+        collabTaskRegistry && typeof collabTaskRegistry.implementationPermission === "function"
+          ? collabTaskRegistry.implementationPermission(sessionId)
+          : null;
+      sendJson(res, 200, { collaboration: projectCollaboration(task, permission) });
+      return true;
+    }
+
     const auditSummaryMatch = url.pathname.match(
       /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/audit-summary$/
     );
