@@ -44,11 +44,13 @@ describe("RightPanel", () => {
     });
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ available: false, session: {}, agents: [] }))
-        )
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (url.includes("/collaboration")) {
+          return new Response(JSON.stringify({ collaboration: null }));
+        }
+        return new Response(JSON.stringify({ available: false, session: {}, agents: [] }));
+      })
     );
     render(
       <QueryClientProvider client={queryClient}>
@@ -72,8 +74,15 @@ describe("RightPanel", () => {
   });
 
   it("shows per-agent usage without loading inactive memories", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
+    const fetchMock = vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("/collaboration")) {
+        return new Response(JSON.stringify({ collaboration: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
         JSON.stringify({
           available: true,
           session: { totalTokens: 2400 },
@@ -90,8 +99,8 @@ describe("RightPanel", () => {
           ],
         }),
         { status: 200, headers: { "content-type": "application/json" } }
-      )
-    );
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     renderPanel();
@@ -104,7 +113,49 @@ describe("RightPanel", () => {
     expect(screen.queryByText("当前团队")).not.toBeInTheDocument();
     expect(await screen.findByText("2.4k tokens")).toBeInTheDocument();
     expect(screen.getByText("40% · 充足")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("尚未开始协作。")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("shows the pending implementation plan from the collaboration snapshot", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (url.includes("/collaboration")) {
+          return new Response(
+            JSON.stringify({
+              collaboration: {
+                phase: "implement",
+                goal: "Fix utcOffset clone",
+                lastFrom: "codex",
+                lastTo: "grok",
+                updatedAt: "2026-08-27T00:00:00.000Z",
+                implementation: {
+                  status: "pending_approval",
+                  allowed: false,
+                  reason: "implementation_plan_not_approved",
+                  planHash: "plan-1",
+                  summary: "Clone first",
+                },
+                review: { status: null, verdict: null },
+                delivery: { status: null, commitSha: null, prUrl: null, ciStatus: null },
+                acceptance: { status: null, verdict: null },
+                blocker: "implementation_plan_not_approved",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        return new Response(JSON.stringify({ available: false, session: {}, agents: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      })
+    );
+
+    renderPanel();
+    expect(await screen.findByText("等待 Codex 批准方案")).toBeInTheDocument();
+    expect(screen.getByText("待 Codex 批准")).toBeInTheDocument();
+  });
 });

@@ -3257,6 +3257,73 @@ body {
   height: calc(100% - 52px);
 }
 
+.react-collab-status {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-instrument-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.react-collab-status header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-collab-status header strong {
+  font-size: 13px;
+}
+
+.react-collab-status header span {
+  color: var(--text-tertiary);
+  font: 10px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.react-collab-status dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.react-collab-status dl div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.react-collab-status dt {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.react-collab-status dd {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-collab-blocker {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--badge-thinking-bg);
+  color: var(--badge-thinking-fg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .react-agent-cards,
 .react-memory-list {
   display: grid;

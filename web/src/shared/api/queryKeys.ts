@@ -16,6 +16,7 @@ export const queryKeys = {
     detail: (sessionId: string) => ["sessions", sessionId] as const,
     messages: (sessionId: string) => ["sessions", sessionId, "messages"] as const,
     usage: (sessionId: string) => ["sessions", sessionId, "usage"] as const,
+    collaboration: (sessionId: string) => ["sessions", sessionId, "collaboration"] as const,
     auditSummary: (sessionId: string) => ["sessions", sessionId, "audit-summary"] as const,
     memories: (sessionId: string) => ["sessions", sessionId, "memories"] as const,
     memoryUsage: (sessionId: string) => ["sessions", sessionId, "memory-usage"] as const,

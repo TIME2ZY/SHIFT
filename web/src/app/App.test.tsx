@@ -137,12 +137,12 @@ describe("App recommended prompt integration", () => {
     const input = screen.getByRole("textbox", { name: "消息" });
     const toggle = screen.getByRole("checkbox", { name: "隔离改代码" });
     const first = {
-      title: "审查前端 UI 与美观性",
-      prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+      title: "讨论并交给 Grok 出方案",
+      prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
     };
     const refactor = {
-      title: "重构项目核心模块",
-      prompt: "请重构项目核心模块：在隔离 worktree 中全自动重构代码。",
+      title: "在隔离 worktree 中实现",
+      prompt: "请按已批准方案在隔离 worktree 中实现，完成后交给 @OpenCode 审查。",
     };
 
     await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));

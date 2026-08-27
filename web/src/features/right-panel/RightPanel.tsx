@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import type { AgentSummary } from "../agents/types";
+import { CollaborationStatus } from "../collaboration/CollaborationStatus";
+import { useCollaborationQuery } from "../collaboration/queries";
 import { AgentUsageCard, type AgentActivityStatus } from "../usage/AgentUsageCard";
 import { useUsageQuery } from "../usage/queries";
 
@@ -41,6 +43,7 @@ export function RightPanel({
   );
   const closeRef = useRef<HTMLButtonElement>(null);
   const usage = useUsageQuery(sessionId, !compactLayout || open);
+  const collaboration = useCollaborationQuery(sessionId, !compactLayout || open);
 
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 1050px)");
@@ -84,6 +87,13 @@ export function RightPanel({
 
       <div className="react-panel-body react-panel-body-agents">
         {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
+        {sessionId ? (
+          <CollaborationStatus
+            snapshot={collaboration.data?.collaboration ?? null}
+            loading={collaboration.isPending}
+            error={collaboration.error instanceof Error ? collaboration.error : null}
+          />
+        ) : null}
         {usage.error ? (
           <p className="react-panel-error" role="status">
             用量暂不可用，Agent 信息不受影响。
