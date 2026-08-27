@@ -122,6 +122,8 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 **结论（handoff）— durable 0B-2 已落地：**
 
+- Receive Bundle 把 Structured Handoff 当后继续工包（权威）；原文附录非权威且预算收窄。
+- `implement/review/fix/deliver/plan` 缺 `files`/`evidence` 记入 `missingRecommended` 并打续工不足 banner，不因此把 `ok` 打成 degraded，也不新开顶层字段。
 - 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；`enqueued_at` 只在 worklist 实际追加后确认。
 - accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
 - target Invocation start/bind 与 Invocation terminal/Handoff terminal 各自在同一事务提交。

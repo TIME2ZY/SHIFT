@@ -6,6 +6,9 @@
 
 const REQUIRED_FIELDS = ["what", "why", "next_action"];
 const RECOMMENDED_FIELDS = ["to", "intent", "goal", "tradeoff", "open_questions"];
+/** Intents whose successor cannot see tool transcript — files/evidence are resume fields. */
+const RESUME_INTENTS = Object.freeze(["implement", "review", "fix", "deliver", "plan"]);
+const RESUME_FIELDS = Object.freeze(["files", "evidence"]);
 const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
 const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
@@ -262,6 +265,7 @@ function evaluateHandoff(handoff, opts = {}) {
     };
   }
 
+  const intent = opts.intent || inferIntent(handoff, opts);
   const missing = REQUIRED_FIELDS.filter((k) => !hasValue(handoff[k]));
   const missingRecommended = RECOMMENDED_FIELDS.filter((k) => !hasValue(handoff[k]));
   const invalidIntent = Boolean(handoff.intent && !normalizeIntent(handoff.intent));
@@ -269,9 +273,23 @@ function evaluateHandoff(handoff, opts = {}) {
     missingRecommended.push("intent");
     riskFlags.push("invalid_intent");
   }
+  const resumeGaps = [];
+  if (RESUME_INTENTS.includes(intent)) {
+    for (const field of RESUME_FIELDS) {
+      if (!hasValue(handoff[field])) {
+        resumeGaps.push(field);
+        if (!missingRecommended.includes(field)) missingRecommended.push(field);
+      }
+    }
+  }
+  const recommendedDenom =
+    RECOMMENDED_FIELDS.length + (resumeGaps.length > 0 ? RESUME_FIELDS.length : 0);
   const requiredScore = (REQUIRED_FIELDS.length - missing.length) / REQUIRED_FIELDS.length;
   const recommendedScore =
-    (RECOMMENDED_FIELDS.length - missingRecommended.length) / RECOMMENDED_FIELDS.length;
+    (recommendedDenom -
+      missingRecommended.filter((k) => RECOMMENDED_FIELDS.includes(k) || resumeGaps.includes(k))
+        .length) /
+    Math.max(1, recommendedDenom);
   const score = Math.round((requiredScore * 0.75 + recommendedScore * 0.25) * 100) / 100;
   const ok = missing.length === 0;
   const routedTo = opts.routedTo || opts.toAgentId || "";
@@ -289,10 +307,16 @@ function evaluateHandoff(handoff, opts = {}) {
   if (invalidIntent) {
     repairHints.push(`intent 必须是以下值之一: ${HANDOFF_INTENTS.join(", ")}。`);
   }
+  if (resumeGaps.length > 0) {
+    repairHints.push(
+      `续工信息不足（缺 ${resumeGaps.join(", ")}）：${intent} 交接应填写 files（路径+为何重要）和 evidence（失败与验证）。接收方不要只依赖原文附录。`
+    );
+  }
 
   return {
     ok,
     // Field completeness only; toMismatch is a separate routing signal (G3).
+    // Missing resume fields stay recommended — they do not flip degraded/block routing.
     degraded: !ok,
     missing,
     missingRecommended,
@@ -302,7 +326,7 @@ function evaluateHandoff(handoff, opts = {}) {
     toMismatch,
     repairHints,
     riskFlags,
-    intent: opts.intent || inferIntent(handoff, opts),
+    intent,
     policy: opts.policy || null,
   };
 }
@@ -364,6 +388,8 @@ function hasValue(v) {
 module.exports = {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
+  RESUME_INTENTS,
+  RESUME_FIELDS,
   LIST_FIELDS,
   SCALAR_FIELDS,
   ALL_KNOWN_FIELDS,

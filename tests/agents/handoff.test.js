@@ -372,7 +372,10 @@ test("renderA2AHandoffCard is compact shared template", () => {
   assert.match(card, /what:/);
   assert.match(card, /next_action:/);
   assert.match(card, /verdict/);
-  assert.ok(card.length < 1200, "card should stay short for A2A token budget");
+  assert.match(card, /续工包/);
+  assert.match(card, /files/);
+  assert.match(card, /evidence/);
+  assert.ok(card.length < 1800, "card should stay short for A2A token budget");
 });
 
 test("selectAppendix prefers review anchors over pure tail when they would be cut", () => {
@@ -477,9 +480,10 @@ test("renderHandoffTask appendix uses controlled budget for ok packs", () => {
     userPrompt: "u",
   });
   assert.match(text, /KEEP_END/);
-  assert.match(text, /budget=2000/);
-  assert.ok(handoff.APPENDIX_OK_FULL <= 2000);
-  assert.ok(handoff.APPENDIX_EMPTY >= 6000);
+  assert.match(text, /budget=800/);
+  assert.match(text, /非权威/);
+  assert.ok(handoff.APPENDIX_OK_FULL <= 800);
+  assert.ok(handoff.APPENDIX_EMPTY >= 4000);
 });
 
 test("resolveAppendixChars shrinks when memory card is present", () => {
@@ -488,7 +492,7 @@ test("resolveAppendixChars shrinks when memory card is present", () => {
   const base = handoff.resolveAppendixChars(q, h, { hasMemoryCard: false });
   const withMem = handoff.resolveAppendixChars(q, h, { hasMemoryCard: true });
   assert.ok(withMem < base);
-  assert.ok(withMem >= 1000);
+  assert.ok(withMem >= 500);
 });
 
 test("renderReceiveBundle orders memory, policy banner, task, and outbound card", () => {
@@ -521,7 +525,53 @@ test("renderReceiveBundle orders memory, policy banner, task, and outbound card"
 });
 
 test("renderPolicyBanner is empty for clean ok handoffs", () => {
-  const h = parseHandoffBody("to: opencode\nwhat: w\nwhy: y\nnext_action: n");
-  const q = evaluateHandoff(h, { routedTo: "opencode" });
+  const h = parseHandoffBody("to: gemini\nintent: discuss\nwhat: w\nwhy: y\nnext_action: n");
+  const q = evaluateHandoff(h, { routedTo: "gemini" });
   assert.equal(handoff.renderPolicyBanner(q), "");
+});
+
+test("evaluateHandoff keeps implement packs ok when resume fields are missing", () => {
+  const h = parseHandoffBody(
+    "to: grok\nintent: implement\nwhat: login\nwhy: need auth\nnext_action: write tests"
+  );
+  const q = evaluateHandoff(h, { routedTo: "grok" });
+  assert.equal(q.ok, true);
+  assert.equal(q.degraded, false);
+  assert.ok(q.missingRecommended.includes("files"));
+  assert.ok(q.missingRecommended.includes("evidence"));
+  assert.ok(q.repairHints.some((hint) => /续工信息不足/.test(hint)));
+});
+
+test("evaluateHandoff does not require files for discuss", () => {
+  const h = parseHandoffBody(
+    "to: gemini\nintent: discuss\nwhat: options\nwhy: compare\nnext_action: pick one"
+  );
+  const q = evaluateHandoff(h);
+  assert.equal(q.ok, true);
+  assert.equal(q.missingRecommended.includes("files"), false);
+  assert.equal(q.missingRecommended.includes("evidence"), false);
+});
+
+test("renderPolicyBanner flags missing resume fields without degrading", () => {
+  const h = parseHandoffBody(
+    "to: grok\nintent: implement\nwhat: login\nwhy: need auth\nnext_action: write tests"
+  );
+  const q = evaluateHandoff(h, { routedTo: "grok" });
+  const banner = handoff.renderPolicyBanner(q);
+  assert.match(banner, /续工信息不足/);
+  assert.match(banner, /files/);
+  assert.doesNotMatch(banner, /degraded/);
+});
+
+test("renderHandoffTask labels structured handoff as the resume packet", () => {
+  const h = extractPrimaryHandoff(FULL_BLOCK);
+  const text = renderHandoffTask({
+    handoff: h,
+    fromAgent: "grok",
+    fromLabel: "Grok",
+    toAgentId: "opencode",
+    fromContent: "narrative",
+    userPrompt: "login",
+  });
+  assert.match(text, /续工包（权威）/);
 });

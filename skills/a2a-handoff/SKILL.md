@@ -21,12 +21,12 @@ always: false
 
 ## 当前 Agent 阵容
 
-| Agent         | id       | 职责                                         |
-| ------------- | -------- | -------------------------------------------- |
+| Agent         | id       | 职责                                        |
+| ------------- | -------- | ------------------------------------------- |
 | **@Codex**    | codex    | 开始/末尾把关、参与讨论、收敛方案、最终验收 |
 | **@Gemini**   | gemini   | 正常讨论、提供选项/反例、与 Codex 互证      |
-| **@Grok**     | grok     | 先给具体修改方案，获批后实现、测试并总结     |
-| **@OpenCode** | opencode | 代码 review；通过后规范 commit、push 和 PR   |
+| **@Grok**     | grok     | 先给具体修改方案，获批后实现、测试并总结    |
+| **@OpenCode** | opencode | 代码 review；通过后规范 commit、push 和 PR  |
 
 可接收的 `intent` 以本轮 identity 的 **Workflow capabilities** 为准。平台按 `role-contracts` 校验；不匹配的交接在 balanced / strict 下拒绝。不要在 prompt 里维护第二份名单。
 
@@ -51,29 +51,36 @@ always: false
 
 **只允许下列顶层字段。** 没有的内容就空着（省略该行）；**禁止** `verdict` / `nits` / `blocking` / `status` 等私有 key。
 
-| 字段                                                          | 策略                                                                   |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `to`                                                          | 推荐，与行首 @ 一致                                                    |
-| `intent`                                                      | 推荐：`discuss, plan, implement, review, fix, deliver, accept, recall` |
-| `what`                                                        | 尽量填：交了什么 / 审了什么 / 结论                                     |
-| `why`                                                         | 尽量填：为什么交 / 为何要改 / 为何阻塞                                 |
-| `next_action`                                                 | 尽量填：希望对方立刻做什么                                             |
-| `goal` / `tradeoff` / `open_questions` / `files` / `evidence` | 可选，可空                                                             |
+后继 Agent **看不到**你的 tool 过程。fence 必须是一份能单独续工的包，不要指望对方去读你的原文附录。
+
+| 字段                          | 策略                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `to`                          | 推荐，与行首 @ 一致                                                    |
+| `intent`                      | 推荐：`discuss, plan, implement, review, fix, deliver, accept, recall` |
+| `goal`                        | 推荐：用户目标、范围、约束                                             |
+| `what`                        | 必填：已完成什么、做到哪（含 review 结论）                             |
+| `why`                         | 必填：为什么交 / 为何阻塞                                              |
+| `next_action`                 | 必填：**唯一**下一步；能引用用户原句则引用                             |
+| `files`                       | `implement/review/fix/deliver/plan` 应填：路径 + 为何重要              |
+| `evidence`                    | 同上：失败过什么、怎么验证的；用户原话照抄                             |
+| `tradeoff` / `open_questions` | 可选                                                                   |
 
 ````markdown
 ```handoff
 to: opencode
 intent: review
-goal: 请 review 登录 API 的鉴权与错误处理
-what: 新增 POST /api/login，JWT 签发，bcrypt 哈希
+goal: 登录 API 无状态鉴权；不做 refresh token；错误码保持现有 401/403
+what: |
+  已完成: POST /api/login，JWT 签发，bcrypt 哈希
+  做到哪: 实现与单测已绿，待独立 review
 why: 需求要求无状态鉴权；现有 session 方案与多实例部署冲突
 tradeoff: 放弃服务端 session；短期不做 refresh token
 open_questions:
   - token TTL 是否应对齐产品 7 天要求
-next_action: 审查密码哈希、JWT 声明与错误码是否安全一致
+next_action: 审查密码哈希、JWT 声明与错误码是否安全一致；用户原句「先把登录鉴权做对」
 files:
-  - src/server/auth.js
-  - tests/auth.test.js
+  - src/server/auth.js — JWT 签发与密码校验
+  - tests/auth.test.js — 登录成功/失败路径
 evidence:
   - npm test -- tests/auth.test.js 通过
 ```
