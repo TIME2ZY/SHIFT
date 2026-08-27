@@ -258,12 +258,15 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
   `/api/project` 与会话创建后修改目录的 UI 已删除。
 - Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
-- 真实 CLI live 场景位于 `scripts/live/`（issue-fix）：sandbox 是独立克隆的上游仓库
-  @ 实例 base commit，`project_dir` 绑定 sandbox 而非 SHIFT 仓库本身。live 默认使用
-  `output/live/.../shift-home` 隔离 SQLite，不写入交互式 `SHIFT_HOME`；`--use-default-home`
-  才选择 UI 库。硬断言（F2P 红→绿、diff 只碰 src、invocation 终态、消息持久化）
-  的判定逻辑在 `scripts/live/lib/assertions.js`，其确定性测试为 `tests/live/sandbox-assert.test.js`
-  与 `tests/live/harness.test.js`。
+- 真实 CLI live 场景位于 `scripts/live/`：
+  - `issue-fix`：sandbox 是独立克隆的上游仓库 @ 实例 base commit，硬断言 F2P 红→绿。
+  - `collab-slice`：同一实例仓库上跑 Codex → Grok `implementation_plan` 交接，经
+    `GET /api/sessions/:id/collaboration` 断言 phase/planHash，不断言 PR。
+    live 默认使用 `output/live/.../shift-home` 隔离 SQLite，不写入交互式 `SHIFT_HOME`；
+    `--use-default-home` 才选择 UI 库。issue-fix 判定逻辑在 `scripts/live/lib/assertions.js`，
+    collab-slice 在 `scripts/live/lib/collab-assert.js`；确定性测试为
+    `tests/live/sandbox-assert.test.js`、`tests/live/collab-assert.test.js` 与
+    `tests/live/harness.test.js`。
 - 产品 Memory 对 Agent 只公开 `shift_context` MCP；其私有 HTTP bridge 使用
   `/api/callbacks/memory-write`，已删除 `/api/callbacks/memory-upsert` 兼容别名及 CLI/测试入口。
 - Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
