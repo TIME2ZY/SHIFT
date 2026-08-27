@@ -41,7 +41,11 @@ function createMemoryCapture({
 
   function persistCapture(input, eventInvocationId) {
     // Capture is scoped to a single source invocation (never cross-agent concat).
-    if (input?.sourceInvocationId && eventInvocationId && input.sourceInvocationId !== eventInvocationId) {
+    if (
+      input?.sourceInvocationId &&
+      eventInvocationId &&
+      input.sourceInvocationId !== eventInvocationId
+    ) {
       logger.warn?.(
         `[memory-capture] refusing cross-invocation capture source=${input.sourceInvocationId} event=${eventInvocationId}`
       );
@@ -128,7 +132,12 @@ function createMemoryCapture({
       id,
       threadId,
       kind: "window-seal",
-      content: renderWindowSealMemory({ ...metadata, assistantContent: input.assistantContent }),
+      content: renderWindowSealMemory({
+        ...metadata,
+        assistantContent: input.assistantContent,
+        userGoal: input.userGoal,
+        events: input.events,
+      }),
       sourceInvocationId: invocationId,
       createdBy: "system:window-seal",
       createdAt,
@@ -183,36 +192,111 @@ function isPartialSealReason(reason, input = {}) {
   return true;
 }
 
+function collectResumeFacts(events) {
+  const files = [];
+  const errors = [];
+  const seenFiles = new Set();
+  const seenErrors = new Set();
+  for (const event of Array.isArray(events) ? events : []) {
+    const kind = String(event?.kind || "");
+    const payload =
+      event?.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+        ? event.payload
+        : {};
+    const filePath = [payload.path, payload.file, payload.filePath, payload.target].find(
+      (value) => typeof value === "string" && value.trim()
+    );
+    if (
+      filePath &&
+      (kind.startsWith("tool.") || kind === "file.changed" || kind === "tool_use") &&
+      !seenFiles.has(filePath)
+    ) {
+      seenFiles.add(filePath);
+      files.push(filePath.trim());
+    }
+    let errorText = "";
+    if (kind === "stderr") {
+      errorText = String(payload.text || payload.content || "")
+        .trim()
+        .split(/\r?\n/)[0];
+    } else if (payload.error || payload.failed === true || payload.ok === false) {
+      errorText = String(payload.error || payload.message || payload.text || kind).trim();
+    }
+    if (errorText) {
+      const clipped = errorText.slice(0, 160);
+      if (!seenErrors.has(clipped)) {
+        seenErrors.add(clipped);
+        errors.push(clipped);
+      }
+    }
+  }
+  return { files: files.slice(0, 8), errors: errors.slice(0, 5) };
+}
+
 function renderWindowSealMemory(input) {
   const partial = input.partial !== false;
+  const facts = collectResumeFacts(input.events);
+  const goal = compactText(input.userGoal, 240);
   const snapshot = truncateMiddle(
-    typeof input.assistantContent === "string" && input.assistantContent
+    typeof input.assistantContent === "string" && input.assistantContent.trim()
       ? input.assistantContent
       : partial
         ? "(seal 时尚无 assistant 文本)"
         : "(本轮无 assistant 文本)",
-    1500
+    400
   );
-  if (partial) {
-    return truncateEnd(
-      [
-        `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=true`,
-        "中断快照:",
-        snapshot,
-        "说明: provider session 已放弃；后续请以结构化记忆与 recall_search 为准。",
-      ].join("\n"),
-      MAX_MEMORY_CONTENT_CHARS
-    );
+  const lines = [
+    `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=${partial}`,
+    goal ? `goal: ${goal}` : "goal: (无用户目标快照)",
+    `done: ${partial ? "中断，输出可能不完整" : "本轮已写出完整回复"}`,
+  ];
+  if (facts.files.length > 0) {
+    lines.push("files:");
+    for (const file of facts.files) lines.push(`  - ${file}`);
+  } else {
+    lines.push("files: (本轮事件未记录路径)");
   }
-  return truncateEnd(
-    [
-      `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=false`,
-      "完整轮次快照:",
-      snapshot,
-      "说明: 窗口已正常轮换；后续请以结构化记忆与 recall_search 为准。",
-    ].join("\n"),
-    MAX_MEMORY_CONTENT_CHARS
+  if (facts.errors.length > 0) {
+    lines.push("errors:");
+    for (const error of facts.errors) lines.push(`  - ${error}`);
+  } else {
+    lines.push("errors: (无)");
+  }
+  lines.push(
+    `next_action: ${
+      partial
+        ? "从中断点继续用户目标；先 recall_search / read-invocation 再改代码"
+        : "在新 generation 继续用户目标；细节用 recall_search / read-invocation"
+    }`,
+    "snapshot:",
+    snapshot,
+    "说明: provider session 已放弃。本包是协作事件，不是产品 Memory。"
   );
+  return truncateEnd(lines.join("\n"), MAX_MEMORY_CONTENT_CHARS);
+}
+
+function compactText(value, maxChars) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function readLatestWindowSealEvent(storage, threadId) {
+  if (!storage?.invocations || typeof threadId !== "string" || !threadId) return null;
+  const listThread = storage.invocations.listForThread;
+  const listEvents = storage.invocations.listEvents;
+  if (typeof listThread !== "function" || typeof listEvents !== "function") return null;
+  const invocations = listThread.call(storage.invocations, threadId) || [];
+  for (let i = invocations.length - 1; i >= 0; i -= 1) {
+    const invocationId = invocations[i].id || invocations[i].invocationId;
+    if (!invocationId) continue;
+    const events = listEvents.call(storage.invocations, invocationId) || [];
+    for (let j = events.length - 1; j >= 0; j -= 1) {
+      if (events[j]?.kind === "window-sealed") return events[j];
+    }
+  }
+  return null;
 }
 
 function normalizeQuality(quality) {
@@ -275,4 +359,6 @@ module.exports = {
   createMemoryCapture,
   renderHandoffMemory,
   renderWindowSealMemory,
+  collectResumeFacts,
+  readLatestWindowSealEvent,
 };

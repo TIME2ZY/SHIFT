@@ -122,6 +122,8 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 **结论（handoff）— durable 0B-2 已落地：**
 
+- Receive Bundle 把 Structured Handoff 当后继续工包（权威）；原文附录非权威且预算收窄。
+- `implement/review/fix/deliver/plan` 缺 `files`/`evidence` 记入 `missingRecommended` 并打续工不足 banner，不因此把 `ok` 打成 degraded，也不新开顶层字段。
 - 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；`enqueued_at` 只在 worklist 实际追加后确认。
 - accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
 - target Invocation start/bind 与 Invocation terminal/Handoff terminal 各自在同一事务提交。
@@ -153,16 +155,17 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.4 Memory 写入
 
-| 类型                             | 入口                                                                     | 落点                               | 调用方                                            |
-| -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------- |
-| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队        | `shift_context` MCP → callback-routes 私有 bridge |
-| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                               | 服务内部                                          |
-| **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件** | a2a-finalize                                      |
-| **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件               | seal 路径（若接线）                               |
-| Recall / FTS / embedding         | 派生                                                                     | recall 表 / 向量                   | 投影只读查询为主                                  |
+| 类型                             | 入口                                                                     | 落点                                                                              | 调用方                                            |
+| -------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队                                                       | `shift_context` MCP → callback-routes 私有 bridge |
+| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                                                                              | 服务内部                                          |
+| **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件**                                                | a2a-finalize                                      |
+| **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件（结构化续工包：goal/files/errors/next_action + 短 snapshot） | seal 路径；下一轮 bootstrap Digest 注入           |
+| Recall / FTS / embedding         | 派生                                                                     | recall 表 / 向量                                                                  | 投影只读查询为主                                  |
 
 **结论（memory）— B-4 已落地（2026-08-07）：**
 
+- window-sealed 写入结构化续工包（goal / files / errors / next_action + 短 snapshot），由下一轮 `buildDigest` 注入；紧急密封也走平台拼包，不另调模型。
 - `createMemoryCapture` **拒绝** `memoryService` 参数（防半接线）。
 - composition root 只传 `eventStore`；注释标明产品记忆走 `writeMemoryCandidate`。
 - 模块头文档区分 collaboration event vs product memory 行。

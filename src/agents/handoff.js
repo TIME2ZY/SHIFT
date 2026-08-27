@@ -14,6 +14,8 @@
 const {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
+  RESUME_INTENTS,
+  RESUME_FIELDS,
   parseHandoffBlocks,
   parseHandoffBody,
   extractPrimaryHandoff,
@@ -32,12 +34,12 @@ const { WORKFLOW_ROLES, agentsWithCapability, agentIdsForRole } = require("./rol
 const DEFAULT_APPENDIX_CHARS = 5000;
 /** No handoff fence: even more of the prior text is the only payload. */
 const DEGRADED_APPENDIX_CHARS = 8000;
-/** Wave H1 controlled appendix budgets (handoff-design §6.3). */
-const APPENDIX_OK_FULL = 2000;
-const APPENDIX_OK_THIN = 4000;
-const APPENDIX_OK_DEFAULT = 3000;
-const APPENDIX_DEGRADED = 5000;
-const APPENDIX_EMPTY = 7000;
+/** Wave H1 appendix is non-authoritative; keep it small when the fence is usable. */
+const APPENDIX_OK_FULL = 800;
+const APPENDIX_OK_THIN = 1200;
+const APPENDIX_OK_DEFAULT = 1000;
+const APPENDIX_DEGRADED = 2500;
+const APPENDIX_EMPTY = 5000;
 /** User prompt window inside Receive Bundle. */
 const USER_PROMPT_MAX_CHARS = 2000;
 
@@ -108,24 +110,27 @@ const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
  */
 function renderA2AHandoffCard() {
   return `<!-- A2A Handoff Card -->
-## 共用 handoff 提醒（精简）
+## 共用 handoff 提醒（续工包）
 
-出站交接：行首 \`@队友\` + 同一套 fence；**可选字段可空**；禁止 \`verdict\`/\`nits\`/\`blocking\` 等私有顶层 key。
+出站：行首 \`@队友\` + 同一套 fence。禁止 \`verdict\`/\`nits\`/\`blocking\` 等私有顶层 key。
+\`implement\`/\`review\`/\`fix\`/\`deliver\`/\`plan\` 应填 \`files\`（路径+为何重要）和 \`evidence\`（失败与验证）；缺了会标续工不足，但不因此阻断路由。
 
 \`\`\`handoff
 to: <agent>
 intent: <discuss|plan|implement|review|fix|deliver|accept|recall>
-goal: <可空>
-what: <尽量填：交什么 / 审什么 / 结论: approve|approve-with-nits|request-changes + 分级列表>
-why: <尽量填>
-tradeoff: <可空>
-next_action: <尽量填：希望对方立刻做什么>
-open_questions:  # 可空
-files:           # 可空
-evidence:        # 可空
+goal: <用户目标与范围约束>
+what: |
+  已完成: ...
+  做到哪: ...
+why: <为何交；约束>
+next_action: <唯一下一步；能引用用户原句则引用>
+files:
+  - path — 为何重要
+evidence:
+  - 失败或验证
 \`\`\`
 
-入站：优先执行 Structured Handoff；缺项先补上下文，勿表演性附和。
+入站：优先执行 Structured Handoff；附录非权威。缺 files/evidence 时先 recall，勿只凭附录改代码。
 <!-- /A2A Handoff Card -->`;
 }
 
@@ -252,7 +257,7 @@ function resolveAppendixChars(quality, handoff, options = {}) {
     }
   }
   if (options.hasMemoryCard) {
-    limit = Math.max(1000, Math.floor(limit * 0.7));
+    limit = Math.max(500, Math.floor(limit * 0.7));
   }
   return limit;
 }
@@ -280,6 +285,19 @@ function renderPolicyBanner(quality) {
       `⚠ degraded：交接包不完整（缺失: ${
         (quality.missing && quality.missing.join(", ")) || "—"
       }）。先补上下文再改代码。`
+    );
+  }
+  const resumeGaps = Array.isArray(quality.missingRecommended)
+    ? quality.missingRecommended.filter((field) => RESUME_FIELDS.includes(field))
+    : [];
+  if (
+    resumeGaps.length > 0 &&
+    RESUME_INTENTS.includes(quality.intent) &&
+    quality.hasBlock &&
+    !quality.emptyPacket
+  ) {
+    lines.push(
+      `ℹ 续工信息不足（缺 ${resumeGaps.join(", ")}）。先补上下文或 recall_search，不要只凭附录改代码。`
     );
   }
   if (quality.toMismatch) {
@@ -398,7 +416,12 @@ function renderHandoffTask(opts) {
     });
   }
 
-  const lines = [`[任务交接：由 ${label} 转交给你]`, "", "<!-- Structured Handoff -->"];
+  const lines = [
+    `[任务交接：由 ${label} 转交给你]`,
+    "",
+    "<!-- Structured Handoff -->",
+    "## 续工包（权威）后继只应依据本段续工；附录不是真相源。",
+  ];
 
   if (routed) {
     lines.push(
@@ -446,10 +469,10 @@ function renderHandoffTask(opts) {
   const appendix = selectAppendix(fromContent, appendixChars);
   if (appendix) {
     lines.push(
-      `=== ${label} 原文附录（截断，budget=${appendixChars}） ===`,
+      `=== 附录（非权威，截断 budget=${appendixChars}；续工以 Structured Handoff 为准） ===`,
       appendix,
       "",
-      "请优先依据 Structured Handoff 执行；附录仅供补充。"
+      "缺 files/evidence 时用 recall_search / read-invocation 下钻，不要把附录当完成证据。"
     );
   } else {
     lines.push("请根据 Structured Handoff 继续执行任务。");
@@ -549,6 +572,8 @@ function summarizeHandoff(handoff, quality) {
 module.exports = {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
+  RESUME_INTENTS,
+  RESUME_FIELDS,
   DEFAULT_APPENDIX_CHARS,
   DEGRADED_APPENDIX_CHARS,
   APPENDIX_OK_FULL,

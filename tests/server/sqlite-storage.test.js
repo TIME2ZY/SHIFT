@@ -308,7 +308,9 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.equal(windows[1].generation, 2);
     assert.match(prompts[2], /Generation: 2/);
     assert.match(prompts[2], /<!-- Active Memories \(0\) -->/);
-    assert.doesNotMatch(prompts[2], /\[window-seal\]/);
+    assert.match(prompts[2], /Window Seal Resume/);
+    assert.match(prompts[2], /\[window-seal\]/);
+    assert.equal(storage.memories.listForThread(session.id).length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();

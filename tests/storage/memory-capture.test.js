@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createMemoryCapture } = require("../../src/storage/memory-capture");
+const {
+  createMemoryCapture,
+  collectResumeFacts,
+  readLatestWindowSealEvent,
+} = require("../../src/storage/memory-capture");
 
 function fixture() {
   const events = [];
@@ -50,6 +54,8 @@ test("window seal is persisted as recovery state, not product Memory", () => {
     windowId: "window-1",
     reason: "post-turn-soft-seal",
     assistantContent: "Completed response.",
+    userGoal: "Implement login",
+    events: [{ kind: "tool.finished", payload: { path: "src/server/auth.js" } }],
   });
 
   assert.equal(result.captured, true);
@@ -57,6 +63,10 @@ test("window seal is persisted as recovery state, not product Memory", () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].kind, "window-sealed");
   assert.equal(events[0].payload.kind, "window-seal");
+  assert.match(events[0].payload.content, /goal: Implement login/);
+  assert.match(events[0].payload.content, /src\/server\/auth\.js/);
+  assert.match(events[0].payload.content, /next_action:/);
+  assert.match(events[0].payload.content, /不是产品 Memory/);
 });
 
 test("missing handoff block remains a no-op", () => {
@@ -83,4 +93,36 @@ test("createMemoryCapture rejects memoryService half-wiring", () => {
 
 test("createMemoryCapture requires EventStore", () => {
   assert.throws(() => createMemoryCapture(), /requires an eventStore/);
+});
+
+test("collectResumeFacts extracts files and stderr without inventing paths", () => {
+  const facts = collectResumeFacts([
+    { kind: "tool.started", payload: { path: "src/foo.js" } },
+    { kind: "file.changed", payload: { file: "src/foo.js" } },
+    { kind: "stderr", payload: { text: "boom\nmore" } },
+    { kind: "text.delta", payload: { text: "hello" } },
+  ]);
+  assert.deepEqual(facts.files, ["src/foo.js"]);
+  assert.deepEqual(facts.errors, ["boom"]);
+});
+
+test("readLatestWindowSealEvent walks invocations newest-first", () => {
+  const storage = {
+    invocations: {
+      listForThread() {
+        return [{ id: "inv-1" }, { id: "inv-2" }];
+      },
+      listEvents(id) {
+        if (id === "inv-1") {
+          return [{ kind: "window-sealed", payload: { content: "old" } }];
+        }
+        return [
+          { kind: "text.delta", payload: { text: "x" } },
+          { kind: "window-sealed", payload: { content: "new-seal" } },
+        ];
+      },
+    },
+  };
+  const latest = readLatestWindowSealEvent(storage, "thread-1");
+  assert.equal(latest.payload.content, "new-seal");
 });

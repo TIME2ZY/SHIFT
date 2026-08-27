@@ -73,7 +73,10 @@ test("buildDigest can read invocation metadata from SQLite-backed recall", async
 });
 
 test("buildDigest requires an explicit invocation source", async () => {
-  await assert.rejects(() => buildDigest({ sessionId: "thread-1" }), /invocationSource is required/);
+  await assert.rejects(
+    () => buildDigest({ sessionId: "thread-1" }),
+    /invocationSource is required/
+  );
 });
 
 test("buildDigest restores semantic thread state from SQLite", async () => {
@@ -107,6 +110,49 @@ test("buildDigest restores semantic thread state from SQLite", async () => {
   assert.match(digest, /快速开始必须先创建 clean epoch/);
   assert.match(digest, /SHIFT_DERIVED_DIGEST_DATA/);
   assert.doesNotMatch(digest, /第一个 invocation/);
+});
+
+test("buildDigest injects the latest window-seal resume packet before invocation index", async () => {
+  const digest = await buildDigest({
+    threadId: "thread-seal",
+    sessionId: "thread-seal",
+    invocationSource: {
+      listInvocationsWithMeta: async () => [
+        {
+          invocationId: "inv-seal",
+          agent: "codex",
+          startedAt: "2026-08-27T00:00:00.000Z",
+          endedAt: "2026-08-27T00:01:00.000Z",
+          state: "completed",
+          eventCount: 2,
+        },
+      ],
+    },
+    windowSealSource: {
+      invocations: {
+        listForThread() {
+          return [{ id: "inv-seal" }];
+        },
+        listEvents() {
+          return [
+            {
+              kind: "window-sealed",
+              payload: {
+                kind: "window-seal",
+                content: "goal: keep going\nfiles:\n  - src/a.js",
+              },
+            },
+          ];
+        },
+      },
+    },
+  });
+  assert.match(digest, /Window Seal Resume/);
+  assert.match(digest, /goal: keep going/);
+  assert.match(digest, /src\/a\.js/);
+  const sealIdx = digest.indexOf("Window Seal Resume");
+  const indexIdx = digest.indexOf("inv-seal");
+  assert.ok(sealIdx >= 0 && sealIdx < indexIdx);
 });
 
 // ── buildDigest ────────────────────────────────────────────────
