@@ -399,6 +399,7 @@ function optionalDate(value, name) {
 }
 
 function boundedInteger(value, fallback, min, max) {
+  if (value == null || value === "") return fallback;
   const number = Number(value);
   return Number.isInteger(number) ? Math.max(min, Math.min(number, max)) : fallback;
 }
