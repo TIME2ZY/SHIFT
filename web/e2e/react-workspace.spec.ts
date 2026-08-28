@@ -126,6 +126,34 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
+    if (url.pathname === "/api/sessions/session-1/collaboration" && method === "GET") {
+      await route.fulfill({
+        json: {
+          collaboration: state.chatCompleted
+            ? {
+                phase: "implement",
+                goal: "实现工作区功能",
+                lastFrom: "codex",
+                lastTo: "grok",
+                updatedAt: "2026-08-13T00:05:00.000Z",
+                implementation: {
+                  status: "pending_approval",
+                  allowed: false,
+                  reason: "implementation_plan_not_approved",
+                  planHash: "plan-e2e",
+                  summary: "Keep worktree isolated",
+                },
+                review: { status: null, verdict: null },
+                delivery: { status: null, commitSha: null, prUrl: null, ciStatus: null },
+                acceptance: { status: null, verdict: null },
+                blocker: "implementation_plan_not_approved",
+              }
+            : null,
+        },
+      });
+      return;
+    }
+
     if (url.pathname === "/api/sessions/session-1/usage" && method === "GET") {
       await route.fulfill({
         json: {
@@ -452,6 +480,7 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
 
   await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "协作状态" })).toContainText("尚未开始协作");
   await page.getByText("隔离改代码", { exact: true }).click();
   await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
 
@@ -459,12 +488,16 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
+  await expect(page.getByRole("region", { name: "协作状态" })).toContainText("等待 Codex 批准方案");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
   await page.getByRole("button", { name: "审计", exact: true }).click();
   await expect(page.getByRole("heading", { name: "在线运行观测" })).toBeVisible();
-  await page.locator(".react-memory-list").getByRole("button", { name: /React 迁移/ }).click();
+  await page
+    .locator(".react-memory-list")
+    .getByRole("button", { name: /React 迁移/ })
+    .click();
   await expect(
     page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
   ).toBeVisible();

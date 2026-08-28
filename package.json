@@ -36,7 +36,8 @@
     "prepare:storage:epoch": "node scripts/prepare-clean-epoch.js",
     "storage:init-home": "node scripts/init-storage-home.js",
     "storage:migrate-home": "node scripts/migrate-storage-home.js",
-    "test:live:issue-fix": "node scripts/live/run-issue-fix.js"
+    "test:live:issue-fix": "node scripts/live/run-issue-fix.js",
+    "test:live:collab-slice": "node scripts/live/run-collab-slice.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

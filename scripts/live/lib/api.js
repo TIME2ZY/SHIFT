@@ -33,7 +33,9 @@ function createApiClient({ baseUrl, token }) {
   async function openProject(dir) {
     const result = await request("POST", "/api/projects/open", { dir });
     if (!result?.project?.projectKey) {
-      throw new Error(`openProject returned no projectKey: ${JSON.stringify(result).slice(0, 300)}`);
+      throw new Error(
+        `openProject returned no projectKey: ${JSON.stringify(result).slice(0, 300)}`
+      );
     }
     return result.project;
   }
@@ -50,7 +52,15 @@ function createApiClient({ baseUrl, token }) {
    * POST /api/chat and collect the whole SSE stream.
    * Resolves with collected events once the stream ends (`done` or socket close).
    */
-  async function chat({ sessionId, agent, prompt, clientTurnId, timeoutMs, onEvent = () => {} }) {
+  async function chat({
+    sessionId,
+    agent,
+    prompt,
+    clientTurnId,
+    timeoutMs,
+    useWorktree = false,
+    onEvent = () => {},
+  }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error("chat timeout")), timeoutMs);
     const events = [];
@@ -62,7 +72,13 @@ function createApiClient({ baseUrl, token }) {
           [UI_TOKEN_HEADER]: token,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ sessionId, agent, prompt, clientTurnId }),
+        body: JSON.stringify({
+          sessionId,
+          agent,
+          prompt,
+          clientTurnId,
+          ...(useWorktree ? { useWorktree: true } : {}),
+        }),
       });
       if (!response.ok || !response.body) {
         const text = await response.text().catch(() => "");
@@ -113,7 +129,10 @@ function createApiClient({ baseUrl, token }) {
   }
 
   async function listTraces(sessionId) {
-    const result = await request("GET", `/api/sessions/${encodeURIComponent(sessionId)}/traces`);
+    const result = await request(
+      "GET",
+      `/api/sessions/${encodeURIComponent(sessionId)}/traces?limit=20`
+    );
     return result?.traces || [];
   }
 
@@ -130,7 +149,33 @@ function createApiClient({ baseUrl, token }) {
     return result?.messages || [];
   }
 
-  return { openProject, createSession, chat, listTraces, getTrace, getMessages };
+  async function getCollaboration(sessionId) {
+    const result = await request(
+      "GET",
+      `/api/sessions/${encodeURIComponent(sessionId)}/collaboration`
+    );
+    return result?.collaboration ?? null;
+  }
+
+  async function getWorktreeDiff(sessionId) {
+    try {
+      return await request("GET", `/api/sessions/${encodeURIComponent(sessionId)}/worktree/diff`);
+    } catch (error) {
+      if (String(error?.message || error).includes("(400)")) return { diff: "", missing: true };
+      throw error;
+    }
+  }
+
+  return {
+    openProject,
+    createSession,
+    chat,
+    listTraces,
+    getTrace,
+    getMessages,
+    getCollaboration,
+    getWorktreeDiff,
+  };
 }
 
 function summarizeChatEvents(events) {

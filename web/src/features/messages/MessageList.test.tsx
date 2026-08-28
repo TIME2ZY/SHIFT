@@ -34,11 +34,11 @@ describe("MessageList", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "使用推荐提示：审查前端 UI 与美观性" }));
+    await user.click(screen.getByRole("button", { name: "使用推荐提示：讨论并交给 Grok 出方案" }));
     expect(onUsePrompt).toHaveBeenCalledWith({
-      title: "审查前端 UI 与美观性",
-      description: "分析页面配色、排版规范与动画微交互",
-      prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+      title: "讨论并交给 Grok 出方案",
+      description: "先收敛问题，再让 Grok 提交可批准的 implementation_plan",
+      prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
     });
   });
 

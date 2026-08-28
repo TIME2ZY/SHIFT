@@ -111,6 +111,7 @@ test("execution read model restores failure and handoff causality from SQLite", 
     assert.equal(failed.page.total, 1);
     assert.equal(failed.traces[0].traceId, "trace-1");
     assert.equal(storage.executions.searchForThread("other-thread").page.total, 0);
+    assert.equal(storage.executions.searchForThread("thread-1").page.limit, 20);
     const exported = storage.executions.export("thread-1", "trace-1");
     assert.equal(exported.capturePolicy, "structural-metadata-v1");
     assert.equal(exported.trace.request.messageId, "message-user-1");

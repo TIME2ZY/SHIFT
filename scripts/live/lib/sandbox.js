@@ -22,7 +22,15 @@ function git(targetDir, args, options = {}) {
   return result.stdout;
 }
 
-function createSandbox({ instance, source, targetDir, nodeModules, logger = () => {} }) {
+function createSandbox({
+  instance,
+  source,
+  targetDir,
+  nodeModules,
+  logger = () => {},
+  applyTestPatch = true,
+  install = true,
+}) {
   fs.mkdirSync(path.dirname(targetDir), { recursive: true });
   if (fs.existsSync(targetDir)) {
     fs.rmSync(targetDir, { recursive: true, force: true });
@@ -39,36 +47,48 @@ function createSandbox({ instance, source, targetDir, nodeModules, logger = () =
   git(targetDir, ["config", "user.name", "shift-live"]);
   git(targetDir, ["config", "user.email", "shift-live@local"]);
 
-  logger(`applying F2P test patch: ${path.basename(instance.testPatchPath)}`);
-  const apply = spawnSync(
-    "git",
-    ["-C", targetDir, "apply", "--whitespace=nowarn", path.resolve(instance.testPatchPath)],
-    { encoding: "utf8" }
-  );
-  if (apply.status !== 0) {
-    throw new Error(`test patch does not apply at base commit: ${(apply.stderr || "").trim()}`);
-  }
-  git(targetDir, ["add", "-A"]);
-  git(targetDir, ["commit", "--no-verify", "--quiet", "-m", `test: add F2P regression tests (${instance.id})`]);
-
-  if (nodeModules) {
-    const linkPath = path.join(targetDir, "node_modules");
-    const absoluteSource = path.resolve(nodeModules);
-    if (!fs.existsSync(absoluteSource)) {
-      throw new Error(`node_modules source does not exist: ${absoluteSource}`);
+  if (applyTestPatch) {
+    logger(`applying F2P test patch: ${path.basename(instance.testPatchPath)}`);
+    const apply = spawnSync(
+      "git",
+      ["-C", targetDir, "apply", "--whitespace=nowarn", path.resolve(instance.testPatchPath)],
+      { encoding: "utf8" }
+    );
+    if (apply.status !== 0) {
+      throw new Error(`test patch does not apply at base commit: ${(apply.stderr || "").trim()}`);
     }
-    fs.symlinkSync(absoluteSource, linkPath, "junction");
-    logger(`junction node_modules -> ${absoluteSource}`);
-  } else {
-    logger(`installing dependencies: ${instance.installCommand}`);
-    const install = spawnSync(instance.installCommand, {
-      cwd: targetDir,
-      shell: true,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (install.status !== 0) {
-      throw new Error(`install failed: ${(install.stderr || install.stdout || "").trim().slice(0, 2000)}`);
+    git(targetDir, ["add", "-A"]);
+    git(targetDir, [
+      "commit",
+      "--no-verify",
+      "--quiet",
+      "-m",
+      `test: add F2P regression tests (${instance.id})`,
+    ]);
+  }
+
+  if (install) {
+    if (nodeModules) {
+      const linkPath = path.join(targetDir, "node_modules");
+      const absoluteSource = path.resolve(nodeModules);
+      if (!fs.existsSync(absoluteSource)) {
+        throw new Error(`node_modules source does not exist: ${absoluteSource}`);
+      }
+      fs.symlinkSync(absoluteSource, linkPath, "junction");
+      logger(`junction node_modules -> ${absoluteSource}`);
+    } else {
+      logger(`installing dependencies: ${instance.installCommand}`);
+      const installed = spawnSync(instance.installCommand, {
+        cwd: targetDir,
+        shell: true,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (installed.status !== 0) {
+        throw new Error(
+          `install failed: ${(installed.stderr || installed.stdout || "").trim().slice(0, 2000)}`
+        );
+      }
     }
   }
   return targetDir;
@@ -79,7 +99,13 @@ function createSandbox({ instance, source, targetDir, nodeModules, logger = () =
  * Jest writes structured results to --outputFile so test console output
  * cannot corrupt the payload.
  */
-function runProjectTests({ instance, targetDir, outputFile, timeoutMs = 600_000, logger = () => {} }) {
+function runProjectTests({
+  instance,
+  targetDir,
+  outputFile,
+  timeoutMs = 600_000,
+  logger = () => {},
+}) {
   if (fs.existsSync(outputFile)) {
     fs.rmSync(outputFile, { force: true });
   }
@@ -93,8 +119,15 @@ function runProjectTests({ instance, targetDir, outputFile, timeoutMs = 600_000,
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (!fs.existsSync(outputFile)) {
-    const detail = (result.stderr || result.stdout || (result.error && result.error.message) || "").trim();
-    throw new Error(`project test run produced no results file (exit ${result.status}): ${detail.slice(0, 2000)}`);
+    const detail = (
+      result.stderr ||
+      result.stdout ||
+      (result.error && result.error.message) ||
+      ""
+    ).trim();
+    throw new Error(
+      `project test run produced no results file (exit ${result.status}): ${detail.slice(0, 2000)}`
+    );
   }
   const parsed = JSON.parse(fs.readFileSync(outputFile, "utf8"));
   return { parsed, exitCode: result.status };

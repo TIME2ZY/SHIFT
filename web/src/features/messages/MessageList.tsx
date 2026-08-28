@@ -20,19 +20,19 @@ interface QuickPrompt {
 
 const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
   {
-    title: "审查前端 UI 与美观性",
-    description: "分析页面配色、排版规范与动画微交互",
-    prompt: "请审查前端 UI 与美观性，分析页面配色、排版规范与动画微交互。",
+    title: "讨论并交给 Grok 出方案",
+    description: "先收敛问题，再让 Grok 提交可批准的 implementation_plan",
+    prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
   },
   {
-    title: "检查 TypeScript 类型与 Lint",
-    description: "扫描代码库潜在类型缺陷与语法不规范",
-    prompt: "请检查 TypeScript 类型与 Lint，扫描代码库潜在类型缺陷与语法不规范。",
+    title: "交叉验证实现方向",
+    description: "Gemini 提出方向与反例，Codex 负责收敛",
+    prompt: "@Gemini 针对当前目标提出两个实现方向和反例，再交给 @Codex 收敛。",
   },
   {
-    title: "重构项目核心模块",
-    description: "隔离分支创建 Worktree，全自动重构代码",
-    prompt: "请重构项目核心模块：在隔离 worktree 中全自动重构代码。",
+    title: "在隔离 worktree 中实现",
+    description: "按已批准方案改代码，完成后交给 OpenCode 审查",
+    prompt: "请按已批准方案在隔离 worktree 中实现，完成后交给 @OpenCode 审查。",
     useWorktree: true,
   },
 ];

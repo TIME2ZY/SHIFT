@@ -226,6 +226,7 @@ function createServer(options = {}) {
     usageStorage: storageContext.storage,
     recallService,
     executionStorage: storageContext.storage,
+    collabTaskRegistry,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,

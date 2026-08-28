@@ -26,7 +26,7 @@
 ```text
 HTTP createServer (src/server/index.js)
   ├─ project-routes     → project-repository (open / list / archive / restore)
-  ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD)
+  ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD + collaboration snapshot)
   ├─ chat-routes        → start/finish Trace + start/stream/finish invocation + finalize A2A
   ├─ callback-routes    → mid-run postMessage / MCP 私有 HTTP bridge / (A2A finalize)
   ├─ memory-routes      → 读为主（list/search 等）
@@ -35,6 +35,7 @@ HTTP createServer (src/server/index.js)
 Web App (web/src/app/App.tsx)
   ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
   ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
+  ├─ collaboration feature → GET /api/sessions/:id/collaboration（只读 phase/gate 投影）
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
@@ -46,6 +47,7 @@ Web App (web/src/app/App.tsx)
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
   execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
+  collaboration-read-model → Session-scoped phase/gate 投影（只读，不回写）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -256,12 +258,15 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
   `/api/project` 与会话创建后修改目录的 UI 已删除。
 - Server 测试直接执行 `open Project → create Session(projectKey) → chat(sessionId)`；
   不再通过 fetch 包装器补 `projectKey`、隐式建 Session 或改写 `projectDir`。
-- 真实 CLI live 场景位于 `scripts/live/`（issue-fix）：sandbox 是独立克隆的上游仓库
-  @ 实例 base commit，`project_dir` 绑定 sandbox 而非 SHIFT 仓库本身。live 默认使用
-  `output/live/.../shift-home` 隔离 SQLite，不写入交互式 `SHIFT_HOME`；`--use-default-home`
-  才选择 UI 库。硬断言（F2P 红→绿、diff 只碰 src、invocation 终态、消息持久化）
-  的判定逻辑在 `scripts/live/lib/assertions.js`，其确定性测试为 `tests/live/sandbox-assert.test.js`
-  与 `tests/live/harness.test.js`。
+- 真实 CLI live 场景位于 `scripts/live/`：
+  - `issue-fix`：sandbox 是独立克隆的上游仓库 @ 实例 base commit，硬断言 F2P 红→绿。
+  - `collab-slice`：同一实例仓库上跑 Codex → Grok `implementation_plan` 交接，经
+    `GET /api/sessions/:id/collaboration` 断言 phase/planHash，不断言 PR。
+    live 默认使用 `output/live/.../shift-home` 隔离 SQLite，不写入交互式 `SHIFT_HOME`；
+    `--use-default-home` 才选择 UI 库。issue-fix 判定逻辑在 `scripts/live/lib/assertions.js`，
+    collab-slice 在 `scripts/live/lib/collab-assert.js`；确定性测试为
+    `tests/live/sandbox-assert.test.js`、`tests/live/collab-assert.test.js` 与
+    `tests/live/harness.test.js`。
 - 产品 Memory 对 Agent 只公开 `shift_context` MCP；其私有 HTTP bridge 使用
   `/api/callbacks/memory-write`，已删除 `/api/callbacks/memory-upsert` 兼容别名及 CLI/测试入口。
 - Web 只公开根入口 `/`；已删除无人调用的 `/react` 兼容跳转及其旧测试。
@@ -270,12 +275,17 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                 |
-| --------------------- | ----------------------------------------------------- | ----------------------------- | ---------------------------------------------------- |
-| 代码 review           | `processWorkflowEvidenceOutput`                       | OpenCode workflow evidence    | changes requested 直接形成事件；approve 继续交付核验 |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | OpenCode 提交后由平台只读核对 | 返回真实 Git/GitHub evidence                         |
-| 交付契约校验          | `recordOpenCodeDelivery` → `validateVerifiedDelivery` | collab task registry          | 校验并持久化 review、commit、分支、PR 与 CI gate     |
-| 最终目标验收          | `submitFinalAcceptance`                               | Codex workflow evidence       | 绑定 goal、solution、plan、review 与 commit hash     |
+| 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                  |
+| --------------------- | ----------------------------------------------------- | ----------------------------- | ----------------------------------------------------- |
+| 代码 review           | `processWorkflowEvidenceOutput`                       | OpenCode workflow evidence    | changes requested 直接形成事件；approve 继续交付核验  |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | OpenCode 提交后由平台只读核对 | 返回真实 Git/GitHub evidence                          |
+| 交付契约校验          | `recordOpenCodeDelivery` → `validateVerifiedDelivery` | collab task registry          | 校验并持久化 review、commit、分支、PR 与 CI gate      |
+| 最终目标验收          | `submitFinalAcceptance`                               | Codex workflow evidence       | 绑定 goal、solution、plan、review 与 commit hash      |
+| 协作状态只读          | `projectCollaboration` ← session-routes               | UI / live harness             | `GET /api/sessions/:id/collaboration` 投影 phase/gate |
+
+`GET /api/sessions/:sessionId/collaboration` 是协作状态的唯一公开读入口：无 task 返回
+`{ collaboration: null }`，有 task 只投影 phase、四道 gate 摘要和派生 `blocker`，不返回
+plan/review 全文，也不写库。权威仍是 `collaboration_tasks` + `collab-task-registry`。
 
 OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、
@@ -461,5 +471,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-13。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-08-27。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

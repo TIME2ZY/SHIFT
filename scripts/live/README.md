@@ -8,7 +8,28 @@
 | CLI    | mock            | **真 codex / grok**                                                      |
 | 靶项目 | 测试夹具        | **真实仓库 @ base commit**（dayjs）                                      |
 | DB     | 临时目录 / 内存 | **隔离 `output/live/.../shift-home`**（`--use-default-home` 才用 UI 库） |
-| 入口   | `npm test`      | `npm run test:live:issue-fix`                                            |
+| 入口   | `npm test`      | `npm run test:live:issue-fix` / `npm run test:live:collab-slice`         |
+
+## 场景：collab-slice（Codex → Grok plan）
+
+验证多 Agent 交接的最小真实切片，不断言 PR / CI：
+
+1. 克隆实例仓库到 sandbox（不打 F2P 补丁、不 `npm ci`）
+2. open Project → create Session，`useWorktree: true`
+3. 用户消息要求 Codex 写 `solution_baseline` 并 `@Grok` 提交 `implementation_plan`，禁止改文件
+4. 硬断言（纯函数在 `scripts/live/lib/collab-assert.js`）：
+   - 至少 2 个终态 invocation，且包含 Codex 与 Grok
+   - 恰好存在 accepted handoff 且有 `targetInvocationId`
+   - `GET /api/sessions/:id/collaboration` 为 `phase=implement` 且 `planHash` 非空
+   - 刷新后再 GET，phase / planHash 不变
+   - project_dir 与 worktree diff 均为空
+
+```powershell
+npm run test:live:collab-slice -- --dry-run
+npm run test:live:collab-slice -- --instance dayjs-2505
+```
+
+Grok 若不写 `implementation_plan` 块，断言记为 `plan_fence_missing`，不放宽门禁。
 
 ## 场景：issue-fix（S1）
 

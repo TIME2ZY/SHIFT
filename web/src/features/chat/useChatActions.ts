@@ -72,6 +72,9 @@ export function useChatActions() {
                 queryKey: queryKeys.sessions.usage(eventSessionId),
               });
               void queryClient.invalidateQueries({
+                queryKey: queryKeys.sessions.collaboration(eventSessionId),
+              });
+              void queryClient.invalidateQueries({
                 queryKey: queryKeys.sessions.invocationProcess(eventSessionId, invocationId),
               });
             },
@@ -106,6 +109,9 @@ export function useChatActions() {
             }),
             queryClient.invalidateQueries({
               queryKey: queryKeys.sessions.usage(sessionId),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.sessions.collaboration(sessionId),
             }),
             queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
           ];
