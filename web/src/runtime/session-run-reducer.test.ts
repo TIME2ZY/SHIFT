@@ -150,6 +150,7 @@ describe("sessionRunReducer", () => {
       invocationId: "i1",
       text: "正在检查",
     });
+    expect(state.runs.s1.liveMessages.i1.status).toBe("streaming");
     state = sessionRunReducer(state, {
       type: "message/delta",
       sessionId: "s1",
@@ -161,6 +162,7 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.liveMessages.i1).toMatchObject({
       commentary: "正在检查",
       text: "最终回答",
+      status: "streaming",
       timeline: [
         { id: "commentary-0", type: "commentary", text: "正在检查" },
         { id: "text-1", type: "text", text: "最终回答" },

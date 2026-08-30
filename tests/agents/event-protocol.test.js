@@ -215,8 +215,9 @@ test("runtime envelope drops content after terminal and stamps protocolVersion",
   const finished = runtime.finish(ctx, { terminal: true, ok: true, exitCode: 0 });
   assert.deepEqual(
     finished.map((e) => e.type),
-    ["run.finished"]
+    ["text.delta", "run.finished"]
   );
+  assert.equal(finished[0].text, "hello");
 
   const late = runtime.transform(
     { type: "item.completed", item: { type: "agent_message", text: "late" } },
@@ -341,7 +342,7 @@ test("shared lifecycle across recreated runtimes suppresses second run.started",
   assert.equal(second[0].text, "b");
   assert.deepEqual(
     attempt2.finish(ctx, { terminal: true, ok: true, exitCode: 0 }).map((e) => e.type),
-    ["run.finished"]
+    ["text.delta", "run.finished"]
   );
 });
 

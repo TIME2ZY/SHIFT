@@ -1,3 +1,4 @@
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -30,7 +31,35 @@ function windowsUtf8Environment(env = process.env, options = {}) {
   };
 }
 
+function childPid(child) {
+  const pid = Number(child && child.pid);
+  return Number.isInteger(pid) && pid > 0 ? pid : 0;
+}
+
+/**
+ * Kill a spawned provider (and its Windows process tree). SIGTERM/SIGKILL on
+ * win32 only hit the wrapper PID; `taskkill /T /F` is required to reap
+ * hung `codex.cmd` / pwsh grandchildren.
+ */
+function killProcessTree(child, signal = "SIGTERM", options = {}) {
+  const platform = options.platform || process.platform;
+  const spawnSyncFn = options.spawnSync || spawnSync;
+  const pid = childPid(child);
+  if (platform === "win32" && pid) {
+    try {
+      spawnSyncFn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+      return;
+    } catch {
+      // Fall through to child.kill when taskkill is unavailable.
+    }
+  }
+  if (child && typeof child.kill === "function") {
+    child.kill(signal);
+  }
+}
+
 module.exports = {
   findPwsh,
   windowsUtf8Environment,
+  killProcessTree,
 };

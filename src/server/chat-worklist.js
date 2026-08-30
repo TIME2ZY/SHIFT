@@ -45,6 +45,30 @@ function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildAssistantFinalMessage({
+  agent,
+  content,
+  code,
+  signal,
+  invocationId,
+  usage,
+  allowEmpty = false,
+}) {
+  if (!allowEmpty && !String(content || "").trim()) return null;
+  return {
+    id: generateMessageId(),
+    role: "assistant",
+    agent,
+    content,
+    exitCode: code,
+    signal,
+    invocationId,
+    usage,
+    messageType: "assistant-final",
+    createdAt: new Date().toISOString(),
+  };
+}
+
 /**
  * @param {object} ctx shared chat run context (mutated: session, aborted)
  * @returns {Promise<{ aborted: boolean, ownedInvocationSlotAtCleanup: boolean }>}
@@ -979,6 +1003,14 @@ async function runChatWorklist(ctx) {
       if (streamFailure) {
         // Handler or persist failure: one failed terminal, no silent retry.
         const failedInvocationId = threadCtx.currentInvocationId || invocationId;
+        const failedMessage = buildAssistantFinalMessage({
+          agent,
+          content: assistantContent,
+          code,
+          signal,
+          invocationId: failedInvocationId,
+          usage: invocationUsage,
+        });
         durable.completeInvocation({
           invocationId: failedInvocationId,
           code,
@@ -993,6 +1025,9 @@ async function runChatWorklist(ctx) {
             streamErrorOrigin: streamFailure.origin,
             streamErrorMessage: streamFailure.message,
           },
+          session,
+          windowId: durableRun?.window?.id || null,
+          message: failedMessage || undefined,
         });
         sendSse(res, "error", {
           message: "Agent stream failed while handling events; invocation closed as failed.",
@@ -1014,6 +1049,14 @@ async function runChatWorklist(ctx) {
 
       if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
         const abortInvId = threadCtx.currentInvocationId || invocationId;
+        const abortMessage = buildAssistantFinalMessage({
+          agent,
+          content: assistantContent,
+          code,
+          signal,
+          invocationId: abortInvId,
+          usage: invocationUsage,
+        });
         // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
         durable.completeInvocation({
           invocationId: abortInvId,
@@ -1025,6 +1068,9 @@ async function runChatWorklist(ctx) {
             terminalState: "aborted",
             supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
           },
+          session,
+          windowId: durableRun?.window?.id || null,
+          message: abortMessage || undefined,
         });
         aborted = true;
         previousInvocationId = abortInvId;
@@ -1071,6 +1117,14 @@ async function runChatWorklist(ctx) {
       }
 
       if (code !== 0 || signal) {
+        const failedMessage = buildAssistantFinalMessage({
+          agent,
+          content: assistantContent,
+          code,
+          signal,
+          invocationId: finalInvocationId,
+          usage: invocationUsage,
+        });
         durable.completeInvocation({
           invocationId: finalInvocationId,
           code,
@@ -1082,6 +1136,9 @@ async function runChatWorklist(ctx) {
             failureStage: "provider_run",
             retryable: false,
           },
+          session,
+          windowId: durableRun?.window?.id || null,
+          message: failedMessage || undefined,
         });
         sendSse(res, "error", {
           message: "Agent process exited without a successful durable result.",
@@ -1101,18 +1158,15 @@ async function runChatWorklist(ctx) {
         break;
       }
 
-      const assistantMessage = {
-        id: generateMessageId(),
-        role: "assistant",
+      const assistantMessage = buildAssistantFinalMessage({
         agent,
         content: assistantContent,
-        exitCode: code,
+        code,
         signal,
         invocationId: finalInvocationId,
         usage: invocationUsage,
-        messageType: "assistant-final",
-        createdAt: new Date().toISOString(),
-      };
+        allowEmpty: true,
+      });
 
       const completed =
         durable.enabled && typeof durable.completeInvocation === "function"
@@ -1364,4 +1418,4 @@ async function runChatWorklist(ctx) {
   return { aborted, ownedInvocationSlotAtCleanup };
 }
 
-module.exports = { runChatWorklist, generateMessageId };
+module.exports = { runChatWorklist, generateMessageId, buildAssistantFinalMessage };

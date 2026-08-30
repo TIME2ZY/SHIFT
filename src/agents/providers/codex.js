@@ -133,6 +133,8 @@ function classifyCodexStderr(line) {
 
 function createCodexRuntime(cli) {
   const finalOutputPath = String(cli?.invocationArtifacts?.finalOutputPath || "");
+  let lastAgentMessage = "";
+  let lastEmittedFinal = "";
 
   function fileChangeEvents(base, item) {
     const changes = item && Array.isArray(item.changes) ? item.changes : [];
@@ -161,6 +163,35 @@ function createCodexRuntime(cli) {
       type === "websearch" ||
       Boolean(toolNameFromItem(item))
     );
+  }
+
+  function rememberAgentMessage(text) {
+    if (typeof text === "string" && text) lastAgentMessage = text;
+  }
+
+  function promoteFinalText(ctx, candidate) {
+    const text = typeof candidate === "string" && candidate ? candidate : lastAgentMessage;
+    if (!text || text === lastEmittedFinal) return [];
+    lastEmittedFinal = text;
+    return [makeEvent("text.delta", { ...ctx, text })];
+  }
+
+  function readFinalOutput() {
+    if (!finalOutputPath) return "";
+    try {
+      return fs.readFileSync(finalOutputPath, "utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  function removeFinalOutput() {
+    if (finalOutputPath) fs.rmSync(finalOutputPath, { force: true });
+  }
+
+  function commentaryEvents(base, text) {
+    rememberAgentMessage(text);
+    return text ? [makeEvent("commentary.delta", { ...base, text })] : [];
   }
 
   function reasoningTextFromItem(item) {
@@ -319,12 +350,7 @@ function createCodexRuntime(cli) {
         event.item.type === "agent_message" &&
         typeof event.item.text === "string"
       ) {
-        return [
-          makeEvent("commentary.delta", {
-            ...base,
-            text: event.item.text,
-          }),
-        ];
+        return commentaryEvents(base, event.item.text);
       }
 
       if (event.type === "assistant") {
@@ -334,28 +360,28 @@ function createCodexRuntime(cli) {
           .filter((item) => item.type === "text" && typeof item.text === "string")
           .map((item) => item.text)
           .join("");
-        return text ? [makeEvent("commentary.delta", { ...base, text })] : [];
+        return commentaryEvents(base, text);
       }
 
-      if (event.type === "turn.completed" && event.usage) {
-        const usage = makeUsageEvent(base, event.usage, {
-          scope: "turn",
-          mode: "cumulative",
-          counterScope: "provider-session",
-          contextTokensExact:
-            event.usage.last_token_usage != null || event.usage.lastTokenUsage != null,
-        });
-        return usage ? [usage] : [];
+      if (event.type === "turn.completed") {
+        const events = [];
+        if (event.usage) {
+          const usage = makeUsageEvent(base, event.usage, {
+            scope: "turn",
+            mode: "cumulative",
+            counterScope: "provider-session",
+            contextTokensExact:
+              event.usage.last_token_usage != null || event.usage.lastTokenUsage != null,
+          });
+          if (usage) events.push(usage);
+        }
+        events.push(...promoteFinalText(base));
+        return events;
       }
 
       const content = event.content || (event.properties && event.properties.content);
       if (content && content.type === "text" && typeof content.text === "string") {
-        return [
-          makeEvent("commentary.delta", {
-            ...base,
-            text: content.text,
-          }),
-        ];
+        return commentaryEvents(base, content.text);
       }
 
       if (event.type === "item.completed" && event.item && event.item.type === "todo_list") {
@@ -400,32 +426,23 @@ function createCodexRuntime(cli) {
       return [];
     },
     finish(ctx, outcome = {}) {
-      if (!finalOutputPath) return [];
-      if (outcome.terminal !== true || outcome.ok !== true) {
-        fs.rmSync(finalOutputPath, { force: true });
+      if (outcome.terminal !== true) {
+        removeFinalOutput();
         return [];
       }
-      let text = "";
-      try {
-        text = fs.readFileSync(finalOutputPath, "utf8");
-      } catch (error) {
+      const fileText = readFinalOutput();
+      removeFinalOutput();
+      const promoted = promoteFinalText(ctx, fileText || lastAgentMessage);
+      if (promoted.length) return promoted;
+      if (outcome.ok === true && finalOutputPath) {
         return [
           makeEvent("run.failed", {
             ...ctx,
-            error: `Codex final output could not be read: ${error?.message || error}`,
+            error: "Codex completed without a final response.",
           }),
         ];
-      } finally {
-        fs.rmSync(finalOutputPath, { force: true });
       }
-      return text
-        ? [makeEvent("text.delta", { ...ctx, text })]
-        : [
-            makeEvent("run.failed", {
-              ...ctx,
-              error: "Codex completed without a final response.",
-            }),
-          ];
+      return [];
     },
   };
 }

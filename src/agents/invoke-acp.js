@@ -1,6 +1,7 @@
 const { spawn } = require("node:child_process");
 const { Readable, Writable } = require("node:stream");
 const { createProviderRuntime } = require("./providers");
+const { killProcessTree } = require("./windows-runtime");
 
 const ACP_READ_ONLY_TOOL_KINDS = new Set(["read", "search", "think", "fetch"]);
 const ACP_MUTATING_TOOL_NAME_RE =
@@ -92,10 +93,7 @@ function decideAcpPermission(params = {}, config = {}) {
 }
 
 function shouldLoadAcpSession(config, initialized) {
-  return Boolean(
-    config?.resumeSessionId &&
-      initialized?.agentCapabilities?.loadSession === true
-  );
+  return Boolean(config?.resumeSessionId && initialized?.agentCapabilities?.loadSession === true);
 }
 
 function buildAcpSessionParams(cwd, mcpServers, sessionId = "") {
@@ -145,15 +143,18 @@ async function invokeAcp({
   const terminate = (message, signal = "SIGTERM") => {
     if (terminationError) return;
     terminationError = new Error(message);
-    child.kill(signal);
+    killProcessTree(child, signal);
     clearTimeout(killTimer);
-    killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+    killTimer = setTimeout(() => killProcessTree(child, "SIGKILL"), killGraceMs);
   };
-  const activityTimer = setInterval(() => {
-    if (Date.now() - lastActivity > timeoutMs) {
-      terminate(`${command} ACP session timed out after ${timeoutMs}ms of no activity.`);
-    }
-  }, Math.max(100, Math.min(1000, Math.floor(timeoutMs / 2))));
+  const activityTimer = setInterval(
+    () => {
+      if (Date.now() - lastActivity > timeoutMs) {
+        terminate(`${command} ACP session timed out after ${timeoutMs}ms of no activity.`);
+      }
+    },
+    Math.max(100, Math.min(1000, Math.floor(timeoutMs / 2)))
+  );
   const signalHandlers = new Map();
   for (const signal of ["SIGINT", "SIGTERM"]) {
     const handler = () => terminate(`${command} ACP session received ${signal}.`, signal);
@@ -170,11 +171,7 @@ async function invokeAcp({
   const emitRaw = (event) => {
     if (typeof onRawEvent === "function") onRawEvent(event);
     const sessionId = runtime.extractSessionId(event);
-    if (
-      sessionId &&
-      sessionId !== persistedSessionId &&
-      typeof onSessionId === "function"
-    ) {
+    if (sessionId && sessionId !== persistedSessionId && typeof onSessionId === "function") {
       persistedSessionId = sessionId;
       onSessionId(sessionId);
     }
@@ -187,10 +184,7 @@ async function invokeAcp({
   });
 
   try {
-    const stream = acp.ndJsonStream(
-      Writable.toWeb(child.stdin),
-      Readable.toWeb(child.stdout)
-    );
+    const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
     let activeSessionId = "";
     const result = await acp
       .client({ name: "shift-console", version: "0.1.0" })
