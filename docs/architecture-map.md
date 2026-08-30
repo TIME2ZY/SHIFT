@@ -83,20 +83,26 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.1 Invocation 生命周期（start / event / finish）
 
-| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                       | 落库                                                              |
-| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| start               | `durableRecorder.startInvocation`                             | **仅** `chat-routes`（含 retry 再 start）                                                                                        | `invocations` + `invocation-start` event                          |
-| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件                                               | `invocation_events` + outbox                                      |
-| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / empty-under-seal / empty-emergency / stream-handler-failed） | 有 `message` → 原子 finish+assistant-final；无 `message` → 仅终态 |
-| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                     | 同上                                                              |
-| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | chat-routes 请求结束 `finally`                                                                                                   | 强制 `failed`/`aborted`（非产品成功路径）                         |
-| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                 | 避免长期 `active`                                                 |
+| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                         | 落库                                                                                           |
+| ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| start               | `durableRecorder.startInvocation`                             | **仅** `chat-routes`（含 retry 再 start）                                                                                                          | `invocations` + `invocation-start` event                                                       |
+| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件                                                                 | `invocation_events` + outbox                                                                   |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed） | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
+| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                       | 同上                                                                                           |
+| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | chat-routes 请求结束 `finally`                                                                                                                     | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
+| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                   | 避免长期 `active`                                                                              |
 
 **结论（终态）— B-1 已落地（2026-08-07）：**
 
 - 调度器面对的唯一写入口 = `completeInvocation({ invocationId, code, signal, reason, endPayload, message? })`。
 - 底层 `finishInvocation` / `finishWithAssistantMessage` 仅为模块私有实现，公开 recorder 不再导出。
 - 分支决策（何时带 message、何时 aborted）仍在 chat-routes；B-1 收口的是**写入口**，不是把业务 if 全部下沉（避免夹带行为变更）。
+- Codex 正文权威：中途 `agent_message` 只发 `commentary.delta`；`turn.completed` 把末条
+  `agent_message` 提升为 `text.delta`；`finish()` 仅在尚未提升时读 `--output-last-message`。
+  失败/中止若已有 `text.delta`，`completeInvocation` 仍带 assistant-final，handoff 仍只在
+  成功路径解析正文。
+- Provider 空闲超时只 terminate 一次；Windows 用 `taskkill /T /F` 杀掉进程树。超时
+  `console.error` 不得重复刷 stderr，以免上层把终止日志当成 child 活动。
 - Callback **仍不** finish invocation；孤儿 reconcile 仍走 force 终端 API。
 - 流式回调（`child-stream` 的 onEvent / onStderr / 管道 error）失败不会以 uncaughtException
   击穿进程：`runChildStream` 捕获后停止子进程并在结果上携带 `streamError`。chat-worklist 在

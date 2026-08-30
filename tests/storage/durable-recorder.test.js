@@ -300,6 +300,65 @@ test("completeInvocation covers abort, final, atomic rollback, and rejects missi
   }
 });
 
+test("completeInvocation can persist assistant-final on aborted invocations", () => {
+  const storage = createStorage({ file: ":memory:" });
+  const recorder = createDurableRecorder({ storage });
+  const session = sessionFixture();
+  try {
+    const window = recorder.ensureWindow({
+      session,
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+    });
+    appendMessage(storage, {
+      id: "message-user",
+      threadId: session.id,
+      windowId: window.id,
+      role: "user",
+      agentId: "codex",
+      content: "review",
+      createdAt: "2026-07-12T00:00:01.000Z",
+    });
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-abort-text",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+      startedAt: "2026-07-12T00:00:02.000Z",
+      triggerMessageId: "message-user",
+      triggerType: "user-message",
+    });
+    const aborted = recorder.completeInvocation({
+      invocationId: "inv-abort-text",
+      code: null,
+      signal: "SIGTERM",
+      reason: "provider-failed",
+      endPayload: { terminalState: "failed", failureStage: "provider_run" },
+      session,
+      windowId: window.id,
+      message: {
+        id: "message-partial",
+        role: "assistant",
+        agent: "codex",
+        content: "partial review",
+        createdAt: "2026-07-12T00:00:03.000Z",
+      },
+    });
+    assert.equal(aborted.invocation.state, "failed");
+    assert.equal(aborted.message.id, "message-partial");
+    assert.equal(storage.messages.get("message-partial").content, "partial review");
+  } finally {
+    recorder.close();
+    storage.close();
+  }
+});
+
 test("durable write failures are reported and fail closed", () => {
   const errors = [];
   const storage = createStorage({ file: ":memory:" });

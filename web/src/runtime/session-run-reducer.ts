@@ -179,6 +179,10 @@ export function sessionRunReducer(
               ...current,
               commentary: (current.commentary || "") + action.text,
               timeline: appendTimelineText(current.timeline, "commentary", action.text),
+              status:
+                current.status === "thinking" || current.status === "streaming"
+                  ? "streaming"
+                  : current.status,
             },
           },
         };

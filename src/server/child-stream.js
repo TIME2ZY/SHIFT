@@ -1,7 +1,7 @@
 const { ROOT } = require("../shared/runtime-paths");
 const { sendSse } = require("./http-transport");
 const { StringDecoder } = require("node:string_decoder");
-const { windowsUtf8Environment } = require("../agents/windows-runtime");
+const { windowsUtf8Environment, killProcessTree } = require("../agents/windows-runtime");
 const { createEncodingTracker } = require("../shared/encoding-guard");
 
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -65,6 +65,7 @@ function runChildStream({
     });
 
     let closed = false;
+    let stopping = false;
     let killTimer;
     let lastActivity = Date.now();
     let stdoutBuffer = "";
@@ -134,11 +135,12 @@ function runChildStream({
     };
 
     const stopChild = (reason) => {
-      if (closed) return;
+      if (closed || stopping) return;
+      stopping = true;
       if (reason) console.error(reason);
-      child.kill("SIGTERM");
+      killProcessTree(child, "SIGTERM");
       killTimer = setTimeout(() => {
-        if (!closed) child.kill("SIGKILL");
+        if (!closed) killProcessTree(child, "SIGKILL");
       }, graceMs);
     };
 
@@ -164,7 +166,8 @@ function runChildStream({
 
     const activityTimer = setInterval(
       () => {
-        if (!closed && Date.now() - lastActivity > serverTimeoutMs) {
+        if (closed || stopping) return;
+        if (Date.now() - lastActivity > serverTimeoutMs) {
           stopChild(`Server timeout: no stdout/stderr activity for ${serverTimeoutMs}ms.`);
         }
       },

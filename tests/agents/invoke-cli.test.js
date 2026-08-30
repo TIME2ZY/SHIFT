@@ -1357,6 +1357,49 @@ childProcess.spawn = function spawn() {
   assert.match(result.stderr, /killed:SIGTERM/);
 });
 
+test("idle timeout terminates the child once", () => {
+  const result = runScriptWithHook(
+    ["--timeout-ms", "30", "--kill-grace-ms", "20", "hello"],
+    `
+const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { PassThrough } = require("node:stream");
+
+childProcess.spawn = function spawn() {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  let kills = 0;
+  child.kill = function kill(signal) {
+    kills += 1;
+    child.stderr.write("killed:" + signal + ":" + kills + "\\n");
+    return true;
+  };
+  process.nextTick(() => {
+    child.stdout.write(JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "review body" }
+    }) + "\\n");
+  });
+  setTimeout(() => child.emit("close", null, "SIGTERM"), 90);
+  return child;
+};
+`
+  );
+
+  assert.equal(result.status, 1);
+  const timeoutLines = String(result.stderr || "")
+    .split(/\r?\n/)
+    .filter((line) => line.includes("timed out after 30ms of no stdout/stderr activity"));
+  assert.equal(timeoutLines.length, 1);
+  const events = parseOutputEvents(result.stdout);
+  assert.deepEqual(
+    events.filter((event) => event.type === "text.delta").map((event) => event.text),
+    ["review body"]
+  );
+  assert.match(result.stderr, /killed:SIGTERM:1/);
+});
+
 test("stderr activity prevents idle timeout", () => {
   const result = runScriptWithHook(
     ["--timeout-ms", "50", "--kill-grace-ms", "20", "hello"],

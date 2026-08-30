@@ -112,7 +112,7 @@ test("runtime envelope enforces started-before-content and one terminal event", 
   );
   assert.deepEqual(
     runtime.finish(context, { terminal: true, ok: true, exitCode: 0 }).map((event) => event.type),
-    ["run.finished"]
+    ["text.delta", "run.finished"]
   );
   assert.deepEqual(runtime.finish(context, { terminal: true, ok: true }), []);
 });
@@ -198,7 +198,7 @@ test("codex success without a final-output artifact fails explicitly", () => {
     events.map((event) => event.type),
     ["run.started", "run.failed"]
   );
-  assert.match(events[1].error, /final output could not be read/);
+  assert.match(events[1].error, /completed without a final response/);
 });
 
 test("provider options configure adapters without central provider branches", () => {

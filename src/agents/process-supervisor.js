@@ -3,6 +3,7 @@ const readline = require("node:readline");
 const { createRunLifecycle } = require("./event-protocol");
 const { createUsageAccumulator } = require("./usage");
 const { createDiagnosticCollector } = require("./diagnostics");
+const { killProcessTree } = require("./windows-runtime");
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_KILL_GRACE_MS = 5000;
@@ -75,6 +76,7 @@ function superviseProviderProcess({
     let failedToStart = false;
     let timedOut = false;
     let closed = false;
+    let terminating = false;
     let lastActivity = Date.now();
     let stderrTail = "";
     let stderrLineBuffer = "";
@@ -98,18 +100,20 @@ function superviseProviderProcess({
     };
 
     const terminate = (signal, reason) => {
-      if (closed) return;
+      if (closed || terminating) return;
+      terminating = true;
       if (reason) console.error(reason);
 
       killTimer = setTimeout(() => {
-        if (!closed) child.kill("SIGKILL");
+        if (!closed) killProcessTree(child, "SIGKILL");
       }, killGraceMs);
 
-      child.kill(signal);
+      killProcessTree(child, signal);
     };
 
     const activityTimer = setInterval(
       () => {
+        if (terminating || closed) return;
         if (Date.now() - lastActivity <= timeoutMs) return;
 
         timedOut = true;

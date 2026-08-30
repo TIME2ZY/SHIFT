@@ -557,8 +557,9 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
   /**
    * Single scheduler-facing write entry for invocation terminal states (Phase B-1).
    *
-   * - With `message`: atomic finish + assistant-final (success path).
-   * - Without `message`: finish only (abort, empty emergency, seal pressure, etc.).
+   * - With `message`: atomic finish + assistant-final (success, or failed/aborted
+   *   when the stream already produced durable text).
+   * - Without `message`: finish only (empty abort, empty emergency, seal pressure).
    *
    * Orphan cleanup still uses {@link forceTerminalInvocation} /
    * {@link reconcileThreadActive} — those are not alternate product success paths.
