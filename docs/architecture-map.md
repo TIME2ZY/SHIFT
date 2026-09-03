@@ -48,6 +48,8 @@ Web App (web/src/app/App.tsx)
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
   execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
   collaboration-read-model → Session-scoped phase/gate 投影（只读，不回写）
+  thread-seat-repository → Thread enabled Seat 配置（schema v30；调度尚未接入）
+  invocation-duty-binding-repository → Invocation DutyBinding（schema v30；启动尚未接入）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -299,6 +301,21 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 ---
 
+### 3.8 Seat / Duty 存储基础（目标运行模型尚未接线）
+
+Migration 30 已新增 `thread_seats` 和 `invocation_duty_bindings`，并为 collaboration task/event
+增加 ADR-007 的目标、状态、evidence profile、actor 和 duty 字段。旧 Thread 的历史 Agent
+参与者会确定性回填为 enabled Seat；旧 invocation 不猜测 Duty，因此不回填 DutyBinding。
+
+当前在线调度仍使用 `agent_id`、`role-contracts.js`、五阶段 allowlist 和原有 gate。Chat 尚未调用
+`thread-seat-repository` 选择执行者，`durableRecorder.startInvocation` 也尚未原子创建
+DutyBinding。下一次运行语义切换必须把 Seat 选择与 DutyBinding 接到现有唯一 invocation start
+入口，并删除固定工号热路径；不得增加平行 start 或 route API。
+
+Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invocation/Seat 的 Thread 因果。
+
+---
+
 ## 4. 双路径 / 双语义清单
 
 | ID  | 主题                     | 当前结论                                               | 状态   |
@@ -313,6 +330,7 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 | D8  | Collab 任务 vs Handoff   | 两者分别为 SQLite 权威事实，不互相借表表达             | 已收口 |
 | D9  | worktree 双地图          | session Map 与 manager 文件职责分离                    | 接受   |
 | D10 | Skill 投递双通道         | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2   | 过渡   |
+| D11 | Seat/Duty 存储 vs 旧调度 | v30 已落存储；在线仍只读旧 agent/phase，待一次切换退出 | 过渡   |
 
 **已收敛（保护，勿回退）：**
 
@@ -328,13 +346,13 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 ### 5.1 在线热路径（`npm start` composition）
 
-| 区域     | 代表模块                                                                                                                                                           |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
-| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                               |
-| storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                    |
-| worktree | manager, delivery-verifier                                                                                                                                         |
+| 区域     | 代表模块                                                                                                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                                  |
+| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                                         |
+| storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, Seat/Duty repositories |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                              |
+| worktree | manager, delivery-verifier                                                                                                                                                   |
 
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
 `memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
@@ -477,5 +495,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-27。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-09-03。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

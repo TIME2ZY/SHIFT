@@ -262,6 +262,22 @@ const HANDOFF_INTENTS = Object.freeze([
   "recall",
 ]);
 
+/** ADR-007 invocation-scoped duties. Kept equal to handoff intents deliberately. */
+const DUTIES = Object.freeze([...HANDOFF_INTENTS]);
+
+const ROUTING_REASONS = Object.freeze([
+  "explicit_mention",
+  "handoff_to",
+  "sticky",
+  "affinity",
+  "solo_fallback",
+]);
+
+const ENFORCEMENT_LEVELS = Object.freeze(["enforced", "advisory", "unavailable"]);
+const TASK_STATUSES = Object.freeze(["active", "waiting_human", "accepted", "rejected"]);
+const EVIDENCE_PROFILES = Object.freeze(["code_change", "working_tree_change", "analysis"]);
+const COLLAB_ACTOR_KINDS = Object.freeze(["human", "seat", "system"]);
+
 /**
  * Default phase → allowed agent ids (phase 5 enforces; live multi uses these names).
  * Empty list means "no default restriction documented here".
@@ -374,6 +390,12 @@ module.exports = {
   MEMORY_FUNNEL_STATS_KEYS,
   COLLAB_TASK_STATES,
   HANDOFF_INTENTS,
+  DUTIES,
+  ROUTING_REASONS,
+  ENFORCEMENT_LEVELS,
+  TASK_STATUSES,
+  EVIDENCE_PROFILES,
+  COLLAB_ACTOR_KINDS,
   DEFAULT_PHASE_AGENT_ALLOWLIST,
   REPORT_SCHEMAS,
   validateReport,

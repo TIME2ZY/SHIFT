@@ -31,11 +31,13 @@ test("memory database applies schema and safety pragmas", () => {
     );
     for (const name of [
       "threads",
+      "thread_seats",
       "context_windows",
       "messages",
       "trace_runs",
       "handoffs",
       "invocations",
+      "invocation_duty_bindings",
       "invocation_events",
       "memory_entries",
       "memory_search",

@@ -1086,6 +1086,130 @@ const MIGRATIONS = Object.freeze([
         WHERE operation_key IS NOT NULL;
     `,
   },
+  {
+    version: 30,
+    name: "seat_duty_contract",
+    sql: `
+      CREATE TABLE thread_seats (
+        seat_id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        label TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        affinity_tags_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
+        UNIQUE (seat_id, thread_id)
+      );
+
+      CREATE INDEX thread_seats_thread_enabled
+        ON thread_seats(thread_id, enabled, created_at);
+
+      CREATE UNIQUE INDEX invocations_id_thread
+        ON invocations(id, thread_id);
+
+      CREATE TABLE invocation_duty_bindings (
+        invocation_id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        seat_id TEXT NOT NULL,
+        duty TEXT NOT NULL
+          CHECK (duty IN ('discuss', 'plan', 'implement', 'fix', 'review', 'deliver', 'accept', 'recall')),
+        skill_name TEXT NOT NULL CHECK (length(trim(skill_name)) > 0),
+        routing_reason TEXT NOT NULL
+          CHECK (routing_reason IN ('explicit_mention', 'handoff_to', 'sticky', 'affinity', 'solo_fallback')),
+        enforcement_level TEXT NOT NULL
+          CHECK (enforcement_level IN ('enforced', 'advisory')),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (invocation_id, thread_id)
+          REFERENCES invocations(id, thread_id) ON DELETE CASCADE,
+        FOREIGN KEY (seat_id, thread_id)
+          REFERENCES thread_seats(seat_id, thread_id) ON DELETE RESTRICT,
+        FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX invocation_duty_bindings_thread_created
+        ON invocation_duty_bindings(thread_id, created_at);
+      CREATE INDEX invocation_duty_bindings_seat_created
+        ON invocation_duty_bindings(seat_id, created_at);
+
+      ALTER TABLE collaboration_tasks ADD COLUMN task_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (task_status IN ('active', 'waiting_human', 'accepted', 'rejected'));
+      ALTER TABLE collaboration_tasks ADD COLUMN goal_original TEXT;
+      ALTER TABLE collaboration_tasks ADD COLUMN goal_normalized TEXT;
+      ALTER TABLE collaboration_tasks ADD COLUMN goal_hash TEXT;
+      ALTER TABLE collaboration_tasks ADD COLUMN evidence_profile TEXT NOT NULL DEFAULT 'code_change'
+        CHECK (evidence_profile IN ('code_change', 'working_tree_change', 'analysis'));
+
+      ALTER TABLE collaboration_task_events ADD COLUMN actor_kind TEXT
+        CHECK (actor_kind IN ('human', 'seat', 'system'));
+      ALTER TABLE collaboration_task_events ADD COLUMN actor_id TEXT;
+      ALTER TABLE collaboration_task_events ADD COLUMN duty TEXT
+        CHECK (duty IN ('discuss', 'plan', 'implement', 'fix', 'review', 'deliver', 'accept', 'recall'));
+
+      WITH legacy_participants(thread_id, provider_id) AS (
+        SELECT id, lower(trim(last_agent_id)) FROM threads
+          WHERE last_agent_id IS NOT NULL AND trim(last_agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(agent_id)) FROM messages
+          WHERE agent_id IS NOT NULL AND trim(agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(agent_id)) FROM invocations
+          WHERE agent_id IS NOT NULL AND trim(agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(agent_id)) FROM context_windows
+          WHERE agent_id IS NOT NULL AND trim(agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(source_agent_id)) FROM handoffs
+          WHERE source_agent_id IS NOT NULL AND trim(source_agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(target_agent_id)) FROM handoffs
+          WHERE target_agent_id IS NOT NULL AND trim(target_agent_id) <> ''
+        UNION
+        SELECT thread_id, lower(trim(actor_agent_id)) FROM collaboration_task_events
+          WHERE actor_agent_id IS NOT NULL
+            AND lower(trim(actor_agent_id)) NOT IN ('', 'user', 'system')
+      )
+      INSERT OR IGNORE INTO thread_seats (
+        seat_id, thread_id, provider_id, label, enabled,
+        affinity_tags_json, created_at, updated_at
+      )
+      SELECT
+        'legacy-seat:' || length(participant.thread_id) || ':' ||
+          participant.thread_id || ':' || participant.provider_id,
+        participant.thread_id,
+        participant.provider_id,
+        NULL,
+        1,
+        '[]',
+        thread.created_at,
+        thread.updated_at
+      FROM legacy_participants participant
+      JOIN threads thread ON thread.id = participant.thread_id;
+
+      UPDATE collaboration_tasks
+      SET task_status = CASE WHEN phase = 'done' THEN 'accepted' ELSE 'active' END,
+          goal_original = CASE WHEN json_valid(artifacts_json)
+            THEN json_extract(artifacts_json, '$.userGoal.text') END,
+          goal_normalized = goal,
+          goal_hash = CASE WHEN json_valid(artifacts_json)
+            THEN json_extract(artifacts_json, '$.userGoal.hash') END;
+
+      UPDATE collaboration_task_events
+      SET actor_kind = CASE
+            WHEN lower(trim(COALESCE(actor_agent_id, ''))) = 'user' THEN 'human'
+            WHEN actor_agent_id IS NULL OR trim(actor_agent_id) = '' THEN 'system'
+            ELSE 'seat'
+          END,
+          actor_id = CASE
+            WHEN lower(trim(COALESCE(actor_agent_id, ''))) = 'user' THEN 'user'
+            WHEN actor_agent_id IS NULL OR trim(actor_agent_id) = '' THEN 'shift'
+            ELSE 'legacy-seat:' || length(thread_id) || ':' || thread_id || ':' ||
+              lower(trim(actor_agent_id))
+          END,
+          duty = intent;
+    `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

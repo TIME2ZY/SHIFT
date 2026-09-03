@@ -22,26 +22,40 @@ test("collaboration task repository persists phases, artifacts, gates, and event
         threadId: "thread-1",
         phase: "discuss",
         artifacts: {
-          userGoal: { hash: "goal-v1", version: 1 },
+          userGoal: { text: "Original goal", hash: "goal-v1", version: 1 },
           preliminarySolution: { hash: "draft-v1" },
         },
+        goalNormalized: "Normalized goal",
+        evidenceProfile: "analysis",
       },
       {
         type: "transition",
         from: "discuss",
         to: "discuss",
         actorAgentId: "gemini",
+        actorKind: "human",
+        actorId: "user",
+        duty: "discuss",
         intent: "discuss",
       }
     );
     assert.equal(discuss.phase, "discuss");
     assert.equal(discuss.artifacts.userGoal.hash, "goal-v1");
+    assert.equal(discuss.taskStatus, "active");
+    assert.equal(discuss.goalOriginal, "Original goal");
+    assert.equal(discuss.goalNormalized, "Normalized goal");
+    assert.equal(discuss.goalHash, "goal-v1");
+    assert.equal(discuss.evidenceProfile, "analysis");
+    assert.equal(discuss.history[0].actorKind, "human");
+    assert.equal(discuss.history[0].actorId, "user");
+    assert.equal(discuss.history[0].duty, "discuss");
     assert.equal(discuss.history.length, 1);
 
     const implemented = storage.collaborationTasks.save(
       {
         ...discuss,
         phase: "implement",
+        goalOriginal: "Attempted overwrite",
         implementationGate: {
           planHash: "plan-v1",
           approvedBy: "codex",
@@ -58,6 +72,7 @@ test("collaboration task repository persists phases, artifacts, gates, and event
     assert.equal(implemented.phase, "implement");
     assert.equal(implemented.state, "implement");
     assert.equal(implemented.implementationGate.approvedBy, "codex");
+    assert.equal(implemented.goalOriginal, "Original goal");
     assert.equal(implemented.history.length, 2);
     assert.equal(implemented.version, 2);
 
@@ -67,6 +82,9 @@ test("collaboration task repository persists phases, artifacts, gates, and event
     assert.equal(restored.phase, "implement");
     assert.equal(restored.artifacts.userGoal.version, 1);
     assert.equal(restored.implementationGate.planHash, "plan-v1");
+    assert.equal(restored.goalOriginal, "Original goal");
+    assert.equal(restored.goalHash, "goal-v1");
+    assert.equal(restored.evidenceProfile, "analysis");
     assert.deepEqual(
       restored.history.map((event) => event.intent),
       ["discuss", "implement"]
