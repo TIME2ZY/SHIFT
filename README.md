@@ -7,7 +7,7 @@
 ![Storage](https://img.shields.io/badge/Storage-SQLite-2563eb?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active%20development-c46a16?style=flat-square)
 
-[快速开始](#快速开始) · [工作方式](#工作方式) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证)
+[快速开始](#快速开始) · [解决的硬问题](#解决的硬问题) · [工作方式](#工作方式) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证)
 
 ![SHIFT 控制台](assets/shift-console.png)
 
@@ -20,6 +20,23 @@ SHIFT 是一个**本地优先**的多 Agent 协作控制台。它不提供模型
 - 用 SQLite 持久化会话、调用、上下文窗口、Memory 和 Recall 索引——只有一个真相源；
 - 需要改代码时创建会话级 Git worktree，改动隔离、可审查、可显式丢弃；
 - 每个协作阶段都有平台侧证据门禁：不是"Agent 说做完了"，而是 Git、PR 和 CI 的实际状态说了算。
+
+## 解决的硬问题
+
+看起来是四个 Agent 的控制台；实现上难点是把**不可控的本地 Runtime** 编排成**可恢复、可审计、可验收**的任务线程。
+
+| 硬问题 | 当前约束 |
+| ------ | -------- |
+| 异构 CLI / ACP 事件不一致 | Adapter 只统一最小事件契约；未知事件不猜成功 |
+| 进程崩溃后状态丢失 | SQLite 是唯一在线真相源；启动时 reconcile 遗留 active 状态 |
+| 交接被重复执行 | Handoff 由 repository 裁裁，同一来源到同一目标只能有一个 accepted flight |
+| Agent 自述“已完成” | 方案批准、review、Git / PR / CI 门禁；有流式文本 ≠ 终态 |
+| 多会话改同一仓库 | 会话级 Git worktree 隔离，diff 可审查、可丢弃 |
+| 交接后丢上下文 | Memory 与 Handoff 分开；FTS + 可选向量按 Token 预算裁剪 |
+
+这不是远程多租户平台。第一用户是作者自己：用 SHIFT 推进本仓库的设计、实现、审查与交付。没有可对外报告的活跃用户数时，不把公开仓库当成市场验证已经成立。
+
+完整不变量、用户边界与后续缺口见 [`docs/problem-and-invariants.md`](docs/problem-and-invariants.md)。
 
 ## 工作方式
 
@@ -170,7 +187,7 @@ React / Vite UI
        ▼
 Node.js service
    ├── Agent adapters ── CLI / ACP ── 本机 Agent
-   ├── SQLite ────────── 在线业务唯一真相源
+   ├── SQLite ────── 在线业务唯一真相源
    ├── audit JSONL ───── 审计、导出和核对，不是在线恢复源
    ├── Memory / Recall ─ FTS + 可选 sqlite-vec
    └── Git worktree ──── 可选的代码修改隔离层
@@ -193,7 +210,7 @@ Node.js service
 - Agent 子进程沿用本机 CLI 登录状态和必要的代理配置；
 - `.env`、运行数据、密钥和凭据不应提交到 Git。
 
-设计与数据契约详见 [`docs/decisions/`](docs/decisions/)（ADR）与 [`docs/architecture-map.md`](docs/architecture-map.md)（当前实现地图）。
+设计与数据契约详见 [`docs/decisions/`](docs/decisions/)（ADR）、[`docs/architecture-map.md`](docs/architecture-map.md)（当前实现地图）与 [`docs/problem-and-invariants.md`](docs/problem-and-invariants.md)（问题、不变量与用户边界）。
 
 ## 项目结构
 
