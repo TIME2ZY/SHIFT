@@ -6,6 +6,7 @@ const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
 const { prepareSkillDelivery: defaultPrepareSkillDelivery } = require("./skills");
+const { buildDutyBinding, initialDuty, resolveEnabledSeat } = require("../agents/duty-routing");
 
 function createChatRoutes({
   selfGitRoot,
@@ -109,6 +110,27 @@ function createChatRoutes({
       sendJson(res, 404, { error: "Session not found or its Project is archived." });
       return true;
     }
+    const initialSeat = resolveEnabledSeat(storage?.threadSeats, sessionId, requestedAgent, AGENTS);
+    if (!initialSeat) {
+      sendJson(res, 409, {
+        error: `Seat for agent "${requestedAgent}" is not enabled in this Session.`,
+        code: "SEAT_NOT_ENABLED",
+      });
+      return true;
+    }
+    let requestedDuty;
+    try {
+      requestedDuty = initialDuty({ requestedDuty: body.duty, useWorktree });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message, code: "INVALID_DUTY" });
+      return true;
+    }
+    const initialDutyBinding = buildDutyBinding({
+      seat: initialSeat,
+      duty: requestedDuty,
+      routingReason: "explicit_mention",
+      agentConfig: AGENTS[requestedAgent],
+    });
     const sessionProjectDir = session.projectDir;
     const existingUserMessage =
       clientTurnId && typeof findUserMessageByClientTurnId === "function"
@@ -142,7 +164,12 @@ function createChatRoutes({
     const trace = durable.startTrace({
       threadId: sessionId,
       clientTurnId,
-      metadata: { requestedAgent, useWorktree },
+      metadata: {
+        requestedAgent,
+        requestedSeatId: initialSeat.seatId,
+        requestedDuty,
+        useWorktree,
+      },
     });
     if (durable.enabled && !trace) {
       if (activeInvocations.get(sessionId) === invocationController) {
@@ -385,11 +412,14 @@ function createChatRoutes({
           parentInvocationId: null,
           triggerMessageId: userMessageId,
           triggerType: "user-message",
+          dutyBinding: initialDutyBinding,
         },
       ],
       collabTaskRegistry,
       deliveryVerifier,
       runWorkspace,
+      threadSeats: storage?.threadSeats || null,
+      agents: AGENTS,
     };
     callbacks.registerThread(sessionId, threadCtx);
 

@@ -13,6 +13,29 @@ test.beforeEach(() => {
 });
 
 let handoffNo = 0;
+const TEST_AGENTS = {
+  codex: { label: "Codex", runtimeCapabilities: {} },
+  gemini: { label: "Gemini", runtimeCapabilities: {} },
+  grok: { label: "Grok", runtimeCapabilities: { permissionCallbacks: true } },
+  opencode: { label: "OpenCode", runtimeCapabilities: {} },
+};
+
+function seatRouting(threadId, enabled = Object.keys(TEST_AGENTS)) {
+  const seats = enabled.map((providerId) => ({
+    seatId: `seat-${threadId}-${providerId}`,
+    threadId,
+    providerId,
+    label: TEST_AGENTS[providerId]?.label || providerId,
+    enabled: true,
+  }));
+  return {
+    agents: TEST_AGENTS,
+    threadSeats: {
+      listEnabledForThread: (id) => (id === threadId ? seats : []),
+    },
+  };
+}
+
 function finalizeA2ARoutes(input) {
   const durableRecorder = input.durableRecorder || {
     acceptHandoff: (route) => ({
@@ -27,7 +50,11 @@ function finalizeA2ARoutes(input) {
     }),
     markHandoffEnqueued: (handoffId) => ({ handoffId, enqueuedAt: new Date().toISOString() }),
   };
-  return finalizeA2ARoutesRaw({ ...input, durableRecorder });
+  return finalizeA2ARoutesRaw({
+    ...seatRouting(input.sessionId || input.threadId),
+    ...input,
+    durableRecorder,
+  });
 }
 
 function completeHandoffText(to = "opencode") {
@@ -107,6 +134,7 @@ test("finalize removes the in-memory enqueue when durable confirmation fails", (
   assert.throws(
     () =>
       finalizeA2ARoutesRaw({
+        ...seatRouting("t-enqueue-fail"),
         text: completeHandoffText("opencode"),
         fromAgent: "codex",
         threadId: "t-enqueue-fail",
@@ -127,7 +155,7 @@ test("finalize removes the in-memory enqueue when durable confirmation fails", (
   assert.deepEqual(worklist, ["codex"]);
 });
 
-test("finalize rejects an explicit intent routed to the wrong workflow role", () => {
+test("finalize routes an explicit Duty to any enabled Seat", () => {
   const worklist = ["codex"];
   const events = [];
   const result = finalizeA2ARoutes({
@@ -153,12 +181,32 @@ test("finalize rejects an explicit intent routed to the wrong workflow role", ()
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });
 
+  assert.equal(result.enqueued.length, 1);
+  assert.equal(result.enqueued[0].duty, "accept");
+  assert.equal(result.enqueued[0].dutyBinding.seatId, "seat-t-role-reject-opencode");
+  assert.deepEqual(worklist, ["codex", "opencode"]);
+  assert.equal(
+    events.some((event) => event.kind === "a2a-skipped"),
+    false
+  );
+});
+
+test("finalize hard rejects a target without an enabled Seat", () => {
+  const worklist = ["codex"];
+  const result = finalizeA2ARoutes({
+    ...seatRouting("t-seat-disabled", ["codex"]),
+    text: completeHandoffText("opencode"),
+    fromAgent: "codex",
+    threadId: "t-seat-disabled",
+    sessionId: "t-seat-disabled",
+    invocationId: "inv-seat-disabled",
+    worklist,
+    policyMode: "soft",
+  });
+
   assert.equal(result.enqueued.length, 0);
-  assert.equal(result.skipped.length, 1);
-  assert.equal(result.skipped[0].reason, "target_lacks_intent_capability");
+  assert.equal(result.skipped[0].reason, "target_seat_not_enabled");
   assert.deepEqual(worklist, ["codex"]);
-  const rejected = events.find((event) => event.kind === "a2a-skipped");
-  assert.deepEqual(rejected.payload.allowed, ["codex"]);
 });
 
 test("finalize rejects Codex implementation handoff before Grok submits a plan", () => {
@@ -412,4 +460,6 @@ test("A2A causality stays queue-aligned when the same agent re-enters", () => {
       },
     ]
   );
+  assert.equal(state.a2aCauses[0].dutyBinding.seatId, "seat-t1-opencode");
+  assert.equal(state.a2aCauses[0].dutyBinding.routingReason, "handoff_to");
 });

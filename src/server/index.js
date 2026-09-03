@@ -22,6 +22,7 @@ const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
+const { initializeCatalogSeats } = require("../agents/duty-routing");
 const skills = require("./skills");
 const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
 const { serveIndex, serveStatic } = require("./static-assets");
@@ -75,6 +76,7 @@ function publicAgents() {
       contextTokens: modelProfile ? modelProfile.contextTokens : null,
       reserveRatio: modelProfile ? modelProfile.reserveRatio : 0.2,
       capabilities: { ...provider.capabilities },
+      runtimeCapabilities: { ...agent.runtimeCapabilities },
       reasoningEffort: agent.reasoningEffort || "",
       description: agent.description || "",
       role: identity ? identity.role : "",
@@ -145,7 +147,11 @@ function createServer(options = {}) {
   _previewManagers.add(worktreeManager);
 
   function createSessionDurable(input) {
-    return sqliteSessionService.createSession(input);
+    const session = sqliteSessionService.createSession(input);
+    initializeCatalogSeats(storageContext.storage.threadSeats, session.id, AGENTS, {
+      createdAt: session.createdAt,
+    });
+    return session;
   }
 
   function updateWorktreeDurable(sessionId, worktree) {

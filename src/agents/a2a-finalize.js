@@ -21,6 +21,7 @@ const {
 const { buildFinalizeMetrics, logFinalizeMetrics } = require("./handoff-metrics");
 const crypto = require("node:crypto");
 const collabTaskRegistry = require("./collab-task-registry");
+const { buildDutyBinding, normalizeDuty, resolveEnabledSeat } = require("./duty-routing");
 const {
   HANDOFF_PARSE_STATUS,
   HANDOFF_ROUTE_STATUS,
@@ -66,6 +67,9 @@ function finalizeA2ARoutes(input = {}) {
   const source = input.source || "chat";
   const logger = input.logger || console;
   const taskRegistry = input.collabTaskRegistry || collabTaskRegistry;
+  const threadSeats = input.threadSeats || null;
+  const agents = input.agents || {};
+  const enabledSeats = threadSeats?.listEnabledForThread?.(sessionId) || [];
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
@@ -90,19 +94,21 @@ function finalizeA2ARoutes(input = {}) {
     if (aborted) break;
 
     const fromLabel = agentLabels[fromAgent] || fromAgent;
-    const toLabel = agentLabels[target] || target;
+    const targetSeat = resolveEnabledSeat(threadSeats, sessionId, target, agents);
+    const targetAgent = targetSeat?.providerId || target;
+    const toLabel = targetSeat?.label || agentLabels[targetAgent] || target;
     // Canonical fence only (last matching block); earlier duplicate fences ignored.
     const handoffMatch = agentHandoff.selectCanonicalHandoffMatch(text, {
       currentAgentId: fromAgent,
-      routedTo: target,
+      routedTo: targetAgent,
       mentionCount: mentions.length,
     });
     const handoff = handoffMatch.handoff;
-    const contentHash = hashHandoffContent(handoff, target);
+    const contentHash = hashHandoffContent(handoff, targetAgent);
     const parseStatus = handoff ? HANDOFF_PARSE_STATUS.PARSED : HANDOFF_PARSE_STATUS.FAILED;
     const quality = agentHandoff.evaluateHandoff(handoff, {
-      routedTo: target,
-      toAgentId: target,
+      routedTo: targetAgent,
+      toAgentId: targetAgent,
       fromAgentId: fromAgent,
       useWorktree,
       riskFlags: [
@@ -117,23 +123,23 @@ function finalizeA2ARoutes(input = {}) {
         useWorktree,
         intent: quality.intent,
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
       });
     const evidenceSkip = taskRegistry.shouldBlockEvidenceRoute({
       threadId: sessionId,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
     });
     const implementationSkip = taskRegistry.shouldBlockImplementationRoute({
       threadId: sessionId,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
     });
     const reviewSkip = taskRegistry.shouldSkipRedundantReview({
       threadId: sessionId,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
       contentHash,
       handoff,
@@ -148,23 +154,36 @@ function finalizeA2ARoutes(input = {}) {
       useWorktree,
       mode,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
       phaseId,
       taskSkip,
+      targetSeat,
+      enabledSeats,
     };
     const decision = decidePolicy(policyInput);
     const phaseCheck = policyInput._phaseCheck || null;
     quality.policy = decision;
     quality.phase = phaseCheck?.phase || phaseId;
     quality.taskSkip = taskSkip.skip ? taskSkip : null;
-    handoffByTarget[target] = handoff;
-    handoffQualityByTarget[target] = quality;
+    handoffByTarget[targetAgent] = handoff;
+    handoffQualityByTarget[targetAgent] = quality;
+
+    const duty = normalizeDuty(quality.intent || "discuss");
+    const dutyBinding = buildDutyBinding({
+      seat: targetSeat,
+      duty,
+      routingReason: handoff?.to ? "handoff_to" : "explicit_mention",
+      agentConfig: agents[targetAgent],
+    });
 
     const summary = {
       ...agentHandoff.summarizeHandoff(handoff, quality),
       from: fromAgent,
-      to: target,
+      to: targetAgent,
+      fromSeatId: input.fromSeatId || null,
+      seatId: targetSeat?.seatId || null,
+      duty,
       policy: decision,
       handoffPolicy: mode,
       source,
@@ -192,7 +211,7 @@ function finalizeA2ARoutes(input = {}) {
         invocationId,
         windowId,
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
         handoff,
         quality,
         blockIndex: handoffMatch.blockIndex,
@@ -208,7 +227,7 @@ function finalizeA2ARoutes(input = {}) {
     if (a2aCount >= maxDepth) {
       const skip = {
         from: fromAgent,
-        to: target,
+        to: targetAgent,
         reason: "max_depth",
         maxDepth,
         policy: DECISIONS.REJECT,
@@ -238,14 +257,14 @@ function finalizeA2ARoutes(input = {}) {
       if (isPhaseOrTaskReject) {
         const reject = buildPhaseRejectPayload({
           fromAgent,
-          toAgent: target,
+          toAgent: targetAgent,
           phaseCheck,
           taskSkip,
           mode,
         });
         skipped.push({
           from: fromAgent,
-          to: target,
+          to: targetAgent,
           reason: reject.reason,
           policy: DECISIONS.REJECT,
           phase: reject.phase,
@@ -262,7 +281,7 @@ function finalizeA2ARoutes(input = {}) {
               kind: "a2a-skipped",
               messageType: "a2a-phase-rejected",
               from: fromAgent,
-              to: target,
+              to: targetAgent,
               reason: reject.reason,
               source,
             },
@@ -281,7 +300,7 @@ function finalizeA2ARoutes(input = {}) {
       }
       const repair = buildRepairPayload({
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
         quality,
         mode,
       });
@@ -305,7 +324,7 @@ function finalizeA2ARoutes(input = {}) {
     const accept = durableRecorder.acceptHandoff({
       threadId: sessionId,
       sourceAgentId: fromAgent,
-      targetAgentId: target,
+      targetAgentId: targetAgent,
       sourceInvocationId: invocationId || null,
       contentHash,
       depth: a2aCount + 1,
@@ -324,7 +343,7 @@ function finalizeA2ARoutes(input = {}) {
       duplicateRoutes += 1;
       const skip = {
         from: fromAgent,
-        to: target,
+        to: targetAgent,
         reason: accept.status,
         policy: DECISIONS.REJECT,
         routeStatus: accept.status,
@@ -361,7 +380,7 @@ function finalizeA2ARoutes(input = {}) {
     }
     // The in-request queue is appended first; only then may durable enqueued_at
     // claim that scheduling occurred. A failed confirmation removes this append.
-    worklist.push(target);
+    worklist.push(targetAgent);
     try {
       const enqueued = durableRecorder.markHandoffEnqueued?.(accept.record.handoffId);
       if (!enqueued?.enqueuedAt) {
@@ -372,10 +391,14 @@ function finalizeA2ARoutes(input = {}) {
       throw error;
     }
     a2aCount += 1;
-    const reentry = worklist ? worklist.filter((id) => id === target).length > 1 : false;
+    const reentry = worklist ? worklist.filter((id) => id === targetAgent).length > 1 : false;
     const entry = {
       from: fromAgent,
-      to: target,
+      to: targetAgent,
+      fromSeatId: input.fromSeatId || null,
+      seatId: targetSeat.seatId,
+      duty,
+      dutyBinding,
       parentInvocationId: invocationId || null,
       policy: decision,
       handoffOk: quality.ok,
@@ -407,7 +430,7 @@ function finalizeA2ARoutes(input = {}) {
       taskRegistry.noteAcceptedRoute({
         threadId: sessionId,
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
         intent: quality.intent,
         contentHash,
         useWorktree,
@@ -419,11 +442,12 @@ function finalizeA2ARoutes(input = {}) {
     }
     if (Array.isArray(input.a2aState?.a2aCauses)) {
       input.a2aState.a2aCauses.push({
-        agentId: target,
+        agentId: targetAgent,
         parentInvocationId: invocationId || null,
         triggerMessageId: entry.routeMessageId || null,
         triggerType: "a2a-handoff",
         handoffId: entry.handoffId,
+        dutyBinding,
       });
     }
   }
@@ -608,6 +632,9 @@ function emitRoute({
         messageType: "a2a-route",
         from: entry.from,
         to: entry.to,
+        fromSeatId: entry.fromSeatId,
+        seatId: entry.seatId,
+        duty: entry.duty,
         parentInvocationId: entry.parentInvocationId,
         handoffOk: entry.handoffOk,
         handoffDegraded: entry.handoffDegraded,
@@ -626,6 +653,9 @@ function emitRoute({
     sendSse("a2a-route", {
       from: entry.from,
       to: entry.to,
+      fromSeatId: entry.fromSeatId,
+      seatId: entry.seatId,
+      duty: entry.duty,
       parentInvocationId: entry.parentInvocationId,
       routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
@@ -649,6 +679,9 @@ function emitRoute({
     payload: {
       from: entry.from,
       to: entry.to,
+      fromSeatId: entry.fromSeatId,
+      seatId: entry.seatId,
+      duty: entry.duty,
       parentInvocationId: entry.parentInvocationId,
       routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,

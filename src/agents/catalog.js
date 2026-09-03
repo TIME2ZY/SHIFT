@@ -115,6 +115,9 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     ...(options.capacityTokens ? { capacityTokens: options.capacityTokens } : {}),
     reasoningEffort: options.reasoningEffort || "",
     ...(options.transport ? { transport: options.transport } : {}),
+    runtimeCapabilities: Object.freeze({
+      permissionCallbacks: options.permissionCallbacks === true,
+    }),
     description,
     workflowRole: workflow?.role || "",
     workflowCapabilities: workflow ? workflow.capabilities.slice() : [],
@@ -146,10 +149,18 @@ const AGENTS = {
     "讨论伙伴：提出正常可行的选项、风险与反例，与 Codex 互相验证，不为猎奇而发散。",
     { reasoningEffort: "high" }
   ),
-  grok: agent("grok", "Grok", "grok", "grok-4.6", "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。", {
-    reasoningEffort: "high",
-    transport: "acp",
-  }),
+  grok: agent(
+    "grok",
+    "Grok",
+    "grok",
+    "grok-4.6",
+    "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。",
+    {
+      reasoningEffort: "high",
+      transport: "acp",
+      permissionCallbacks: true,
+    }
+  ),
   opencode: agent(
     "opencode",
     "OpenCode",

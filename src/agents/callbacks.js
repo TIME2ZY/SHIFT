@@ -294,6 +294,9 @@ function postMessage(
     a2aState: thread,
     logger: console,
     collabTaskRegistry: taskRegistry,
+    threadSeats: thread.threadSeats || null,
+    agents: thread.agents || AGENTS,
+    fromSeatId: thread.currentDutyBinding?.seatId || null,
   });
 
   const writeStats = mergeWriteStats(

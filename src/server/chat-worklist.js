@@ -177,6 +177,7 @@ async function runChatWorklist(ctx) {
       let preCallSealedRatio = 0;
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
+      const dutyBinding = queuedCause?.dutyBinding || null;
       const parentInvocationId =
         i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
       const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
@@ -449,11 +450,13 @@ async function runChatWorklist(ctx) {
         triggerMessageId,
         triggerType,
         handoffId: queuedCause?.handoffId || null,
+        dutyBinding,
       });
       if (!durableRun) {
         throw new Error(`Failed to persist invocation start for ${invocationId}.`);
       }
       let activeInvocationId = invocationId;
+      threadCtx.currentDutyBinding = durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
       if (durableRun.window) {
         healthTracker = contextHealth.makeTracker(agent, {
@@ -485,9 +488,14 @@ async function runChatWorklist(ctx) {
       });
       sealer.update(healthTracker.getFillRatio());
       threadCtx.sealer = sealer;
-      // Keep this payload stable for existing clients. A2A causality lives on
-      // window-meta and is joined by invocationId in live-test auditing.
-      sendSse(res, "agent-start", { agent, invocationId });
+      // Surface invocation identity together with its immutable Seat/Duty contract.
+      // A2A causality remains on window-meta and is joined by invocationId.
+      sendSse(res, "agent-start", {
+        agent,
+        invocationId,
+        seatId: durableRun.binding?.seatId || null,
+        duty: durableRun.binding?.duty || null,
+      });
       sendSse(res, "window-meta", {
         agent,
         invocationId,
@@ -501,6 +509,8 @@ async function runChatWorklist(ctx) {
         parentInvocationId,
         triggerMessageId,
         triggerType,
+        seatId: durableRun.binding?.seatId || null,
+        duty: durableRun.binding?.duty || null,
       });
       // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
       sendSse(res, "workspace-meta", {
@@ -804,10 +814,12 @@ async function runChatWorklist(ctx) {
             parentInvocationId,
             triggerMessageId,
             triggerType,
+            dutyBinding: durableRun.binding || dutyBinding,
           });
           if (!retryRun) break;
           durableRun = retryRun;
           activeInvocationId = retry.invocationId;
+          threadCtx.currentDutyBinding = retryRun.binding || dutyBinding;
           invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
           invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
           invocationEnv.INVOKE_SESSION_ID = "";
@@ -819,7 +831,12 @@ async function runChatWorklist(ctx) {
           });
           healthTracker.addInput(promptForAgent.length);
           billingAtStart = { ...healthTracker.snapshot().billing };
-          sendSse(res, "agent-start", { agent, invocationId: retry.invocationId });
+          sendSse(res, "agent-start", {
+            agent,
+            invocationId: retry.invocationId,
+            seatId: retryRun.binding?.seatId || null,
+            duty: retryRun.binding?.duty || null,
+          });
           sendSse(res, "window-meta", {
             agent,
             invocationId: retry.invocationId,
@@ -833,6 +850,8 @@ async function runChatWorklist(ctx) {
             parentInvocationId,
             triggerMessageId,
             triggerType,
+            seatId: retryRun.binding?.seatId || null,
+            duty: retryRun.binding?.duty || null,
           });
           sendSse(res, "workspace-meta", {
             agent,
@@ -1358,6 +1377,9 @@ async function runChatWorklist(ctx) {
         a2aState: threadCtx,
         logger: log,
         collabTaskRegistry,
+        threadSeats: storage?.threadSeats || null,
+        agents: AGENTS,
+        fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
       });
       Object.assign(handoffByTarget, finalized.handoffByTarget);
       Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);

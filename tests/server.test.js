@@ -14,6 +14,8 @@ const { hashImplementationPlan } = require("../src/agents/implementation-plan-ga
 const { createStorage } = require("../src/storage");
 const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
+const { initializeCatalogSeats } = require("../src/agents/duty-routing");
+const { AGENTS } = require("../src/agents/catalog");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -110,7 +112,10 @@ async function withServer(options, fn) {
     const project = storage.projects.openDirectory(tmpDir);
     projectKey = project.projectKey;
     for (const sessionId of initialSessionIds) {
-      storage.threads.create({ id: sessionId, project });
+      const session = storage.threads.create({ id: sessionId, project });
+      initializeCatalogSeats(storage.threadSeats, sessionId, AGENTS, {
+        createdAt: session.createdAt,
+      });
     }
   } finally {
     storage.close();
@@ -2193,9 +2198,9 @@ test("chat endpoint aborts previous invocation on same session", async () => {
 
       const text = await second.text();
       const startMatch = text.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)","seatId":"[^"]+","duty":"discuss"\}/
       );
-      assert.ok(startMatch, "agent-start must retain its stable two-field payload");
+      assert.ok(startMatch, "agent-start must expose invocation, Seat, and Duty");
       const windowMeta = text
         .split("\n\n")
         .find(
@@ -2211,7 +2216,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
 
       const firstText = await first.text();
       const firstInvocationId = firstText.match(
-        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"[^\n]*\}/
       )?.[1];
       assert.ok(firstInvocationId);
       const storage = createStorage({ file: memoryDbFile });
@@ -2345,6 +2350,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
     controller,
     a2aCount: 0,
     tokens: new Map(),
+    ...callbackSeatRouting(sessionId),
   };
 
   const invocationId = "invocation-cb-1";
@@ -2444,6 +2450,7 @@ test("Grok callback persists a concrete plan before routing it for Codex approva
     useWorktree: true,
     collabTaskRegistry: registry,
     tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
+    ...callbackSeatRouting(sessionId),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -2489,6 +2496,7 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
     a2aCount: 0,
     windowId: "window-cb-1",
     tokens: new Map([[invocationId, { agentId: "codex", callbackToken: "token" }]]),
+    ...callbackSeatRouting(sessionId),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -2539,6 +2547,20 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
   }
 });
 
+function callbackSeatRouting(threadId) {
+  const seats = Object.entries(AGENTS).map(([providerId, profile]) => ({
+    seatId: `seat-${threadId}-${providerId}`,
+    threadId,
+    providerId,
+    label: profile.label,
+    enabled: true,
+  }));
+  return {
+    agents: AGENTS,
+    threadSeats: { listEnabledForThread: () => seats },
+  };
+}
+
 test("callbacks.postMessage captures handoff even when A2A max depth skips enqueue", () => {
   const sessionId = "session-cb-memory-depth";
   const invocationId = "invocation-cb-memory-depth";
@@ -2560,6 +2582,7 @@ test("callbacks.postMessage captures handoff even when A2A max depth skips enque
     a2aCount: 1,
     windowId: "window-depth-1",
     tokens: new Map([[invocationId, { agentId: "codex", callbackToken: "token" }]]),
+    ...callbackSeatRouting(sessionId),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -3877,7 +3900,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.ok(sidMatch, "expected session event");
       const sid = sidMatch[1];
       const invMatch = chatText.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"[^\n]*\}/
       );
       assert.ok(invMatch, "expected agent-start with invocationId");
       const invId = invMatch[1];

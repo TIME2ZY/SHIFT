@@ -21,6 +21,12 @@ function createThreadSeatRepository(db) {
     WHERE thread_id = ? AND enabled = 1
     ORDER BY created_at, seat_id
   `);
+  const findEnabledByProvider = db.prepare(`
+    SELECT * FROM thread_seats
+    WHERE thread_id = ? AND provider_id = ? AND enabled = 1
+    ORDER BY created_at, seat_id
+    LIMIT 1
+  `);
   const updateConfiguration = db.prepare(`
     UPDATE thread_seats
     SET label = @label,
@@ -56,6 +62,15 @@ function createThreadSeatRepository(db) {
 
     listEnabledForThread(threadId) {
       return listEnabledForThread.all(requiredString(threadId, "thread id")).map(mapSeat);
+    },
+
+    findEnabledByProvider(threadId, providerId) {
+      return mapSeat(
+        findEnabledByProvider.get(
+          requiredString(threadId, "thread id"),
+          requiredString(providerId, "provider id").toLowerCase()
+        )
+      );
     },
 
     configure(seatId, patch = {}) {

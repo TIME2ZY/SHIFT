@@ -172,6 +172,19 @@ function baseDeps(res, overrides = {}) {
       captureHandoff: () => ({ captured: false }),
       captureWindowSeal: () => ({ captured: false }),
     },
+    storage: {
+      threadSeats: {
+        listEnabledForThread: (threadId) => [
+          {
+            seatId: `seat-${threadId}-codex`,
+            threadId,
+            providerId: "codex",
+            label: "Codex",
+            enabled: true,
+          },
+        ],
+      },
+    },
     getSession: () => ({ worktree: null, projectDir: "/root" }),
     setSessionWorktree: () => ({ worktree: null, projectDir: "/root" }),
     appendToSession() {},
@@ -217,6 +230,28 @@ test("handleChatRoutes rejects unsupported agents before starting chat", async (
   assert.equal(handled, true);
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { error: 'Unsupported agent "unknown".' });
+});
+
+test("handleChatRoutes rejects a supported agent whose Seat is disabled", async () => {
+  const res = makeRes();
+  const handle = chatRoutes.createChatRoutes(
+    baseDeps(res, {
+      storage: { threadSeats: { listEnabledForThread: () => [] } },
+      readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "hi" }),
+    })
+  );
+
+  const handled = await handle(
+    makeReq("POST", { host: "127.0.0.1:8787" }),
+    res,
+    new URL("http://127.0.0.1/api/chat")
+  );
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    error: 'Seat for agent "codex" is not enabled in this Session.',
+    code: "SEAT_NOT_ENABLED",
+  });
 });
 
 test("a slower older chat request cannot abort the newer request", async () => {

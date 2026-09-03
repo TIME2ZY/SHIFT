@@ -51,6 +51,13 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       clientTurnId: "turn-1",
       startedAt: "2026-07-12T00:00:01.500Z",
     });
+    storage.threadSeats.create({
+      seatId: "seat-codex",
+      threadId: session.id,
+      providerId: "codex",
+      enabled: true,
+      createdAt: "2026-07-12T00:00:01.750Z",
+    });
 
     const run = recorder.startInvocation({
       session,
@@ -65,6 +72,13 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       triggerMessageId: "message-user",
       triggerType: "user-message",
       traceId: trace.id,
+      dutyBinding: {
+        seatId: "seat-codex",
+        duty: "review",
+        skillName: "code-review-deliver",
+        routingReason: "explicit_mention",
+        enforcementLevel: "advisory",
+      },
     });
     recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "Stored" });
     // Assistant-final goes only through completeInvocation (not mirror + finish*).
@@ -91,6 +105,9 @@ test("durable recorder writes thread, window, message, and invocation data", () 
     assert.equal(storage.traces.get(trace.id).rootInvocationId, "invocation-1");
 
     assert.equal(run.window.id, window.id);
+    assert.deepEqual(run.binding, storage.invocationDutyBindings.getForInvocation("invocation-1"));
+    assert.equal(run.binding.seatId, "seat-codex");
+    assert.equal(run.binding.duty, "review");
     assert.equal(storage.threads.get("thread-1").lastAgentId, "codex");
     assert.equal(storage.windows.listForThread("thread-1").length, 1);
     recorder.addWindowUsage(window.id, { inputChars: 100, outputChars: 50 });
@@ -114,6 +131,9 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       storage.invocations.listEvents("invocation-1").map((event) => event.kind),
       ["invocation-start", "text.delta", "invocation-end"]
     );
+    const startEvent = storage.invocations.listEvents("invocation-1")[0];
+    assert.equal(startEvent.payload.seatId, "seat-codex");
+    assert.equal(startEvent.payload.duty, "review");
     assert.equal(storage.recall.search("thread-1", "Remember this")[0].sourceKind, "message");
     assert.equal(
       storage.recall.search("thread-1", "Stored", { sourceKinds: ["invocation-event"] }).length,
