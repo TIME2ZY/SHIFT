@@ -1,9 +1,11 @@
 ---
 title: "ADR-004: Five-Phase Collaboration Workflow"
-status: accepted
+status: superseded
 decision_id: ADR-004
 created: 2026-08-05
 scope: handoff intent, collaboration phase, durable artifacts and approval gates
+superseded_by:
+  - ./007-seat-duty-evidence-workflow.md
 supersedes:
   - ADR-002 collaboration task states and phase allowlist
 related:
@@ -16,10 +18,14 @@ related:
 
 ## 1. 状态
 
-**Accepted**
+**Superseded by ADR-007**
 
 本 ADR 取代 ADR-002 中七状态协作任务模型和旧 phase allowlist。Invocation、handoff
 幂等、memory funnel 与报告 schema 等其余 ADR-002 契约保持有效。
+
+ADR-007 将固定 Agent 角色、五阶段权威状态和按 Agent ID 的路由合同替换为
+Provider / Seat / Duty / Policy 模型。本文件保留为已经实施过的历史决策；在 ADR-007
+完成代码迁移前，当前运行路径仍以本文件描述的旧实现为准。
 
 ## 2. 背景
 
