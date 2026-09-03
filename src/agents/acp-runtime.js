@@ -233,7 +233,7 @@ function createAcpRuntime(_config = {}) {
           makeEvent("diagnostic", {
             ...base(ctx),
             code: String(event.reason || "acp_permission_denied"),
-            message: `ACP ${event.toolKind || "other"} tool denied by the Grok implementation gate.`,
+            message: `ACP ${event.toolKind || "other"} tool denied by the implementation gate.`,
             ...(event.toolCallId ? { toolId: String(event.toolCallId) } : {}),
           }),
         ];

@@ -172,22 +172,13 @@ test("serves fixed agent list", async () => {
         agent.description && agent.description.length > 0,
         `Agent ${agent.id} missing description`
       );
-      // Identity pack metadata (role / duties) comes from src/agents/identities/*.md
-      assert.ok(agent.role && agent.role.length > 0, `Agent ${agent.id} missing role`);
-      assert.ok(
-        Array.isArray(agent.duties) && agent.duties.length > 0,
-        `Agent ${agent.id} missing duties`
-      );
+      // Identity metadata describes only the provider runtime. Duty is invocation-scoped.
+      assert.equal(agent.role, "provider");
+      assert.deepEqual(agent.duties, []);
       assert.ok(Array.isArray(agent.boundaries), `Agent ${agent.id} missing boundaries array`);
-      assert.ok(agent.workflowRole, `Agent ${agent.id} missing workflow role`);
-      assert.ok(
-        Array.isArray(agent.workflowCapabilities) && agent.workflowCapabilities.length > 0,
-        `Agent ${agent.id} missing workflow capabilities`
-      );
-      assert.ok(
-        Array.isArray(agent.workflowResponsibilities) && agent.workflowResponsibilities.length > 0,
-        `Agent ${agent.id} missing workflow responsibilities`
-      );
+      assert.equal("workflowRole" in agent, false);
+      assert.equal("workflowCapabilities" in agent, false);
+      assert.equal("workflowResponsibilities" in agent, false);
     }
   });
 });
@@ -1397,7 +1388,7 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
         process.nextTick(() => {
           if (agent === "grok") {
             grokRuns += 1;
-            const isApproved = options.env.SHIFT_GROK_IMPLEMENTATION_GATE === "approved";
+            const isApproved = options.env.SHIFT_IMPLEMENTATION_GATE === "approved";
             if (isApproved) {
               fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
             }
@@ -1462,12 +1453,12 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
       );
       assert.equal(reviewedContent, "changed by grok\n");
       assert.equal(grokRuns, 2);
-      assert.equal(runs[0].env.SHIFT_GROK_IMPLEMENTATION_GATE, "required");
-      assert.equal(runs[0].env.SHIFT_GROK_APPROVED_PLAN_HASH, "");
-      assert.match(runs[0].prompt, /Grok 实现门禁/);
+      assert.equal(runs[0].env.SHIFT_IMPLEMENTATION_GATE, "required");
+      assert.equal(runs[0].env.SHIFT_APPROVED_PLAN_HASH, "");
+      assert.match(runs[0].prompt, /## 实现门禁/);
       assert.match(runs[0].prompt, /只读/);
-      assert.equal(runs[2].env.SHIFT_GROK_IMPLEMENTATION_GATE, "approved");
-      assert.match(runs[2].env.SHIFT_GROK_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
+      assert.equal(runs[2].env.SHIFT_IMPLEMENTATION_GATE, "approved");
+      assert.match(runs[2].env.SHIFT_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
       assert.match(runs[2].prompt, /APPROVED/);
       assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
       assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
@@ -1669,6 +1660,7 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
           prompt: userPrompt,
           sessionId: session.id,
           useWorktree: true,
+          duty: "discuss",
         }),
       });
       const text = await response.text();
@@ -1678,7 +1670,7 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
         ["codex", "grok", "codex", "grok", "opencode", "codex"]
       );
       assert.match(runs[0].prompt, /solution_baseline/);
-      assert.match(runs[4].prompt, /OpenCode Review 与交付门禁/);
+      assert.match(runs[4].prompt, /## Review 与交付门禁/);
       assert.match(runs[5].prompt, /final_acceptance/);
       assert.match(runs[5].prompt, /最初用户目标/);
       assert.match(text, /event: delivery-evidence-verified/);
@@ -1811,9 +1803,18 @@ test("isolated worktree chat uses native skill delivery instead of full prompt i
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /PLATFORM SKILL CATALOG/);
-  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: a2a-handoff/);
+  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: cross-agent-handoff/);
   assert.doesNotMatch(prompts[0], /APPLICATION SKILL: memory-write/);
-  assert.ok(fs.existsSync(path.join(worktreeDir, ".agents", "skills", "a2a-handoff", "SKILL.md")));
+  assert.ok(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "implementation-plan", "SKILL.md"))
+  );
+  assert.ok(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "cross-agent-handoff", "SKILL.md"))
+  );
+  assert.equal(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "code-review-deliver")),
+    false
+  );
   fs.rmSync(baseDir, { recursive: true, force: true });
   fs.rmSync(worktreeDir, { recursive: true, force: true });
 });
@@ -2449,6 +2450,13 @@ test("Grok callback persists a concrete plan before routing it for Codex approva
     a2aCount: 0,
     useWorktree: true,
     collabTaskRegistry: registry,
+    currentDutyBinding: {
+      seatId: `seat-${sessionId}-grok`,
+      duty: "plan",
+      skillName: "implementation-plan",
+      routingReason: "sticky",
+      enforcementLevel: "enforced",
+    },
     tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
     ...callbackSeatRouting(sessionId),
   };
@@ -3730,15 +3738,15 @@ test("A2A-routed agents receive structured handoff fields when present", async (
   assert.match(prompts[1], /交接包完整度: ok/);
   assert.match(prompts[1], /做登录/);
   assert.doesNotMatch(prompts[1], /未提供标准/);
-  // A2A follow-up gets compact card (not full always-on a2a-handoff skill body).
+  // A2A follow-up gets the shared short handoff card.
   assert.match(prompts[1], /A2A Handoff Card/);
-  assert.doesNotMatch(prompts[1], /APPLICATION SKILL: a2a-handoff/);
+  assert.match(prompts[1], /APPLICATION SKILL: cross-agent-handoff/);
 });
 
-test("A2A allows the same agent to re-enter worklist (review → fix)", async () => {
+test("A2A allows the same Seat to re-enter the worklist with another Duty", async () => {
   const prompts = [];
   const agentsSeen = [];
-  const grokOut1 = [
+  const firstOut = [
     "@OpenCode",
     "",
     "```handoff",
@@ -3749,10 +3757,11 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
     "```",
   ].join("\n");
   const openCodeOut = [
-    "@Grok",
+    "@Codex",
     "",
     "```handoff",
-    "to: grok",
+    "to: codex",
+    "intent: discuss",
     "what: |",
     "  结论: request-changes",
     "  P0: 缺空指针检查",
@@ -3771,11 +3780,11 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
         const child = createMockChild();
         process.nextTick(() => {
           let text = "done";
-          if (agent === "grok" && agentsSeen.filter((a) => a === "grok").length === 1) {
-            text = grokOut1;
+          if (agent === "codex" && agentsSeen.filter((a) => a === "codex").length === 1) {
+            text = firstOut;
           } else if (agent === "opencode") {
             text = openCodeOut;
-          } else if (agent === "grok") {
+          } else if (agent === "codex") {
             text = "fixed p0";
           }
           child.stdout.write(
@@ -3796,25 +3805,25 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "grok",
+          agent: "codex",
           prompt: "做登录并走 review",
           sessionId: "reentry-handoff-test",
         }),
       });
       const text = await response.text();
       assert.equal(response.status, 200);
-      assert.deepEqual(agentsSeen, ["grok", "opencode", "grok"]);
+      assert.deepEqual(agentsSeen, ["codex", "opencode", "codex"]);
       assert.equal(prompts.length, 3);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"grok"[^\n]*"to":"opencode"/);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"grok"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"opencode"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"codex"/);
       assert.match(text, /"reentry":true/);
-      // Second Grok turn: structured handoff + compact card + receiving-review.
+      // Re-entered Seat gets only the discuss Duty handoff card.
       assert.match(prompts[2], /任务交接/);
       assert.match(prompts[2], /request-changes|缺空指针/);
       assert.match(prompts[2], /A2A Handoff Card/);
-      assert.match(prompts[2], /APPLICATION SKILL: receiving-review/);
-      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: a2a-handoff/);
-      assert.match(prompts[2], /<!-- Agent Identity: grok/);
+      assert.match(prompts[2], /APPLICATION SKILL: cross-agent-handoff/);
+      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: implementation-plan/);
+      assert.match(prompts[2], /<!-- Agent Identity: codex/);
     }
   );
 });

@@ -6,11 +6,12 @@ const test = require("node:test");
 const { createCollabTaskRegistry } = require("../../src/agents/collab-task-registry");
 const { processWorkflowEvidenceOutput } = require("../../src/agents/workflow-evidence");
 
-test("Codex solution output becomes the baseline for the implementation workflow", () => {
+test("discuss Duty output becomes the baseline regardless of Seat provider", () => {
   const registry = createCollabTaskRegistry();
   const goal = registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
   const events = processWorkflowEvidenceOutput({
     agent: "codex",
+    duty: "discuss",
     threadId: "thread-1",
     registry,
     content: [
@@ -30,10 +31,10 @@ test("Codex solution output becomes the baseline for the implementation workflow
   assert.match(registry.getTask("thread-1").artifacts.solutionBaseline.hash, /^[a-f0-9]{16}$/);
 });
 
-test("OpenCode delivery output is independently verified before becoming a gate", () => {
+test("review Duty output is independently verified regardless of Seat provider", () => {
   const calls = [];
   const registry = {
-    recordOpenCodeDelivery(threadId, input) {
+    recordDeliveryEvidence(threadId, input) {
       calls.push({ threadId, input });
       return { accepted: true, readyForAcceptance: true, reviewEvidenceHash: "review-1" };
     },
@@ -56,7 +57,8 @@ test("OpenCode delivery output is independently verified before becoming a gate"
     "```",
   ].join("\n");
   const events = processWorkflowEvidenceOutput({
-    agent: "opencode",
+    agent: "gemini",
+    duty: "review",
     content,
     threadId: "thread-1",
     registry,
@@ -70,6 +72,7 @@ test("OpenCode delivery output is independently verified before becoming a gate"
     },
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].input.actorAgentId, "opencode");
+  assert.equal(calls[0].input.actorAgentId, "gemini");
+  assert.equal(calls[0].input.actorDuty, "review");
   assert.equal(events[0].event, "delivery-evidence-verified");
 });

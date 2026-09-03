@@ -98,20 +98,22 @@ function isImplementationApproved(gate) {
   const planHash = String(gate?.planHash || "");
   return Boolean(
     gate?.status === IMPLEMENTATION_GATE_STATUS.APPROVED &&
-      planHash &&
-      String(gate?.approvedPlanHash || "") === planHash
+    planHash &&
+    String(gate?.approvedPlanHash || "") === planHash
   );
 }
 
 function resolveImplementationGateEnv(env = process.env) {
-  const status = String(env[ENV.GROK_IMPLEMENTATION_GATE] || "")
+  const status = String(env[ENV.IMPLEMENTATION_GATE] || "")
     .trim()
     .toLowerCase();
-  const planHash = String(env[ENV.GROK_APPROVED_PLAN_HASH] || "").trim();
+  const planHash = String(env[ENV.APPROVED_PLAN_HASH] || "").trim();
   const allowed = status === IMPLEMENTATION_GATE_STATUS.APPROVED && Boolean(planHash);
   return {
     allowed,
-    status: allowed ? IMPLEMENTATION_GATE_STATUS.APPROVED : status || IMPLEMENTATION_GATE_STATUS.REQUIRED,
+    status: allowed
+      ? IMPLEMENTATION_GATE_STATUS.APPROVED
+      : status || IMPLEMENTATION_GATE_STATUS.REQUIRED,
     planHash: allowed ? planHash : null,
     reason: allowed ? null : "implementation_plan_not_approved",
   };
@@ -121,17 +123,13 @@ function renderImplementationGateBlock(gate) {
   if (!gate) return "";
   const approved = isImplementationApproved(gate);
   const planHash = String(gate.planHash || "");
-  const lines = [
-    "<!-- Grok Implementation Gate -->",
-    "## Grok 实现门禁（平台强制）",
-    "",
-  ];
+  const lines = ["<!-- Implementation Gate -->", "## 实现门禁（平台强制）", ""];
 
   if (approved) {
     lines.push(
       `状态：APPROVED（plan hash: \`${planHash}\`）`,
       "你现在可以修改文件和执行实现所需命令，但不得偏离已批准方案。",
-      "完成后必须总结改动、验证和未解决项，再以 `review` intent 交给 OpenCode。"
+      "完成后必须总结改动、验证和未解决项，再以 `review` intent 交给可用 Seat。"
     );
   } else {
     lines.push(
@@ -151,10 +149,10 @@ function renderImplementationGateBlock(gate) {
       "  - <风险或边界，可空>",
       "```",
       "",
-      "方案提交后以 `discuss` intent 交给 Codex。只有 Codex 对该 plan hash 发出显式 `implement` 交接，平台才会开放写权限。"
+      "方案提交后以 `discuss` intent 请求批准。只有具备批准 Duty 的参与者对该 plan hash 发出显式 `implement` 交接，平台才会开放写权限。"
     );
   }
-  lines.push("<!-- /Grok Implementation Gate -->");
+  lines.push("<!-- /Implementation Gate -->");
   return lines.join("\n");
 }
 

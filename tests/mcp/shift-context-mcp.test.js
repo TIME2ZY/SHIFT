@@ -326,12 +326,12 @@ test("platform skill MCP tools expose index and bodies through tools/call", asyn
 test("list_platform_skills matches the skills loader index", () => {
   const result = listPlatformSkills({}, { env: ENV });
   assert.deepEqual(result.skills, listSkillIndex());
-  assert.ok(result.skills.some((skill) => skill.name === "a2a-handoff"));
+  assert.ok(result.skills.some((skill) => skill.name === "cross-agent-handoff"));
 });
 
 test("load_platform_skill returns a known body and rejects traversal", () => {
-  const loaded = loadPlatformSkill({ name: "a2a-handoff" }, { env: ENV });
-  assert.equal(loaded.name, "a2a-handoff");
+  const loaded = loadPlatformSkill({ name: "cross-agent-handoff" }, { env: ENV });
+  assert.equal(loaded.name, "cross-agent-handoff");
   assert.ok(String(loaded.body || "").length > 0);
   assert.throws(
     () => loadPlatformSkill({ name: "../secret" }, { env: ENV }),

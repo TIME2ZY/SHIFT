@@ -38,31 +38,26 @@ test("getIdentity returns catalog agents and null for unknown", () => {
   assert.equal(getIdentity(""), null);
 });
 
-test("renderIdentityBlock includes markers, role meta, and body", () => {
+test("renderIdentityBlock includes provider identity without a fixed workflow role", () => {
   const block = renderIdentityBlock("opencode");
   assert.match(block, /<!-- Agent Identity: opencode \/ OpenCode -->/);
   assert.match(block, /<!-- \/Agent Identity -->/);
-  assert.match(block, /Role: reviewer_deliverer/);
-  assert.match(block, /Workflow role: reviewer_deliverer/);
-  assert.match(block, /Workflow capabilities: review, deliver, discuss, recall/);
-  assert.match(block, /Duties:/);
-  assert.match(block, /Boundaries:/);
+  assert.match(block, /Role: provider/);
+  assert.doesNotMatch(block, /reviewer_deliverer|Workflow role|Workflow capabilities|Duties:/);
   assert.match(block, /你是 \*\*OpenCode/);
   assert.ok(!block.includes("你是 **Grok"), "must not leak other agent bodies");
 });
 
-test("identity packs stay thin personas without playbook fences", () => {
+test("identity packs stay provider-only without Duty playbooks", () => {
   const codex = renderIdentityBlock("codex");
   const gemini = renderIdentityBlock("gemini");
   const grok = renderIdentityBlock("grok");
   const opencode = renderIdentityBlock("opencode");
 
-  assert.match(codex, /开始与末尾的把关者/);
-  assert.match(codex, /证据优先/);
-  assert.match(gemini, /不为新奇而发散|不猎奇/);
-  assert.match(grok, /不表演性附和/);
-  assert.match(opencode, /证据优先/);
-  assert.match(opencode, /不替代 Codex/);
+  for (const block of [codex, gemini, grok, opencode]) {
+    assert.match(block, /不承担固定岗位/);
+    assert.match(block, /Duty Skill/);
+  }
 
   for (const block of [codex, gemini, grok, opencode]) {
     assert.doesNotMatch(block, /```implementation_plan/);
@@ -153,9 +148,11 @@ test("publicIdentities returns metadata without body", () => {
   assert.ok(coder);
   assert.equal(coder.label, "Grok");
   assert.ok(Array.isArray(coder.duties));
-  assert.equal(coder.workflowRole, "implementer");
-  assert.deepEqual(coder.workflowCapabilities, ["plan", "implement", "fix", "discuss", "recall"]);
-  assert.ok(coder.workflowResponsibilities.includes("change_summary"));
+  assert.equal(coder.role, "provider");
+  assert.deepEqual(coder.duties, []);
+  assert.equal("workflowRole" in coder, false);
+  assert.equal("workflowCapabilities" in coder, false);
+  assert.equal("workflowResponsibilities" in coder, false);
   assert.equal("body" in coder, false);
 });
 

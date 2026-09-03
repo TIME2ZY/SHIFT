@@ -7,6 +7,7 @@ const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
 const { prepareSkillDelivery: defaultPrepareSkillDelivery } = require("./skills");
 const { buildDutyBinding, initialDuty, resolveEnabledSeat } = require("../agents/duty-routing");
+const { activeSkillNames } = require("../agents/duty-routing");
 
 function createChatRoutes({
   selfGitRoot,
@@ -261,10 +262,13 @@ function createChatRoutes({
         useWorktree,
         isolated: isolatedWorkspace,
         rawPrompt: turnPrompt,
+        skillNames: activeSkillNames(initialDutyBinding),
       });
     } catch (error) {
       log.warn?.(`[skills] delivery failed: ${error.message}`);
-      skillDelivery = augmentPrompt(turnPrompt, useWorktree);
+      skillDelivery = augmentPrompt(turnPrompt, useWorktree, {
+        skillNames: activeSkillNames(initialDutyBinding),
+      });
       skillDelivery = {
         ...skillDelivery,
         nativeDelivery: false,
@@ -473,7 +477,9 @@ function createChatRoutes({
       spawnRunner,
       buildChatArgs,
       options,
-      augmentPrompt,
+      prepareSkillDelivery,
+      sessionProjectDir,
+      isolatedWorkspace,
     };
 
     let workResult;

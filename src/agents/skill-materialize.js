@@ -10,6 +10,7 @@ const path = require("node:path");
 
 const SAFE_SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DISCOVERY_REL = path.join(".agents", "skills");
+const OWNERSHIP_MARKER = ".shift-platform-skill";
 
 const materializeCache = new Map();
 
@@ -129,6 +130,7 @@ function materializePlatformSkills(opts = {}) {
   const skillsRoot = opts.skillsRoot ? path.resolve(opts.skillsRoot) : null;
   const errors = [];
   const targets = [];
+  const removed = [];
 
   try {
     fs.mkdirSync(destRoot, { recursive: true });
@@ -140,6 +142,16 @@ function materializePlatformSkills(opts = {}) {
       targets: [],
       errors: [`cannot create ${destRoot}: ${error.message}`],
     };
+  }
+
+  const wantedNames = new Set(entries.map((entry) => entry?.name).filter(isSafeSkillName));
+  for (const dirent of fs.readdirSync(destRoot, { withFileTypes: true })) {
+    if (!dirent.isDirectory() || wantedNames.has(dirent.name)) continue;
+    const staleDir = path.resolve(destRoot, dirent.name);
+    const marker = path.join(staleDir, OWNERSHIP_MARKER);
+    if (!isInside(destRoot, staleDir) || !fs.existsSync(marker)) continue;
+    fs.rmSync(staleDir, { recursive: true, force: true });
+    removed.push(staleDir);
   }
 
   for (const entry of entries) {
@@ -163,12 +175,21 @@ function materializePlatformSkills(opts = {}) {
       continue;
     }
     try {
+      if (fs.existsSync(destDir)) {
+        const marker = path.join(destDir, OWNERSHIP_MARKER);
+        if (!fs.existsSync(marker)) {
+          errors.push(`${name}: destination exists and is not owned by SHIFT`);
+          continue;
+        }
+        fs.rmSync(destDir, { recursive: true, force: true });
+      }
       copySkillDir(sourceDir, destDir);
       const skillFile = path.join(destDir, "SKILL.md");
       if (!fs.existsSync(skillFile)) {
         errors.push(`${name}: copied directory is missing SKILL.md`);
         continue;
       }
+      fs.writeFileSync(path.join(destDir, OWNERSHIP_MARKER), "owned-by=SHIFT\n", "utf8");
       targets.push(destDir);
     } catch (error) {
       errors.push(`${name}: ${error.message}`);
@@ -179,6 +200,7 @@ function materializePlatformSkills(opts = {}) {
     ok: errors.length === 0 && targets.length === entries.length,
     method: "copy",
     targets,
+    removed,
     errors,
   };
   materializeCache.set(cacheKey(root), { signature: entriesSignature(entries), result });
@@ -192,6 +214,7 @@ function resetMaterializeCache() {
 module.exports = {
   SAFE_SKILL_NAME,
   DISCOVERY_REL,
+  OWNERSHIP_MARKER,
   isSafeSkillName,
   isInside,
   materializePlatformSkills,

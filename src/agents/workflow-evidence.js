@@ -9,17 +9,19 @@ const {
 
 function processWorkflowEvidenceOutput(input = {}) {
   const agent = String(input.agent || "").toLowerCase();
+  const duty = String(input.duty || "").toLowerCase();
   const content = String(input.content || "");
   const threadId = input.threadId;
   const registry = input.registry;
   const events = [];
   if (!threadId || !registry) return events;
 
-  if (agent === "codex") {
+  if (["discuss", "plan", "accept"].includes(duty)) {
     const baseline = parseSolutionBaseline(content);
     if (baseline) {
       const result = registry.submitSolutionBaseline(threadId, {
         actorAgentId: agent,
+        actorDuty: duty,
         baseline,
       });
       events.push({
@@ -28,10 +30,11 @@ function processWorkflowEvidenceOutput(input = {}) {
       });
     }
 
-    const acceptance = parseFinalAcceptance(content);
+    const acceptance = duty === "accept" ? parseFinalAcceptance(content) : null;
     if (acceptance) {
       const result = registry.submitFinalAcceptance(threadId, {
         actorAgentId: agent,
+        actorDuty: duty,
         acceptance,
       });
       events.push({
@@ -39,7 +42,11 @@ function processWorkflowEvidenceOutput(input = {}) {
         payload: summarize(result, ["verdict", "acceptanceHash"]),
       });
       if (result.accepted && result.verdict === "accept") {
-        const done = registry.markDone(threadId, { actorAgentId: agent, intent: "accept" });
+        const done = registry.markDone(threadId, {
+          actorAgentId: agent,
+          actorDuty: duty,
+          intent: "accept",
+        });
         events.push({
           event: done.phase === "done" ? "collaboration-done" : "collaboration-done-blocked",
           payload: {
@@ -52,7 +59,7 @@ function processWorkflowEvidenceOutput(input = {}) {
     }
   }
 
-  if (agent === "opencode") {
+  if (["review", "deliver"].includes(duty)) {
     const review = parseCodeReview(content);
     const receipt = parseDeliveryReceipt(content);
     if (review?.verdict === "approve") {
@@ -72,8 +79,9 @@ function processWorkflowEvidenceOutput(input = {}) {
           branch: input.branch,
           receipt,
         });
-        const result = registry.recordOpenCodeDelivery(threadId, {
+        const result = registry.recordDeliveryEvidence(threadId, {
           actorAgentId: agent,
+          actorDuty: duty,
           review,
           receipt,
           verification,

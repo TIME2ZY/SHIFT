@@ -154,6 +154,12 @@ test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", 
 
 test("finalizeA2ARoutes repair path reports repair_rate=1", () => {
   const lines = [];
+  const taskRegistry = {
+    shouldBlockEvidenceRoute: () => ({ skip: false }),
+    shouldBlockImplementationRoute: () => ({ skip: false }),
+    shouldSkipRedundantReview: () => ({ skip: false }),
+    getTask: () => null,
+  };
   const result = finalizeA2ARoutes({
     ...seatRouting("t-repair"),
     text: "@OpenCode\nplease implement without fence",
@@ -165,6 +171,7 @@ test("finalizeA2ARoutes repair path reports repair_rate=1", () => {
     a2aCount: 0,
     useWorktree: true,
     policyMode: "balanced",
+    collabTaskRegistry: taskRegistry,
     logger: { info: (line) => lines.push(line) },
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });

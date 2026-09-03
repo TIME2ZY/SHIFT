@@ -313,10 +313,11 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.opencode.reasoningEffort, "max");
   assert.equal(AGENTS.opencode.label, "OpenCode");
   assert.equal(AGENTS.opencode.providerId, "opencode");
-  assert.equal(AGENTS.codex.workflowRole, "lead");
-  assert.deepEqual(AGENTS.gemini.workflowCapabilities, ["discuss", "recall"]);
-  assert.ok(AGENTS.grok.workflowResponsibilities.includes("concrete_change_plan"));
-  assert.ok(AGENTS.opencode.workflowResponsibilities.includes("pull_request"));
+  for (const agent of Object.values(AGENTS)) {
+    assert.equal("workflowRole" in agent, false);
+    assert.equal("workflowCapabilities" in agent, false);
+    assert.equal("workflowResponsibilities" in agent, false);
+  }
 });
 
 test("codex runtime maps agent_message and todo_list into normalized events", () => {

@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   buildDutyBinding,
+  activeSkillNames,
   initialDuty,
   initializeCatalogSeats,
   resolveEnabledSeat,
@@ -50,12 +51,45 @@ test("Duty binding records routing reason and provider enforcement capability", 
     {
       seatId: "seat-grok",
       duty: "fix",
-      skillName: "receiving-review",
+      skillName: "implementation-plan",
       routingReason: "handoff_to",
       enforcementLevel: "enforced",
     }
   );
+  assert.equal(
+    buildDutyBinding({
+      seat,
+      duty: "plan",
+      routingReason: "sticky",
+      agentConfig: { runtimeCapabilities: { permissionCallbacks: true } },
+    }).enforcementLevel,
+    "enforced"
+  );
   assert.throws(() => initialDuty({ requestedDuty: "owner" }), /Unsupported duty/);
+});
+
+test("active Skills come only from the current Duty plus the shared handoff card", () => {
+  assert.deepEqual(activeSkillNames({ skillName: "implementation-plan" }), [
+    "implementation-plan",
+    "cross-agent-handoff",
+  ]);
+  assert.deepEqual(activeSkillNames({ skillName: "code-review-deliver" }), [
+    "code-review-deliver",
+    "cross-agent-handoff",
+  ]);
+  assert.deepEqual(activeSkillNames(null), ["cross-agent-handoff"]);
+});
+
+test("different enabled Seats activate the same review Skill for review Duty", () => {
+  for (const providerId of ["codex", "opencode"]) {
+    const binding = buildDutyBinding({
+      seat: { seatId: `seat-${providerId}`, providerId, enabled: true },
+      duty: "review",
+      routingReason: "explicit_mention",
+      agentConfig: { runtimeCapabilities: {} },
+    });
+    assert.deepEqual(activeSkillNames(binding), ["code-review-deliver", "cross-agent-handoff"]);
+  }
 });
 
 function repositoryFor(rows) {

@@ -117,6 +117,14 @@ function finalizeA2ARoutes(input = {}) {
         ...(handoffMatch.blockCount > 1 ? ["multi_handoff_block"] : []),
       ],
     });
+    const duty = normalizeDuty(quality.intent || "discuss");
+    const fromDuty = input.fromDuty || null;
+    const dutyBinding = buildDutyBinding({
+      seat: targetSeat,
+      duty,
+      routingReason: handoff?.to ? "handoff_to" : "explicit_mention",
+      agentConfig: agents[targetAgent],
+    });
     const phaseId =
       input.phaseId ||
       resolveCollabPhase({
@@ -130,17 +138,23 @@ function finalizeA2ARoutes(input = {}) {
       fromAgent,
       toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
     });
     const implementationSkip = taskRegistry.shouldBlockImplementationRoute({
       threadId: sessionId,
       fromAgent,
       toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
     });
     const reviewSkip = taskRegistry.shouldSkipRedundantReview({
       threadId: sessionId,
       toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
       contentHash,
       handoff,
     });
@@ -168,14 +182,6 @@ function finalizeA2ARoutes(input = {}) {
     quality.taskSkip = taskSkip.skip ? taskSkip : null;
     handoffByTarget[targetAgent] = handoff;
     handoffQualityByTarget[targetAgent] = quality;
-
-    const duty = normalizeDuty(quality.intent || "discuss");
-    const dutyBinding = buildDutyBinding({
-      seat: targetSeat,
-      duty,
-      routingReason: handoff?.to ? "handoff_to" : "explicit_mention",
-      agentConfig: agents[targetAgent],
-    });
 
     const summary = {
       ...agentHandoff.summarizeHandoff(handoff, quality),
@@ -432,6 +438,8 @@ function finalizeA2ARoutes(input = {}) {
         fromAgent,
         toAgent: targetAgent,
         intent: quality.intent,
+        fromDuty,
+        toDuty: duty,
         contentHash,
         useWorktree,
         handoff,

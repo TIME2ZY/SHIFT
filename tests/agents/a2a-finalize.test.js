@@ -19,6 +19,13 @@ const TEST_AGENTS = {
   grok: { label: "Grok", runtimeCapabilities: { permissionCallbacks: true } },
   opencode: { label: "OpenCode", runtimeCapabilities: {} },
 };
+const PERMISSIVE_TASK_REGISTRY = {
+  shouldBlockEvidenceRoute: () => ({ skip: false }),
+  shouldBlockImplementationRoute: () => ({ skip: false }),
+  shouldSkipRedundantReview: () => ({ skip: false }),
+  noteAcceptedRoute: () => null,
+  getTask: () => null,
+};
 
 function seatRouting(threadId, enabled = Object.keys(TEST_AGENTS)) {
   const seats = enabled.map((providerId) => ({
@@ -52,6 +59,7 @@ function finalizeA2ARoutes(input) {
   };
   return finalizeA2ARoutesRaw({
     ...seatRouting(input.sessionId || input.threadId),
+    collabTaskRegistry: PERMISSIVE_TASK_REGISTRY,
     ...input,
     durableRecorder,
   });
@@ -62,6 +70,7 @@ function completeHandoffText(to = "opencode") {
     `@${to === "opencode" ? "OpenCode" : "Grok"} continue`,
     "```handoff",
     `to: ${to}`,
+    "intent: discuss",
     "what: implement feature",
     "why: product need",
     "next_action: write code",
@@ -88,6 +97,7 @@ function establishBaseline(threadId) {
   });
   collabTaskRegistry.submitSolutionBaseline(threadId, {
     actorAgentId: "codex",
+    actorDuty: "discuss",
     baseline: {
       user_goal_hash: goal.goalHash,
       summary: "Implement the requested workflow",
@@ -223,6 +233,8 @@ test("finalize rejects Codex implementation handoff before Grok submits a plan",
     a2aCount: 0,
     maxDepth: 15,
     policyMode: "balanced",
+    collabTaskRegistry,
+    fromDuty: "discuss",
     agentLabels: { codex: "Codex", grok: "Grok" },
   });
 
@@ -237,6 +249,7 @@ test("finalize binds Codex approval to Grok's submitted plan before enqueue", ()
   collabTaskRegistry.ensureImplementationPlanRequired(threadId, { requestedBy: "codex" });
   const submitted = collabTaskRegistry.submitImplementationPlan(threadId, {
     actorAgentId: "grok",
+    actorDuty: "plan",
     plan: {
       summary: "Implement the approved change",
       files: ["src/change.js"],
@@ -257,6 +270,8 @@ test("finalize binds Codex approval to Grok's submitted plan before enqueue", ()
     a2aCount: 0,
     maxDepth: 15,
     policyMode: "balanced",
+    collabTaskRegistry,
+    fromDuty: "discuss",
     agentLabels: { codex: "Codex", grok: "Grok" },
   });
 

@@ -129,6 +129,7 @@ test("approved Grok plan hash survives a registry and database restart", () => {
     registry.ensureImplementationPlanRequired("thread-plan", { requestedBy: "codex" });
     const submitted = registry.submitImplementationPlan("thread-plan", {
       actorAgentId: "grok",
+      actorDuty: "plan",
       plan: {
         summary: "Persist plan approval",
         files: ["src/plan.js"],
@@ -140,6 +141,7 @@ test("approved Grok plan hash survives a registry and database restart", () => {
     assert.equal(
       registry.approveImplementationPlan("thread-plan", {
         actorAgentId: "codex",
+        actorDuty: "discuss",
         planHash: submitted.planHash,
       }).approved,
       true

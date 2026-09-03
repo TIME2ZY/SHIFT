@@ -82,9 +82,6 @@ function publicAgents() {
       role: identity ? identity.role : "",
       duties: identity ? identity.duties.slice() : [],
       boundaries: identity ? identity.boundaries.slice() : [],
-      workflowRole: agent.workflowRole || "",
-      workflowCapabilities: agent.workflowCapabilities.slice(),
-      workflowResponsibilities: agent.workflowResponsibilities.slice(),
     };
   });
 }

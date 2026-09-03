@@ -12,6 +12,7 @@ function establishSolutionBaseline(registry) {
   });
   const solution = registry.submitSolutionBaseline("thread-1", {
     actorAgentId: "codex",
+    actorDuty: "discuss",
     baseline: {
       user_goal_hash: goal.goalHash,
       summary: "Implement and verify the agreed workflow",
@@ -25,6 +26,14 @@ function establishSolutionBaseline(registry) {
 }
 
 function route(registry, input) {
+  const sourceDutyByIntent = {
+    discuss: "discuss",
+    plan: "discuss",
+    implement: "discuss",
+    review: "implement",
+    fix: "review",
+    accept: "review",
+  };
   return registry.noteAcceptedRoute({
     threadId: "thread-1",
     contentHash: `${input.fromAgent}-${input.toAgent}-${input.intent}`,
@@ -32,6 +41,8 @@ function route(registry, input) {
       goal: "deliver the user outcome",
       what: input.what || "continue workflow",
     },
+    fromDuty: input.fromDuty || sourceDutyByIntent[input.intent] || "discuss",
+    toDuty: input.toDuty || input.intent || "discuss",
     ...input,
   });
 }
@@ -39,6 +50,7 @@ function route(registry, input) {
 function submitConcretePlan(registry) {
   return registry.submitImplementationPlan("thread-1", {
     actorAgentId: "grok",
+    actorDuty: "plan",
     content: [
       "```implementation_plan",
       "summary: Implement the agreed workflow",
@@ -80,8 +92,8 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(submitted.accepted, true);
   assert.equal(submitted.task.implementationGate.status, "pending_approval");
   assert.equal(
-    route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" })
-      .implementationGate.status,
+    route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" }).implementationGate
+      .status,
     "approved"
   );
   assert.equal(
@@ -97,7 +109,7 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(delivered.phase, STATE.DELIVER);
   assert.equal(delivered.codeReviewGate.reviewedBy, "opencode");
 
-  const blocked = registry.markDone("thread-1", { actorAgentId: "codex" });
+  const blocked = registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" });
   assert.equal(blocked.phase, STATE.DELIVER);
   assert.equal(blocked.completionBlocked, "code_review_artifact_missing");
 
@@ -138,10 +150,13 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
       implementationPlanHash: delivered.artifacts.implementationPlan.hash,
     },
   });
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
+  assert.equal(
+    registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" }).phase,
+    STATE.DONE
+  );
 });
 
-test("OpenCode review changes return to implement and invalidate downstream gates", () => {
+test("review Duty changes return to implement and invalidate downstream gates", () => {
   const registry = createCollabTaskRegistry();
   approveConcretePlan(registry);
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
@@ -158,7 +173,7 @@ test("OpenCode review changes return to implement and invalidate downstream gate
   assert.equal(task.finalGate, null);
 });
 
-test("Grok stays read-only until a concrete plan is approved by Codex", () => {
+test("implementation Duty stays read-only until a concrete plan is approved", () => {
   const registry = createCollabTaskRegistry();
   registry.ensureImplementationPlanRequired("thread-1", { requestedBy: "codex" });
 
@@ -168,6 +183,7 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(
     registry.submitImplementationPlan("thread-1", {
       actorAgentId: "grok",
+      actorDuty: "plan",
       plan: { summary: "too vague", files: [], changes: [], tests: [] },
     }).reason,
     "invalid_or_missing_implementation_plan"
@@ -178,6 +194,8 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
       fromAgent: "codex",
       toAgent: "grok",
       intent: "implement",
+      fromDuty: "discuss",
+      toDuty: "implement",
     }).reason,
     "implementation_plan_missing"
   );
@@ -186,8 +204,11 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(submitted.accepted, true);
   assert.equal(registry.implementationPermission("thread-1").allowed, false);
   assert.equal(
-    registry.approveImplementationPlan("thread-1", { actorAgentId: "gemini" }).reason,
-    "plan_must_be_approved_by_lead"
+    registry.approveImplementationPlan("thread-1", {
+      actorAgentId: "gemini",
+      actorDuty: "review",
+    }).reason,
+    "plan_approval_requires_discuss_or_accept_duty"
   );
 
   const pendingRoute = registry.shouldBlockImplementationRoute({
@@ -195,12 +216,15 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
     fromAgent: "codex",
     toAgent: "grok",
     intent: "implement",
+    fromDuty: "discuss",
+    toDuty: "implement",
   });
   assert.equal(pendingRoute.skip, false);
   assert.equal(pendingRoute.pendingApproval, true);
 
   const approved = registry.approveImplementationPlan("thread-1", {
     actorAgentId: "codex",
+    actorDuty: "discuss",
     planHash: submitted.planHash,
   });
   assert.equal(approved.approved, true);
@@ -210,13 +234,14 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(registry.implementationPermission("thread-1").allowed, true);
 });
 
-test("a revised Grok plan invalidates the prior plan approval", () => {
+test("a revised implementation plan invalidates the prior approval", () => {
   const registry = createCollabTaskRegistry();
   const first = approveConcretePlan(registry);
   assert.equal(registry.implementationPermission("thread-1").allowed, true);
 
   const revised = registry.submitImplementationPlan("thread-1", {
     actorAgentId: "grok",
+    actorDuty: "plan",
     plan: {
       summary: "Revised implementation",
       files: ["src/workflow.js", "tests/workflow.test.js"],
@@ -247,7 +272,7 @@ test("an approval gate without the matching persisted plan artifact stays locked
   assert.equal(permission.reason, "implementation_plan_artifact_missing");
 });
 
-test("Codex cannot route a plan until the solution baseline matches the original user goal", () => {
+test("plan Duty cannot route until the solution baseline matches the original user goal", () => {
   const registry = createCollabTaskRegistry();
   assert.equal(
     registry.shouldBlockEvidenceRoute({
@@ -280,7 +305,7 @@ test("Codex cannot route a plan until the solution baseline matches the original
   );
 });
 
-test("OpenCode delivery and Codex acceptance bind real PR evidence to every outcome hash", () => {
+test("delivery and acceptance Duties bind real PR evidence to every outcome hash", () => {
   const registry = createCollabTaskRegistry();
   const baseline = establishSolutionBaseline(registry);
   route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
@@ -289,8 +314,9 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
   const commitSha = "a".repeat(40);
   const prUrl = "https://github.com/acme/repo/pull/7";
-  const delivery = registry.recordOpenCodeDelivery("thread-1", {
+  const delivery = registry.recordDeliveryEvidence("thread-1", {
     actorAgentId: "opencode",
+    actorDuty: "deliver",
     review: {
       verdict: "approve",
       summary: "No blocking findings",
@@ -342,6 +368,7 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
 
   const acceptance = registry.submitFinalAcceptance("thread-1", {
     actorAgentId: "codex",
+    actorDuty: "accept",
     acceptance: {
       verdict: "accept",
       user_goal_hash: baseline.goalHash,
@@ -353,8 +380,15 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
     },
   });
   assert.equal(acceptance.accepted, true);
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "opencode" }).completionBlocked, "done_must_be_marked_by_lead");
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
+  assert.equal(
+    registry.markDone("thread-1", { actorAgentId: "opencode", actorDuty: "review" })
+      .completionBlocked,
+    "done_requires_accept_duty"
+  );
+  assert.equal(
+    registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" }).phase,
+    STATE.DONE
+  );
 });
 
 test("forged delivery and final gate JSON cannot replace their persisted artifacts", () => {

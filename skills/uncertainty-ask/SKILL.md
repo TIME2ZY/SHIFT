@@ -1,8 +1,11 @@
 ---
 name: uncertainty-ask
-description: 不确定就提问，不要硬猜 — 基础规则，始终激活
+description: 不确定就提问，不要硬猜
+preferTags: [human-escalation]
+allow: anyEnabledSeat
+avoid: ""
 triggers: []
-always: true
+always: false
 ---
 
 # 不确定就提问，不要硬猜
@@ -20,8 +23,8 @@ IF 任何关键前提不确定:
 ## 可以问谁
 
 - **问用户**：需求边界、优先级、产品意图
-- **问 @OpenCode（Reviewer）**：代码质量、安全、测试边界
-- **问 @Codex**：架构方向、任务优先级
+- **问承担 review Duty 的 Seat**：代码质量、安全、测试边界
+- **问承担 discuss 或 accept Duty 的 Seat**：架构方向、任务优先级
 - 如果不知道该问谁，优先问用户
 
 ## 禁止行为
@@ -33,6 +36,7 @@ IF 任何关键前提不确定:
 ## 为什么必须这样做
 
 因为 AI 的幻觉特点是：
+
 1. 它不知道自己不知道
 2. 它会自信地给出错误答案
 3. 格式还很专业，让人误以为是真的

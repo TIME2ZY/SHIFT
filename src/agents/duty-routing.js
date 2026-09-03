@@ -4,10 +4,10 @@ const { DUTIES } = require("../shared/collab-contracts");
 const { legacySeatId } = require("../shared/seat-contracts");
 
 const DUTY_SKILLS = Object.freeze({
-  discuss: "cross-agent-handoff",
+  discuss: "solution-baseline-acceptance",
   plan: "implementation-plan",
   implement: "implementation-plan",
-  fix: "receiving-review",
+  fix: "implementation-plan",
   review: "code-review-deliver",
   deliver: "code-review-deliver",
   accept: "solution-baseline-acceptance",
@@ -84,7 +84,14 @@ function normalizeDuty(value, fallback = "discuss") {
 
 function resolveEnforcementLevel(agentConfig, duty) {
   const permissionCallbacks = agentConfig?.runtimeCapabilities?.permissionCallbacks === true;
-  return permissionCallbacks && ["implement", "fix"].includes(duty) ? "enforced" : "advisory";
+  return permissionCallbacks && ["plan", "implement", "fix"].includes(duty)
+    ? "enforced"
+    : "advisory";
+}
+
+function activeSkillNames(binding) {
+  if (!binding?.skillName) return ["cross-agent-handoff"];
+  return [...new Set([binding.skillName, "cross-agent-handoff"])];
 }
 
 function normalizeProviderId(value) {
@@ -99,4 +106,5 @@ module.exports = {
   initialDuty,
   normalizeDuty,
   resolveEnforcementLevel,
+  activeSkillNames,
 };

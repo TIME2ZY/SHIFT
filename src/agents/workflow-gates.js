@@ -11,7 +11,7 @@ const planGate = require("./implementation-plan-gate");
 const outcomeGate = require("./outcome-evidence-gate");
 
 module.exports = {
-  // Plan approval gate (Grok write permission)
+  // Plan approval gate for a Duty whose runtime can enforce write permission.
   ...planGate,
   // Outcome evidence gate (review / delivery / final acceptance)
   ...outcomeGate,

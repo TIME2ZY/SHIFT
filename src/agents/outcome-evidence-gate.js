@@ -26,13 +26,7 @@ function validateSolutionBaseline(value) {
   if (!value || typeof value !== "object") {
     return {
       ok: false,
-      missing: [
-        "user_goal_hash",
-        "summary",
-        "constraints",
-        "non_goals",
-        "acceptance_criteria",
-      ],
+      missing: ["user_goal_hash", "summary", "constraints", "non_goals", "acceptance_criteria"],
     };
   }
   if (!isShortHash(value.user_goal_hash)) missing.push("user_goal_hash");
@@ -208,7 +202,10 @@ function validateFinalAcceptanceAgainstTask(value, task) {
   if (!solution?.hash || clean(value.solution_hash) !== clean(solution.hash)) {
     return { ok: false, reason: "final_solution_mismatch" };
   }
-  if (!implementation?.hash || clean(value.implementation_plan_hash) !== clean(implementation.hash)) {
+  if (
+    !implementation?.hash ||
+    clean(value.implementation_plan_hash) !== clean(implementation.hash)
+  ) {
     return { ok: false, reason: "final_implementation_plan_mismatch" };
   }
   if (!delivery?.commitSha || clean(value.commit_sha) !== clean(delivery.commitSha)) {
@@ -237,26 +234,30 @@ function hashUserGoal(text) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
-function renderOutcomeEvidenceBlock(agentId, task, context = {}) {
-  const agent = clean(agentId).toLowerCase();
-  if (agent === "codex") return renderCodexEvidenceBlock(task);
-  if (agent === "opencode") return renderOpenCodeEvidenceBlock(task, context);
+function renderOutcomeEvidenceBlock(dutyName, task, context = {}) {
+  const duty = clean(dutyName).toLowerCase();
+  if (["discuss", "plan", "accept"].includes(duty)) {
+    return renderSolutionEvidenceBlock(task);
+  }
+  if (["review", "deliver"].includes(duty)) {
+    return renderReviewDeliveryEvidenceBlock(task, context);
+  }
   return "";
 }
 
-function renderCodexEvidenceBlock(task) {
+function renderSolutionEvidenceBlock(task) {
   const goal = task?.artifacts?.userGoal;
   const solution = task?.artifacts?.solutionBaseline;
   const implementation = task?.artifacts?.implementationPlan;
   const delivery = task?.deliveryGate;
-  const lines = ["<!-- Outcome Evidence Gate -->", "## Codex 目标证据门禁（平台强制）", ""];
+  const lines = ["<!-- Outcome Evidence Gate -->", "## 目标证据门禁（平台强制）", ""];
   if (!solution) {
     lines.push(
-      `最初用户目标 hash：\`${goal?.hash || "missing"}\`。交给 Grok 前必须输出：`,
+      `最初用户目标 hash：\`${goal?.hash || "missing"}\`。进入实现计划前必须输出：`,
       "",
       "```solution_baseline",
       `user_goal_hash: ${goal?.hash || "<平台提供的用户目标 hash>"}`,
-      "summary: <Codex 收敛后的可行方案>",
+      "summary: <收敛后的可行方案>",
       "constraints:",
       "  - <必须遵守的约束；没有则写 none>",
       "non_goals:",
@@ -270,9 +271,9 @@ function renderCodexEvidenceBlock(task) {
   } else if (delivery) {
     lines.push(
       `最初用户目标 hash：\`${goal?.hash || "missing"}\``,
-      `Codex 收敛方案 hash：\`${solution.hash}\``,
-      `Grok 实现方案 hash：\`${implementation?.hash || "missing"}\``,
-      `OpenCode 交付 commit：\`${delivery.commitSha || "missing"}\``,
+      `收敛方案 hash：\`${solution.hash}\``,
+      `实现方案 hash：\`${implementation?.hash || "missing"}\``,
+      `交付 commit：\`${delivery.commitSha || "missing"}\``,
       `PR：${delivery.prUrl || "missing"}；CI：${delivery.ciStatus || "unknown"}`,
       "",
       "最终验收必须逐项回到最初用户目标和收敛方案，而不是只判断代码是否合理：",
@@ -300,13 +301,13 @@ function renderCodexEvidenceBlock(task) {
   return lines.join("\n");
 }
 
-function renderOpenCodeEvidenceBlock(task, context = {}) {
+function renderReviewDeliveryEvidenceBlock(task, context = {}) {
   const review = task?.codeReviewGate;
   const lines = [
-    "<!-- OpenCode Delivery Gate -->",
-    "## OpenCode Review 与交付门禁（平台强制）",
+    "<!-- Review Delivery Gate -->",
+    "## Review 与交付门禁（平台强制）",
     "",
-    "你是唯一的代码 reviewer 和 Git/PR 交付者。先 review；需要修改就交回 Grok。只有 approve 后才执行交付。",
+    "当前 Duty 负责代码 review 与交付。先 review；需要修改则以 `fix` intent 交回可用 Seat。只有 approve 后才执行交付。",
     "approve 时必须由你在当前 worktree 运行 `npm run verify:pr`，规范 commit、push、创建 ready PR，并等待 GitHub checks 成功。",
     "commit subject 必须使用 Conventional Commit 且不超过 72 字符；commit body 必须说明改动与原因。",
     "PR title 必须为 10–100 个字符；PR body 必须包含 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、`## 测试（旧接口测试是否处理）`、`## 风险与回滚` 五节。",
@@ -335,7 +336,7 @@ function renderOpenCodeEvidenceBlock(task, context = {}) {
     "```",
     "",
     "平台会独立读取 Git 与 GitHub 验证以上内容；不能用文本声明代替真实 commit、PR 或 CI。",
-    "<!-- /OpenCode Delivery Gate -->",
+    "<!-- /Review Delivery Gate -->",
   ];
   return lines.join("\n");
 }

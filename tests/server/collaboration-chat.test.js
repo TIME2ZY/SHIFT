@@ -161,6 +161,7 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
         agent: "codex",
         prompt: USER_PLAN_PROMPT,
         useWorktree: true,
+        duty: "discuss",
       }),
     }).then((response) => response.text());
     assert.match(planStream, /event: handoff-captured/);
@@ -199,6 +200,7 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
         agent: "codex",
         prompt: USER_APPROVE_PROMPT,
         useWorktree: true,
+        duty: "discuss",
       }),
     }).then((response) => response.text());
     assert.match(approveStream, /event: handoff-captured/);

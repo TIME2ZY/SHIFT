@@ -224,16 +224,17 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 | 加载 / 索引     | **仅** `src/server/skills.js`（`skills/*/SKILL.md`）                                                                        | 进程内 cache                                             |
 | 隔离 worktree   | `agents/skill-materialize.js` ← `skills.prepareSkillDelivery` ← `chat-routes` 在 `runWorkspace` 确定后、start invocation 前 | `{worktree}/.agents/skills/<name>/SKILL.md` 副本（copy） |
 | MCP 按需        | `list_platform_skills` / `load_platform_skill`                                                                              | 同一 loader 的只读视图                                   |
-| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A hop 由 `playbookSkillNamesForHop` 强制注入对应 playbook                                   | 用户消息 / receive bundle                                |
+| Prompt 全文注入 | `prepareSkillDelivery` 失败时由 `augmentPrompt` **fallback**；只注入当前 Duty Skill 与短 handoff Skill                      | 用户消息 / receive bundle                                |
 
 **结论（skill）：**
 
-- 权威源只有仓库 `skills/*/SKILL.md`。worktree `.agents/skills` 是派生投递，禁止回读覆盖权威，也禁止写入 `project_dir` 或 `~/.codex` / `~/.grok`。
+- 权威源只有仓库 `skills/*/SKILL.md`。worktree `.agents/skills` 是派生投递，禁止回读覆盖权威，也禁止写入 `project_dir` 或用户级 CLI home。
 - 物化公开入口只有 `materializePlatformSkills`；`ensureWorktree` 不挂钩。
-- 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 只留短 catalog，不再灌 `APPLICATION SKILL` 全文。
-- 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 全文注入，请求不 500。
-- Prompt 全文注入的删除条件：Codex 与 OpenCode 在 SHIFT 隔离 worktree cwd 下能稳定列出平台 skill 后，再默认关闭 `augmentPrompt` 匹配注入。本版本只降级，不删除 fallback。
-- 身份只保留人设；`implementation_plan` / 验收 / 交付模板在 `skills/`。可接收 intent 的真相源是 `role-contracts.js`（C1：Grok/OpenCode 可收 `discuss`；Codex 不加 `review`，Gemini 不加 `plan`）。A2A hop 通过 `playbookSkillNamesForHop` 强制注入对应 skill。
+- 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 的短 catalog 只列当前 Duty Skill 与 `cross-agent-handoff`，不注入 Skill 全文。
+- 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 只全文注入同一份当前 Duty allowlist，请求不 500。
+- 物化器只覆盖或清理带 `.shift-platform-skill` 所有权标记的副本；同名用户 Skill 会显式报错并保留原内容。
+- Prompt 全文注入的删除条件：支持原生发现的运行时在 SHIFT 隔离 worktree cwd 下能稳定加载当前 Duty Skill 后，再关闭 fallback。本版本保留降级路径。
+- Provider identity 只描述 CLI/runtime。Duty→Skill 的单一映射在 `agents/duty-routing.js`；固定 Provider 岗位、hop playbook 选择器和重复 review/merge Skill 已删除。
 
 ---
 
@@ -286,19 +287,19 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                  |
-| --------------------- | ----------------------------------------------------- | ----------------------------- | ----------------------------------------------------- |
-| 代码 review           | `processWorkflowEvidenceOutput`                       | OpenCode workflow evidence    | changes requested 直接形成事件；approve 继续交付核验  |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | OpenCode 提交后由平台只读核对 | 返回真实 Git/GitHub evidence                          |
-| 交付契约校验          | `recordOpenCodeDelivery` → `validateVerifiedDelivery` | collab task registry          | 校验并持久化 review、commit、分支、PR 与 CI gate      |
-| 最终目标验收          | `submitFinalAcceptance`                               | Codex workflow evidence       | 绑定 goal、solution、plan、review 与 commit hash      |
-| 协作状态只读          | `projectCollaboration` ← session-routes               | UI / live harness             | `GET /api/sessions/:id/collaboration` 投影 phase/gate |
+| 步骤                  | 权威入口                                              | 责任方 / 调用方                | 结果                                                  |
+| --------------------- | ----------------------------------------------------- | ------------------------------ | ----------------------------------------------------- |
+| 代码 review           | `processWorkflowEvidenceOutput`                       | 当前 `review` / `deliver` Duty | changes requested 直接形成事件；approve 继续交付核验  |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | 当前交付 Duty 后由平台只读核对 | 返回真实 Git/GitHub evidence                          |
+| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery` | collab task registry           | 校验并持久化 review、commit、分支、PR 与 CI gate      |
+| 最终目标验收          | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash      |
+| 协作状态只读          | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影 phase/gate |
 
 `GET /api/sessions/:sessionId/collaboration` 是协作状态的唯一公开读入口：无 task 返回
 `{ collaboration: null }`，有 task 只投影 phase、四道 gate 摘要和派生 `blocker`，不返回
 plan/review 全文，也不写库。权威仍是 `collaboration_tasks` + `collab-task-registry`。
 
-OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–100 个字符，PR body 固定包含
+承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、
 `## 测试（旧接口测试是否处理）`、`## 风险与回滚`；缺少任一章节都会拒绝交付证据。
 
@@ -317,8 +318,12 @@ routingReason, enforcementLevel }`，因此没有新增第二套调度器。
 
 `durableRecorder.startInvocation` 在原有 start 事务内写入且只写入一条 DutyBinding，并把 Seat/Duty
 写入首个 `invocation-start` 事件。初始 Duty 为显式请求值，否则 worktree=`implement`、普通会话=
-`discuss`；handoff Duty 来自 intent。当前 catalog 初始化是 Provider 可用性发现接入前的兼容步骤；
-`role-contracts.js` 与原有 plan/evidence gate 仍参与 prompt 和任务状态，不再决定 A2A 目标是否合法。
+`discuss`；handoff Duty 来自 intent。当前 catalog 初始化是 Provider 可用性发现接入前的兼容步骤。
+
+`role-contracts.js` 已删除；catalog、identity、handoff policy 与证据门禁不再保存固定岗位。
+`plan` / `implement` / `fix` 的写权限等级由当前 Duty 与 Provider 的 `permissionCallbacks`
+运行能力共同决定；实现门禁通过通用 `SHIFT_IMPLEMENTATION_GATE` / `SHIFT_APPROVED_PLAN_HASH`
+传输批准状态，不形成新的调度入口。
 
 Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invocation/Seat 的 Thread 因果。
 
@@ -326,19 +331,19 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 
 ## 4. 双路径 / 双语义清单
 
-| ID  | 主题                      | 当前结论                                                    | 状态   |
-| --- | ------------------------- | ----------------------------------------------------------- | ------ |
-| D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立           | 已收口 |
-| D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态      | 接受   |
-| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize       | 接受   |
-| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted       | 已收口 |
-| D5  | 事件 sink 回退            | 无 transcript 热路径双写                                    | 已收口 |
-| D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                   | 已收口 |
-| D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线            | 已收口 |
-| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                  | 已收口 |
-| D9  | worktree 双地图           | session Map 与 manager 文件职责分离                         | 接受   |
-| D10 | Skill 投递双通道          | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2        | 过渡   |
-| D11 | Seat/Duty vs 固定岗位语义 | Seat/Duty 已接入唯一调度路径；旧岗位 prompt/gate 待后续收口 | 过渡   |
+| ID  | 主题                      | 当前结论                                                          | 状态   |
+| --- | ------------------------- | ----------------------------------------------------------------- | ------ |
+| D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立                 | 已收口 |
+| D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态            | 接受   |
+| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize             | 接受   |
+| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted             | 已收口 |
+| D5  | 事件 sink 回退            | 无 transcript 热路径双写                                          | 已收口 |
+| D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                         | 已收口 |
+| D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线                  | 已收口 |
+| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                        | 已收口 |
+| D9  | worktree 双地图           | session Map 与 manager 文件职责分离                               | 接受   |
+| D10 | Skill 投递双通道          | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2              | 过渡   |
+| D11 | Seat/Duty vs 固定岗位语义 | 固定岗位合同、prompt、gate 与旧测试已删除；职责仅来自 DutyBinding | 已收口 |
 
 **已收敛（保护，勿回退）：**
 

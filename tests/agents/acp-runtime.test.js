@@ -13,7 +13,7 @@ const {
 } = require("../../src/agents/invoke-acp");
 const { AGENTS } = require("../../src/agents/catalog");
 const { ENV } = require("../../src/shared/brand");
-const { applyGrokImplementationGate } = require("../../src/agents/invoke-cli");
+const { applyImplementationPermissionGate } = require("../../src/agents/invoke-cli");
 
 const ctx = { agent: "grok", invocationId: "inv-acp" };
 
@@ -202,19 +202,22 @@ test("ACP permission selection prefers persistent allow then one-shot allow", ()
   assert.equal(preferredPermission([{ optionId: "deny", kind: "reject_once" }]), null);
 });
 
-test("Grok ACP drops --always-approve until the persisted plan hash is approved", () => {
-  const locked = applyGrokImplementationGate(AGENTS.grok, {});
+test("permission-capable ACP drops --always-approve until the plan hash is approved", () => {
+  const locked = applyImplementationPermissionGate(AGENTS.grok, {});
   const lockedInvocation = buildProviderTransportInvocation(locked, "ignored", "acp");
   assert.equal(locked.executionGate.allowed, false);
   assert.ok(!lockedInvocation.args.includes("--always-approve"));
 
-  const approved = applyGrokImplementationGate(AGENTS.grok, {
-    [ENV.GROK_IMPLEMENTATION_GATE]: "approved",
-    [ENV.GROK_APPROVED_PLAN_HASH]: "plan-abc",
+  const approved = applyImplementationPermissionGate(AGENTS.grok, {
+    [ENV.IMPLEMENTATION_GATE]: "approved",
+    [ENV.APPROVED_PLAN_HASH]: "plan-abc",
   });
   const approvedInvocation = buildProviderTransportInvocation(approved, "ignored", "acp");
   assert.equal(approved.executionGate.allowed, true);
   assert.ok(approvedInvocation.args.includes("--always-approve"));
+
+  const withoutCallbacks = applyImplementationPermissionGate(AGENTS.codex, {});
+  assert.equal(withoutCallbacks.executionGate, undefined);
 });
 
 test("Grok implementation gate allows only one-shot read tools before plan approval", () => {
