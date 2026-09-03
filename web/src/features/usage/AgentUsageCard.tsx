@@ -92,7 +92,7 @@ export function AgentUsageCard({
 
       {selected ? (
         <div className="react-agent-details">
-          <p>{agent.description || "暂无职责说明。"}</p>
+          <p>{agent.description || "暂无运行器说明。"}</p>
 
           {usage && (totalTokens > 0 || context) ? (
             <div className="react-agent-usage">

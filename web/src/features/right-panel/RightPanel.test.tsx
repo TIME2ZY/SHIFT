@@ -47,7 +47,15 @@ describe("RightPanel", () => {
       vi.fn(async (input: RequestInfo) => {
         const url = String(input);
         if (url.includes("/collaboration")) {
-          return new Response(JSON.stringify({ collaboration: null }));
+          return new Response(
+            JSON.stringify({
+              collaboration: null,
+              seats: [
+                { seatId: "seat-codex", providerId: "codex", label: null },
+                { seatId: "seat-gemini", providerId: "gemini", label: null },
+              ],
+            })
+          );
         }
         return new Response(JSON.stringify({ available: false, session: {}, agents: [] }));
       })
@@ -77,10 +85,16 @@ describe("RightPanel", () => {
     const fetchMock = vi.fn(async (input: RequestInfo) => {
       const url = String(input);
       if (url.includes("/collaboration")) {
-        return new Response(JSON.stringify({ collaboration: null }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            collaboration: null,
+            seats: [{ seatId: "seat-codex", providerId: "codex", label: null }],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }
+        );
       }
       return new Response(
         JSON.stringify({
@@ -108,12 +122,12 @@ describe("RightPanel", () => {
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("负责实现与验证。")).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("席位")).toBeInTheDocument();
 
     expect(screen.queryByText("当前团队")).not.toBeInTheDocument();
     expect(await screen.findByText("2.4k tokens")).toBeInTheDocument();
     expect(screen.getByText("40% · 充足")).toBeInTheDocument();
-    expect(await screen.findByText("尚未开始协作。")).toBeInTheDocument();
+    expect(await screen.findByText("发送消息后，这里会显示目标与完成证据。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -126,23 +140,34 @@ describe("RightPanel", () => {
           return new Response(
             JSON.stringify({
               collaboration: {
+                status: "active",
                 phase: "implement",
-                goal: "Fix utcOffset clone",
-                lastFrom: "codex",
-                lastTo: "grok",
-                updatedAt: "2026-08-27T00:00:00.000Z",
-                implementation: {
-                  status: "pending_approval",
-                  allowed: false,
-                  reason: "implementation_plan_not_approved",
-                  planHash: "plan-1",
-                  summary: "Clone first",
+                goalOriginal: "Fix utcOffset clone",
+                goalNormalized: "Clone first",
+                currentSeat: {
+                  seatId: "seat-grok",
+                  providerId: "grok",
+                  label: "实现席",
                 },
-                review: { status: null, verdict: null },
-                delivery: { status: null, commitSha: null, prUrl: null, ciStatus: null },
-                acceptance: { status: null, verdict: null },
-                blocker: "implementation_plan_not_approved",
+                currentDuty: "implement",
+                currentSkill: "implementation-plan",
+                enforcementLevel: "advisory",
+                updatedAt: "2026-08-27T00:00:00.000Z",
+                blocker: {
+                  type: "waiting_approval",
+                  reason: "implementation_plan_not_approved",
+                },
+                evidence: {
+                  dirtyFileCount: 1,
+                  headSha: "a".repeat(40),
+                  commitSha: null,
+                  prUrl: null,
+                  ciStatus: null,
+                },
+                reviewMode: "pending",
+                nextAction: "请批准实现方案后继续。",
               },
+              seats: [{ seatId: "seat-codex", providerId: "codex", label: null }],
             }),
             { status: 200, headers: { "content-type": "application/json" } }
           );
@@ -155,7 +180,7 @@ describe("RightPanel", () => {
     );
 
     renderPanel();
-    expect(await screen.findByText("等待 Codex 批准方案")).toBeInTheDocument();
-    expect(screen.getByText("待 Codex 批准")).toBeInTheDocument();
+    expect(await screen.findByText("等待批准实现方案")).toBeInTheDocument();
+    expect(screen.getByText("实现 · implementation-plan")).toBeInTheDocument();
   });
 });

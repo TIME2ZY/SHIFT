@@ -230,6 +230,8 @@ function createServer(options = {}) {
     recallService,
     executionStorage: storageContext.storage,
     collabTaskRegistry,
+    threadSeats: storageContext.storage.threadSeats,
+    invocationDutyBindings: storageContext.storage.invocationDutyBindings,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,

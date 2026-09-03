@@ -47,7 +47,7 @@ Web App (web/src/app/App.tsx)
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
   execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
-  collaboration-read-model → Session-scoped phase/gate 投影（只读，不回写）
+  collaboration-read-model → Session-scoped 任务卡、Seat/Duty 与证据投影（只读，不回写）
   thread-seat-repository → Thread enabled Seat 配置与 chat/A2A 目标解析（schema v30）
   invocation-duty-binding-repository → Invocation start 同事务写入的不可变 DutyBinding（schema v30）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
@@ -287,17 +287,18 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                              | 责任方 / 调用方                | 结果                                                  |
-| --------------------- | ----------------------------------------------------- | ------------------------------ | ----------------------------------------------------- |
-| 代码 review           | `processWorkflowEvidenceOutput`                       | 当前 `review` / `deliver` Duty | changes requested 直接形成事件；approve 继续交付核验  |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | 当前交付 Duty 后由平台只读核对 | 返回真实 Git/GitHub evidence                          |
-| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery` | collab task registry           | 校验并持久化 review、commit、分支、PR 与 CI gate      |
-| 最终目标验收          | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash      |
-| 协作状态只读          | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影 phase/gate |
+| 步骤                  | 权威入口                                              | 责任方 / 调用方                | 结果                                                                  |
+| --------------------- | ----------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------- |
+| 代码 review           | `processWorkflowEvidenceOutput`                       | 当前 `review` / `deliver` Duty | changes requested 直接形成事件；approve 继续交付核验                  |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | 当前交付 Duty 后由平台只读核对 | 返回真实 Git/GitHub evidence                                          |
+| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery` | collab task registry           | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
+| 最终目标验收          | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash                      |
+| 任务卡只读            | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
 
-`GET /api/sessions/:sessionId/collaboration` 是协作状态的唯一公开读入口：无 task 返回
-`{ collaboration: null }`，有 task 只投影 phase、四道 gate 摘要和派生 `blocker`，不返回
-plan/review 全文，也不写库。权威仍是 `collaboration_tasks` + `collab-task-registry`。
+`GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
+无 task 仍返回 SQLite 席位条；有 task 从 `collaboration_tasks`、latest DutyBinding 和 Git worktree
+投影目标、当前 Seat/Duty/Skill、枚举 blocker、审查模式、脏文件数、HEAD、PR、CI 与下一动作。
+接口不返回 plan/review 全文，也不写库；权威仍是 SQLite 协作事实与 Git 工作区。
 
 承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、

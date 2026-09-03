@@ -172,10 +172,12 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
       (response) => response.json()
     );
     assert.equal(pending.collaboration.phase, "implement");
-    assert.equal(pending.collaboration.implementation.status, "pending_approval");
-    assert.equal(pending.collaboration.implementation.allowed, false);
-    assert.equal(pending.collaboration.blocker, "implementation_plan_not_approved");
-    assert.ok(pending.collaboration.implementation.planHash);
+    assert.deepEqual(pending.collaboration.blocker, {
+      type: "waiting_approval",
+      reason: "implementation_plan_not_approved",
+    });
+    assert.equal(pending.collaboration.currentDuty, "plan");
+    assert.equal(pending.collaboration.currentSeat.providerId, "grok");
 
     const tracesAfterPlan = await apiFetch(
       `${baseUrl}/api/sessions/${session.id}/traces?limit=20`
@@ -210,13 +212,8 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
       (response) => response.json()
     );
     assert.equal(approved.collaboration.phase, "implement");
-    assert.equal(approved.collaboration.implementation.allowed, true);
-    assert.equal(approved.collaboration.implementation.status, "approved");
     assert.equal(approved.collaboration.blocker, null);
-    assert.equal(
-      approved.collaboration.implementation.planHash,
-      pending.collaboration.implementation.planHash
-    );
+    assert.equal(approved.collaboration.nextAction, "完成实现并留下验证证据。");
 
     const tracesAfterApprove = await apiFetch(
       `${baseUrl}/api/sessions/${session.id}/traces?limit=20`

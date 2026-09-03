@@ -3286,25 +3286,57 @@ body {
   text-transform: uppercase;
 }
 
-.react-collab-status dl {
+.react-task-goal {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.react-task-goal small,
+.react-task-next-action small,
+.react-task-evidence small,
+.react-collab-blocker small {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.react-task-goal strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.react-task-goal p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.react-task-assignment {
   display: grid;
   gap: 6px;
   margin: 0;
 }
 
-.react-collab-status dl div {
+.react-task-assignment div {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   gap: var(--space-2);
   align-items: start;
 }
 
-.react-collab-status dt {
+.react-task-assignment dt {
   color: var(--text-tertiary);
   font-size: 11px;
 }
 
-.react-collab-status dd {
+.react-task-assignment dd {
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -3315,13 +3347,53 @@ body {
 }
 
 .react-collab-blocker {
-  margin: 0;
+  display: grid;
+  gap: 3px;
   padding: var(--space-2);
   border-radius: var(--radius-sm);
   background: var(--badge-thinking-bg);
   color: var(--badge-thinking-fg);
+}
+
+.react-collab-blocker strong {
   font-size: 12px;
+  font-weight: 600;
   line-height: 1.4;
+}
+
+.react-task-evidence {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--border-subtle);
+}
+
+.react-task-evidence span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 5px;
+  background: var(--surface-instrument);
+  text-align: center;
+}
+
+.react-task-evidence strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 11px/1.2 var(--font-mono);
+  text-overflow: ellipsis;
+}
+
+.react-task-next-action {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .react-agent-cards,

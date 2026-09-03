@@ -1,27 +1,38 @@
 import type { CollaborationSnapshot } from "./types";
 
-const PHASE_LABELS: Record<string, string> = {
-  discuss: "讨论",
-  implement: "实现",
-  review: "审查",
-  deliver: "交付",
-  done: "完成",
+const STATUS_LABELS: Record<string, string> = {
+  active: "推进中",
+  waiting_human: "等待用户",
+  accepted: "已验收",
+  rejected: "已拒绝",
 };
 
-const IMPLEMENTATION_LABELS: Record<string, string> = {
-  required: "待提交方案",
-  pending_approval: "待 Codex 批准",
-  approved: "已批准",
+const DUTY_LABELS: Record<string, string> = {
+  discuss: "讨论",
+  plan: "规划",
+  implement: "实现",
+  fix: "修复",
+  review: "审查",
+  deliver: "交付",
+  accept: "验收",
+  recall: "回忆",
 };
 
 const BLOCKER_LABELS: Record<string, string> = {
-  implementation_plan_missing: "尚未提交方案",
-  implementation_plan_not_approved: "等待 Codex 批准方案",
+  implementation_plan_missing: "尚未提交实现方案",
+  implementation_plan_not_approved: "等待批准实现方案",
   implementation_plan_artifact_missing: "方案正文缺失",
   code_review_pending: "等待代码审查",
   delivery_evidence_missing: "等待交付证据",
-  ci_not_successful: "CI 未通过",
+  ci_not_successful: "CI 尚未通过",
   final_acceptance_missing: "等待最终验收",
+  human_input_required: "等待用户输入",
+};
+
+const REVIEW_MODE_LABELS: Record<string, string> = {
+  same_seat: "当前席位自审",
+  other_seat: "另一席位审查",
+  pending: "尚未审查",
 };
 
 interface CollaborationStatusProps {
@@ -32,93 +43,121 @@ interface CollaborationStatusProps {
 
 export function CollaborationStatus({ snapshot, loading, error }: CollaborationStatusProps) {
   return (
-    <section className="react-collab-status" aria-label="协作状态">
+    <section className="react-collab-status" aria-label="任务卡">
       <header>
-        <strong>协作</strong>
-        <span>{phaseLabel(snapshot?.phase)}</span>
+        <strong>任务</strong>
+        <span data-status={snapshot?.status}>{statusLabel(snapshot)}</span>
       </header>
       {error ? (
         <p className="react-panel-error" role="status">
-          协作状态暂不可用。
+          任务状态暂不可用。
         </p>
       ) : null}
       {loading && !snapshot && !error ? (
-        <p className="react-panel-empty">正在读取协作状态…</p>
+        <p className="react-panel-empty">正在读取任务状态…</p>
       ) : null}
-      {!loading && !error && !snapshot ? <p className="react-panel-empty">尚未开始协作。</p> : null}
+      {!loading && !error && !snapshot ? (
+        <p className="react-panel-empty">发送消息后，这里会显示目标与完成证据。</p>
+      ) : null}
       {snapshot ? (
-        <dl>
-          {snapshot.goal ? (
+        <>
+          <div className="react-task-goal">
+            <small>目标</small>
+            <strong>{snapshot.goalOriginal || "目标尚未记录"}</strong>
+            {snapshot.goalNormalized && snapshot.goalNormalized !== snapshot.goalOriginal ? (
+              <p>{snapshot.goalNormalized}</p>
+            ) : null}
+          </div>
+          <dl className="react-task-assignment">
             <div>
-              <dt>目标</dt>
-              <dd title={snapshot.goal}>{snapshot.goal}</dd>
+              <dt>当前席位</dt>
+              <dd>{seatLabel(snapshot)}</dd>
+            </div>
+            <div>
+              <dt>职责 / Skill</dt>
+              <dd title={snapshot.currentSkill || undefined}>{dutyAndSkillLabel(snapshot)}</dd>
+            </div>
+            <div>
+              <dt>审查方式</dt>
+              <dd>{REVIEW_MODE_LABELS[snapshot.reviewMode] || snapshot.reviewMode}</dd>
+            </div>
+          </dl>
+          {snapshot.blocker ? (
+            <div className="react-collab-blocker" role="status">
+              <small>{blockerTypeLabel(snapshot.blocker.type)}</small>
+              <strong>{BLOCKER_LABELS[snapshot.blocker.reason] || snapshot.blocker.reason}</strong>
             </div>
           ) : null}
-          <div>
-            <dt>方案</dt>
-            <dd>{implementationLabel(snapshot)}</dd>
+          <div className="react-task-evidence" aria-label="完成证据">
+            <Evidence label="脏文件" value={dirtyFilesLabel(snapshot.evidence.dirtyFileCount)} />
+            <Evidence label="HEAD" value={shortSha(snapshot.evidence.headSha)} />
+            <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
+            <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
-          <div>
-            <dt>审查</dt>
-            <dd>{reviewLabel(snapshot)}</dd>
-          </div>
-          <div>
-            <dt>交付</dt>
-            <dd>{deliveryLabel(snapshot)}</dd>
-          </div>
-          <div>
-            <dt>验收</dt>
-            <dd>{acceptanceLabel(snapshot)}</dd>
-          </div>
-        </dl>
-      ) : null}
-      {snapshot?.blocker ? (
-        <p className="react-collab-blocker" role="status">
-          {BLOCKER_LABELS[snapshot.blocker] || snapshot.blocker}
-        </p>
+          <p className="react-task-next-action">
+            <small>下一步</small>
+            {snapshot.nextAction}
+          </p>
+        </>
       ) : null}
     </section>
   );
 }
 
-function phaseLabel(phase: string | undefined) {
-  if (!phase) return "未开始";
-  return PHASE_LABELS[phase] || phase;
+function Evidence({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
 }
 
-function implementationLabel(snapshot: CollaborationSnapshot) {
-  const status = snapshot.implementation.status;
-  if (!status) return "未到";
-  return IMPLEMENTATION_LABELS[status] || status;
+function statusLabel(snapshot: CollaborationSnapshot | null) {
+  if (!snapshot) return "未开始";
+  return STATUS_LABELS[snapshot.status] || snapshot.status;
 }
 
-function reviewLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.review.verdict === "approve" || snapshot.review.status === "approved")
-    return "已通过";
-  if (
-    snapshot.review.verdict === "changes_requested" ||
-    snapshot.review.status === "changes_requested"
-  ) {
-    return "需修改";
-  }
-  if (snapshot.phase === "review") return "进行中";
-  return "未到";
+function seatLabel(snapshot: CollaborationSnapshot) {
+  const seat = snapshot.currentSeat;
+  return seat?.label || seat?.providerId || seat?.seatId || "尚未分配";
 }
 
-function deliveryLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.delivery.status === "verified") return "已核验";
-  if (snapshot.delivery.status === "recorded") return "已记录";
-  if (snapshot.phase === "deliver") return "进行中";
-  return "未到";
+function dutyAndSkillLabel(snapshot: CollaborationSnapshot) {
+  if (!snapshot.currentDuty && !snapshot.currentSkill) return "尚未分配";
+  const duty = snapshot.currentDuty
+    ? DUTY_LABELS[snapshot.currentDuty] || snapshot.currentDuty
+    : "未知职责";
+  return snapshot.currentSkill ? `${duty} · ${snapshot.currentSkill}` : duty;
 }
 
-function acceptanceLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.acceptance.verdict === "accept" || snapshot.acceptance.status === "accepted") {
-    return "已接受";
-  }
-  if (snapshot.acceptance.verdict === "reject" || snapshot.acceptance.status === "rejected") {
-    return "已拒绝";
-  }
-  if (snapshot.phase === "deliver" || snapshot.phase === "done") return "待 Codex 验收";
-  return "未到";
+function blockerTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    waiting_human: "等待用户",
+    waiting_approval: "等待批准",
+    missing_evidence: "缺少证据",
+    provider_unavailable: "执行器不可用",
+    execution_failed: "执行失败",
+  };
+  return labels[type] || type;
+}
+
+function dirtyFilesLabel(count: number | null) {
+  if (count === null) return "—";
+  return count === 0 ? "0" : String(count);
+}
+
+function shortSha(value: string | null) {
+  return value ? value.slice(0, 7) : "—";
+}
+
+function ciLabel(status: string | null) {
+  if (!status) return "—";
+  const labels: Record<string, string> = {
+    success: "通过",
+    failure: "失败",
+    pending: "进行中",
+    unknown: "未知",
+  };
+  return labels[status] || status;
 }

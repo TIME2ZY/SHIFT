@@ -1,4 +1,4 @@
-const { projectCollaboration } = require("../storage/collaboration-read-model");
+const { projectCollaboration, projectSeats } = require("../storage/collaboration-read-model");
 const { buildUsageSummary } = require("../storage/usage-summary");
 const { projectInvocationProcess } = require("./invocation-process");
 
@@ -16,6 +16,8 @@ function createSessionRoutes({
   recallService,
   executionStorage,
   collabTaskRegistry = null,
+  threadSeats = null,
+  invocationDutyBindings = null,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -47,15 +49,26 @@ function createSessionRoutes({
         collabTaskRegistry && typeof collabTaskRegistry.getTask === "function"
           ? collabTaskRegistry.getTask(sessionId)
           : null;
+      const seats = threadSeats?.listEnabledForThread?.(sessionId) || [];
       if (!task) {
-        sendJson(res, 200, { collaboration: null });
+        sendJson(res, 200, { collaboration: null, seats: projectSeats(seats) });
         return true;
       }
       const permission =
         collabTaskRegistry && typeof collabTaskRegistry.implementationPermission === "function"
           ? collabTaskRegistry.implementationPermission(sessionId)
           : null;
-      sendJson(res, 200, { collaboration: projectCollaboration(task, permission) });
+      const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
+      let workspace = null;
+      try {
+        workspace = worktreeManager?.getStatus?.(sessionId) || null;
+      } catch {
+        // A collaboration task can exist before its managed worktree is created.
+      }
+      sendJson(res, 200, {
+        collaboration: projectCollaboration(task, permission, { bindings, seats, workspace }),
+        seats: projectSeats(seats),
+      });
       return true;
     }
 

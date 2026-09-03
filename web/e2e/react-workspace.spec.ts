@@ -131,24 +131,38 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         json: {
           collaboration: state.chatCompleted
             ? {
+                status: "active",
                 phase: "implement",
-                goal: "实现工作区功能",
-                lastFrom: "codex",
-                lastTo: "grok",
-                updatedAt: "2026-08-13T00:05:00.000Z",
-                implementation: {
-                  status: "pending_approval",
-                  allowed: false,
-                  reason: "implementation_plan_not_approved",
-                  planHash: "plan-e2e",
-                  summary: "Keep worktree isolated",
+                goalOriginal: "实现工作区功能",
+                goalNormalized: "在隔离工作区完成并验证功能",
+                currentSeat: {
+                  seatId: "seat-gemini",
+                  providerId: "gemini",
+                  label: null,
                 },
-                review: { status: null, verdict: null },
-                delivery: { status: null, commitSha: null, prUrl: null, ciStatus: null },
-                acceptance: { status: null, verdict: null },
-                blocker: "implementation_plan_not_approved",
+                currentDuty: "implement",
+                currentSkill: "implementation-plan",
+                enforcementLevel: "advisory",
+                updatedAt: "2026-08-13T00:05:00.000Z",
+                blocker: {
+                  type: "waiting_approval",
+                  reason: "implementation_plan_not_approved",
+                },
+                evidence: {
+                  dirtyFileCount: 1,
+                  headSha: "a".repeat(40),
+                  commitSha: null,
+                  prUrl: null,
+                  ciStatus: null,
+                },
+                reviewMode: "pending",
+                nextAction: "请批准实现方案后继续。",
               }
             : null,
+          seats: [
+            { seatId: "seat-codex", providerId: "codex", label: null },
+            { seatId: "seat-gemini", providerId: "gemini", label: null },
+          ],
         },
       });
       return;
@@ -480,7 +494,9 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
 
   await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
-  await expect(page.getByRole("region", { name: "协作状态" })).toContainText("尚未开始协作");
+  await expect(page.getByRole("region", { name: "任务卡" })).toContainText(
+    "发送消息后，这里会显示目标与完成证据"
+  );
   await page.getByText("隔离改代码", { exact: true }).click();
   await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
 
@@ -488,7 +504,7 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
-  await expect(page.getByRole("region", { name: "协作状态" })).toContainText("等待 Codex 批准方案");
+  await expect(page.getByRole("region", { name: "任务卡" })).toContainText("等待批准实现方案");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
@@ -547,13 +563,13 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
     .click();
 
   await page.getByRole("button", { name: "会话信息" }).click();
-  await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "任务与席位" })).toBeVisible();
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(
-    page.getByRole("dialog", { name: "会话 Agent" }).getByText("Agent", { exact: true })
+    page.getByRole("dialog", { name: "任务与席位" }).getByText("席位", { exact: true })
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "会话 Agent" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "任务与席位" })).toBeHidden();
   await expect(page.locator(".react-info-panel-button")).toBeFocused();
 
   const viewport = await page.evaluate(() => ({

@@ -93,6 +93,7 @@ test("getStatus reports branch, dirty state, and porcelain lines", () => {
 
   assert.equal(status.sessionId, "status-session");
   assert.equal(status.branch, "codex/session-status-session");
+  assert.match(status.headSha, /^[a-f0-9]{40}$/);
   assert.equal(status.clean, false);
   assert.deepEqual(status.porcelain, ["?? changed.txt"]);
 });

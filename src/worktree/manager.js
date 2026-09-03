@@ -196,6 +196,7 @@ function createWorktreeManager(opts = {}) {
       .filter(Boolean);
     return {
       ...meta,
+      headSha: runGit(["rev-parse", "HEAD"], meta.worktreeDir),
       clean: porcelain.length === 0,
       porcelain,
     };

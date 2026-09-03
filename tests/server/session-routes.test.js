@@ -178,7 +178,7 @@ test("collaboration snapshot is a session-scoped read of the durable task", asyn
     new URL("http://127.0.0.1/api/sessions/s1/collaboration")
   );
   assert.equal(empty.statusCode, 200);
-  assert.deepEqual(empty.body, { collaboration: null });
+  assert.deepEqual(empty.body, { collaboration: null, seats: [] });
 
   const pending = makeRes();
   const pendingHandle = createHandler(pending, {
@@ -200,6 +200,24 @@ test("collaboration snapshot is a session-scoped read of the durable task", asyn
         planHash: "plan-1",
       }),
     },
+    threadSeats: {
+      listEnabledForThread: () => [
+        { seatId: "seat-grok", providerId: "grok", label: "实现席", enabled: true },
+      ],
+    },
+    invocationDutyBindings: {
+      listForThread: () => [
+        {
+          seatId: "seat-grok",
+          duty: "implement",
+          skillName: "implementation-plan",
+          enforcementLevel: "advisory",
+        },
+      ],
+    },
+    worktreeManager: {
+      getStatus: () => ({ headSha: "a".repeat(40), porcelain: [" M src/index.js"] }),
+    },
   });
   await pendingHandle(
     makeReq("GET"),
@@ -208,8 +226,14 @@ test("collaboration snapshot is a session-scoped read of the durable task", asyn
   );
   assert.equal(pending.statusCode, 200);
   assert.equal(pending.body.collaboration.phase, "implement");
-  assert.equal(pending.body.collaboration.implementation.allowed, false);
-  assert.equal(pending.body.collaboration.blocker, "implementation_plan_not_approved");
+  assert.deepEqual(pending.body.collaboration.blocker, {
+    type: "waiting_approval",
+    reason: "implementation_plan_not_approved",
+  });
+  assert.equal(pending.body.collaboration.currentDuty, "implement");
+  assert.equal(pending.body.collaboration.currentSeat.providerId, "grok");
+  assert.equal(pending.body.collaboration.evidence.dirtyFileCount, 1);
+  assert.equal(pending.body.seats[0].seatId, "seat-grok");
 
   const write = makeRes();
   const writeHandle = createHandler(write, {
