@@ -52,6 +52,9 @@ function createHandoffConfirmationGate(options = {}) {
   function waitForThread(threadId, signal) {
     const id = requiredString(threadId, "thread id");
     if (!hasPending(id)) return Promise.resolve();
+    for (const record of pending.values()) {
+      if (record.threadId === id) record.timer?.ref?.();
+    }
     return new Promise((resolve) => {
       const threadWaiters = waiters.get(id) || new Set();
       const waiter = () => {
