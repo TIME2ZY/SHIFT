@@ -123,6 +123,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 解析 fence             | `agents/handoff.js`                                      | finalize 内 `selectCanonicalHandoffMatch`                        | 无                                                        |
 | Seat/Duty 解析         | `duty-routing.js`                                        | 初始 chat 与 finalize；仅从 Thread enabled Seats 选目标          | 读取 `thread_seats`；DutyBinding 随队列因果传递           |
 | 策略                   | `handoff-policy.js`                                      | finalize 内 `decidePolicy`；禁用/缺失 Seat 在所有模式下拒绝      | 无                                                        |
+| 用户确认预览           | `handoff-confirmation.js`                                | finalize 生成可编辑摘要；chat 请求等待确认、取消或超时           | 请求内存，未确认不是业务事实                              |
 | 幂等 accept            | `durableRecorder.acceptHandoff`                          | finalize 内                                                      | SQLite `handoffs`，唯一 accepted flight                   |
 | 入队下一 Seat          | `worklist.push` → `markHandoffEnqueued`                  | finalize 内；队列项因果携带不可变 DutyBinding；确认失败撤销 push | 请求内存 worklist + SQLite `enqueued_at`                  |
 | 捕获 handoff 协作事件  | `memoryCapture.captureHandoff`                           | finalize 内                                                      | event-store `handoff-captured`（**不是** product memory） |
@@ -135,7 +136,10 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 - Receive Bundle 把 Structured Handoff 当后继续工包（权威）；原文附录非权威且预算收窄。
 - `implement/review/fix/deliver/plan` 缺 `files`/`evidence` 记入 `missingRecommended` 并打续工不足 banner，不因此把 `ok` 打成 degraded，也不新开顶层字段。
-- 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；`enqueued_at` 只在 worklist 实际追加后确认。
+- 解析→策略→预览确认→accept→enqueue 仍统一在 `finalizeA2ARoutes`；确认后继续调用唯一的
+  `acceptHandoff` 写入口，`enqueued_at` 只在 worklist 实际追加后确认。
+- 待确认预览仅存在于服务进程内存；取消、超时、源请求停止或服务重启都会释放它，不创建
+  `handoffs` 行或目标 invocation。服务重启丢失预览不会伪造已交接事实。
 - A2A 固定 Agent ID/岗位 allowlist 已退出路由策略；明确 mention/handoff 仅能命中当前 Thread 的
   enabled Seat，目标未启用时不降级、不静默改派。Duty 由 handoff intent 确定，单独改变 Duty 不换 Seat。
 - accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
@@ -480,7 +484,8 @@ Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用�
 | trace start / finish         | `durableRecorder.startTrace` / `completeTrace`           | 仅 chat request 生命周期                          |
 | invocation start + Duty bind | `durableRecorder.startInvocation`                        | 仅 chat 调度器；同事务写 invocation/binding/event |
 | invocation finish            | `durableRecorder.completeInvocation`                     | chat 调度器；孤儿用 force/reconcile               |
-| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | chat end、callback post                           |
+| handoff preview              | `createHandoffConfirmationGate`                          | finalize；仅运行时待决状态                        |
+| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | 用户确认后；测试可显式禁用 gate                   |
 | hop bind/complete            | `durableRecorder.startInvocation` / `completeInvocation` | chat 调度器                                       |
 | message user/system/callback | `appendToSession` → `appendMessage`                      | routes / callbacks                                |
 | message assistant-final      | `completeInvocation({ message })` → `appendMessage`      | chat 成功收尾 only                                |

@@ -64,6 +64,30 @@ export interface RunChangedFile {
   changeType?: string;
 }
 
+export interface HandoffPreviewSummary {
+  goal: string | null;
+  completed: string | null;
+  constraints: string[];
+  files: string[];
+  openQuestions: string[];
+  prohibited: string[];
+  nextAction: string | null;
+  targetSeat: { seatId: string; providerId: string | null; label: string | null } | null;
+  duty: string | null;
+  skillName: string | null;
+  degraded: boolean;
+  missing: string[];
+}
+
+export interface HandoffPreview {
+  previewId: string;
+  threadId: string;
+  sourceInvocationId: string;
+  summary: HandoffPreviewSummary;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface SessionRun {
   sessionId: string;
   status: RunStatus;
@@ -77,6 +101,7 @@ export interface SessionRun {
   /** Stable display order for invocations seen in this run. */
   invocationOrder: string[];
   notices: string[];
+  handoffPreviews: HandoffPreview[];
   optimisticUser?: {
     agentId: string;
     content: string;
@@ -175,6 +200,8 @@ export type SessionRunAction =
       failed?: boolean;
     }
   | { type: "notice/received"; sessionId: string; message: string }
+  | { type: "handoff/previewed"; sessionId: string; preview: HandoffPreview }
+  | { type: "handoff/resolved"; sessionId: string; previewId: string }
   | { type: "run/done"; sessionId: string }
   | { type: "run/failed"; sessionId: string; error: string }
   | { type: "run/aborted"; sessionId: string }

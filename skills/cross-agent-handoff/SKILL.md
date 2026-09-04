@@ -25,6 +25,10 @@ what: |
   做到哪: ...
 why: <为何交接；关键约束>
 next_action: <唯一下一步>
+constraints:
+  - 必须保持的约束
+prohibited:
+  - 明确禁止的动作
 files:
   - path — 为何重要
 evidence:
@@ -34,3 +38,6 @@ evidence:
 `what`、`why`、`next_action` 不应为空。`plan`、`implement`、`fix`、`review`、`deliver` 应携带
 `files` 和 `evidence`，让接手 Seat 不依赖上一跳工具 transcript。只有 Human 能决定产品取舍、批准
 或去留时，停下并提问，不要自动寻找另一个 Runtime。
+
+系统会在交接入队前向用户展示可编辑摘要。用户确认后才会创建 durable handoff 并启动目标
+invocation；取消、超时或停止当前运行都不会形成目标 handoff。

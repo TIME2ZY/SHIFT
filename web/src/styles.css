@@ -3396,6 +3396,151 @@ body {
   line-height: 1.45;
 }
 
+.react-handoff-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--surface-canvas) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.react-handoff-dialog {
+  display: grid;
+  gap: var(--space-3);
+  width: min(720px, 100%);
+  max-height: min(860px, calc(100vh - 32px));
+  padding: var(--space-4);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.react-handoff-dialog > header,
+.react-handoff-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.react-handoff-dialog h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.react-handoff-dialog header small,
+.react-handoff-dialog header > span,
+.react-handoff-route small {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.react-handoff-route {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--border-subtle);
+}
+
+.react-handoff-route span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--surface-instrument);
+}
+
+.react-handoff-route strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-handoff-warning {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--badge-thinking-bg);
+  color: var(--badge-thinking-fg);
+  font-size: 12px;
+}
+
+.react-handoff-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.react-handoff-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.react-handoff-fields textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--surface-instrument);
+  color: var(--text-primary);
+  font: 12px/1.45 var(--font-sans);
+}
+
+.react-handoff-fields textarea:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.react-handoff-dialog footer {
+  justify-content: flex-end;
+}
+
+.react-handoff-dialog footer button {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
+  background: var(--surface-instrument);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.react-handoff-dialog footer button:last-child {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+@media (max-width: 640px) {
+  .react-handoff-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .react-handoff-dialog {
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .react-handoff-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .react-agent-cards,
 .react-memory-list {
   display: grid;

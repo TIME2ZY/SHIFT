@@ -101,6 +101,9 @@ async function withServer(options, fn) {
     ? options.initialSessionIds
     : [];
   const serverOptions = { ...options };
+  if (!Object.hasOwn(serverOptions, "handoffConfirmations")) {
+    serverOptions.handoffConfirmations = null;
+  }
   delete serverOptions.initialSessionIds;
   const patchStorage = serverOptions.patchStorage;
   delete serverOptions.patchStorage;

@@ -18,6 +18,7 @@ function createSessionRoutes({
   collabTaskRegistry = null,
   threadSeats = null,
   invocationDutyBindings = null,
+  handoffConfirmations = null,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -36,6 +37,41 @@ function createSessionRoutes({
   }
 
   return async function handleSessionRoutes(req, res, url) {
+    const handoffPreviewsMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/handoff-previews$/
+    );
+    if (handoffPreviewsMatch && req.method === "GET") {
+      const sessionId = handoffPreviewsMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      sendJson(res, 200, { previews: handoffConfirmations?.list?.(sessionId) || [] });
+      return true;
+    }
+
+    const handoffPreviewActionMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/handoff-previews\/([a-zA-Z0-9_-]+)\/(confirm|cancel)$/
+    );
+    if (handoffPreviewActionMatch && req.method === "POST") {
+      const [, sessionId, previewId, action] = handoffPreviewActionMatch;
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      try {
+        const result =
+          action === "confirm"
+            ? handoffConfirmations?.confirm?.(sessionId, previewId, await readJsonBody(req))
+            : handoffConfirmations?.cancel?.(sessionId, previewId);
+        if (!result) throw new Error("Handoff confirmation is unavailable.");
+        sendJson(res, 200, result);
+      } catch (error) {
+        sendJson(res, error.statusCode || 400, { error: error.message });
+      }
+      return true;
+    }
+
     const collaborationMatch = url.pathname.match(
       /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration$/
     );

@@ -36,6 +36,66 @@ describe("formatToolResultForDisplay", () => {
 });
 
 describe("runChatStream", () => {
+  it("stores a handoff preview until the user resolves it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse([
+            'event: handoff-preview\ndata: {"previewId":"preview-1","threadId":"s1","sourceInvocationId":"i1","summary":{"goal":"Ship","completed":"Done","constraints":[],"files":[],"openQuestions":[],"prohibited":[],"nextAction":"Review","targetSeat":null,"duty":"review","skillName":"code-review-deliver","degraded":false,"missing":[]},"createdAt":"now","expiresAt":"later"}\n\n',
+            "event: done\ndata: {}\n\n",
+          ])
+        )
+    );
+    const store = createSessionRunStore();
+    const controller = store.startController("s1");
+    await runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller);
+
+    expect(store.getSnapshot().runs.s1.handoffPreviews[0]?.previewId).toBe("preview-1");
+    store.dispatch({ type: "handoff/resolved", sessionId: "s1", previewId: "preview-1" });
+    expect(store.getSnapshot().runs.s1.handoffPreviews).toEqual([]);
+  });
+
+  it("queues multiple handoff previews until each one is resolved", async () => {
+    const summary = {
+      goal: "Continue",
+      completed: "Analysis",
+      constraints: [],
+      files: [],
+      openQuestions: [],
+      prohibited: [],
+      nextAction: "Implement",
+      targetSeat: null,
+      duty: "implement",
+      skillName: null,
+      degraded: false,
+      missing: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          'event: session\ndata: {"sessionId":"s1"}\n\n',
+          `event: handoff-preview\ndata: ${JSON.stringify({ previewId: "preview-1", summary })}\n\n`,
+          `event: handoff-preview\ndata: ${JSON.stringify({ previewId: "preview-2", summary })}\n\n`,
+          "event: done\ndata: {}\n\n",
+        ])
+      )
+    );
+    const store = createSessionRunStore();
+    const controller = store.startController("s1");
+
+    await runChatStream({ sessionId: "s1", agentId: "codex", prompt: "go" }, store, controller);
+
+    expect(store.getSnapshot().runs.s1.handoffPreviews.map((preview) => preview.previewId)).toEqual([
+      "preview-1",
+      "preview-2",
+    ]);
+    store.dispatch({ type: "handoff/resolved", sessionId: "s1", previewId: "preview-1" });
+    expect(store.getSnapshot().runs.s1.handoffPreviews[0]?.previewId).toBe("preview-2");
+  });
+
   it("rejects a session identity change instead of moving client state", async () => {
     vi.stubGlobal(
       "fetch",

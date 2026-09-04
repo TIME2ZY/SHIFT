@@ -249,6 +249,59 @@ test("collaboration snapshot is a session-scoped read of the durable task", asyn
   assert.equal(write.statusCode, 0);
 });
 
+test("handoff preview routes confirm or cancel only within the owning session", async () => {
+  const calls = [];
+  const handoffConfirmations = {
+    list: (sessionId) => [{ previewId: "preview-1", threadId: sessionId }],
+    confirm(sessionId, previewId, edits) {
+      calls.push({ action: "confirm", sessionId, previewId, edits });
+      return { status: "confirmed" };
+    },
+    cancel(sessionId, previewId) {
+      calls.push({ action: "cancel", sessionId, previewId });
+      return { status: "cancelled" };
+    },
+  };
+  const listRes = makeRes();
+  const list = createHandler(listRes, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    handoffConfirmations,
+  });
+  await list(makeReq("GET"), listRes, new URL("http://127.0.0.1/api/sessions/s1/handoff-previews"));
+  assert.equal(listRes.body.previews[0].previewId, "preview-1");
+
+  const confirmRes = makeRes();
+  const confirm = createHandler(confirmRes, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    readJsonBody: async () => ({ constraints: ["Keep SQLite authoritative"] }),
+    handoffConfirmations,
+  });
+  await confirm(
+    makeReq("POST"),
+    confirmRes,
+    new URL("http://127.0.0.1/api/sessions/s1/handoff-previews/preview-1/confirm")
+  );
+  assert.equal(confirmRes.statusCode, 200);
+  assert.deepEqual(calls[0], {
+    action: "confirm",
+    sessionId: "s1",
+    previewId: "preview-1",
+    edits: { constraints: ["Keep SQLite authoritative"] },
+  });
+
+  const missingRes = makeRes();
+  const missing = createHandler(missingRes, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    handoffConfirmations,
+  });
+  await missing(
+    makeReq("POST"),
+    missingRes,
+    new URL("http://127.0.0.1/api/sessions/other/handoff-previews/preview-1/cancel")
+  );
+  assert.equal(missingRes.statusCode, 404);
+});
+
 test("session audit summary combines the execution read model with billing usage", async () => {
   const res = makeRes();
   const handle = createHandler(res, {

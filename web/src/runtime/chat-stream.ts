@@ -2,6 +2,7 @@ import { ApiError, authenticatedFetch } from "../shared/api/client";
 import { agentExitIndicatesFailure } from "../shared/contracts/run-status";
 import { parseSseChunk, type SseFrame } from "./sse-parser";
 import type { SessionRunStore } from "./session-run-store";
+import type { HandoffPreview } from "./types";
 
 export interface ChatRequest {
   sessionId: string;
@@ -286,6 +287,27 @@ export async function runChatStream(
       case "a2a-route": {
         // Agent handoffs are execution metadata. They remain available in the
         // process history, but do not interrupt the user-facing transcript.
+        break;
+      }
+
+      case "handoff-preview": {
+        store.dispatch({
+          type: "handoff/previewed",
+          sessionId: boundSessionId,
+          preview: payload as unknown as HandoffPreview,
+        });
+        break;
+      }
+
+      case "handoff-confirmed":
+      case "handoff-cancelled": {
+        if (typeof payload.previewId === "string") {
+          store.dispatch({
+            type: "handoff/resolved",
+            sessionId: boundSessionId,
+            previewId: payload.previewId,
+          });
+        }
         break;
       }
 

@@ -69,6 +69,8 @@ const APPENDIX_ANCHORS = [
  * @property {string[]} [open_questions]
  * @property {string[]} [files]
  * @property {string[]} [evidence]
+ * @property {string[]} [constraints]
+ * @property {string[]} [prohibited]
  * @property {string} raw
  */
 
@@ -118,6 +120,10 @@ files:
   - path — 为何重要
 evidence:
   - 失败或验证
+constraints:
+  - 必须保留的约束
+prohibited:
+  - 禁止事项
 \`\`\`
 
 入站：优先执行 Structured Handoff；附录非权威。缺 files/evidence 时先 recall，勿只凭附录改代码。
@@ -377,6 +383,8 @@ function renderHandoffTask(opts) {
   pushField(lines, "what", handoff.what);
   pushField(lines, "why", handoff.why);
   pushField(lines, "tradeoff", handoff.tradeoff);
+  pushList(lines, "constraints", handoff.constraints);
+  pushList(lines, "prohibited", handoff.prohibited);
   pushList(lines, "files", handoff.files);
   pushList(lines, "evidence", handoff.evidence);
   pushList(lines, "open_questions", handoff.open_questions);
@@ -491,6 +499,71 @@ function summarizeHandoff(handoff, quality) {
   };
 }
 
+function summarizeHandoffForUser(input = {}) {
+  const handoff = input.handoff || {};
+  const quality = input.quality || evaluateHandoff(input.handoff || null);
+  return {
+    goal: cleanText(handoff.goal),
+    completed: cleanText(handoff.what),
+    constraints: cleanList(
+      Array.isArray(handoff.constraints) ? handoff.constraints : handoff.why ? [handoff.why] : []
+    ),
+    files: cleanList(handoff.files),
+    openQuestions: cleanList(handoff.open_questions),
+    prohibited: cleanList(handoff.prohibited),
+    nextAction: cleanText(handoff.next_action),
+    targetSeat: input.targetSeat
+      ? {
+          seatId: cleanText(input.targetSeat.seatId),
+          providerId: cleanText(input.targetSeat.providerId),
+          label: cleanText(input.targetSeat.label),
+        }
+      : null,
+    duty: cleanText(input.duty),
+    skillName: cleanText(input.skillName),
+    degraded: Boolean(quality.degraded || !quality.ok),
+    missing: Array.isArray(quality.missing) ? quality.missing.slice() : [],
+  };
+}
+
+function applyHandoffPreviewEdits(handoff, edits = {}) {
+  const next = handoff && typeof handoff === "object" ? { ...handoff } : {};
+  assignText(next, "goal", edits.goal);
+  assignText(next, "what", edits.completed);
+  assignText(next, "next_action", edits.nextAction);
+  assignList(next, "constraints", edits.constraints);
+  assignList(next, "files", edits.files);
+  assignList(next, "open_questions", edits.openQuestions);
+  assignList(next, "prohibited", edits.prohibited);
+  return next;
+}
+
+function assignText(target, key, value) {
+  if (value === undefined) return;
+  const text = cleanText(value);
+  if (text) target[key] = text;
+  else delete target[key];
+}
+
+function assignList(target, key, value) {
+  if (value === undefined) return;
+  const items = cleanList(value);
+  if (items.length > 0) target[key] = items;
+  else delete target[key];
+}
+
+function cleanText(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function cleanList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
 module.exports = {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
@@ -522,6 +595,8 @@ module.exports = {
   renderA2AHandoffCard,
   selectAppendix,
   summarizeHandoff,
+  summarizeHandoffForUser,
+  applyHandoffPreviewEdits,
   normalizeTo,
   toMatchesRoute,
 };

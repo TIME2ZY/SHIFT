@@ -9,7 +9,7 @@ const RECOMMENDED_FIELDS = ["to", "intent", "goal", "tradeoff", "open_questions"
 /** Intents whose successor cannot see tool transcript — files/evidence are resume fields. */
 const RESUME_INTENTS = Object.freeze(["implement", "review", "fix", "deliver", "plan"]);
 const RESUME_FIELDS = Object.freeze(["files", "evidence"]);
-const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
+const LIST_FIELDS = new Set(["open_questions", "files", "evidence", "constraints", "prohibited"]);
 const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 const { HANDOFF_INTENTS } = require("../shared/collab-contracts");

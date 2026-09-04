@@ -104,6 +104,7 @@ test("sqlite server ignores the retired online transcript path override", async 
       storageMode: "sqlite",
       memoryDbFile: databaseFile,
       auditTranscriptDir: transcriptDir,
+      handoffConfirmations: null,
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,
     });
@@ -126,6 +127,7 @@ test("chat persists thread state through SQLite repositories", async () => {
   const server = createServer({
     storageMode: "sqlite",
     storage,
+    handoffConfirmations: null,
     spawnRunner: successfulSpawn,
     worktreeManager: worktreeManager(),
     uiToken: UI_TOKEN,
@@ -200,6 +202,7 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
   const server = createServer({
     storageMode: "sqlite",
     storage,
+    handoffConfirmations: null,
     spawnRunner() {
       run += 1;
       if (run === 1) {
@@ -254,6 +257,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
   const server = createServer({
     storageMode: "sqlite",
     storage,
+    handoffConfirmations: null,
     spawnRunner(_command, args) {
       prompts.push(args[args.length - 1]);
       return successfulSpawn();
@@ -335,6 +339,7 @@ test("default sqlite mode restores sessions after restart", async () => {
   function startServer() {
     const server = createServer({
       memoryDbFile,
+      handoffConfirmations: null,
       spawnRunner: providerSessionSpawn(providerCalls, [firstConclusion, "hello"]),
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,

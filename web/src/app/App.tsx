@@ -18,6 +18,7 @@ import { AuditPage } from "../features/observability/AuditPage";
 import { useSessionTracesQuery } from "../features/observability/queries";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
+import { HandoffPreviewDialog } from "../features/handoff/HandoffPreviewDialog";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running"]);
 const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
@@ -426,6 +427,16 @@ export function App() {
           aria-hidden="true"
           tabIndex={-1}
           onClick={closeInfoPanel}
+        />
+      ) : null}
+      {activeSessionId && run?.handoffPreviews[0] ? (
+        <HandoffPreviewDialog
+          key={run.handoffPreviews[0].previewId}
+          preview={run.handoffPreviews[0]}
+          onConfirm={(edits) =>
+            chat.confirmHandoff(activeSessionId, run.handoffPreviews[0].previewId, edits)
+          }
+          onCancel={() => chat.cancelHandoff(activeSessionId, run.handoffPreviews[0].previewId)}
         />
       ) : null}
     </div>

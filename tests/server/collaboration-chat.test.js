@@ -21,6 +21,31 @@ function apiFetch(url, init = {}) {
   return fetch(url, { ...init, headers });
 }
 
+async function chatAndConfirm(baseUrl, sessionId, body, edits, beforeConfirm) {
+  const streamPromise = apiFetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then((response) => response.text());
+
+  let previews = [];
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    previews = await apiFetch(
+      `${baseUrl}/api/sessions/${sessionId}/handoff-previews`
+    ).then((response) => response.json()).then((payload) => payload.previews);
+    if (previews.length > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(previews.length, 1);
+  await beforeConfirm?.(previews[0]);
+
+  const confirmed = await apiFetch(
+    `${baseUrl}/api/sessions/${sessionId}/handoff-previews/${previews[0].previewId}/confirm`,
+    { method: "POST", body: JSON.stringify(edits || {}) }
+  );
+  assert.equal(confirmed.status, 200);
+  return streamPromise;
+}
+
 function spawnText(text) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -122,12 +147,14 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
   storage.metadata.activateCleanCutover();
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const spawned = [];
+  const prompts = [];
   const server = createServer({
     storageMode: "sqlite",
     storage,
     spawnRunner(_command, args) {
       const agent = agentFromArgs(args);
       spawned.push(agent);
+      prompts.push(args[args.length - 1]);
       if (agent === "codex" && spawned.filter((id) => id === "codex").length === 1) {
         return spawnText(PLAN_HANDOFF);
       }
@@ -154,19 +181,26 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
     );
     assert.equal(before.collaboration, null);
 
-    const planStream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
+    const planStream = await chatAndConfirm(
+      baseUrl,
+      session.id,
+      {
         sessionId: session.id,
         agent: "codex",
         prompt: USER_PLAN_PROMPT,
         useWorktree: true,
         duty: "discuss",
-      }),
-    }).then((response) => response.text());
+      },
+      { constraints: ["Keep the public utcOffset API unchanged"] },
+      () => assert.deepEqual(spawned, ["codex"])
+    );
+    assert.match(planStream, /event: handoff-preview/);
+    assert.match(planStream, /event: handoff-confirmed/);
     assert.match(planStream, /event: handoff-captured/);
+    assert.match(planStream, /event: a2a-route/);
     assert.match(planStream, /event: implementation-plan-submitted/);
     assert.deepEqual(spawned, ["codex", "grok"]);
+    assert.match(prompts[1], /Keep the public utcOffset API unchanged/);
 
     const pending = await apiFetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
       (response) => response.json()
@@ -195,16 +229,21 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
     assert.equal(accepted[0].targetAgent, "grok");
     assert.ok(accepted[0].targetInvocationId);
 
-    const approveStream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
+    const approveStream = await chatAndConfirm(
+      baseUrl,
+      session.id,
+      {
         sessionId: session.id,
         agent: "codex",
         prompt: USER_APPROVE_PROMPT,
         useWorktree: true,
         duty: "discuss",
-      }),
-    }).then((response) => response.text());
+      },
+      {},
+      () => assert.deepEqual(spawned, ["codex", "grok", "codex"])
+    );
+    assert.match(approveStream, /event: handoff-preview/);
+    assert.match(approveStream, /event: handoff-confirmed/);
     assert.match(approveStream, /event: handoff-captured/);
     assert.deepEqual(spawned, ["codex", "grok", "codex", "grok"]);
 

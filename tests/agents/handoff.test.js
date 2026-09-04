@@ -378,6 +378,44 @@ test("renderA2AHandoffCard is compact shared template", () => {
   assert.ok(card.length < 1800, "card should stay short for A2A token budget");
 });
 
+test("handoff preview summary exposes editable constraints without the raw appendix", () => {
+  const packet = handoff.parseHandoffBody(`
+to: gemini
+intent: review
+goal: Keep the public contract stable
+what: Implemented the route
+why: Preserve one durable path
+next_action: Review the diff
+files:
+  - src/server/index.js
+constraints:
+  - Keep SQLite authoritative
+prohibited:
+  - Do not add a second queue
+open_questions:
+  - Is the copy clear?
+`);
+  const quality = handoff.evaluateHandoff(packet, { routedTo: "gemini" });
+  const summary = handoff.summarizeHandoffForUser({
+    handoff: packet,
+    quality,
+    targetSeat: { seatId: "seat-gemini", providerId: "gemini", label: "审查席" },
+    duty: "review",
+    skillName: "code-review-deliver",
+  });
+
+  assert.equal(summary.goal, "Keep the public contract stable");
+  assert.deepEqual(summary.constraints, ["Keep SQLite authoritative"]);
+  assert.deepEqual(summary.prohibited, ["Do not add a second queue"]);
+  assert.equal(summary.targetSeat.seatId, "seat-gemini");
+  assert.equal(JSON.stringify(summary).includes("raw"), false);
+
+  const edited = handoff.applyHandoffPreviewEdits(packet, {
+    constraints: ["Keep SQLite and Git authoritative"],
+  });
+  assert.deepEqual(edited.constraints, ["Keep SQLite and Git authoritative"]);
+});
+
 test("selectAppendix prefers review anchors over pure tail when they would be cut", () => {
   const prefix = "noise ".repeat(800); // ~4000 chars
   const important = "\n## 评审\nP0: CAS race in foo.js\nrequest-changes\n";

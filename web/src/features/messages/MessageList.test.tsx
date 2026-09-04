@@ -62,8 +62,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-live" },
-          invocationOrder: ["i-live"],
-          notices: [],
+      invocationOrder: ["i-live"],
+      notices: [],
+      handoffPreviews: [],
         }}
         isLoading={false}
         error={null}
@@ -279,8 +280,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i1" },
-          invocationOrder: ["i1"],
-          notices: [],
+      invocationOrder: ["i1"],
+      notices: [],
+      handoffPreviews: [],
         }}
         isLoading={false}
         error={null}
@@ -427,8 +429,9 @@ describe("MessageList", () => {
           doneReceived: false,
           liveMessages: {},
           latestInvocationByAgent: {},
-          invocationOrder: [],
-          notices: [],
+      invocationOrder: [],
+      notices: [],
+      handoffPreviews: [],
           optimisticUser: {
             agentId: "codex",
             content: "不要重复我",
@@ -481,8 +484,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { gemini: "i2" },
-          invocationOrder: ["i2"],
-          notices: [],
+      invocationOrder: ["i2"],
+      notices: [],
+      handoffPreviews: [],
           optimisticUser: {
             agentId: "codex",
             content: "检查这个问题",
@@ -581,8 +585,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-handoff" },
-          invocationOrder: ["i-handoff"],
-          notices: [],
+      invocationOrder: ["i-handoff"],
+      notices: [],
+      handoffPreviews: [],
         }}
         isLoading={false}
         error={null}
@@ -638,8 +643,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-mid" },
-          invocationOrder: ["i-mid"],
-          notices: [],
+      invocationOrder: ["i-mid"],
+      notices: [],
+      handoffPreviews: [],
         }}
         isLoading={false}
         error={null}
