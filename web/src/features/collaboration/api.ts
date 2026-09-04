@@ -7,3 +7,13 @@ export function getSessionCollaboration(sessionId: string, signal?: AbortSignal)
     { signal }
   );
 }
+
+export function decideSessionAcceptance(
+  sessionId: string,
+  input: { verdict: "accepted" | "rejected" | "incomplete"; note?: string }
+) {
+  return apiRequest<CollaborationResponse & { recorded: true }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/collaboration/acceptance`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}

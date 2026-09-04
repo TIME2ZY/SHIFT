@@ -109,7 +109,7 @@ function normalizeTask(input = {}, current = null) {
   }
   const artifacts = input.artifacts && typeof input.artifacts === "object" ? input.artifacts : {};
   const taskStatus = enumValue(
-    phase === "done" ? "accepted" : input.taskStatus || current?.task_status || "active",
+    input.taskStatus || current?.task_status || "active",
     TASK_STATUSES,
     "task status"
   );
@@ -206,7 +206,7 @@ function mapTask(row, events = []) {
     codeReviewGate: parseNullableObject(row.code_review_gate_json),
     deliveryGate: parseNullableObject(row.delivery_gate_json),
     finalGate: parseNullableObject(row.final_gate_json),
-    taskStatus: row.task_status || (phase === "done" ? "accepted" : "active"),
+    taskStatus: row.task_status || "active",
     goalOriginal: row.goal_original || null,
     goalNormalized: row.goal_normalized || null,
     goalHash: row.goal_hash || null,

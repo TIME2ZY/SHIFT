@@ -249,6 +249,55 @@ test("collaboration snapshot is a session-scoped read of the durable task", asyn
   assert.equal(write.statusCode, 0);
 });
 
+test("final acceptance route records a trusted Human decision and returns its card", async () => {
+  const res = makeRes();
+  let decisionInput = null;
+  const task = {
+    phase: "done",
+    taskStatus: "accepted",
+    artifacts: {
+      userGoal: { hash: "goal-1" },
+      implementationPlan: { hash: "plan-1" },
+      acceptanceDecision: {
+        verdict: "accepted",
+        goalHash: "goal-1",
+        planHash: "plan-1",
+        commitSha: "a".repeat(40),
+        decidedAt: "2026-09-04T00:00:00.000Z",
+      },
+    },
+    deliveryGate: { commitSha: "a".repeat(40), ciStatus: "success" },
+  };
+  const handle = createHandler(res, {
+    getSession: (id) => (id === "s1" ? { id } : null),
+    readJsonBody: async () => ({ verdict: "accepted", note: "matches goal" }),
+    collabTaskRegistry: {
+      decideFinalAcceptance(_threadId, input) {
+        decisionInput = input;
+        return { recorded: true, task };
+      },
+      acceptanceReadiness: () => ({ ok: true, reason: null }),
+      implementationPermission: () => null,
+    },
+  });
+
+  await handle(
+    makeReq("POST"),
+    res,
+    new URL("http://127.0.0.1/api/sessions/s1/collaboration/acceptance")
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(decisionInput, {
+    verdict: "accepted",
+    note: "matches goal",
+    actorKind: "human",
+    actorId: "local-user",
+  });
+  assert.equal(res.body.collaboration.status, "accepted");
+  assert.equal(res.body.collaboration.acceptance.verdict, "accepted");
+});
+
 test("handoff preview routes confirm or cancel only within the owning session", async () => {
   const calls = [];
   const handoffConfirmations = {

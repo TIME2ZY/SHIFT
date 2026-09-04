@@ -17,10 +17,11 @@ related:
 
 ## 1. 状态
 
-**Accepted，implementation pending**
+**Accepted，core model implemented**
 
-本 ADR 确定下一阶段的目标合同。当前代码仍运行 ADR-004 的固定角色和五阶段模型；只有完成
-本 ADR 第 8 节的迁移与退出条件后，才可把这里的模型写入 README 或架构地图作为当前实现。
+本 ADR 的 Seat、Duty、按职责 Skill、任务卡、Human 验收与证据绑定合同已进入在线路径。
+Provider availability 仍作为派生运行信息逐步收口；当前代码锚点与兼容边界由
+`docs/architecture-map.md` 描述。
 
 ADR-004 中 Invocation 终态、handoff 幂等、SQLite 真相源、artifact hash 绑定和证据失效等
 已经成立的可靠性约束继续有效。本 ADR 只替换固定 Agent 职责、按工号路由、强制五阶段和
@@ -190,15 +191,10 @@ Human 可以批准方案、修改或确认 handoff、执行最终验收以及处
 核心 Seat/Duty 迁移沿用现有 durable handoff 的 accept、enqueue、bind 和 terminal 生命周期。
 本阶段核心切换不增加交接预览状态。
 
-未来若加入人工预览，必须另行扩展为：
-
-```text
-proposed → waiting_confirmation → accepted → enqueued
-                              ↘ cancelled
-```
-
-proposal 必须先持久化、重启后可继续确认或取消、确认只能消费一次。不得只在 Web 内存中暂停
-handoff，也不得旁路现有 finalize 和 handoff repository。
+人工预览是一次请求内的 Human 确认门禁，不定义 durable proposal。预览只包含将要发出的摘要，
+在确认前保存在运行时；取消、超时、请求中止或重启都视为未发生 handoff。用户确认后，改写后的
+包才进入既有 finalize 和 handoff repository，由 SQLite 的 accept/enqueue/bind/terminal 生命周期
+保证只消费一次。若未来要求跨重启继续确认，必须另行设计 durable proposal 状态并更新本 ADR。
 
 ## 6. 真相源与读模型
 
@@ -257,4 +253,4 @@ handoff，也不得旁路现有 finalize 和 handoff repository。
 - Provider 能否执行 Duty 由实际运行能力和策略共同决定，不再由品牌名决定。
 - 五阶段仍可用于解释复杂协作，但不是所有任务的强制承诺。
 - DutyBinding 和 Human actor 增加持久化契约，但减少固定工号、隐式批准和重复路由语义。
-- handoff preview 被明确推迟，避免在核心模型切换时同时引入新的 durable 暂停状态。
+- handoff preview 作为请求内确认门禁，不增加 durable 暂停状态；跨重启恢复预览不在本阶段范围。

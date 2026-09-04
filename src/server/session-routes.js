@@ -36,6 +36,14 @@ function createSessionRoutes({
     };
   }
 
+  function readWorkspace(sessionId) {
+    try {
+      return worktreeManager?.getStatus?.(sessionId) || null;
+    } catch {
+      return null;
+    }
+  }
+
   return async function handleSessionRoutes(req, res, url) {
     const handoffPreviewsMatch = url.pathname.match(
       /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/handoff-previews$/
@@ -95,16 +103,59 @@ function createSessionRoutes({
           ? collabTaskRegistry.implementationPermission(sessionId)
           : null;
       const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
-      let workspace = null;
-      try {
-        workspace = worktreeManager?.getStatus?.(sessionId) || null;
-      } catch {
-        // A collaboration task can exist before its managed worktree is created.
-      }
+      const workspace = readWorkspace(sessionId);
+      const acceptanceReadiness = collabTaskRegistry?.acceptanceReadiness?.(sessionId) || null;
       sendJson(res, 200, {
-        collaboration: projectCollaboration(task, permission, { bindings, seats, workspace }),
+        collaboration: projectCollaboration(task, permission, {
+          bindings,
+          seats,
+          workspace,
+          acceptanceReadiness,
+        }),
         seats: projectSeats(seats),
       });
+      return true;
+    }
+
+    const acceptanceMatch = url.pathname.match(
+      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration\/acceptance$/
+    );
+    if (acceptanceMatch && req.method === "POST") {
+      const sessionId = acceptanceMatch[1];
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(req);
+        const result = collabTaskRegistry?.decideFinalAcceptance?.(sessionId, {
+          verdict: body?.verdict,
+          note: body?.note,
+          actorKind: "human",
+          actorId: "local-user",
+        });
+        if (!result?.recorded) {
+          sendJson(res, 400, { error: result?.reason || "Final acceptance is unavailable." });
+          return true;
+        }
+        const task = result.task;
+        const seats = threadSeats?.listEnabledForThread?.(sessionId) || [];
+        const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
+        const permission = collabTaskRegistry?.implementationPermission?.(sessionId) || null;
+        const acceptanceReadiness = collabTaskRegistry?.acceptanceReadiness?.(sessionId) || null;
+        sendJson(res, 200, {
+          recorded: true,
+          collaboration: projectCollaboration(task, permission, {
+            bindings,
+            seats,
+            workspace: readWorkspace(sessionId),
+            acceptanceReadiness,
+          }),
+          seats: projectSeats(seats),
+        });
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+      }
       return true;
     }
 

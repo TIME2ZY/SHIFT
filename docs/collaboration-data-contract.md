@@ -1,11 +1,10 @@
 # Collaboration Data Contract
 
-> **状态：** ADR-007 目标契约，尚未实现。
+> **状态：** ADR-007 核心契约已实现；Provider availability 仍是派生运行信息。
 >
 > **范围：** Thread Seat、Invocation Duty、协作任务、Human 事件与验收证据。
 >
-> **当前实现：** 仍见 `docs/architecture-map.md`。在迁移完成前，本文件不得用于声称运行时
-> 已经支持动态席位。
+> **当前实现：** 代码锚点与尚存的兼容边界见 `docs/architecture-map.md`。
 
 ## 1. 所有权
 
@@ -14,7 +13,7 @@
 | Thread enabled Seats    | SQLite `thread_seats`             | Thread Seat service                       | Session / task card            |
 | Invocation DutyBinding  | SQLite invocation binding         | `durableRecorder.startInvocation` 事务    | execution timeline / task card |
 | Task goal and status    | SQLite collaboration task         | collaboration task registry/service       | collaboration read model       |
-| Approval and acceptance | SQLite collaboration task + event | workflow evidence entry                   | acceptance card / timeline     |
+| Approval and acceptance | SQLite collaboration task + event | collaboration task registry               | acceptance card / timeline     |
 | Handoff lifecycle       | SQLite handoffs                   | existing `finalizeA2ARoutes` + repository | handoff timeline               |
 | Provider availability   | runtime probe cache               | provider discovery service                | Seat picker                    |
 | Git evidence            | Git worktree                      | existing delivery verifier records refs   | task / acceptance card         |
@@ -113,7 +112,8 @@ CollaborationTask {
 - `goalOriginal` 保存触发任务的用户原话，后续不得覆盖。
 - 收敛目标变化产生新 `goalHash`，并使绑定旧 hash 的 final acceptance 失效。
 - `waiting_human` 必须带可枚举 blocker；恢复执行后回到 `active`。
-- `accepted` 只能由 evidence gate 写入；Agent 文本中的 done 不产生状态转换。
+- `accepted` 只能由 Human 最终决定入口在 evidence gate 通过后写入；Agent 文本中的 done 或
+  `final_acceptance` 只提供证据，不产生完成状态转换。
 - 阶段是读模型投影，不能作为 Seat 或 Provider ID allowlist。
 
 建议 blocker 集合：
@@ -144,6 +144,8 @@ CollaborationEvent {
 - Seat actor 使用 `seatId`，不能把 Provider ID 当作长期人员身份。
 - Message 时间线只投影事件；删除或隐藏投影不影响批准事实。
 - event payload 中的批准、review 和验收必须携带对应证据 hash。
+- 最终验收事件固定记录 `actorKind=human`、Human identity、`duty=accept`，并绑定当前 goal、
+  plan 与 commit；请求通过但证据不足时记录 `incomplete`，不得返回伪成功。
 
 ## 7. Evidence and invalidation
 
@@ -211,4 +213,6 @@ escalation。没有 mention/handoff 时禁止仅因 Duty 改变而换 Seat。
 ## 10. 实施边界
 
 本合同不引入新 Provider、dispatch outbox、SSE cursor、默认四人流水线或人格系统。
-handoff preview/confirm 需要独立的 durable 状态设计，不属于核心 Seat/Duty 切换。
+handoff preview/confirm 是请求内的 Human 确认门禁；未确认内容不是业务事实，只保存在运行时，
+取消、超时或重启都不产生 durable handoff。确认后仍通过既有 `finalizeA2ARoutes` 与 handoff
+repository 的唯一 accept/enqueue 路径持久化和消费。

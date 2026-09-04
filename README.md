@@ -3,7 +3,7 @@
 > 一个本地控制台，让 Codex、Gemini、Grok 与 OpenCode 围绕同一条任务线程讨论、实现、审查和交付——每一次交接都有据可查。
 
 ![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-3c873a?style=flat-square)
-![Agents](https://img.shields.io/badge/Agents-4-5b55e7?style=flat-square)
+![Providers](https://img.shields.io/badge/Providers-4-5b55e7?style=flat-square)
 ![Storage](https://img.shields.io/badge/Storage-SQLite-2563eb?style=flat-square)
 ![Status](https://img.shields.io/badge/Status-Active%20development-c46a16?style=flat-square)
 
@@ -19,61 +19,60 @@ SHIFT 是一个**本地优先**的多 Agent 协作控制台。它不提供模型
 - 通过 `@Agent` 指定下一位协作者，Agent 也可以把任务继续交接出去；
 - 用 SQLite 持久化会话、调用、上下文窗口、Memory 和 Recall 索引——只有一个真相源；
 - 需要改代码时创建会话级 Git worktree，改动隔离、可审查、可显式丢弃；
-- 每个协作阶段都有平台侧证据门禁：不是"Agent 说做完了"，而是 Git、PR 和 CI 的实际状态说了算。
+- 每次 invocation 都绑定当前席位、职责和 Skill；门禁依据职责与证据，不绑定 Provider 名称；
+- 任务卡展示目标、当前执行者、阻塞和交付证据，只有用户验收通过才算完成。
 
 ## 工作方式
 
 ```text
 用户提出目标
     │
-    ├─ 选择一个 Agent 直接处理
-    │
-    └─ 多 Agent 接力
-         Codex ↔ Gemini 讨论、互证；Codex 收敛方案
-                 ↓
-          Grok 提交带 hash 的具体修改方案
-                 ↓
-          Codex 显式批准后，Grok 才能在 worktree 实现
-                 ↓
-          OpenCode review / 回修闭环，随后交付 commit 和 PR
-                 ↓
-          Codex 按用户最初目标与收敛方案最终验收
+    ├─ 当前席位按本跳 Duty 加载对应 Skill
+    ├─ 需要交接时，用户先查看并确认交接摘要
+    ├─ 同一席位可继续实现和自审，也可交给另一个已启用席位
+    ├─ 平台核验方案、review、commit、PR 与 CI 证据
+    └─ 用户对照目标作出 accepted / rejected / incomplete 决定
 ```
 
-这不是固定流水线。你可以只使用一个 Agent，也可以在任何一轮通过 `@Codex`、`@Gemini`、`@Grok` 或 `@OpenCode` 指定下一位。
+一个已启用席位就能完成整条路径。启用多个席位后，可以通过 `@Agent` 明确交接；没有点名或
+handoff 时保持当前席位，不会因为职责变化随机换人。
 
 ### 证据门禁
 
 SHIFT 与"把几个 CLI 串起来"的区别在于：平台不信任 Agent 的自述，每个关键跃迁都要拿出证据。
 
-| 门禁     | 谁触发       | 平台核对什么                                                   |
-| -------- | ------------ | -------------------------------------------------------------- |
-| 方案批准 | Grok → Codex | 新方案 hash 自动撤销旧批准；未批准时 Grok 只有只读工具权限     |
-| 代码评审 | OpenCode     | 结构化 `code_review`，changes requested 直接回到 implement     |
-| 交付核验 | OpenCode     | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI |
-| 最终验收 | Codex        | 必须绑定用户目标、收敛方案、实现方案和实际 commit，逐项给证据  |
+| 门禁       | 谁触发                | 平台核对什么                                                       |
+| ---------- | --------------------- | ------------------------------------------------------------------ |
+| 方案批准   | discuss / accept Duty | 新方案 hash 自动撤销旧批准；支持权限回调时，未批准只放行只读操作   |
+| 代码评审   | review / deliver Duty | 结构化 `code_review`；changes requested 回到 implement / fix Duty  |
+| 交付核验   | deliver Duty          | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI     |
+| Agent 核验 | accept Duty           | 将逐项结论绑定目标、方案、review 和实际 commit，不直接写任务完成态 |
+| 最终验收   | 用户                  | 证据完整才能写 `accepted`；证据不足的通过请求会保存为 `incomplete` |
 
 所有协作事实——Trace、Invocation、Handoff、Gate——都落在 SQLite，并通过内置审计控制台可视化：失败断点、Handoff 漏斗、Memory 命中率、每步的因果链路。
 
-### Agent 团队
+### Provider 与席位
 
 Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
 
-| Agent        | 默认模型                  | 运行方式        | 默认职责                                        |
-| ------------ | ------------------------- | --------------- | ----------------------------------------------- |
-| **Codex**    | `gpt-5.6-sol`             | Codex CLI       | 开始/末尾把关、参与讨论、收敛方案、最终目标验收 |
-| **Gemini**   | `gemini-3.6-flash`        | Antigravity CLI | 正常讨论、提出选项和反例、与 Codex 交叉验证     |
-| **Grok**     | `grok-4.6`                | Grok Build ACP  | 先给具体修改方案，获批后实现、测试并总结        |
-| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI    | 代码 review；通过后规范 commit、push 和 PR      |
+| Provider     | 默认模型                  | 运行方式        |
+| ------------ | ------------------------- | --------------- |
+| **Codex**    | `gpt-5.6-sol`             | Codex CLI       |
+| **Gemini**   | `gemini-3.6-flash`        | Antigravity CLI |
+| **Grok**     | `grok-4.6`                | Grok Build ACP  |
+| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI    |
 
-模型、容量和职责目前是固定配置。SHIFT 不打包这些 CLI，也不管理它们的账号；使用前需要在本机分别安装并完成认证。
+Provider 只描述启动方式、模型和运行能力。Thread 的 enabled Seat 决定谁可参与，每次 invocation
+再绑定 `discuss | plan | implement | fix | review | deliver | accept | recall` 中的一项 Duty。
+SHIFT 不打包这些 CLI，也不管理它们的账号。
 
 ## 核心能力
 
 | 能力             | 当前实现                                                              |
 | ---------------- | --------------------------------------------------------------------- |
-| 多 Agent 调度    | 支持 Codex、Gemini、Grok、OpenCode，可手动选择或在消息中使用 `@Agent` |
-| 五阶段协作流     | discuss → implement → review → deliver → done，每阶段有持久化证据门禁 |
+| 动态席位与路由   | Thread 持久化 enabled Seats；显式点名、粘性和亲和性只在这些席位中解析 |
+| Duty / Skill     | 每次 invocation 原子绑定职责；运行时只激活当前 Duty Skill 与交接卡    |
+| 任务与验收卡     | 展示目标、执行者、阻塞、Git/PR/CI、审查模式和 Human 最终结论          |
 | 流式过程         | Node 服务通过 SSE 推送文本、思考、工具调用、进度、文件变化与运行状态  |
 | 结构化交接       | 解析并记录 Agent 之间的 handoff，保留来源、目标和因果关系，只消费一次 |
 | 会话与调用历史   | SQLite 持久化 thread、message、invocation、event 和 provider session  |

@@ -35,7 +35,8 @@ HTTP createServer (src/server/index.js)
 Web App (web/src/app/App.tsx)
   ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
   ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
-  ├─ collaboration feature → GET /api/sessions/:id/collaboration（只读 phase/gate 投影）
+  ├─ collaboration feature → GET /api/sessions/:id/collaboration（任务/验收卡投影）
+  │                         + POST /api/sessions/:id/collaboration/acceptance（Human 最终决定）
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
@@ -296,13 +297,20 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 | 代码 review           | `processWorkflowEvidenceOutput`                       | 当前 `review` / `deliver` Duty | changes requested 直接形成事件；approve 继续交付核验                  |
 | commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | 当前交付 Duty 后由平台只读核对 | 返回真实 Git/GitHub evidence                                          |
 | 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery` | collab task registry           | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
-| 最终目标验收          | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash                      |
-| 任务卡只读            | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
+| Agent 目标核验        | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash，不写完成态          |
+| Human 最终决定        | `decideFinalAcceptance` ← session-routes              | 本地用户                       | 唯一写入 accepted/rejected/incomplete 与 `final_acceptance_decided`   |
+| 任务/验收卡只读       | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
 
 `GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
 无 task 仍返回 SQLite 席位条；有 task 从 `collaboration_tasks`、latest DutyBinding 和 Git worktree
 投影目标、当前 Seat/Duty/Skill、枚举 blocker、审查模式、脏文件数、HEAD、PR、CI 与下一动作。
 接口不返回 plan/review 全文，也不写库；权威仍是 SQLite 协作事实与 Git 工作区。
+
+Agent 的结构化 `final_acceptance` 只是逐项核验证据，不能把任务推进到 `done`。用户通过
+`POST /api/sessions/:sessionId/collaboration/acceptance` 作出最终决定；服务端固定记录可信
+Human actor。请求 `accepted` 时仍会重新检查 goal、solution、plan、review、commit、PR 与 CI
+绑定，证据不足则持久化为 `incomplete`。验收决定绑定当前 goal、plan 与 commit；任一上游事实
+变化都会清除旧决定。旧数据只有 phase=`done` 而没有匹配的 Human 决定时，也不会投影为已验收。
 
 承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、

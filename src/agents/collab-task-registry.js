@@ -147,6 +147,7 @@ function createCollabTaskRegistry(options = {}) {
         capturedAt: new Date().toISOString(),
       },
     };
+    delete task.artifacts.acceptanceDecision;
     const saved = persist(task, {
       type: "user_goal_captured",
       from: task.phase,
@@ -255,6 +256,9 @@ function createCollabTaskRegistry(options = {}) {
         reviewEvidenceHash,
       },
     };
+    delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
     task.codeReviewGate = {
       verdict: "approve",
       evidenceHash: reviewEvidenceHash,
@@ -338,6 +342,12 @@ function createCollabTaskRegistry(options = {}) {
         acceptedAt: new Date().toISOString(),
       },
     };
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "waiting_human";
+    if (task.phase === STATE.DONE) {
+      task.phase = STATE.DELIVER;
+      task.state = STATE.DELIVER;
+    }
     task.finalGate = {
       verdict: acceptance.verdict,
       evidenceHash: acceptanceHash,
@@ -359,6 +369,113 @@ function createCollabTaskRegistry(options = {}) {
       commitSha: acceptance.commit_sha,
     });
     return { accepted: true, verdict: acceptance.verdict, acceptanceHash, task: saved };
+  }
+
+  function acceptanceReadiness(threadId) {
+    const task = getTask(threadId);
+    if (!task) return { ok: false, reason: "collaboration_task_missing" };
+    return completionReadiness(task);
+  }
+
+  function decideFinalAcceptance(threadId, input = {}) {
+    if (!threadId) return { recorded: false, reason: "missing_thread" };
+    if (input.actorKind !== "human" || !String(input.actorId || "").trim()) {
+      return { recorded: false, reason: "final_decision_requires_human" };
+    }
+    const requestedVerdict = String(input.verdict || "")
+      .trim()
+      .toLowerCase();
+    if (!["accepted", "rejected", "incomplete"].includes(requestedVerdict)) {
+      return { recorded: false, reason: "invalid_final_verdict" };
+    }
+    const task = getTask(threadId);
+    if (!task) return { recorded: false, reason: "collaboration_task_missing" };
+
+    const readiness = completionReadiness(task);
+    const verdict =
+      requestedVerdict === "accepted" && !readiness.ok ? "incomplete" : requestedVerdict;
+    const reason =
+      verdict === "accepted"
+        ? null
+        : requestedVerdict === "accepted"
+          ? readiness.reason
+          : verdict === "rejected"
+            ? "human_rejected"
+            : "human_marked_incomplete";
+    const goalHash = String(task.artifacts?.userGoal?.hash || "");
+    const planHash = String(task.artifacts?.implementationPlan?.hash || "") || null;
+    const commitSha = String(task.deliveryGate?.commitSha || "") || null;
+    const note = String(input.note || "").trim() || null;
+    const previousDecision = task.artifacts?.acceptanceDecision;
+    if (
+      previousDecision?.verdict === verdict &&
+      previousDecision?.goalHash === goalHash &&
+      previousDecision?.planHash === planHash &&
+      previousDecision?.commitSha === commitSha &&
+      previousDecision?.reason === reason &&
+      previousDecision?.note === note
+    ) {
+      return {
+        recorded: true,
+        reused: true,
+        accepted: verdict === "accepted",
+        verdict,
+        reason,
+        task,
+      };
+    }
+
+    const decidedAt = new Date().toISOString();
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      acceptanceDecision: {
+        verdict,
+        requestedVerdict,
+        reason,
+        note,
+        goalHash,
+        planHash,
+        commitSha,
+        actorKind: "human",
+        actorId: String(input.actorId).trim(),
+        decidedAt,
+      },
+    };
+    const previous = task.phase;
+    if (verdict === "accepted") {
+      task.phase = STATE.DONE;
+      task.state = STATE.DONE;
+      task.taskStatus = "accepted";
+    } else {
+      if (task.phase === STATE.DONE) {
+        task.phase = STATE.DELIVER;
+        task.state = STATE.DELIVER;
+      }
+      task.taskStatus = verdict === "rejected" ? "rejected" : "waiting_human";
+    }
+    const saved = persist(task, {
+      type: "final_acceptance_decided",
+      from: previous,
+      to: task.phase,
+      actorKind: "human",
+      actorId: String(input.actorId).trim(),
+      duty: "accept",
+      intent: "accept",
+      verdict,
+      requestedVerdict,
+      reason,
+      goalHash,
+      planHash,
+      commitSha,
+    });
+    return {
+      recorded: true,
+      reused: false,
+      accepted: verdict === "accepted",
+      verdict,
+      reason,
+      task: saved,
+    };
   }
 
   function shouldBlockEvidenceRoute(input = {}) {
@@ -409,6 +526,8 @@ function createCollabTaskRegistry(options = {}) {
     delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
     task.codeReviewGate = null;
     task.deliveryGate = null;
     task.finalGate = null;
@@ -467,6 +586,8 @@ function createCollabTaskRegistry(options = {}) {
     delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
     task.implementationGate = {
       ...(task.implementationGate || {}),
       status: IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL,
@@ -660,6 +781,8 @@ function createCollabTaskRegistry(options = {}) {
         delete task.artifacts.codeReview;
         delete task.artifacts.delivery;
         delete task.artifacts.finalAcceptance;
+        delete task.artifacts.acceptanceDecision;
+        task.taskStatus = "active";
         task.approvalHash = null;
       } else if (/approve-with-nits|approve\b|批准|可交付|可合入|lgtm/.test(reviewBlob)) {
         next = STATE.DELIVER;
@@ -700,27 +823,6 @@ function createCollabTaskRegistry(options = {}) {
       planHash: implementationApproved ? task.implementationGate?.planHash || null : null,
     };
     return persist(task, event);
-  }
-
-  function markDone(threadId, input = {}) {
-    const task = getOrCreateTask(threadId);
-    if (task.phase !== STATE.DELIVER) return task;
-    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
-    if (!isAcceptanceDuty(input.actorDuty)) {
-      return { ...task, completionBlocked: "done_requires_accept_duty" };
-    }
-    const readiness = completionReadiness(task);
-    if (!readiness.ok) return { ...task, completionBlocked: readiness.reason };
-    const previous = task.phase;
-    task.phase = STATE.DONE;
-    task.state = STATE.DONE;
-    return persist(task, {
-      type: "transition",
-      from: previous,
-      to: STATE.DONE,
-      actorAgentId,
-      intent: input.intent || "accept",
-    });
   }
 
   function updateTask(threadId, patch = {}, event = {}) {
@@ -789,6 +891,8 @@ function createCollabTaskRegistry(options = {}) {
     submitSolutionBaseline,
     recordDeliveryEvidence,
     submitFinalAcceptance,
+    acceptanceReadiness,
+    decideFinalAcceptance,
     shouldBlockEvidenceRoute,
     noteAcceptedRoute,
     ensureImplementationPlanRequired,
@@ -797,7 +901,6 @@ function createCollabTaskRegistry(options = {}) {
     implementationPermission,
     shouldBlockImplementationRoute,
     updateTask,
-    markDone,
     shouldSkipRedundantReview,
     resetForTests,
   };
@@ -931,6 +1034,7 @@ function resetOutcomeEvidence(task) {
   task.deliveryGate = null;
   task.finalGate = null;
   task.approvalHash = null;
+  task.taskStatus = "active";
 }
 
 function invalidateAfterSolutionRevision(task) {
@@ -941,11 +1045,13 @@ function invalidateAfterSolutionRevision(task) {
   delete task.artifacts.codeReview;
   delete task.artifacts.delivery;
   delete task.artifacts.finalAcceptance;
+  delete task.artifacts.acceptanceDecision;
   task.implementationGate = null;
   task.codeReviewGate = null;
   task.deliveryGate = null;
   task.finalGate = null;
   task.approvalHash = null;
+  task.taskStatus = "active";
 }
 
 function invalidateDownstreamGates(task, previous, next) {
@@ -957,15 +1063,21 @@ function invalidateDownstreamGates(task, previous, next) {
     delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
     task.approvalHash = null;
   } else if (next === STATE.REVIEW && previous !== STATE.REVIEW) {
     task.deliveryGate = null;
     task.finalGate = null;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
   } else if (next === STATE.DELIVER && previous !== STATE.DELIVER) {
     task.finalGate = null;
     delete task.artifacts.finalAcceptance;
+    delete task.artifacts.acceptanceDecision;
+    task.taskStatus = "active";
   }
 }
 

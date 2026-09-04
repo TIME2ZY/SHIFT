@@ -22,6 +22,23 @@ export interface CollaborationEvidence {
   ciStatus: string | null;
 }
 
+export interface AcceptanceCard {
+  evidenceProfile: "code_change" | "working_tree_change" | "analysis" | string;
+  goalHash: string | null;
+  planHash: string | null;
+  branch: string | null;
+  headSha: string | null;
+  commitSha: string | null;
+  prUrl: string | null;
+  ciStatus: string;
+  reviewMode: "same_seat" | "other_seat" | "pending";
+  reviewVerdict: "approved" | "changes_requested" | "unknown";
+  verdict: "accepted" | "rejected" | "incomplete";
+  ready: boolean;
+  reason: string | null;
+  decidedAt: string | null;
+}
+
 export interface CollaborationSnapshot {
   status: "active" | "waiting_human" | "accepted" | "rejected" | string;
   phase: "discuss" | "implement" | "review" | "deliver" | "done" | string;
@@ -35,6 +52,7 @@ export interface CollaborationSnapshot {
   blocker: CollaborationBlocker | null;
   evidence: CollaborationEvidence;
   reviewMode: "same_seat" | "other_seat" | "pending";
+  acceptance: AcceptanceCard;
   nextAction: string;
 }
 

@@ -1678,7 +1678,28 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       assert.match(runs[5].prompt, /最初用户目标/);
       assert.match(text, /event: delivery-evidence-verified/);
       assert.match(text, /event: final-acceptance-submitted/);
-      assert.match(text, /event: collaboration-done/);
+      assert.doesNotMatch(text, /event: collaboration-done/);
+
+      const pending = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(pending.collaboration.status, "waiting_human");
+      assert.equal(pending.collaboration.acceptance.ready, true);
+      assert.equal(pending.collaboration.acceptance.verdict, "incomplete");
+
+      const decision = await fetch(
+        `${baseUrl}/api/sessions/${session.id}/collaboration/acceptance`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ verdict: "accepted", note: "已对照目标核验" }),
+        }
+      );
+      assert.equal(decision.status, 200);
+      const accepted = await decision.json();
+      assert.equal(accepted.collaboration.status, "accepted");
+      assert.equal(accepted.collaboration.phase, "done");
+      assert.equal(accepted.collaboration.acceptance.verdict, "accepted");
     }
   );
 });

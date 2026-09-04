@@ -41,21 +41,6 @@ function processWorkflowEvidenceOutput(input = {}) {
         event: result.accepted ? "final-acceptance-submitted" : "final-acceptance-rejected",
         payload: summarize(result, ["verdict", "acceptanceHash"]),
       });
-      if (result.accepted && result.verdict === "accept") {
-        const done = registry.markDone(threadId, {
-          actorAgentId: agent,
-          actorDuty: duty,
-          intent: "accept",
-        });
-        events.push({
-          event: done.phase === "done" ? "collaboration-done" : "collaboration-done-blocked",
-          payload: {
-            accepted: done.phase === "done",
-            phase: done.phase,
-            reason: done.completionBlocked || null,
-          },
-        });
-      }
     }
   }
 

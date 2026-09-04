@@ -109,9 +109,14 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(delivered.phase, STATE.DELIVER);
   assert.equal(delivered.codeReviewGate.reviewedBy, "opencode");
 
-  const blocked = registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" });
-  assert.equal(blocked.phase, STATE.DELIVER);
-  assert.equal(blocked.completionBlocked, "code_review_artifact_missing");
+  const blocked = registry.decideFinalAcceptance("thread-1", {
+    actorKind: "human",
+    actorId: "local-user",
+    verdict: "accepted",
+  });
+  assert.equal(blocked.verdict, "incomplete");
+  assert.equal(blocked.reason, "code_review_artifact_missing");
+  assert.equal(blocked.task.phase, STATE.DELIVER);
 
   const commitSha = "a".repeat(40);
   const reviewEvidenceHash = delivered.codeReviewGate.evidenceHash;
@@ -150,10 +155,13 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
       implementationPlanHash: delivered.artifacts.implementationPlan.hash,
     },
   });
-  assert.equal(
-    registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" }).phase,
-    STATE.DONE
-  );
+  const completed = registry.decideFinalAcceptance("thread-1", {
+    actorKind: "human",
+    actorId: "local-user",
+    verdict: "accepted",
+  });
+  assert.equal(completed.verdict, "accepted");
+  assert.equal(completed.task.phase, STATE.DONE);
 });
 
 test("review Duty changes return to implement and invalidate downstream gates", () => {
@@ -380,15 +388,61 @@ test("delivery and acceptance Duties bind real PR evidence to every outcome hash
     },
   });
   assert.equal(acceptance.accepted, true);
-  assert.equal(
-    registry.markDone("thread-1", { actorAgentId: "opencode", actorDuty: "review" })
-      .completionBlocked,
-    "done_requires_accept_duty"
+  assert.equal(acceptance.task.phase, STATE.DELIVER);
+  assert.equal(acceptance.task.taskStatus, "waiting_human");
+  assert.deepEqual(
+    registry.decideFinalAcceptance("thread-1", {
+      actorKind: "agent",
+      actorId: "codex",
+      verdict: "accepted",
+    }),
+    { recorded: false, reason: "final_decision_requires_human" }
   );
-  assert.equal(
-    registry.markDone("thread-1", { actorAgentId: "codex", actorDuty: "accept" }).phase,
-    STATE.DONE
-  );
+  const completed = registry.decideFinalAcceptance("thread-1", {
+    actorKind: "human",
+    actorId: "local-user",
+    verdict: "accepted",
+    note: "已对照目标核验",
+  });
+  assert.equal(completed.accepted, true);
+  assert.equal(completed.task.phase, STATE.DONE);
+  assert.equal(completed.task.taskStatus, "accepted");
+  const decisionEvent = completed.task.history.at(-1);
+  assert.equal(decisionEvent.type, "final_acceptance_decided");
+  assert.equal(decisionEvent.actorKind, "human");
+  assert.equal(decisionEvent.actorId, "local-user");
+
+  registry.updateTask("thread-1", {
+    deliveryGate: { ...completed.task.deliveryGate, commitSha: null },
+  });
+  const missingCommitDecision = registry.decideFinalAcceptance("thread-1", {
+    actorKind: "human",
+    actorId: "local-user",
+    verdict: "accepted",
+  });
+  assert.equal(missingCommitDecision.verdict, "incomplete");
+  assert.equal(missingCommitDecision.reason, "delivery_commit_missing");
+  assert.equal(missingCommitDecision.task.phase, STATE.DELIVER);
+
+  const current = registry.getTask("thread-1");
+  registry.updateTask("thread-1", {
+    artifacts: {
+      ...current.artifacts,
+      delivery: { ...current.artifacts.delivery, ciStatus: "failure" },
+    },
+    deliveryGate: { ...current.deliveryGate, commitSha, ciStatus: "failure" },
+  });
+  const failedCiDecision = registry.decideFinalAcceptance("thread-1", {
+    actorKind: "human",
+    actorId: "local-user",
+    verdict: "accepted",
+  });
+  assert.equal(failedCiDecision.verdict, "incomplete");
+  assert.equal(failedCiDecision.reason, "ci_not_successful");
+
+  registry.captureUserGoal("thread-1", { text: "Rewritten goal", force: true });
+  assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision, undefined);
+  assert.equal(registry.getTask("thread-1").taskStatus, "active");
 });
 
 test("forged delivery and final gate JSON cannot replace their persisted artifacts", () => {

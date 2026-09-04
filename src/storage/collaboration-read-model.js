@@ -22,10 +22,24 @@ function projectCollaboration(task, permission = null, context = {}) {
   const reviewGate = task.codeReviewGate || null;
   const deliveryGate = task.deliveryGate || null;
   const implementation = projectImplementation(implementationGate, plan, implPermission);
-  const blocker = deriveBlocker(task, implementation);
+  const reviewMode = deriveReviewMode(bindings, reviewGate);
+  const acceptance = projectAcceptance(
+    task,
+    context.acceptanceReadiness,
+    context.workspace,
+    reviewMode
+  );
+  const blocker = deriveBlocker(task, implementation, acceptance);
 
   return {
-    status: nullableString(task.taskStatus) || (task.phase === "done" ? "accepted" : "active"),
+    status:
+      acceptance.verdict === "accepted"
+        ? "accepted"
+        : acceptance.verdict === "rejected"
+          ? "rejected"
+          : task.taskStatus === "waiting_human"
+            ? "waiting_human"
+            : "active",
     phase: String(task.phase || task.state || "discuss"),
     goalOriginal: nullableString(task.goalOriginal || task.artifacts?.userGoal?.text || task.goal),
     goalNormalized: nullableString(task.goalNormalized || task.goal),
@@ -36,8 +50,57 @@ function projectCollaboration(task, permission = null, context = {}) {
     updatedAt: nullableString(task.updatedAt),
     blocker,
     evidence: projectEvidence(deliveryGate, context.workspace),
-    reviewMode: deriveReviewMode(bindings, reviewGate),
+    reviewMode,
+    acceptance,
     nextAction: deriveNextAction(currentBinding?.duty, task, blocker),
+  };
+}
+
+function projectAcceptance(task, readiness, workspace, reviewMode) {
+  const goalHash = nullableString(task.goalHash || task.artifacts?.userGoal?.hash);
+  const planHash = nullableString(
+    task.implementationGate?.approvedPlanHash || task.artifacts?.implementationPlan?.hash
+  );
+  const commitSha = nullableString(task.deliveryGate?.commitSha);
+  const decision = task.artifacts?.acceptanceDecision || null;
+  const decisionMatches = Boolean(
+    decision &&
+    decision.goalHash === goalHash &&
+    decision.planHash === planHash &&
+    decision.commitSha === commitSha
+  );
+  const gate = readiness && typeof readiness === "object" ? readiness : {};
+  const recordedVerdict = decisionMatches
+    ? nullableString(decision.verdict) || "incomplete"
+    : "incomplete";
+  const verdict =
+    recordedVerdict === "accepted" && gate.ok !== true ? "incomplete" : recordedVerdict;
+  const reviewVerdict =
+    task.codeReviewGate?.verdict === "approve"
+      ? "approved"
+      : task.codeReviewGate?.verdict === "changes_requested"
+        ? "changes_requested"
+        : "unknown";
+  return {
+    evidenceProfile: nullableString(task.evidenceProfile) || "code_change",
+    goalHash,
+    planHash,
+    branch: nullableString(workspace?.branch || task.deliveryGate?.branch),
+    headSha: nullableString(workspace?.headSha),
+    commitSha,
+    prUrl: nullableString(task.deliveryGate?.prUrl),
+    ciStatus: nullableString(task.deliveryGate?.ciStatus) || "unknown",
+    reviewMode,
+    reviewVerdict,
+    verdict,
+    ready: gate.ok === true,
+    reason:
+      verdict === "accepted"
+        ? null
+        : nullableString(decisionMatches ? decision.reason : null) ||
+          nullableString(gate.reason) ||
+          "human_acceptance_required",
+    decidedAt: decisionMatches ? nullableString(decision.decidedAt) : null,
   };
 }
 
@@ -96,9 +159,15 @@ function projectEvidence(deliveryGate, workspace) {
   };
 }
 
-function deriveBlocker(task, implementation) {
+function deriveBlocker(task, implementation, acceptance) {
   const phase = String(task.phase || task.state || "");
-  if (phase === "done" || task.taskStatus === "accepted") return null;
+  if (acceptance?.verdict === "accepted") return null;
+  if (phase === "done") {
+    return { type: "waiting_human", reason: "human_acceptance_required" };
+  }
+  if (task.taskStatus === "rejected") {
+    return { type: "waiting_human", reason: "final_acceptance_rejected" };
+  }
   if (task.taskStatus === "waiting_human") {
     return { type: "waiting_human", reason: "human_input_required" };
   }
@@ -120,8 +189,9 @@ function deriveBlocker(task, implementation) {
       return { type: "missing_evidence", reason: "ci_not_successful" };
     }
     if (!task.finalGate || task.finalGate.verdict !== "accept") {
-      return { type: "waiting_human", reason: "final_acceptance_missing" };
+      return { type: "missing_evidence", reason: "final_acceptance_missing" };
     }
+    return { type: "waiting_human", reason: "human_acceptance_required" };
   }
   return null;
 }
@@ -150,6 +220,8 @@ function deriveNextAction(duty, task, blocker) {
     delivery_evidence_missing: "请补充 commit、PR 和 CI 交付证据。",
     ci_not_successful: "请修复 CI 后重新核验交付。",
     final_acceptance_missing: "请核对证据并完成最终验收。",
+    human_acceptance_required: "请对照目标确认最终验收。",
+    final_acceptance_rejected: "验收已拒绝，请决定是否继续修复。",
     human_input_required: "等待用户提供信息或作出决定。",
   };
   if (blocker?.reason && blockerActions[blocker.reason]) return blockerActions[blocker.reason];

@@ -1,4 +1,5 @@
-import type { CollaborationSnapshot } from "./types";
+import { useState } from "react";
+import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "推进中",
@@ -26,6 +27,8 @@ const BLOCKER_LABELS: Record<string, string> = {
   delivery_evidence_missing: "等待交付证据",
   ci_not_successful: "CI 尚未通过",
   final_acceptance_missing: "等待最终验收",
+  human_acceptance_required: "等待用户对照目标验收",
+  final_acceptance_rejected: "最终验收已拒绝",
   human_input_required: "等待用户输入",
 };
 
@@ -39,9 +42,18 @@ interface CollaborationStatusProps {
   snapshot: CollaborationSnapshot | null;
   loading: boolean;
   error: Error | null;
+  onAcceptanceDecision?(
+    verdict: "accepted" | "rejected" | "incomplete",
+    note?: string
+  ): Promise<unknown>;
 }
 
-export function CollaborationStatus({ snapshot, loading, error }: CollaborationStatusProps) {
+export function CollaborationStatus({
+  snapshot,
+  loading,
+  error,
+  onAcceptanceDecision,
+}: CollaborationStatusProps) {
   return (
     <section className="react-collab-status" aria-label="任务卡">
       <header>
@@ -94,6 +106,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
             <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
             <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
+          <AcceptanceCardView card={snapshot.acceptance} onDecision={onAcceptanceDecision} />
           <p className="react-task-next-action">
             <small>下一步</small>
             {snapshot.nextAction}
@@ -101,6 +114,98 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
         </>
       ) : null}
     </section>
+  );
+}
+
+function AcceptanceCardView({
+  card,
+  onDecision,
+}: {
+  card: AcceptanceCard;
+  onDecision?: CollaborationStatusProps["onAcceptanceDecision"];
+}) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+
+  async function decide(verdict: "accepted" | "rejected" | "incomplete") {
+    if (!onDecision) return;
+    setSubmitting(true);
+    setDecisionError(null);
+    try {
+      await onDecision(verdict, note.trim() || undefined);
+      setOpen(false);
+    } catch (cause) {
+      setDecisionError(cause instanceof Error ? cause.message : "验收决定保存失败。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="react-acceptance-card" aria-label="验收卡" data-verdict={card.verdict}>
+      <header>
+        <strong>验收</strong>
+        <span>{acceptanceVerdictLabel(card.verdict)}</span>
+      </header>
+      <dl>
+        <AcceptanceFact label="目标" value={shortHash(card.goalHash)} />
+        <AcceptanceFact label="方案" value={shortHash(card.planHash)} />
+        <AcceptanceFact label="分支" value={card.branch || "unknown"} />
+        <AcceptanceFact
+          label="Commit"
+          value={card.commitSha ? shortSha(card.commitSha) : "unknown"}
+        />
+        <AcceptanceFact label="PR" value={card.prUrl ? "已核验" : "unknown"} />
+        <AcceptanceFact
+          label="CI"
+          value={card.ciStatus === "unknown" ? "unknown" : ciLabel(card.ciStatus)}
+        />
+        <AcceptanceFact
+          label="审查"
+          value={REVIEW_MODE_LABELS[card.reviewMode] || card.reviewMode}
+        />
+        <AcceptanceFact label="结论" value={reviewVerdictLabel(card.reviewVerdict)} />
+      </dl>
+      {card.reason && card.verdict !== "accepted" ? (
+        <p className="react-acceptance-reason">{acceptanceReasonLabel(card.reason)}</p>
+      ) : null}
+      {card.verdict !== "accepted" && onDecision ? (
+        <button className="react-acceptance-open" type="button" onClick={() => setOpen(true)}>
+          对照目标验收
+        </button>
+      ) : null}
+      {open ? (
+        <div className="react-acceptance-actions">
+          <label>
+            <span>验收说明（可选）</span>
+            <textarea value={note} rows={3} onChange={(event) => setNote(event.target.value)} />
+          </label>
+          {decisionError ? <p role="alert">{decisionError}</p> : null}
+          <div>
+            <button type="button" disabled={submitting} onClick={() => void decide("incomplete")}>
+              暂不验收
+            </button>
+            <button type="button" disabled={submitting} onClick={() => void decide("rejected")}>
+              拒绝交付
+            </button>
+            <button type="button" disabled={submitting} onClick={() => void decide("accepted")}>
+              确认验收
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AcceptanceFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd title={value}>{value}</dd>
+    </div>
   );
 }
 
@@ -160,4 +265,46 @@ function ciLabel(status: string | null) {
     unknown: "未知",
   };
   return labels[status] || status;
+}
+
+function shortHash(value: string | null) {
+  return value ? value.slice(0, 12) : "unknown";
+}
+
+function acceptanceVerdictLabel(verdict: AcceptanceCard["verdict"]) {
+  const labels: Record<AcceptanceCard["verdict"], string> = {
+    accepted: "已通过",
+    rejected: "已拒绝",
+    incomplete: "未完成",
+  };
+  return labels[verdict];
+}
+
+function reviewVerdictLabel(verdict: AcceptanceCard["reviewVerdict"]) {
+  const labels: Record<AcceptanceCard["reviewVerdict"], string> = {
+    approved: "通过",
+    changes_requested: "需修改",
+    unknown: "unknown",
+  };
+  return labels[verdict];
+}
+
+function acceptanceReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    human_acceptance_required: "等待用户对照目标作出最终决定。",
+    human_rejected: "用户已拒绝本次交付。",
+    human_marked_incomplete: "用户认为当前交付尚未完成。",
+    user_goal_missing: "缺少可核验的用户目标。",
+    solution_baseline_missing: "缺少与目标绑定的已批准方案。",
+    implementation_plan_not_approved: "实现方案尚未批准。",
+    code_review_not_approved: "代码审查尚未通过。",
+    code_review_artifact_missing: "缺少代码审查证据。",
+    delivery_not_bound_to_review: "交付未绑定到已通过的审查。",
+    delivery_commit_missing: "缺少可核验的提交。",
+    delivery_pr_missing: "缺少可核验的 PR。",
+    delivery_artifact_missing: "交付证据不完整。",
+    ci_not_successful: "CI 尚未通过。",
+    final_acceptance_not_bound_to_outcome: "Agent 验收证据未与当前目标、方案和提交绑定。",
+  };
+  return labels[reason] || reason;
 }

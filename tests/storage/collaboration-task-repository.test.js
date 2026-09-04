@@ -119,6 +119,19 @@ test("collaboration task repository rejects unknown phases and intents", () => {
   }
 });
 
+test("a done phase does not synthesize accepted without a Human decision", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    storage.threads.create({ id: "thread-1", title: "Collaboration" });
+    const saved = storage.collaborationTasks.save({ threadId: "thread-1", phase: "done" });
+    assert.equal(saved.phase, "done");
+    assert.equal(saved.taskStatus, "active");
+    assert.equal(storage.collaborationTasks.get("thread-1").taskStatus, "active");
+  } finally {
+    storage.close();
+  }
+});
+
 test("approved Grok plan hash survives a registry and database restart", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-plan-gate-"));
   const file = path.join(dir, "shift.sqlite");

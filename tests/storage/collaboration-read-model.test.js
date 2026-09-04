@@ -122,8 +122,104 @@ test("review mode compares implementer and reviewer Duty bindings", () => {
   assert.equal(sameSeat.reviewMode, "same_seat");
   assert.equal(otherSeat.reviewMode, "other_seat");
   assert.deepEqual(otherSeat.blocker, {
-    type: "waiting_human",
+    type: "missing_evidence",
     reason: "final_acceptance_missing",
   });
   assert.equal(otherSeat.evidence.commitSha, "b".repeat(40));
+});
+
+test("acceptance card exposes the bound goal, plan, Git, CI, and Human verdict", () => {
+  const commitSha = "c".repeat(40);
+  const snapshot = projectCollaboration(
+    {
+      phase: "done",
+      taskStatus: "accepted",
+      artifacts: {
+        userGoal: { hash: "goal-hash-1" },
+        implementationPlan: { hash: "plan-hash-1" },
+        acceptanceDecision: {
+          verdict: "accepted",
+          goalHash: "goal-hash-1",
+          planHash: "plan-hash-1",
+          commitSha,
+          decidedAt: "2026-09-04T00:00:00.000Z",
+        },
+      },
+      implementationGate: { approvedPlanHash: "plan-hash-1" },
+      codeReviewGate: { verdict: "approve", evidenceHash: "review-1" },
+      deliveryGate: {
+        commitSha,
+        branch: "codex/acceptance",
+        prUrl: "https://example.test/pr/7",
+        ciStatus: "success",
+      },
+    },
+    null,
+    {
+      acceptanceReadiness: { ok: true, reason: null },
+      workspace: { branch: "codex/acceptance", headSha: commitSha },
+      bindings: [
+        { seatId: "seat-codex", duty: "implement" },
+        { seatId: "seat-codex", duty: "review" },
+      ],
+    }
+  );
+
+  assert.equal(snapshot.status, "accepted");
+  assert.equal(snapshot.blocker, null);
+  assert.deepEqual(snapshot.acceptance, {
+    evidenceProfile: "code_change",
+    goalHash: "goal-hash-1",
+    planHash: "plan-hash-1",
+    branch: "codex/acceptance",
+    headSha: commitSha,
+    commitSha,
+    prUrl: "https://example.test/pr/7",
+    ciStatus: "success",
+    reviewMode: "same_seat",
+    reviewVerdict: "approved",
+    verdict: "accepted",
+    ready: true,
+    reason: null,
+    decidedAt: "2026-09-04T00:00:00.000Z",
+  });
+});
+
+test("legacy done state and stale Human decisions cannot project as accepted", () => {
+  const commitSha = "d".repeat(40);
+  const legacy = projectCollaboration(
+    { phase: "done", taskStatus: "accepted", artifacts: {}, deliveryGate: { commitSha } },
+    null,
+    { acceptanceReadiness: { ok: true, reason: null } }
+  );
+  assert.equal(legacy.status, "active");
+  assert.equal(legacy.acceptance.verdict, "incomplete");
+  assert.deepEqual(legacy.blocker, {
+    type: "waiting_human",
+    reason: "human_acceptance_required",
+  });
+
+  const stale = projectCollaboration(
+    {
+      phase: "done",
+      taskStatus: "accepted",
+      artifacts: {
+        userGoal: { hash: "new-goal" },
+        implementationPlan: { hash: "plan-1" },
+        acceptanceDecision: {
+          verdict: "accepted",
+          goalHash: "old-goal",
+          planHash: "plan-1",
+          commitSha,
+        },
+      },
+      implementationGate: { approvedPlanHash: "plan-1" },
+      deliveryGate: { commitSha, ciStatus: "success" },
+    },
+    null,
+    { acceptanceReadiness: { ok: true, reason: null } }
+  );
+  assert.equal(stale.status, "active");
+  assert.equal(stale.acceptance.verdict, "incomplete");
+  assert.equal(stale.acceptance.reason, "human_acceptance_required");
 });
