@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  parseImplementationPlan,
   parseSolutionBaseline,
   parseCodeReview,
   parseDeliveryReceipt,
@@ -40,6 +41,21 @@ function processWorkflowEvidenceOutput(input = {}) {
       events.push({
         event: result.accepted ? "final-acceptance-submitted" : "final-acceptance-rejected",
         payload: summarize(result, ["verdict", "acceptanceHash"]),
+      });
+    }
+  }
+
+  if (["plan", "implement", "fix"].includes(duty)) {
+    const plan = parseImplementationPlan(content);
+    if (plan || !registry.implementationPermission(threadId).allowed) {
+      const result = registry.submitImplementationPlan(threadId, {
+        actorAgentId: agent,
+        actorDuty: duty,
+        plan,
+      });
+      events.push({
+        event: result.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
+        payload: summarize(result, ["planHash", "reused"]),
       });
     }
   }

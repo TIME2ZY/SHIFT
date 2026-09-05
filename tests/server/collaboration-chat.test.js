@@ -29,9 +29,9 @@ async function chatAndConfirm(baseUrl, sessionId, body, edits, beforeConfirm) {
 
   let previews = [];
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    previews = await apiFetch(
-      `${baseUrl}/api/sessions/${sessionId}/handoff-previews`
-    ).then((response) => response.json()).then((payload) => payload.previews);
+    previews = await apiFetch(`${baseUrl}/api/sessions/${sessionId}/handoff-previews`)
+      .then((response) => response.json())
+      .then((payload) => payload.previews);
     if (previews.length > 0) break;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -140,6 +140,157 @@ const IMPLEMENT_HANDOFF = [
   "next_action: 按批准方案实现，本轮先确认不改文件\n",
   "```",
 ].join("");
+
+test("each Provider persists plan Duty output through the chat API", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-plan-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const server = createServer({
+    storageMode: "sqlite",
+    storage,
+    spawnRunner: () => spawnText(IMPLEMENTATION_PLAN),
+    worktreeManager: worktreeManager(tmpDir),
+    uiToken: UI_TOKEN,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const agent of ["codex", "gemini", "grok", "opencode"]) {
+      const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        body: JSON.stringify({ projectKey }),
+      }).then((response) => response.json());
+      for (const seat of storage.threadSeats.listForThread(session.id)) {
+        storage.threadSeats.configure(seat.seatId, { enabled: seat.providerId === agent });
+      }
+      const response = await apiFetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: session.id,
+          agent,
+          prompt: "提交实现方案",
+          duty: "plan",
+          useWorktree: true,
+        }),
+      });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /event: implementation-plan-submitted/, agent);
+      const task = storage.collaborationTasks.get(session.id);
+      assert.equal(task.implementationGate.status, "pending_approval", agent);
+      assert.equal(task.artifacts.implementationPlan.proposedBy, agent);
+      const { collaboration } = await apiFetch(
+        `${baseUrl}/api/sessions/${session.id}/collaboration`
+      ).then((r) => r.json());
+      assert.equal(collaboration.currentDuty, "plan");
+      assert.equal(collaboration.blocker.reason, "implementation_plan_not_approved");
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("confirmed chat hops honor the depth limit and finish every accepted target", async () => {
+  const previousDepth = process.env.MAX_A2A_DEPTH;
+  process.env.MAX_A2A_DEPTH = "2";
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-depth-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const spawned = [];
+  const server = createServer({
+    storageMode: "sqlite",
+    storage,
+    uiToken: UI_TOKEN,
+    spawnRunner(_command, args) {
+      const agent = agentFromArgs(args);
+      spawned.push(agent);
+      if (spawned.length > 4) return spawnText("Stop the test chain.");
+      const target = agent === "codex" ? "gemini" : "codex";
+      return spawnText(
+        [
+          `@${target} continue`,
+          "```handoff",
+          `to: ${target}`,
+          "intent: discuss",
+          "what: Compare the options",
+          "why: Verify the reasoning",
+          "next_action: Read the evidence",
+          "```",
+        ].join("\n")
+      );
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    }).then((response) => response.json());
+    const response = await apiFetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: session.id,
+        agent: "codex",
+        prompt: "Compare the options",
+      }),
+    });
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let stream = "";
+    let confirmations = 0;
+    for await (const chunk of response.body) {
+      const text = decoder.decode(chunk, { stream: true });
+      stream += text;
+      buffer += text;
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (!frame.startsWith("event: handoff-preview\n")) continue;
+        const preview = JSON.parse(frame.slice(frame.indexOf("data: ") + 6));
+        const confirmed = await apiFetch(
+          `${baseUrl}/api/sessions/${session.id}/handoff-previews/${preview.previewId}/confirm`,
+          {
+            method: "POST",
+            body: "{}",
+          }
+        );
+        assert.equal(confirmed.status, 200);
+        confirmations += 1;
+      }
+    }
+    assert.equal(confirmations, 2);
+    assert.deepEqual(spawned, ["codex", "gemini", "codex"]);
+    assert.match(stream, /"reason":"max_depth"/);
+    const { traces } = await apiFetch(`${baseUrl}/api/sessions/${session.id}/traces`).then((r) =>
+      r.json()
+    );
+    const { trace } = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/traces/${traces[0].traceId}`
+    ).then((r) => r.json());
+    assert.equal(trace.state, "completed");
+    assert.equal(trace.invocations.length, 3);
+    assert.ok(trace.invocations.every((invocation) => invocation.state === "completed"));
+    assert.deepEqual(
+      trace.handoffs.map((handoff) => handoff.depth),
+      [1, 2]
+    );
+    assert.ok(trace.handoffs.every((handoff) => handoff.targetInvocationId));
+    assert.ok(trace.handoffs.every((handoff) => handoff.completeStatus === "completed"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (previousDepth === undefined) delete process.env.MAX_A2A_DEPTH;
+    else process.env.MAX_A2A_DEPTH = previousDepth;
+  }
+});
 
 test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-chat-"));

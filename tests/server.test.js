@@ -1494,6 +1494,8 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
   };
   const implementationPlanHash = hashImplementationPlan(implementationPlan);
   const commitSha = "a".repeat(40);
+  let workspaceHead = commitSha;
+  let workspaceDirty = false;
   const prUrl = "https://github.com/acme/repo/pull/7";
   const branch = "codex/session-pr4";
   const runs = [];
@@ -1583,6 +1585,12 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
   await withServer(
     {
       worktreeManager: {
+        getStatus() {
+          return {
+            headSha: workspaceHead,
+            porcelain: workspaceDirty ? [" M src/audited-delivery.js"] : [],
+          };
+        },
         ensureWorktree({ sessionId }) {
           return {
             sessionId,
@@ -1687,6 +1695,21 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       assert.equal(pending.collaboration.acceptance.ready, true);
       assert.equal(pending.collaboration.acceptance.verdict, "incomplete");
 
+      workspaceHead = "b".repeat(40);
+      const staleDecision = await fetch(
+        `${baseUrl}/api/sessions/${session.id}/collaboration/acceptance`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            verdict: "accepted",
+            workspace: { headSha: commitSha, porcelain: [] },
+          }),
+        }
+      ).then((result) => result.json());
+      assert.equal(staleDecision.collaboration.acceptance.verdict, "incomplete");
+      assert.equal(staleDecision.collaboration.acceptance.reason, "acceptance_head_mismatch");
+      workspaceHead = commitSha;
       const decision = await fetch(
         `${baseUrl}/api/sessions/${session.id}/collaboration/acceptance`,
         {
@@ -1700,6 +1723,13 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       assert.equal(accepted.collaboration.status, "accepted");
       assert.equal(accepted.collaboration.phase, "done");
       assert.equal(accepted.collaboration.acceptance.verdict, "accepted");
+      workspaceDirty = true;
+      const dirty = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(dirty.collaboration.acceptance.verdict, "incomplete");
+      assert.equal(dirty.collaboration.acceptance.reason, "acceptance_worktree_dirty");
+      assert.equal(dirty.collaboration.blocker.reason, "acceptance_worktree_dirty");
     }
   );
 });
@@ -2454,60 +2484,62 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   callbacks.unregisterThread(sessionId);
 });
 
-test("Grok callback persists a concrete plan before routing it for Codex approval", () => {
-  const sessionId = "session-cb-grok-plan";
-  const invocationId = "invocation-cb-grok-plan";
-  const sse = [];
-  const registry = createCollabTaskRegistry();
-  registry.ensureImplementationPlanRequired(sessionId, { requestedBy: "codex" });
-  const threadCtx = {
-    res: {
-      destroyed: false,
-      writableEnded: false,
-      write(chunk) {
-        sse.push(chunk);
-        return true;
+for (const provider of ["codex", "gemini", "grok", "opencode"]) {
+  test(`${provider} callback persists a concrete plan regardless of permission capability`, () => {
+    const sessionId = `session-cb-${provider}-plan`;
+    const invocationId = `invocation-cb-${provider}-plan`;
+    const sse = [];
+    const registry = createCollabTaskRegistry();
+    registry.ensureImplementationPlanRequired(sessionId, { requestedBy: "codex" });
+    const threadCtx = {
+      res: {
+        destroyed: false,
+        writableEnded: false,
+        write(chunk) {
+          sse.push(chunk);
+          return true;
+        },
       },
-    },
-    worklist: ["grok"],
-    controller: new AbortController(),
-    a2aCount: 0,
-    useWorktree: true,
-    collabTaskRegistry: registry,
-    currentDutyBinding: {
-      seatId: `seat-${sessionId}-grok`,
-      duty: "plan",
-      skillName: "implementation-plan",
-      routingReason: "sticky",
-      enforcementLevel: "enforced",
-    },
-    tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
-    ...callbackSeatRouting(sessionId),
-  };
-  callbacks.registerThread(sessionId, threadCtx);
+      worklist: [provider],
+      controller: new AbortController(),
+      a2aCount: 0,
+      useWorktree: true,
+      collabTaskRegistry: registry,
+      currentDutyBinding: {
+        seatId: `seat-${sessionId}-${provider}`,
+        duty: "plan",
+        skillName: "implementation-plan",
+        routingReason: "sticky",
+        enforcementLevel: provider === "grok" ? "enforced" : "advisory",
+      },
+      tokens: new Map([[invocationId, { agentId: provider, callbackToken: "token" }]]),
+      ...callbackSeatRouting(sessionId),
+    };
+    callbacks.registerThread(sessionId, threadCtx);
 
-  try {
-    const content = [
-      "```implementation_plan",
-      "summary: Implement the callback change",
-      "files:",
-      "  - src/callback-change.js",
-      "changes:",
-      "  - Add the requested callback behavior",
-      "tests:",
-      "  - node --test tests/callback-change.test.js",
-      "```",
-    ].join("\n");
-    const result = callbacks.postMessage(sessionId, invocationId, content);
+    try {
+      const content = [
+        "```implementation_plan",
+        "summary: Implement the callback change",
+        "files:",
+        "  - src/callback-change.js",
+        "changes:",
+        "  - Add the requested callback behavior",
+        "tests:",
+        "  - node --test tests/callback-change.test.js",
+        "```",
+      ].join("\n");
+      const result = callbacks.postMessage(sessionId, invocationId, content);
 
-    assert.equal(result.ok, true);
-    assert.equal(registry.getTask(sessionId).implementationGate.status, "pending_approval");
-    assert.match(registry.getTask(sessionId).implementationGate.planHash, /^[a-f0-9]{16}$/);
-    assert.match(sse.join(""), /event: implementation-plan-submitted/);
-  } finally {
-    callbacks.unregisterThread(sessionId);
-  }
-});
+      assert.equal(result.ok, true);
+      assert.equal(registry.getTask(sessionId).implementationGate.status, "pending_approval");
+      assert.match(registry.getTask(sessionId).implementationGate.planHash, /^[a-f0-9]{16}$/);
+      assert.match(sse.join(""), /event: implementation-plan-submitted/);
+    } finally {
+      callbacks.unregisterThread(sessionId);
+    }
+  });
+}
 
 test("callbacks.postMessage captures structured handoff only for an enqueued target", () => {
   const sessionId = "session-cb-memory";

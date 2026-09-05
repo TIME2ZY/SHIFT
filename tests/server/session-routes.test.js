@@ -274,7 +274,7 @@ test("final acceptance route records a trusted Human decision and returns its ca
     collabTaskRegistry: {
       decideFinalAcceptance(_threadId, input) {
         decisionInput = input;
-        return { recorded: true, task };
+        return { recorded: true, task, readiness: { ok: true, reason: null } };
       },
       acceptanceReadiness: () => ({ ok: true, reason: null }),
       implementationPermission: () => null,

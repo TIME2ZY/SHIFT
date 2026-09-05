@@ -154,7 +154,7 @@ function baseDeps(res, overrides = {}) {
     readJsonBody: async () => ({}),
     buildChatArgs: () => [],
     augmentPrompt: () => ({ augmentedPrompt: "", skillNames: [] }),
-    getMaxA2ADepth: () => 0,
+    getMaxA2ADepth: () => 15,
     parseA2AMentions: () => [],
     filterBenignStderr: (text) => text,
     runChildStream: async () => ({ code: 0, signal: null }),
@@ -273,6 +273,10 @@ test("a slower older chat request cannot abort the newer request", async () => {
     },
     readJsonBody: async (req) => req.body,
     appendToSession: (...args) => appended.push(args),
+    sendSse(response, event) {
+      // This test covers request preparation; disconnect once the newer request starts SSE.
+      if (event === "session") response.destroyed = true;
+    },
   });
   const handler = chatRoutes.createChatRoutes(deps);
   const req1 = makeReq("POST");
@@ -289,6 +293,7 @@ test("a slower older chat request cannot abort the newer request", async () => {
   await Promise.resolve();
 
   assert.equal(pendingBootstraps.length, 2);
+  const newerController = activeInvocations.get("s1");
   pendingBootstraps[1]();
   await second;
   pendingBootstraps[0]();
@@ -298,6 +303,7 @@ test("a slower older chat request cannot abort the newer request", async () => {
   assert.match(res1.body.error, /superseded/);
   assert.equal(appended.length, 1);
   assert.equal(appended[0][1].content, "newer");
+  assert.equal(newerController.signal.aborted, false);
 });
 
 test("chat preparation failure closes the durable trace", async () => {

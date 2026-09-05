@@ -74,7 +74,8 @@ function finalizeA2ARoutes(input = {}) {
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
-  let a2aCount = Number.isFinite(Number(input.a2aCount)) ? Number(input.a2aCount) : 0;
+  const a2aState = input.a2aState || {};
+  a2aState.a2aCount ??= Number.isFinite(Number(input.a2aCount)) ? Number(input.a2aCount) : 0;
   const mode = input.policyMode || resolveHandoffPolicyMode();
   const mentionParser =
     typeof input.parseMentions === "function" ? input.parseMentions : parseA2AMentions;
@@ -232,7 +233,8 @@ function finalizeA2ARoutes(input = {}) {
       }
     }
 
-    if (a2aCount >= maxDepth) {
+    function skipAtDepthLimit() {
+      if (a2aState.a2aCount < maxDepth) return false;
       const skip = {
         from: fromAgent,
         to: targetAgent,
@@ -255,8 +257,10 @@ function finalizeA2ARoutes(input = {}) {
         appendToSession,
         source,
       });
-      continue;
+      return true;
     }
+
+    if (skipAtDepthLimit()) continue;
 
     if (!canEnqueue(decision)) {
       // Phase/task reject vs handoff repair (incomplete fence).
@@ -327,6 +331,7 @@ function finalizeA2ARoutes(input = {}) {
     }
 
     const enqueueRoute = (routeHandoff, routeQuality, routeDecision, routeContentHash) => {
+      if (skipAtDepthLimit()) return null;
       if (!durableRecorder || typeof durableRecorder.acceptHandoff !== "function") {
         throw new Error("A2A finalize requires durable Handoff storage.");
       }
@@ -336,7 +341,7 @@ function finalizeA2ARoutes(input = {}) {
         targetAgentId: targetAgent,
         sourceInvocationId: invocationId || null,
         contentHash: routeContentHash,
-        depth: a2aCount + 1,
+        depth: a2aState.a2aCount + 1,
         parseStatus,
         policy: routeDecision,
         source,
@@ -384,8 +389,7 @@ function finalizeA2ARoutes(input = {}) {
         worklist.pop();
         throw error;
       }
-      a2aCount += 1;
-      updateA2ACount(input, a2aCount);
+      a2aState.a2aCount += 1;
       const entry = {
         from: fromAgent,
         to: targetAgent,
@@ -527,8 +531,6 @@ function finalizeA2ARoutes(input = {}) {
     enqueueRoute(handoff, quality, decision, contentHash);
   }
 
-  updateA2ACount(input, a2aCount);
-
   const metrics = buildFinalizeMetrics({
     source,
     mode,
@@ -554,7 +556,9 @@ function finalizeA2ARoutes(input = {}) {
     handoffByTarget,
     handoffQualityByTarget,
     mode,
-    a2aCount,
+    get a2aCount() {
+      return a2aState.a2aCount;
+    },
     metrics,
     capturedCount,
     hopRecords,
@@ -562,14 +566,6 @@ function finalizeA2ARoutes(input = {}) {
     previews,
     effectiveHops: hopRecords.filter(isEffectiveHandoffHop),
   };
-}
-
-function updateA2ACount(input, count) {
-  if (typeof input.onA2ACount === "function") {
-    input.onA2ACount(count);
-  } else if (input.a2aState && typeof input.a2aState === "object") {
-    input.a2aState.a2aCount = count;
-  }
 }
 
 function emitHandoffParsed({ summary, threadId, invocationId, eventStore, sendSse }) {

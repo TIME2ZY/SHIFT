@@ -30,6 +30,9 @@ const BLOCKER_LABELS: Record<string, string> = {
   human_acceptance_required: "等待用户对照目标验收",
   final_acceptance_rejected: "最终验收已拒绝",
   human_input_required: "等待用户输入",
+  acceptance_workspace_unavailable: "无法读取当前工作区",
+  acceptance_worktree_dirty: "工作区存在未提交改动",
+  acceptance_head_mismatch: "当前提交与交付证据不一致",
 };
 
 const REVIEW_MODE_LABELS: Record<string, string> = {
@@ -301,6 +304,9 @@ function acceptanceReasonLabel(reason: string) {
     code_review_artifact_missing: "缺少代码审查证据。",
     delivery_not_bound_to_review: "交付未绑定到已通过的审查。",
     delivery_commit_missing: "缺少可核验的提交。",
+    acceptance_workspace_unavailable: "无法读取当前工作区，请恢复访问后重新核验。",
+    acceptance_worktree_dirty: "工作区存在未提交改动，请重新核验交付证据。",
+    acceptance_head_mismatch: "当前 HEAD 与已核验提交不一致，请重新审查并核验交付。",
     delivery_pr_missing: "缺少可核验的 PR。",
     delivery_artifact_missing: "交付证据不完整。",
     ci_not_successful: "CI 尚未通过。",

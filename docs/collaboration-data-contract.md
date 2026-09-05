@@ -172,6 +172,15 @@ AcceptanceEvidence {
 4. review changes requested 使 final acceptance 失效并要求 implement/fix Duty；
 5. CI failure 不能产生 `code_change` 的 accepted；CI unknown 是否阻断由显式策略决定。
 
+当前 `code_change` 完成路径的 Human 决定必须在写入前读取 Thread 绑定的 Git worktree：工作区应干净，HEAD
+必须匹配已核验的 delivery commit。读取失败、缺少工作区或绑定不匹配时，请求 `accepted`
+应记录为 `incomplete` 并给出原因。任务卡的 readiness 使用同一检查，不能仅凭 SQLite 中的
+历史交付引用继续显示可验收。已有 Human 决定保留为历史事实，当前证据不匹配时不投影为已验收。
+
+`implementation_plan` 的提交只依据 `plan | implement | fix` Duty 和方案内容；正文与
+callback 共用 `processWorkflowEvidenceOutput`，再进入唯一 `submitImplementationPlan`
+写入口。Provider 的权限回调能力只决定工具写权限能否强制执行，不决定方案是否可落库。
+
 Evidence profile 最低要求：
 
 | Profile               | 必需字段                                        |
@@ -216,3 +225,7 @@ escalation。没有 mention/handoff 时禁止仅因 Duty 改变而换 Seat。
 handoff preview/confirm 是请求内的 Human 确认门禁；未确认内容不是业务事实，只保存在运行时，
 取消、超时或重启都不产生 durable handoff。确认后仍通过既有 `finalizeA2ARoutes` 与 handoff
 repository 的唯一 accept/enqueue 路径持久化和消费。
+
+请求内所有正文、callback 和待确认交接共享同一个 A2A 计数。实际入队成功后才增加计数；
+确认时重新检查上限，不得把预览生成时的快照回写运行状态。已接受的目标必须执行并收口，
+达到上限仅阻止继续接受下一次交接，不能留下已入队但未启动的目标。

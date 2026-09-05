@@ -212,6 +212,52 @@ test("cancelling a preview creates no durable handoff or target work", async () 
   assert.equal(result.skipped[0].reason, "confirmation_cancelled");
 });
 
+test("pending callback and final-output previews share the confirmation-time depth limit", () => {
+  const worklist = ["codex"];
+  const state = { a2aCount: 0, a2aCauses: [] };
+  const gate = createHandoffConfirmationGate({ timeoutMs: 1000 });
+  const acceptedDepths = [];
+  const input = {
+    fromAgent: "codex",
+    sessionId: "shared-depth",
+    worklist,
+    a2aState: state,
+    maxDepth: 1,
+    handoffConfirmations: gate,
+    durableRecorder: {
+      acceptHandoff(route) {
+        acceptedDepths.push(route.depth);
+        return {
+          accepted: true,
+          status: "accepted",
+          record: { handoffId: "shared-hop", depth: route.depth },
+        };
+      },
+      markHandoffEnqueued: () => ({ enqueuedAt: new Date().toISOString() }),
+    },
+  };
+  const callback = finalizeA2ARoutes({
+    ...input,
+    invocationId: "callback-source",
+    source: "callback",
+    text: completeHandoffText("opencode"),
+  });
+  const finalOutput = finalizeA2ARoutes({
+    ...input,
+    invocationId: "final-source",
+    text: completeHandoffText("grok"),
+  });
+  assert.equal(gate.list("shared-depth").length, 2);
+  gate.confirm("shared-depth", callback.previews[0].previewId);
+  gate.confirm("shared-depth", finalOutput.previews[0].previewId);
+  assert.deepEqual(acceptedDepths, [1]);
+  assert.equal(state.a2aCount, 1);
+  assert.equal(finalOutput.a2aCount, 1);
+  assert.deepEqual(worklist, ["codex", "opencode"]);
+  assert.equal(finalOutput.skipped[0].reason, "max_depth");
+  assert.equal(gate.list("shared-depth").length, 0);
+});
+
 test("finalize removes the in-memory enqueue when durable confirmation fails", () => {
   const worklist = ["codex"];
   assert.throws(

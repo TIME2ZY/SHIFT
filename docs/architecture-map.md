@@ -141,6 +141,9 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   `acceptHandoff` 写入口，`enqueued_at` 只在 worklist 实际追加后确认。
 - 待确认预览仅存在于服务进程内存；取消、超时、源请求停止或服务重启都会释放它，不创建
   `handoffs` 行或目标 invocation。服务重启丢失预览不会伪造已交接事实。
+- 正文与 callback 的预览共享请求内 `a2aState.a2aCount`；finalize 在确认入队时再次检查上限，
+  持久化 enqueue 成功后递增。调度器不再回写 finalize 的计数快照，也不按已接受次数跳过
+  worklist 中尚未运行的目标；达到上限只拒绝新的交接。
 - A2A 固定 Agent ID/岗位 allowlist 已退出路由策略；明确 mention/handoff 仅能命中当前 Thread 的
   enabled Seat，目标未启用时不降级、不静默改派。Duty 由 handoff intent 确定，单独改变 Duty 不换 Seat。
 - accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
@@ -292,14 +295,15 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                              | 责任方 / 调用方                | 结果                                                                  |
-| --------------------- | ----------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------- |
-| 代码 review           | `processWorkflowEvidenceOutput`                       | 当前 `review` / `deliver` Duty | changes requested 直接形成事件；approve 继续交付核验                  |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | 当前交付 Duty 后由平台只读核对 | 返回真实 Git/GitHub evidence                                          |
-| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery` | collab task registry           | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
-| Agent 目标核验        | `submitFinalAcceptance`                               | 当前 `accept` Duty             | 绑定 goal、solution、plan、review 与 commit hash，不写完成态          |
-| Human 最终决定        | `decideFinalAcceptance` ← session-routes              | 本地用户                       | 唯一写入 accepted/rejected/incomplete 与 `final_acceptance_decided`   |
-| 任务/验收卡只读       | `projectCollaboration` ← session-routes               | UI / live harness              | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
+| 步骤                  | 权威入口                                                     | 责任方 / 调用方                                  | 结果                                                                  |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------- |
+| 实现方案证据          | `processWorkflowEvidenceOutput` → `submitImplementationPlan` | 正文与 callback 的 `plan / implement / fix` Duty | 与 Provider 权限回调能力无关；新方案撤销旧批准                        |
+| 代码 review           | `processWorkflowEvidenceOutput`                              | 当前 `review` / `deliver` Duty                   | changes requested 直接形成事件；approve 继续交付核验                  |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                          | 当前交付 Duty 后由平台只读核对                   | 返回真实 Git/GitHub evidence                                          |
+| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery`        | collab task registry                             | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
+| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 绑定 goal、solution、plan、review 与 commit hash，不写完成态          |
+| Human 最终决定        | `decideFinalAcceptance` ← session-routes                     | 本地用户                                         | 唯一写入 accepted/rejected/incomplete 与 `final_acceptance_decided`   |
+| 任务/验收卡只读       | `projectCollaboration` ← session-routes                      | UI / live harness                                | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
 
 `GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
 无 task 仍返回 SQLite 席位条；有 task 从 `collaboration_tasks`、latest DutyBinding 和 Git worktree
@@ -308,9 +312,13 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 Agent 的结构化 `final_acceptance` 只是逐项核验证据，不能把任务推进到 `done`。用户通过
 `POST /api/sessions/:sessionId/collaboration/acceptance` 作出最终决定；服务端固定记录可信
-Human actor。请求 `accepted` 时仍会重新检查 goal、solution、plan、review、commit、PR 与 CI
-绑定，证据不足则持久化为 `incomplete`。验收决定绑定当前 goal、plan 与 commit；任一上游事实
-变化都会清除旧决定。旧数据只有 phase=`done` 而没有匹配的 Human 决定时，也不会投影为已验收。
+Human actor。`workflow-readiness` 承载从 registry 移出的方案、交付和完成证据检查，registry
+不再导出旧的独立 readiness helper。请求 `accepted` 时检查 goal、solution、plan、review、
+commit、PR 与 CI 绑定，并通过 composition root 注入的 `worktreeManager.getStatus` 读取当前
+Thread 的工作区；HEAD 不匹配、工作区不干净或读取失败时持久化为 `incomplete`。POST 响应复用
+本次写入前检查的快照，不在写入后另读工作区充当验收依据。GET readiness 使用同一检查。
+SQLite 上游证据变化会清除旧决定；Git 外部变化不会改写历史决定，但当前卡片不再投影为已验收。
+旧数据只有 phase=`done` 而没有匹配的 Human 决定时，也不会投影为已验收。
 
 承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、

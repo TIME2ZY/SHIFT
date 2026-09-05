@@ -77,7 +77,9 @@ function approveConcretePlan(registry) {
 }
 
 test("five-phase registry follows discuss, implement, review, deliver, done", () => {
-  const registry = createCollabTaskRegistry();
+  const registry = createCollabTaskRegistry({
+    readWorkspace: () => ({ headSha: "a".repeat(40), porcelain: [] }),
+  });
 
   assert.equal(
     route(registry, { fromAgent: "codex", toAgent: "gemini", intent: "discuss" }).phase,
@@ -313,8 +315,14 @@ test("plan Duty cannot route until the solution baseline matches the original us
   );
 });
 
-test("delivery and acceptance Duties bind real PR evidence to every outcome hash", () => {
-  const registry = createCollabTaskRegistry();
+test("delivery and Human acceptance bind outcome hashes to the current worktree", async () => {
+  let workspace = { headSha: "a".repeat(40), porcelain: [] };
+  const registry = createCollabTaskRegistry({
+    readWorkspace: () => {
+      if (workspace instanceof Error) throw workspace;
+      return workspace;
+    },
+  });
   const baseline = establishSolutionBaseline(registry);
   route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
   const implementation = submitConcretePlan(registry);
@@ -398,6 +406,39 @@ test("delivery and acceptance Duties bind real PR evidence to every outcome hash
     }),
     { recorded: false, reason: "final_decision_requires_human" }
   );
+  const { createSessionRoutes } = require("../../src/server/session-routes");
+  async function acceptanceRequest(method = "POST") {
+    const res = {};
+    const handler = createSessionRoutes({
+      collabTaskRegistry: registry,
+      getSession: () => ({ id: "thread-1" }),
+      readJsonBody: async () => ({ verdict: "accepted" }),
+      sendJson: (_res, status, body) => Object.assign(res, { status, body }),
+    });
+    const suffix = method === "POST" ? "/acceptance" : "";
+    await handler(
+      { method },
+      res,
+      new URL(`http://localhost/api/sessions/thread-1/collaboration${suffix}`)
+    );
+    return res;
+  }
+  for (const [snapshot, reason] of [
+    [{ headSha: "b".repeat(40), porcelain: [] }, "acceptance_head_mismatch"],
+    [{ headSha: commitSha, porcelain: [" M src/workflow.js"] }, "acceptance_worktree_dirty"],
+    [null, "acceptance_workspace_unavailable"],
+    [{ headSha: commitSha }, "acceptance_workspace_unavailable"],
+    [new Error("Git unavailable"), "acceptance_workspace_unavailable"],
+  ]) {
+    workspace = snapshot;
+    const response = await acceptanceRequest();
+    assert.equal(response.status, 200);
+    assert.equal(response.body.collaboration.acceptance.verdict, "incomplete");
+    assert.equal(response.body.collaboration.acceptance.reason, reason);
+    assert.notEqual(registry.getTask("thread-1").phase, STATE.DONE);
+    assert.equal(registry.getTask("thread-1").history.at(-1).reason, reason);
+  }
+  workspace = { headSha: commitSha, porcelain: [] };
   const completed = registry.decideFinalAcceptance("thread-1", {
     actorKind: "human",
     actorId: "local-user",
@@ -411,6 +452,13 @@ test("delivery and acceptance Duties bind real PR evidence to every outcome hash
   assert.equal(decisionEvent.type, "final_acceptance_decided");
   assert.equal(decisionEvent.actorKind, "human");
   assert.equal(decisionEvent.actorId, "local-user");
+
+  workspace = { headSha: "b".repeat(40), porcelain: [] };
+  const stale = await acceptanceRequest("GET");
+  assert.equal(stale.body.collaboration.acceptance.verdict, "incomplete");
+  assert.equal(stale.body.collaboration.acceptance.reason, "acceptance_head_mismatch");
+  assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision.verdict, "accepted");
+  workspace = { headSha: commitSha, porcelain: [] };
 
   registry.updateTask("thread-1", {
     deliveryGate: { ...completed.task.deliveryGate, commitSha: null },

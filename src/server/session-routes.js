@@ -103,8 +103,10 @@ function createSessionRoutes({
           ? collabTaskRegistry.implementationPermission(sessionId)
           : null;
       const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
-      const workspace = readWorkspace(sessionId);
       const acceptanceReadiness = collabTaskRegistry?.acceptanceReadiness?.(sessionId) || null;
+      const workspace = acceptanceReadiness
+        ? acceptanceReadiness.workspace
+        : readWorkspace(sessionId);
       sendJson(res, 200, {
         collaboration: projectCollaboration(task, permission, {
           bindings,
@@ -142,13 +144,13 @@ function createSessionRoutes({
         const seats = threadSeats?.listEnabledForThread?.(sessionId) || [];
         const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
         const permission = collabTaskRegistry?.implementationPermission?.(sessionId) || null;
-        const acceptanceReadiness = collabTaskRegistry?.acceptanceReadiness?.(sessionId) || null;
+        const acceptanceReadiness = result.readiness;
         sendJson(res, 200, {
           recorded: true,
           collaboration: projectCollaboration(task, permission, {
             bindings,
             seats,
-            workspace: readWorkspace(sessionId),
+            workspace: acceptanceReadiness?.workspace,
             acceptanceReadiness,
           }),
           seats: projectSeats(seats),

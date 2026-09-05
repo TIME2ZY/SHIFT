@@ -141,7 +141,7 @@ async function runChatWorklist(ctx) {
   }
 
   try {
-    for (let i = 0; i < worklist.length && threadCtx.a2aCount < maxDepth; i++) {
+    for (let i = 0; i < worklist.length; i++) {
       if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
         aborted = true;
         break;
@@ -1299,30 +1299,6 @@ async function runChatWorklist(ctx) {
         durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
       }
 
-      if (
-        enforcesImplementationPermission &&
-        !implementationPermission?.allowed &&
-        collabTaskRegistry &&
-        typeof collabTaskRegistry.submitImplementationPlan === "function"
-      ) {
-        const submission = collabTaskRegistry.submitImplementationPlan(sessionId, {
-          actorAgentId: agent,
-          actorDuty: dutyBinding?.duty,
-          content: assistantContent,
-        });
-        sendSse(
-          res,
-          submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
-          {
-            agent,
-            invocationId: finalInvocationId,
-            accepted: submission.accepted,
-            reason: submission.reason,
-            planHash: submission.planHash || null,
-          }
-        );
-      }
-
       const workflowEvidenceEvents = processWorkflowEvidenceOutput({
         agent,
         duty: dutyBinding?.duty,
@@ -1374,7 +1350,6 @@ async function runChatWorklist(ctx) {
         windowId: durableRun?.window?.id || null,
         useWorktree: Boolean(useWorktree),
         worklist,
-        a2aCount: threadCtx.a2aCount,
         maxDepth,
         memoryCapture: memories,
         eventStore: events,
@@ -1396,11 +1371,9 @@ async function runChatWorklist(ctx) {
       });
       Object.assign(handoffByTarget, finalized.handoffByTarget);
       Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
-      threadCtx.a2aCount = finalized.a2aCount;
       await handoffConfirmations?.waitForThread(sessionId, invocationController.signal);
       Object.assign(handoffByTarget, finalized.handoffByTarget);
       Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
-      threadCtx.a2aCount = finalized.a2aCount;
 
       const turnWriteStats = mergeWriteStats(
         emptyWriteStats(),

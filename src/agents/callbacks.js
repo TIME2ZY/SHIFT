@@ -237,33 +237,6 @@ function postMessage(
   const routeInvocationId = currentInvocationId || invocationId;
   const taskRegistry = thread.collabTaskRegistry || null;
   const currentDuty = thread.currentDutyBinding?.duty || null;
-  const enforcesImplementationPermission =
-    thread.currentDutyBinding?.enforcementLevel === "enforced" &&
-    (thread.agents?.[agent] || AGENTS[agent])?.runtimeCapabilities?.permissionCallbacks === true;
-  if (
-    enforcesImplementationPermission &&
-    taskRegistry &&
-    typeof taskRegistry.submitImplementationPlan === "function" &&
-    !taskRegistry.implementationPermission(callbackSessionId).allowed
-  ) {
-    const submission = taskRegistry.submitImplementationPlan(callbackSessionId, {
-      actorAgentId: agent,
-      actorDuty: currentDuty,
-      content,
-    });
-    sendSse(
-      thread.res,
-      submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
-      {
-        agent,
-        invocationId: routeInvocationId,
-        accepted: submission.accepted,
-        reused: Boolean(submission.reused),
-        reason: submission.reason,
-        planHash: submission.planHash || null,
-      }
-    );
-  }
   const workflowEvidenceEvents = processWorkflowEvidenceOutput({
     agent,
     duty: currentDuty,
@@ -290,7 +263,6 @@ function postMessage(
     windowId: typeof thread.windowId === "string" ? thread.windowId : null,
     useWorktree: Boolean(thread.useWorktree),
     worklist: thread.worklist,
-    a2aCount: thread.a2aCount || 0,
     maxDepth: getMaxA2ADepth(),
     memoryCapture,
     eventStore,

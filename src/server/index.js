@@ -135,6 +135,7 @@ function createServer(options = {}) {
   });
   const collabTaskRegistry = createCollabTaskRegistry({
     repository: storageContext.storage?.collaborationTasks || null,
+    readWorkspace: (threadId) => worktreeManager.getStatus(threadId),
   });
   const handoffConfirmations = Object.hasOwn(options, "handoffConfirmations")
     ? options.handoffConfirmations

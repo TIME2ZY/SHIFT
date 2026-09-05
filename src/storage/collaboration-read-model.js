@@ -162,6 +162,9 @@ function projectEvidence(deliveryGate, workspace) {
 function deriveBlocker(task, implementation, acceptance) {
   const phase = String(task.phase || task.state || "");
   if (acceptance?.verdict === "accepted") return null;
+  if (!acceptance?.ready && acceptance?.reason?.startsWith("acceptance_")) {
+    return { type: "missing_evidence", reason: acceptance.reason };
+  }
   if (phase === "done") {
     return { type: "waiting_human", reason: "human_acceptance_required" };
   }
@@ -223,6 +226,9 @@ function deriveNextAction(duty, task, blocker) {
     human_acceptance_required: "请对照目标确认最终验收。",
     final_acceptance_rejected: "验收已拒绝，请决定是否继续修复。",
     human_input_required: "等待用户提供信息或作出决定。",
+    acceptance_workspace_unavailable: "请恢复工作区访问后重新核验交付。",
+    acceptance_worktree_dirty: "工作区存在未提交改动，请重新核验交付证据。",
+    acceptance_head_mismatch: "当前提交已变化，请重新审查并核验交付。",
   };
   if (blocker?.reason && blockerActions[blocker.reason]) return blockerActions[blocker.reason];
   if (task.phase === "done" || task.taskStatus === "accepted") return "任务已验收。";
