@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  parseImplementationPlan,
   parseSolutionBaseline,
   parseCodeReview,
   parseDeliveryReceipt,
@@ -9,17 +10,19 @@ const {
 
 function processWorkflowEvidenceOutput(input = {}) {
   const agent = String(input.agent || "").toLowerCase();
+  const duty = String(input.duty || "").toLowerCase();
   const content = String(input.content || "");
   const threadId = input.threadId;
   const registry = input.registry;
   const events = [];
   if (!threadId || !registry) return events;
 
-  if (agent === "codex") {
+  if (["discuss", "plan", "accept"].includes(duty)) {
     const baseline = parseSolutionBaseline(content);
     if (baseline) {
       const result = registry.submitSolutionBaseline(threadId, {
         actorAgentId: agent,
+        actorDuty: duty,
         baseline,
       });
       events.push({
@@ -28,31 +31,36 @@ function processWorkflowEvidenceOutput(input = {}) {
       });
     }
 
-    const acceptance = parseFinalAcceptance(content);
+    const acceptance = duty === "accept" ? parseFinalAcceptance(content) : null;
     if (acceptance) {
       const result = registry.submitFinalAcceptance(threadId, {
         actorAgentId: agent,
+        actorDuty: duty,
         acceptance,
       });
       events.push({
         event: result.accepted ? "final-acceptance-submitted" : "final-acceptance-rejected",
-        payload: summarize(result, ["verdict", "acceptanceHash"]),
+        payload: summarize(result, ["verdict", "acceptanceHash", "taskStatus", "reason"]),
       });
-      if (result.accepted && result.verdict === "accept") {
-        const done = registry.markDone(threadId, { actorAgentId: agent, intent: "accept" });
-        events.push({
-          event: done.phase === "done" ? "collaboration-done" : "collaboration-done-blocked",
-          payload: {
-            accepted: done.phase === "done",
-            phase: done.phase,
-            reason: done.completionBlocked || null,
-          },
-        });
-      }
     }
   }
 
-  if (agent === "opencode") {
+  if (["plan", "implement", "fix"].includes(duty)) {
+    const plan = parseImplementationPlan(content);
+    if (plan || !registry.implementationPermission(threadId).allowed) {
+      const result = registry.submitImplementationPlan(threadId, {
+        actorAgentId: agent,
+        actorDuty: duty,
+        plan,
+      });
+      events.push({
+        event: result.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
+        payload: summarize(result, ["planHash", "reused"]),
+      });
+    }
+  }
+
+  if (["review", "deliver"].includes(duty)) {
     const review = parseCodeReview(content);
     const receipt = parseDeliveryReceipt(content);
     if (review?.verdict === "approve") {
@@ -72,8 +80,9 @@ function processWorkflowEvidenceOutput(input = {}) {
           branch: input.branch,
           receipt,
         });
-        const result = registry.recordOpenCodeDelivery(threadId, {
+        const result = registry.recordDeliveryEvidence(threadId, {
           actorAgentId: agent,
+          actorDuty: duty,
           review,
           receipt,
           verification,

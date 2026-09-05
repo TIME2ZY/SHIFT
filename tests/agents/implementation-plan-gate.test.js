@@ -70,12 +70,12 @@ test("approval requires the approved hash to match the current plan", () => {
 test("environment gate fails closed without both approved state and hash", () => {
   assert.equal(resolveImplementationGateEnv({}).allowed, false);
   assert.equal(
-    resolveImplementationGateEnv({ [ENV.GROK_IMPLEMENTATION_GATE]: "approved" }).allowed,
+    resolveImplementationGateEnv({ [ENV.IMPLEMENTATION_GATE]: "approved" }).allowed,
     false
   );
   const approved = resolveImplementationGateEnv({
-    [ENV.GROK_IMPLEMENTATION_GATE]: "approved",
-    [ENV.GROK_APPROVED_PLAN_HASH]: "abc123",
+    [ENV.IMPLEMENTATION_GATE]: "approved",
+    [ENV.APPROVED_PLAN_HASH]: "abc123",
   });
   assert.equal(approved.allowed, true);
   assert.equal(approved.planHash, "abc123");
@@ -85,7 +85,8 @@ test("gate prompt distinguishes read-only planning from approved implementation"
   const locked = renderImplementationGateBlock({ status: IMPLEMENTATION_GATE_STATUS.REQUIRED });
   assert.match(locked, /只读/);
   assert.match(locked, /implementation_plan/);
-  assert.match(locked, /Codex/);
+  assert.match(locked, /具备批准 Duty 的参与者/);
+  assert.doesNotMatch(locked, /Codex|Grok|OpenCode/);
 
   const approved = renderImplementationGateBlock({
     status: IMPLEMENTATION_GATE_STATUS.APPROVED,
@@ -94,5 +95,6 @@ test("gate prompt distinguishes read-only planning from approved implementation"
   });
   assert.match(approved, /APPROVED/);
   assert.match(approved, /abc123/);
-  assert.match(approved, /OpenCode/);
+  assert.match(approved, /可用 Seat/);
+  assert.doesNotMatch(approved, /Codex|Grok|OpenCode/);
 });

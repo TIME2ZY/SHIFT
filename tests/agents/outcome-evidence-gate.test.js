@@ -30,8 +30,8 @@ function solutionText() {
     "non_goals:",
     "  - Do not add a sixth phase",
     "acceptance_criteria:",
-    "  - OpenCode creates a verified PR",
-    "  - Codex checks the original goal",
+    "  - Delivery creates a verified PR",
+    "  - Acceptance checks the original goal",
     "```",
   ].join("\n");
 }
@@ -149,8 +149,8 @@ test("final acceptance must match every artifact and pass every criterion", () =
       `implementation_plan_hash: ${"1".repeat(16)}`,
       `commit_sha: ${"a".repeat(40)}`,
       "checks:",
-      "  - OpenCode creates a verified PR => pass: PR #7 and green CI",
-      "  - Codex checks the original goal => pass: goal hash matched",
+      "  - Delivery creates a verified PR => pass: PR #7 and green CI",
+      "  - Acceptance checks the original goal => pass: goal hash matched",
       "gaps:",
       "  - none",
       "```",
@@ -165,7 +165,7 @@ test("final acceptance must match every artifact and pass every criterion", () =
   );
 });
 
-test("agent evidence prompts keep review and final acceptance responsibilities separate", () => {
+test("Duty evidence prompts keep review and final acceptance responsibilities separate", () => {
   const solution = parseSolutionBaseline(solutionText());
   solution.hash = hashSolutionBaseline(solution);
   const task = {
@@ -180,10 +180,14 @@ test("agent evidence prompts keep review and final acceptance responsibilities s
       ciStatus: "success",
     },
   };
-  const codex = renderOutcomeEvidenceBlock("codex", task);
-  assert.match(codex, /最初用户目标/);
-  assert.match(codex, /final_acceptance/);
-  const opencode = renderOutcomeEvidenceBlock("opencode", task, { branch: "codex/session-1" });
-  assert.match(opencode, /唯一的代码 reviewer/);
-  assert.match(opencode, /delivery_receipt/);
+  const acceptance = renderOutcomeEvidenceBlock("accept", task);
+  assert.match(acceptance, /最初用户目标/);
+  assert.match(acceptance, /final_acceptance/);
+  const review = renderOutcomeEvidenceBlock("review", task, { branch: "codex/session-1" });
+  assert.match(review, /Review 与交付门禁/);
+  assert.match(review, /delivery_receipt/);
+  assert.equal(renderOutcomeEvidenceBlock("implement", task), "");
+  for (const block of [acceptance, review]) {
+    assert.doesNotMatch(block, /Codex|Grok|OpenCode/);
+  }
 });

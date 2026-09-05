@@ -1,27 +1,42 @@
-import type { CollaborationSnapshot } from "./types";
+import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 
-const PHASE_LABELS: Record<string, string> = {
-  discuss: "讨论",
-  implement: "实现",
-  review: "审查",
-  deliver: "交付",
-  done: "完成",
+const STATUS_LABELS: Record<string, string> = {
+  active: "推进中",
+  waiting_human: "等待用户",
+  accepted: "已验收",
+  rejected: "已拒绝",
 };
 
-const IMPLEMENTATION_LABELS: Record<string, string> = {
-  required: "待提交方案",
-  pending_approval: "待 Codex 批准",
-  approved: "已批准",
+const DUTY_LABELS: Record<string, string> = {
+  discuss: "讨论",
+  plan: "规划",
+  implement: "实现",
+  fix: "修复",
+  review: "审查",
+  deliver: "交付",
+  accept: "验收",
+  recall: "回忆",
 };
 
 const BLOCKER_LABELS: Record<string, string> = {
-  implementation_plan_missing: "尚未提交方案",
-  implementation_plan_not_approved: "等待 Codex 批准方案",
+  implementation_plan_missing: "尚未提交实现方案",
+  implementation_plan_not_approved: "等待讨论席位批准方案",
   implementation_plan_artifact_missing: "方案正文缺失",
   code_review_pending: "等待代码审查",
   delivery_evidence_missing: "等待交付证据",
-  ci_not_successful: "CI 未通过",
-  final_acceptance_missing: "等待最终验收",
+  ci_not_successful: "CI 尚未通过",
+  final_acceptance_missing: "等待验收席位核验证据",
+  final_acceptance_rejected: "最终验收已拒绝",
+  final_acceptance_not_bound_to_outcome: "验收证据未绑定当前结果",
+  acceptance_workspace_unavailable: "无法读取当前工作区",
+  acceptance_worktree_dirty: "工作区存在未提交改动",
+  acceptance_head_mismatch: "当前提交与交付证据不一致",
+};
+
+const REVIEW_MODE_LABELS: Record<string, string> = {
+  same_seat: "当前席位自审",
+  other_seat: "另一席位审查",
+  pending: "尚未审查",
 };
 
 interface CollaborationStatusProps {
@@ -32,93 +47,207 @@ interface CollaborationStatusProps {
 
 export function CollaborationStatus({ snapshot, loading, error }: CollaborationStatusProps) {
   return (
-    <section className="react-collab-status" aria-label="协作状态">
+    <section className="react-collab-status" aria-label="任务卡">
       <header>
-        <strong>协作</strong>
-        <span>{phaseLabel(snapshot?.phase)}</span>
+        <strong>任务</strong>
+        <span data-status={snapshot?.status}>{statusLabel(snapshot)}</span>
       </header>
       {error ? (
         <p className="react-panel-error" role="status">
-          协作状态暂不可用。
+          任务状态暂不可用。
         </p>
       ) : null}
       {loading && !snapshot && !error ? (
-        <p className="react-panel-empty">正在读取协作状态…</p>
+        <p className="react-panel-empty">正在读取任务状态…</p>
       ) : null}
-      {!loading && !error && !snapshot ? <p className="react-panel-empty">尚未开始协作。</p> : null}
+      {!loading && !error && !snapshot ? (
+        <p className="react-panel-empty">发送消息后，这里会显示目标与完成证据。</p>
+      ) : null}
       {snapshot ? (
-        <dl>
-          {snapshot.goal ? (
+        <>
+          <div className="react-task-goal">
+            <small>目标</small>
+            <strong>{snapshot.goalOriginal || "目标尚未记录"}</strong>
+            {snapshot.goalNormalized && snapshot.goalNormalized !== snapshot.goalOriginal ? (
+              <p>{snapshot.goalNormalized}</p>
+            ) : null}
+          </div>
+          <dl className="react-task-assignment">
             <div>
-              <dt>目标</dt>
-              <dd title={snapshot.goal}>{snapshot.goal}</dd>
+              <dt>当前席位</dt>
+              <dd>{seatLabel(snapshot)}</dd>
+            </div>
+            <div>
+              <dt>职责 / Skill</dt>
+              <dd title={snapshot.currentSkill || undefined}>{dutyAndSkillLabel(snapshot)}</dd>
+            </div>
+            <div>
+              <dt>审查方式</dt>
+              <dd>{REVIEW_MODE_LABELS[snapshot.reviewMode] || snapshot.reviewMode}</dd>
+            </div>
+          </dl>
+          {snapshot.blocker ? (
+            <div className="react-collab-blocker" role="status">
+              <small>{blockerTypeLabel(snapshot.blocker.type)}</small>
+              <strong>{BLOCKER_LABELS[snapshot.blocker.reason] || snapshot.blocker.reason}</strong>
             </div>
           ) : null}
-          <div>
-            <dt>方案</dt>
-            <dd>{implementationLabel(snapshot)}</dd>
+          <div className="react-task-evidence" aria-label="完成证据">
+            <Evidence label="脏文件" value={dirtyFilesLabel(snapshot.evidence.dirtyFileCount)} />
+            <Evidence label="HEAD" value={shortSha(snapshot.evidence.headSha)} />
+            <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
+            <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
-          <div>
-            <dt>审查</dt>
-            <dd>{reviewLabel(snapshot)}</dd>
-          </div>
-          <div>
-            <dt>交付</dt>
-            <dd>{deliveryLabel(snapshot)}</dd>
-          </div>
-          <div>
-            <dt>验收</dt>
-            <dd>{acceptanceLabel(snapshot)}</dd>
-          </div>
-        </dl>
-      ) : null}
-      {snapshot?.blocker ? (
-        <p className="react-collab-blocker" role="status">
-          {BLOCKER_LABELS[snapshot.blocker] || snapshot.blocker}
-        </p>
+          <AcceptanceCardView card={snapshot.acceptance} />
+          <p className="react-task-next-action">
+            <small>下一步</small>
+            {snapshot.nextAction}
+          </p>
+        </>
       ) : null}
     </section>
   );
 }
 
-function phaseLabel(phase: string | undefined) {
-  if (!phase) return "未开始";
-  return PHASE_LABELS[phase] || phase;
+function AcceptanceCardView({ card }: { card: AcceptanceCard }) {
+  return (
+    <section className="react-acceptance-card" aria-label="验收卡" data-verdict={card.verdict}>
+      <header>
+        <strong>验收</strong>
+        <span>{acceptanceVerdictLabel(card.verdict)}</span>
+      </header>
+      <dl>
+        <AcceptanceFact label="目标" value={shortHash(card.goalHash)} />
+        <AcceptanceFact label="方案" value={shortHash(card.planHash)} />
+        <AcceptanceFact label="分支" value={card.branch || "unknown"} />
+        <AcceptanceFact
+          label="Commit"
+          value={card.commitSha ? shortSha(card.commitSha) : "unknown"}
+        />
+        <AcceptanceFact label="PR" value={card.prUrl ? "已核验" : "unknown"} />
+        <AcceptanceFact
+          label="CI"
+          value={card.ciStatus === "unknown" ? "unknown" : ciLabel(card.ciStatus)}
+        />
+        <AcceptanceFact
+          label="审查"
+          value={REVIEW_MODE_LABELS[card.reviewMode] || card.reviewMode}
+        />
+        <AcceptanceFact label="结论" value={reviewVerdictLabel(card.reviewVerdict)} />
+      </dl>
+      {card.reason && card.verdict !== "accepted" ? (
+        <p className="react-acceptance-reason">{acceptanceReasonLabel(card.reason)}</p>
+      ) : null}
+    </section>
+  );
 }
 
-function implementationLabel(snapshot: CollaborationSnapshot) {
-  const status = snapshot.implementation.status;
-  if (!status) return "未到";
-  return IMPLEMENTATION_LABELS[status] || status;
+function AcceptanceFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd title={value}>{value}</dd>
+    </div>
+  );
 }
 
-function reviewLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.review.verdict === "approve" || snapshot.review.status === "approved")
-    return "已通过";
-  if (
-    snapshot.review.verdict === "changes_requested" ||
-    snapshot.review.status === "changes_requested"
-  ) {
-    return "需修改";
-  }
-  if (snapshot.phase === "review") return "进行中";
-  return "未到";
+function Evidence({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
 }
 
-function deliveryLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.delivery.status === "verified") return "已核验";
-  if (snapshot.delivery.status === "recorded") return "已记录";
-  if (snapshot.phase === "deliver") return "进行中";
-  return "未到";
+function statusLabel(snapshot: CollaborationSnapshot | null) {
+  if (!snapshot) return "未开始";
+  return STATUS_LABELS[snapshot.status] || snapshot.status;
 }
 
-function acceptanceLabel(snapshot: CollaborationSnapshot) {
-  if (snapshot.acceptance.verdict === "accept" || snapshot.acceptance.status === "accepted") {
-    return "已接受";
-  }
-  if (snapshot.acceptance.verdict === "reject" || snapshot.acceptance.status === "rejected") {
-    return "已拒绝";
-  }
-  if (snapshot.phase === "deliver" || snapshot.phase === "done") return "待 Codex 验收";
-  return "未到";
+function seatLabel(snapshot: CollaborationSnapshot) {
+  const seat = snapshot.currentSeat;
+  return seat?.label || seat?.providerId || seat?.seatId || "尚未分配";
+}
+
+function dutyAndSkillLabel(snapshot: CollaborationSnapshot) {
+  if (!snapshot.currentDuty && !snapshot.currentSkill) return "尚未分配";
+  const duty = snapshot.currentDuty
+    ? DUTY_LABELS[snapshot.currentDuty] || snapshot.currentDuty
+    : "未知职责";
+  return snapshot.currentSkill ? `${duty} · ${snapshot.currentSkill}` : duty;
+}
+
+function blockerTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    waiting_human: "等待用户",
+    waiting_approval: "等待方案门禁",
+    missing_evidence: "缺少证据",
+    provider_unavailable: "执行器不可用",
+    execution_failed: "执行失败",
+  };
+  return labels[type] || type;
+}
+
+function dirtyFilesLabel(count: number | null) {
+  if (count === null) return "—";
+  return count === 0 ? "0" : String(count);
+}
+
+function shortSha(value: string | null) {
+  return value ? value.slice(0, 7) : "—";
+}
+
+function ciLabel(status: string | null) {
+  if (!status) return "—";
+  const labels: Record<string, string> = {
+    success: "通过",
+    failure: "失败",
+    pending: "进行中",
+    unknown: "未知",
+  };
+  return labels[status] || status;
+}
+
+function shortHash(value: string | null) {
+  return value ? value.slice(0, 12) : "unknown";
+}
+
+function acceptanceVerdictLabel(verdict: AcceptanceCard["verdict"]) {
+  const labels: Record<AcceptanceCard["verdict"], string> = {
+    accepted: "已通过",
+    rejected: "已拒绝",
+    incomplete: "未完成",
+  };
+  return labels[verdict];
+}
+
+function reviewVerdictLabel(verdict: AcceptanceCard["reviewVerdict"]) {
+  const labels: Record<AcceptanceCard["reviewVerdict"], string> = {
+    approved: "通过",
+    changes_requested: "需修改",
+    unknown: "unknown",
+  };
+  return labels[verdict];
+}
+
+function acceptanceReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    accept_duty_rejected: "验收席位已拒绝本次交付。",
+    user_goal_missing: "缺少可核验的用户目标。",
+    solution_baseline_missing: "缺少与目标绑定的已批准方案。",
+    implementation_plan_not_approved: "实现方案尚未批准。",
+    code_review_not_approved: "代码审查尚未通过。",
+    code_review_artifact_missing: "缺少代码审查证据。",
+    delivery_not_bound_to_review: "交付未绑定到已通过的审查。",
+    delivery_commit_missing: "缺少可核验的提交。",
+    acceptance_workspace_unavailable: "无法读取当前工作区，请恢复访问后重新核验。",
+    acceptance_worktree_dirty: "工作区存在未提交改动，请重新核验交付证据。",
+    acceptance_head_mismatch: "当前 HEAD 与已核验提交不一致，请重新审查并核验交付。",
+    delivery_pr_missing: "缺少可核验的 PR。",
+    delivery_artifact_missing: "交付证据不完整。",
+    ci_not_successful: "CI 尚未通过。",
+    final_acceptance_not_bound_to_outcome: "Agent 验收证据未与当前目标、方案和提交绑定。",
+  };
+  return labels[reason] || reason;
 }

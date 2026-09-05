@@ -8,9 +8,11 @@ const { backupDatabase, integrityCheck, rebuildDerivedModels } = require("../mai
 const SOURCE_TABLES = Object.freeze([
   "storage_metadata",
   "threads",
+  "thread_seats",
   "context_windows",
   "trace_runs",
   "invocations",
+  "invocation_duty_bindings",
   "handoffs",
   "invocation_events",
   "messages",
@@ -217,6 +219,22 @@ function inspectCausality(db) {
       SELECT COUNT(*) AS count FROM invocations i
       JOIN trace_runs t ON t.id = i.trace_id
       WHERE i.thread_id <> t.thread_id
+    `,
+    ],
+    [
+      "duty-binding-invocation-thread",
+      `
+      SELECT COUNT(*) AS count FROM invocation_duty_bindings binding
+      JOIN invocations invocation ON invocation.id = binding.invocation_id
+      WHERE binding.thread_id <> invocation.thread_id
+    `,
+    ],
+    [
+      "duty-binding-seat-thread",
+      `
+      SELECT COUNT(*) AS count FROM invocation_duty_bindings binding
+      JOIN thread_seats seat ON seat.seat_id = binding.seat_id
+      WHERE binding.thread_id <> seat.thread_id
     `,
     ],
     [

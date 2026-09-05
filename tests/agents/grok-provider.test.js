@@ -232,7 +232,7 @@ test("identity file exists for grok and mentions CLI", () => {
   assert.ok(fs.existsSync(file));
   const body = fs.readFileSync(file, "utf8");
   assert.match(body, /id: grok/);
-  assert.match(body, /Grok Build CLI|本地/);
+  assert.match(body, /Grok CLI\/ACP/);
 });
 
 test("createGrokRuntime maps tool_use / tool_result to tool.*", () => {

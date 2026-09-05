@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { createEventStore } = require("./event-store");
 const { isTerminalInvocationState } = require("../shared/collab-contracts");
+const { legacySeatId } = require("../shared/seat-contracts");
 const { appendMessage, durableMessageMetadata } = require("./message-persistence");
 const { DurableWriteError, withSqliteBusyRetry } = require("./sqlite-retry");
 
@@ -355,6 +356,36 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           triggerType: input.triggerType,
           traceId: input.traceId,
         });
+        const requestedBinding = input.dutyBinding || null;
+        let seatId = requestedBinding?.seatId || null;
+        if (!seatId) {
+          const existingSeat = storage.threadSeats.findEnabledByProvider(
+            input.threadId,
+            input.agentId
+          );
+          seatId = existingSeat?.seatId || legacySeatId(input.threadId, input.agentId);
+          if (!existingSeat) {
+            storage.threadSeats.create({
+              seatId,
+              threadId: input.threadId,
+              providerId: input.agentId,
+              label: input.agentId,
+              enabled: true,
+              affinityTags: [],
+              createdAt: input.startedAt,
+            });
+          }
+        }
+        const binding = storage.invocationDutyBindings.create({
+          invocationId: input.invocationId,
+          threadId: input.threadId,
+          seatId,
+          duty: requestedBinding?.duty || "discuss",
+          skillName: requestedBinding?.skillName || "cross-agent-handoff",
+          routingReason: requestedBinding?.routingReason || "sticky",
+          enforcementLevel: requestedBinding?.enforcementLevel || "advisory",
+          createdAt: input.startedAt,
+        });
         if (input.traceId && !input.parentInvocationId) {
           const boundTrace = storage.traces.bindRootInvocation(input.traceId, input.invocationId);
           if (!boundTrace?.rootInvocationId) {
@@ -379,6 +410,11 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           kind: "invocation-start",
           payload: {
             agent: input.agentId,
+            seatId: binding.seatId,
+            duty: binding.duty,
+            skillName: binding.skillName,
+            routingReason: binding.routingReason,
+            enforcementLevel: binding.enforcementLevel,
             resumeSessionId: resumeSessionId || null,
             windowGeneration: window.generation,
             parentInvocationId: input.parentInvocationId || null,
@@ -389,7 +425,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           createdAt: input.startedAt,
           sequenceNo: 0,
         });
-        return record;
+        return { record, binding };
       });
       return started;
     });
@@ -397,7 +433,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     else {
       events.registerInvocation(input.invocationId, input.threadId);
       const refreshed = storage.windows.get(window.id) || window;
-      return { invocation, window: refreshed };
+      return { invocation: invocation.record, binding: invocation.binding, window: refreshed };
     }
     return null;
   }

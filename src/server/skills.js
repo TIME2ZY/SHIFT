@@ -52,6 +52,10 @@ function readSkillDirectory(skillsDir, dirent) {
     description: parsed.meta.description || "",
     triggers: parsed.meta.triggers || [],
     always: parsed.meta.always === true,
+    duties: Array.isArray(parsed.meta.duties) ? parsed.meta.duties : [],
+    preferTags: Array.isArray(parsed.meta.preferTags) ? parsed.meta.preferTags : [],
+    allow: parsed.meta.allow || "",
+    avoid: parsed.meta.avoid || "",
     body: parsed.body,
     sourceDir,
     path: skillRelativePath(dirent.name),
@@ -179,6 +183,10 @@ function createSkillsService(options = {}) {
       description: s.description,
       triggers: s.triggers,
       always: s.always,
+      duties: s.duties.slice(),
+      preferTags: s.preferTags.slice(),
+      allow: s.allow,
+      avoid: s.avoid,
       path: s.path || skillRelativePath(s.name),
     }));
   }
@@ -199,7 +207,7 @@ function createSkillsService(options = {}) {
    * @param {string} rawPrompt
    * @param {boolean} [useWorktree=true]
    * @param {{ skillNames?: string[], catalogPointer?: boolean }} [options]
-   *   skillNames: inject an explicit allow-list of skill names (e.g. receiving-review).
+   *   skillNames: inject an explicit allow-list for the current Duty.
    *   catalogPointer: prepend a short native/MCP index instead of relying on matchSkills.
    */
   function augmentPrompt(rawPrompt, useWorktree = true, options = {}) {
@@ -232,8 +240,14 @@ function createSkillsService(options = {}) {
     useWorktree = false,
     isolated = false,
     rawPrompt,
+    skillNames,
   } = {}) {
-    const index = listSkillIndex();
+    const wanted = new Set(Array.isArray(skillNames) ? skillNames : []);
+    const selected = getSkills().filter((skill) => wanted.has(skill.name));
+    const index = selected.map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+    }));
     const isolatedWorkspace = isolated === true && isIsolatedWorkspace(workspaceDir, projectDir);
     let materializeResult = {
       ok: false,
@@ -244,7 +258,7 @@ function createSkillsService(options = {}) {
     };
 
     if (isolatedWorkspace) {
-      const entries = getSkills().map((skill) => ({
+      const entries = selected.map((skill) => ({
         name: skill.name,
         sourceDir: skill.sourceDir,
       }));
@@ -267,8 +281,14 @@ function createSkillsService(options = {}) {
 
     const nativeDelivery = materializeResult.ok === true;
     const promptResult = nativeDelivery
-      ? augmentPrompt(rawPrompt, useWorktree, { skillNames: [], catalogPointer: true })
-      : augmentPrompt(rawPrompt, useWorktree);
+      ? (() => {
+          const result = buildAugmentedPrompt(rawPrompt, []);
+          result.augmentedPrompt = `${buildSkillCatalogPointer(selected)}\n${result.augmentedPrompt}`;
+          return result;
+        })()
+      : augmentPrompt(rawPrompt, useWorktree, {
+          skillNames: [...wanted],
+        });
 
     return {
       nativeDelivery,

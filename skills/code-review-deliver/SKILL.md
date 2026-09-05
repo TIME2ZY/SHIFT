@@ -1,6 +1,10 @@
 ---
 name: code-review-deliver
-description: OpenCode 代码 review 与 Git/PR 交付的过关模板（code_review、delivery_receipt、Conventional Commit）
+description: review / deliver Duty 的代码审查与 Git/PR 证据剧本
+duties: [review, deliver]
+preferTags: [git, diff, pr]
+allow: anyEnabledSeat
+avoid: sameSeatIfImplementerAndAnotherSeatExists
 triggers:
   - "code_review"
   - "delivery_receipt"
@@ -9,19 +13,19 @@ triggers:
   - "创建 PR"
 ---
 
-# 代码 review 与交付（OpenCode）
+# 代码 review 与交付
 
-你是唯一的代码 reviewer 和 Git/PR 交付者。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。
+当前 invocation 承担 review 或 deliver Duty。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。同一份剧本可由任意已启用 Seat 执行。
 
 ## Review
 
 先弄清改动目标与约束，再按 P0 / P1 / P2 分级。每条问题给位置、原因、建议。区分必须改与可选改进。
 
-需要修复时行首 `@Grok` + 共用 `handoff`（不要 `verdict` / `nits` / `blocking` 顶层字段）：
+需要修复时交回合适的 enabled Seat，并使用共用 `handoff`（不要 `verdict` / `nits` / `blocking` 顶层字段）：
 
 - `what`：`结论: request-changes|approve-with-nits|approve` + P0/P1 列表
 - `why`：阻塞原因
-- `next_action`：希望 Grok 立刻做什么
+- `next_action`：希望 implement/fix Duty 立刻做什么
 
 ````markdown
 ```code_review
@@ -34,7 +38,7 @@ tests:
 ```
 ````
 
-可放行时自己完成交付，不要把代码 review 交给 Codex。
+可放行时进入 deliver Duty；若当前只要求 review，应明确给出下一动作。
 
 ## 交付（approve 之后）
 
@@ -56,4 +60,6 @@ verification:
 ```
 ````
 
-未完成 commit、push、ready PR 或 CI 未成功时，不得 `@Codex`。验证通过后以 `intent: accept` 交给 Codex 做目标验收。
+未完成 commit、push、ready PR 或 CI 未成功时，不得宣称可验收。验证通过后以 `intent: accept` 进入目标验收；目标 Seat 由本线程编制和路由规则决定。
+
+合入前必须同时具备结构化 review 放行与 CI 成功证据。自审必须显式标记，不能伪装成换席审查。

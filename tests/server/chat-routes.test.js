@@ -154,7 +154,7 @@ function baseDeps(res, overrides = {}) {
     readJsonBody: async () => ({}),
     buildChatArgs: () => [],
     augmentPrompt: () => ({ augmentedPrompt: "", skillNames: [] }),
-    getMaxA2ADepth: () => 0,
+    getMaxA2ADepth: () => 15,
     parseA2AMentions: () => [],
     filterBenignStderr: (text) => text,
     runChildStream: async () => ({ code: 0, signal: null }),
@@ -171,6 +171,19 @@ function baseDeps(res, overrides = {}) {
     memoryCapture: {
       captureHandoff: () => ({ captured: false }),
       captureWindowSeal: () => ({ captured: false }),
+    },
+    storage: {
+      threadSeats: {
+        listEnabledForThread: (threadId) => [
+          {
+            seatId: `seat-${threadId}-codex`,
+            threadId,
+            providerId: "codex",
+            label: "Codex",
+            enabled: true,
+          },
+        ],
+      },
     },
     getSession: () => ({ worktree: null, projectDir: "/root" }),
     setSessionWorktree: () => ({ worktree: null, projectDir: "/root" }),
@@ -219,6 +232,28 @@ test("handleChatRoutes rejects unsupported agents before starting chat", async (
   assert.deepEqual(res.body, { error: 'Unsupported agent "unknown".' });
 });
 
+test("handleChatRoutes rejects a supported agent whose Seat is disabled", async () => {
+  const res = makeRes();
+  const handle = chatRoutes.createChatRoutes(
+    baseDeps(res, {
+      storage: { threadSeats: { listEnabledForThread: () => [] } },
+      readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "hi" }),
+    })
+  );
+
+  const handled = await handle(
+    makeReq("POST", { host: "127.0.0.1:8787" }),
+    res,
+    new URL("http://127.0.0.1/api/chat")
+  );
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    error: 'Seat for agent "codex" is not enabled in this Session.',
+    code: "SEAT_NOT_ENABLED",
+  });
+});
+
 test("a slower older chat request cannot abort the newer request", async () => {
   const activeInvocations = new Map();
   const pendingBootstraps = [];
@@ -238,6 +273,10 @@ test("a slower older chat request cannot abort the newer request", async () => {
     },
     readJsonBody: async (req) => req.body,
     appendToSession: (...args) => appended.push(args),
+    sendSse(response, event) {
+      // This test covers request preparation; disconnect once the newer request starts SSE.
+      if (event === "session") response.destroyed = true;
+    },
   });
   const handler = chatRoutes.createChatRoutes(deps);
   const req1 = makeReq("POST");
@@ -254,6 +293,7 @@ test("a slower older chat request cannot abort the newer request", async () => {
   await Promise.resolve();
 
   assert.equal(pendingBootstraps.length, 2);
+  const newerController = activeInvocations.get("s1");
   pendingBootstraps[1]();
   await second;
   pendingBootstraps[0]();
@@ -263,6 +303,7 @@ test("a slower older chat request cannot abort the newer request", async () => {
   assert.match(res1.body.error, /superseded/);
   assert.equal(appended.length, 1);
   assert.equal(appended[0][1].content, "newer");
+  assert.equal(newerController.signal.aborted, false);
 });
 
 test("chat preparation failure closes the durable trace", async () => {

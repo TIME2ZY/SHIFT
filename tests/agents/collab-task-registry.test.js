@@ -12,6 +12,7 @@ function establishSolutionBaseline(registry) {
   });
   const solution = registry.submitSolutionBaseline("thread-1", {
     actorAgentId: "codex",
+    actorDuty: "discuss",
     baseline: {
       user_goal_hash: goal.goalHash,
       summary: "Implement and verify the agreed workflow",
@@ -25,6 +26,14 @@ function establishSolutionBaseline(registry) {
 }
 
 function route(registry, input) {
+  const sourceDutyByIntent = {
+    discuss: "discuss",
+    plan: "discuss",
+    implement: "discuss",
+    review: "implement",
+    fix: "review",
+    accept: "review",
+  };
   return registry.noteAcceptedRoute({
     threadId: "thread-1",
     contentHash: `${input.fromAgent}-${input.toAgent}-${input.intent}`,
@@ -32,6 +41,8 @@ function route(registry, input) {
       goal: "deliver the user outcome",
       what: input.what || "continue workflow",
     },
+    fromDuty: input.fromDuty || sourceDutyByIntent[input.intent] || "discuss",
+    toDuty: input.toDuty || input.intent || "discuss",
     ...input,
   });
 }
@@ -39,6 +50,7 @@ function route(registry, input) {
 function submitConcretePlan(registry) {
   return registry.submitImplementationPlan("thread-1", {
     actorAgentId: "grok",
+    actorDuty: "plan",
     content: [
       "```implementation_plan",
       "summary: Implement the agreed workflow",
@@ -65,7 +77,9 @@ function approveConcretePlan(registry) {
 }
 
 test("five-phase registry follows discuss, implement, review, deliver, done", () => {
-  const registry = createCollabTaskRegistry();
+  const registry = createCollabTaskRegistry({
+    readWorkspace: () => ({ headSha: "a".repeat(40), porcelain: [] }),
+  });
 
   assert.equal(
     route(registry, { fromAgent: "codex", toAgent: "gemini", intent: "discuss" }).phase,
@@ -80,8 +94,8 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(submitted.accepted, true);
   assert.equal(submitted.task.implementationGate.status, "pending_approval");
   assert.equal(
-    route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" })
-      .implementationGate.status,
+    route(registry, { fromAgent: "codex", toAgent: "grok", intent: "implement" }).implementationGate
+      .status,
     "approved"
   );
   assert.equal(
@@ -97,13 +111,25 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(delivered.phase, STATE.DELIVER);
   assert.equal(delivered.codeReviewGate.reviewedBy, "opencode");
 
-  const blocked = registry.markDone("thread-1", { actorAgentId: "codex" });
-  assert.equal(blocked.phase, STATE.DELIVER);
-  assert.equal(blocked.completionBlocked, "code_review_artifact_missing");
+  const blocked = registry.submitFinalAcceptance("thread-1", {
+    actorAgentId: "codex",
+    actorDuty: "accept",
+    acceptance: {
+      verdict: "accept",
+      user_goal_hash: baseline.goalHash,
+      solution_hash: baseline.solutionHash,
+      implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
+      commit_sha: "a".repeat(40),
+      checks: ["The workflow is delivered => pass: evidence"],
+      gaps: ["none"],
+    },
+  });
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.reason, "final_commit_mismatch");
+  assert.equal(registry.getTask("thread-1").phase, STATE.DELIVER);
 
   const commitSha = "a".repeat(40);
   const reviewEvidenceHash = delivered.codeReviewGate.evidenceHash;
-  const finalEvidenceHash = "f".repeat(16);
   registry.updateTask("thread-1", {
     artifacts: {
       ...delivered.artifacts,
@@ -114,14 +140,6 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
         prUrl: "https://github.com/acme/repo/pull/1",
         ciStatus: "success",
       },
-      finalAcceptance: {
-        hash: finalEvidenceHash,
-        verdict: "accept",
-        user_goal_hash: baseline.goalHash,
-        solution_hash: baseline.solutionHash,
-        implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
-        commit_sha: commitSha,
-      },
     },
     deliveryGate: {
       commitSha,
@@ -129,19 +147,27 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
       ciStatus: "success",
       reviewEvidenceHash,
     },
-    finalGate: {
+  });
+  const completed = registry.submitFinalAcceptance("thread-1", {
+    actorAgentId: "codex",
+    actorDuty: "accept",
+    acceptance: {
       verdict: "accept",
-      evidenceHash: finalEvidenceHash,
-      acceptedCommitSha: commitSha,
-      userGoalHash: baseline.goalHash,
-      solutionHash: baseline.solutionHash,
-      implementationPlanHash: delivered.artifacts.implementationPlan.hash,
+      user_goal_hash: baseline.goalHash,
+      solution_hash: baseline.solutionHash,
+      implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
+      commit_sha: commitSha,
+      checks: ["The workflow is delivered => pass: evidence"],
+      gaps: ["none"],
     },
   });
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
+  assert.equal(completed.verdict, "accepted");
+  assert.equal(completed.task.phase, STATE.DONE);
+  assert.equal(completed.task.taskStatus, "accepted");
+  assert.equal(completed.task.artifacts.acceptanceDecision.actorKind, "seat");
 });
 
-test("OpenCode review changes return to implement and invalidate downstream gates", () => {
+test("review Duty changes return to implement and invalidate downstream gates", () => {
   const registry = createCollabTaskRegistry();
   approveConcretePlan(registry);
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
@@ -158,7 +184,7 @@ test("OpenCode review changes return to implement and invalidate downstream gate
   assert.equal(task.finalGate, null);
 });
 
-test("Grok stays read-only until a concrete plan is approved by Codex", () => {
+test("implementation Duty stays read-only until a concrete plan is approved", () => {
   const registry = createCollabTaskRegistry();
   registry.ensureImplementationPlanRequired("thread-1", { requestedBy: "codex" });
 
@@ -168,6 +194,7 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(
     registry.submitImplementationPlan("thread-1", {
       actorAgentId: "grok",
+      actorDuty: "plan",
       plan: { summary: "too vague", files: [], changes: [], tests: [] },
     }).reason,
     "invalid_or_missing_implementation_plan"
@@ -178,6 +205,8 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
       fromAgent: "codex",
       toAgent: "grok",
       intent: "implement",
+      fromDuty: "discuss",
+      toDuty: "implement",
     }).reason,
     "implementation_plan_missing"
   );
@@ -186,8 +215,11 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(submitted.accepted, true);
   assert.equal(registry.implementationPermission("thread-1").allowed, false);
   assert.equal(
-    registry.approveImplementationPlan("thread-1", { actorAgentId: "gemini" }).reason,
-    "plan_must_be_approved_by_lead"
+    registry.approveImplementationPlan("thread-1", {
+      actorAgentId: "gemini",
+      actorDuty: "review",
+    }).reason,
+    "plan_approval_requires_discuss_or_accept_duty"
   );
 
   const pendingRoute = registry.shouldBlockImplementationRoute({
@@ -195,12 +227,15 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
     fromAgent: "codex",
     toAgent: "grok",
     intent: "implement",
+    fromDuty: "discuss",
+    toDuty: "implement",
   });
   assert.equal(pendingRoute.skip, false);
   assert.equal(pendingRoute.pendingApproval, true);
 
   const approved = registry.approveImplementationPlan("thread-1", {
     actorAgentId: "codex",
+    actorDuty: "discuss",
     planHash: submitted.planHash,
   });
   assert.equal(approved.approved, true);
@@ -210,13 +245,14 @@ test("Grok stays read-only until a concrete plan is approved by Codex", () => {
   assert.equal(registry.implementationPermission("thread-1").allowed, true);
 });
 
-test("a revised Grok plan invalidates the prior plan approval", () => {
+test("a revised implementation plan invalidates the prior approval", () => {
   const registry = createCollabTaskRegistry();
   const first = approveConcretePlan(registry);
   assert.equal(registry.implementationPermission("thread-1").allowed, true);
 
   const revised = registry.submitImplementationPlan("thread-1", {
     actorAgentId: "grok",
+    actorDuty: "plan",
     plan: {
       summary: "Revised implementation",
       files: ["src/workflow.js", "tests/workflow.test.js"],
@@ -247,7 +283,7 @@ test("an approval gate without the matching persisted plan artifact stays locked
   assert.equal(permission.reason, "implementation_plan_artifact_missing");
 });
 
-test("Codex cannot route a plan until the solution baseline matches the original user goal", () => {
+test("plan Duty cannot route until the solution baseline matches the original user goal", () => {
   const registry = createCollabTaskRegistry();
   assert.equal(
     registry.shouldBlockEvidenceRoute({
@@ -280,8 +316,14 @@ test("Codex cannot route a plan until the solution baseline matches the original
   );
 });
 
-test("OpenCode delivery and Codex acceptance bind real PR evidence to every outcome hash", () => {
-  const registry = createCollabTaskRegistry();
+test("delivery and accept-duty completion bind outcome hashes to the current worktree", async () => {
+  let workspace = { headSha: "a".repeat(40), porcelain: [] };
+  const registry = createCollabTaskRegistry({
+    readWorkspace: () => {
+      if (workspace instanceof Error) throw workspace;
+      return workspace;
+    },
+  });
   const baseline = establishSolutionBaseline(registry);
   route(registry, { fromAgent: "codex", toAgent: "grok", intent: "plan" });
   const implementation = submitConcretePlan(registry);
@@ -289,8 +331,9 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
   const commitSha = "a".repeat(40);
   const prUrl = "https://github.com/acme/repo/pull/7";
-  const delivery = registry.recordOpenCodeDelivery("thread-1", {
+  const delivery = registry.recordDeliveryEvidence("thread-1", {
     actorAgentId: "opencode",
+    actorDuty: "deliver",
     review: {
       verdict: "approve",
       summary: "No blocking findings",
@@ -340,8 +383,9 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
     false
   );
 
-  const acceptance = registry.submitFinalAcceptance("thread-1", {
+  const payload = {
     actorAgentId: "codex",
+    actorDuty: "accept",
     acceptance: {
       verdict: "accept",
       user_goal_hash: baseline.goalHash,
@@ -351,10 +395,59 @@ test("OpenCode delivery and Codex acceptance bind real PR evidence to every outc
       checks: ["The workflow is delivered => pass: PR #7 and green CI"],
       gaps: ["none"],
     },
-  });
-  assert.equal(acceptance.accepted, true);
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "opencode" }).completionBlocked, "done_must_be_marked_by_lead");
-  assert.equal(registry.markDone("thread-1", { actorAgentId: "codex" }).phase, STATE.DONE);
+  };
+  const { createSessionRoutes } = require("../../src/server/session-routes");
+  async function collaborationRequest() {
+    const res = {};
+    const handler = createSessionRoutes({
+      collabTaskRegistry: registry,
+      getSession: () => ({ id: "thread-1" }),
+      sendJson: (_res, status, body) => Object.assign(res, { status, body }),
+    });
+    await handler(
+      { method: "GET" },
+      res,
+      new URL("http://localhost/api/sessions/thread-1/collaboration")
+    );
+    return res;
+  }
+  for (const [snapshot, reason] of [
+    [{ headSha: "b".repeat(40), porcelain: [] }, "acceptance_head_mismatch"],
+    [{ headSha: commitSha, porcelain: [" M src/workflow.js"] }, "acceptance_worktree_dirty"],
+    [null, "acceptance_workspace_unavailable"],
+    [{ headSha: commitSha }, "acceptance_workspace_unavailable"],
+    [new Error("Git unavailable"), "acceptance_workspace_unavailable"],
+  ]) {
+    workspace = snapshot;
+    const acceptance = registry.submitFinalAcceptance("thread-1", payload);
+    assert.equal(acceptance.accepted, true);
+    assert.equal(acceptance.verdict, "incomplete");
+    assert.equal(acceptance.reason, reason);
+    assert.notEqual(registry.getTask("thread-1").phase, STATE.DONE);
+    assert.equal(registry.getTask("thread-1").taskStatus, "active");
+    assert.equal(registry.getTask("thread-1").history.at(-1).reason, reason);
+  }
+  workspace = { headSha: commitSha, porcelain: [] };
+  const completed = registry.submitFinalAcceptance("thread-1", payload);
+  assert.equal(completed.verdict, "accepted");
+  assert.equal(completed.task.phase, STATE.DONE);
+  assert.equal(completed.task.taskStatus, "accepted");
+  const decisionEvent = completed.task.history.at(-1);
+  assert.equal(decisionEvent.type, "final_acceptance_decided");
+  assert.equal(decisionEvent.actorKind, "seat");
+  assert.equal(decisionEvent.actorId, "codex");
+
+  workspace = { headSha: "b".repeat(40), porcelain: [] };
+  const stale = await collaborationRequest();
+  assert.equal(stale.status, 200);
+  assert.equal(stale.body.collaboration.acceptance.verdict, "incomplete");
+  assert.equal(stale.body.collaboration.acceptance.reason, "acceptance_head_mismatch");
+  assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision.verdict, "accepted");
+  workspace = { headSha: commitSha, porcelain: [] };
+
+  registry.captureUserGoal("thread-1", { text: "Rewritten goal", force: true });
+  assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision, undefined);
+  assert.equal(registry.getTask("thread-1").taskStatus, "active");
 });
 
 test("forged delivery and final gate JSON cannot replace their persisted artifacts", () => {

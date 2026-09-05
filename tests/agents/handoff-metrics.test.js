@@ -13,6 +13,19 @@ const {
 const { finalizeA2ARoutes } = require("../../src/agents/a2a-finalize");
 const { DECISIONS } = require("../../src/agents/handoff-policy");
 
+function seatRouting(threadId) {
+  const seats = ["codex", "opencode"].map((providerId) => ({
+    seatId: `seat-${threadId}-${providerId}`,
+    threadId,
+    providerId,
+    enabled: true,
+  }));
+  return {
+    agents: { codex: {}, opencode: {} },
+    threadSeats: { listEnabledForThread: () => seats },
+  };
+}
+
 test("buildFinalizeMetrics returns null without mentions", () => {
   assert.equal(buildFinalizeMetrics({ mentions: [] }), null);
 });
@@ -89,6 +102,7 @@ test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", 
   const lines = [];
   const events = [];
   const result = finalizeA2ARoutes({
+    ...seatRouting("t-metrics"),
     text: [
       "@OpenCode continue",
       "```handoff",
@@ -140,7 +154,14 @@ test("finalizeA2ARoutes keeps terminal metrics silent and returns SSE metrics", 
 
 test("finalizeA2ARoutes repair path reports repair_rate=1", () => {
   const lines = [];
+  const taskRegistry = {
+    shouldBlockEvidenceRoute: () => ({ skip: false }),
+    shouldBlockImplementationRoute: () => ({ skip: false }),
+    shouldSkipRedundantReview: () => ({ skip: false }),
+    getTask: () => null,
+  };
   const result = finalizeA2ARoutes({
+    ...seatRouting("t-repair"),
     text: "@OpenCode\nplease implement without fence",
     fromAgent: "codex",
     threadId: "t-repair",
@@ -150,6 +171,7 @@ test("finalizeA2ARoutes repair path reports repair_rate=1", () => {
     a2aCount: 0,
     useWorktree: true,
     policyMode: "balanced",
+    collabTaskRegistry: taskRegistry,
     logger: { info: (line) => lines.push(line) },
     agentLabels: { codex: "Codex", opencode: "OpenCode" },
   });

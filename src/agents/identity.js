@@ -1,7 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { parseSkillFrontmatter } = require("../shared/frontmatter");
-const { getAgentRoleContract } = require("./role-contracts");
 
 const DEFAULT_IDENTITIES_DIR = path.join(__dirname, "identities");
 
@@ -15,9 +14,6 @@ let cache = null;
  * @property {string} role
  * @property {string[]} duties
  * @property {string[]} boundaries
- * @property {string} workflowRole
- * @property {string[]} workflowCapabilities
- * @property {string[]} workflowResponsibilities
  * @property {string} body
  * @property {string} file
  */
@@ -39,17 +35,12 @@ function loadIdentities(dir = DEFAULT_IDENTITIES_DIR) {
 
     const id = String(parsed.meta.id || file.replace(/\.md$/, "")).trim();
     if (!id) continue;
-    const workflow = getAgentRoleContract(id);
-
     map.set(id, {
       id,
       label: String(parsed.meta.label || id),
       role: String(parsed.meta.role || ""),
       duties: asStringArray(parsed.meta.duties),
       boundaries: asStringArray(parsed.meta.boundaries),
-      workflowRole: workflow?.role || "",
-      workflowCapabilities: workflow ? workflow.capabilities.slice() : [],
-      workflowResponsibilities: workflow ? workflow.responsibilities.slice() : [],
       body: parsed.body || "",
       file,
     });
@@ -118,18 +109,10 @@ function renderIdentityBlock(agentId, fallback = null) {
   }
 
   const label = identity.label || agentId;
-  const lines = [
-    `<!-- Agent Identity: ${identity.id} / ${label} -->`,
-  ];
+  const lines = [`<!-- Agent Identity: ${identity.id} / ${label} -->`];
 
   if (identity.role) {
     lines.push(`Role: ${identity.role}`);
-  }
-  if (identity.workflowRole) {
-    lines.push(`Workflow role: ${identity.workflowRole}`);
-  }
-  if (identity.workflowCapabilities.length > 0) {
-    lines.push(`Workflow capabilities: ${identity.workflowCapabilities.join(", ")}`);
   }
   if (identity.duties.length > 0) {
     lines.push(`Duties: ${identity.duties.join("；")}`);
@@ -137,13 +120,7 @@ function renderIdentityBlock(agentId, fallback = null) {
   if (identity.boundaries.length > 0) {
     lines.push(`Boundaries: ${identity.boundaries.join("；")}`);
   }
-  if (
-    identity.role ||
-    identity.workflowRole ||
-    identity.workflowCapabilities.length > 0 ||
-    identity.duties.length > 0 ||
-    identity.boundaries.length > 0
-  ) {
+  if (identity.role || identity.duties.length > 0 || identity.boundaries.length > 0) {
     lines.push("");
   }
 
@@ -153,7 +130,7 @@ function renderIdentityBlock(agentId, fallback = null) {
 
 /**
  * Public metadata for UI / API (no full body).
- * @returns {Array<{ id: string, label: string, role: string, duties: string[], boundaries: string[], workflowRole: string, workflowCapabilities: string[], workflowResponsibilities: string[] }>}
+ * @returns {Array<{ id: string, label: string, role: string, duties: string[], boundaries: string[] }>}
  */
 function publicIdentities() {
   return [...getCache().values()].map((id) => ({
@@ -162,9 +139,6 @@ function publicIdentities() {
     role: id.role,
     duties: id.duties.slice(),
     boundaries: id.boundaries.slice(),
-    workflowRole: id.workflowRole,
-    workflowCapabilities: id.workflowCapabilities.slice(),
-    workflowResponsibilities: id.workflowResponsibilities.slice(),
   }));
 }
 

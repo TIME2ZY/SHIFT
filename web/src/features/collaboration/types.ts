@@ -1,41 +1,62 @@
-export interface CollaborationImplementation {
-  status: "required" | "pending_approval" | "approved" | null;
-  allowed: boolean | null;
-  reason: string | null;
-  planHash: string | null;
-  summary: string | null;
+export interface CollaborationSeat {
+  seatId: string;
+  providerId: string | null;
+  label: string | null;
 }
 
-export interface CollaborationReview {
-  status: "approved" | "changes_requested" | string | null;
-  verdict: string | null;
+export interface CollaborationBlocker {
+  type:
+    | "waiting_human"
+    | "waiting_approval"
+    | "missing_evidence"
+    | "provider_unavailable"
+    | "execution_failed";
+  reason: string;
 }
 
-export interface CollaborationDelivery {
-  status: "verified" | "recorded" | null;
+export interface CollaborationEvidence {
+  dirtyFileCount: number | null;
+  headSha: string | null;
   commitSha: string | null;
   prUrl: string | null;
   ciStatus: string | null;
 }
 
-export interface CollaborationAcceptance {
-  status: "accepted" | "rejected" | "recorded" | null;
-  verdict: string | null;
+export interface AcceptanceCard {
+  evidenceProfile: "code_change" | "working_tree_change" | "analysis" | string;
+  goalHash: string | null;
+  planHash: string | null;
+  branch: string | null;
+  headSha: string | null;
+  commitSha: string | null;
+  prUrl: string | null;
+  ciStatus: string;
+  reviewMode: "same_seat" | "other_seat" | "pending";
+  reviewVerdict: "approved" | "changes_requested" | "unknown";
+  verdict: "accepted" | "rejected" | "incomplete";
+  ready: boolean;
+  reason: string | null;
+  decidedAt: string | null;
 }
 
 export interface CollaborationSnapshot {
+  status: "active" | "waiting_human" | "accepted" | "rejected" | string;
   phase: "discuss" | "implement" | "review" | "deliver" | "done" | string;
-  goal: string | null;
-  lastFrom: string | null;
-  lastTo: string | null;
+  goalOriginal: string | null;
+  goalNormalized: string | null;
+  currentSeat: CollaborationSeat | null;
+  currentDuty: string | null;
+  currentSkill: string | null;
+  enforcementLevel: "enforced" | "advisory" | string | null;
   updatedAt: string | null;
-  implementation: CollaborationImplementation;
-  review: CollaborationReview;
-  delivery: CollaborationDelivery;
-  acceptance: CollaborationAcceptance;
-  blocker: string | null;
+  blocker: CollaborationBlocker | null;
+  evidence: CollaborationEvidence;
+  reviewMode: "same_seat" | "other_seat" | "pending";
+  acceptance: AcceptanceCard;
+  nextAction: string;
 }
 
 export interface CollaborationResponse {
   collaboration: CollaborationSnapshot | null;
+  seats: CollaborationSeat[];
 }

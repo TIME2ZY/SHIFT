@@ -8,7 +8,6 @@ const DEFAULT_SEAL_MARGIN = 0.08;
 const DEFAULT_SEAL_SOFT_GAP = 0.04;
 /** Physical points between recovery and soft (sealer hysteresis). */
 const DEFAULT_SEAL_RECOVERY_GAP = 0.05;
-const { getAgentRoleContract } = require("./role-contracts");
 
 function model(providerId, modelId, vendorId, options = {}) {
   const profile = {
@@ -106,7 +105,6 @@ const MODELS = Object.fromEntries(
 );
 
 function agent(id, label, providerId, modelId, description, options = {}) {
-  const workflow = getAgentRoleContract(id);
   return {
     id,
     label,
@@ -115,27 +113,21 @@ function agent(id, label, providerId, modelId, description, options = {}) {
     ...(options.capacityTokens ? { capacityTokens: options.capacityTokens } : {}),
     reasoningEffort: options.reasoningEffort || "",
     ...(options.transport ? { transport: options.transport } : {}),
+    runtimeCapabilities: Object.freeze({
+      permissionCallbacks: options.permissionCallbacks === true,
+    }),
     description,
-    workflowRole: workflow?.role || "",
-    workflowCapabilities: workflow ? workflow.capabilities.slice() : [],
-    workflowResponsibilities: workflow ? workflow.responsibilities.slice() : [],
   };
 }
 
-/**
- * Four agents only — id equals the display name (lowercase).
- *   codex     · initial/final guard, discussion convergence
- *   gemini    · discussion, options, challenge and cross-validation
- *   grok      · concrete change plan, implementation and test summary
- *   opencode  · code review and delivery
- */
+/** Installed provider/runtime profiles. Duty is bound per invocation elsewhere. */
 const AGENTS = {
   codex: agent(
     "codex",
     "Codex",
     "codex",
     "gpt-5.6-sol",
-    "开始与末尾把关：参与讨论、与 Gemini 互证并收敛方案，最终按用户目标验收。",
+    "OpenAI Codex CLI runtime。支持代码读取、修改、命令执行与结构化事件输出。",
     { reasoningEffort: "medium" }
   ),
   gemini: agent(
@@ -143,19 +135,27 @@ const AGENTS = {
     "Gemini",
     "antigravity",
     "gemini-3.6-flash",
-    "讨论伙伴：提出正常可行的选项、风险与反例，与 Codex 互相验证，不为猎奇而发散。",
+    "Antigravity CLI runtime，使用 Gemini 模型并输出结构化流事件。",
     { reasoningEffort: "high" }
   ),
-  grok: agent("grok", "Grok", "grok", "grok-4.6", "实现：先给具体修改方案，再按批准方案改代码、跑测试并总结。", {
-    reasoningEffort: "high",
-    transport: "acp",
-  }),
+  grok: agent(
+    "grok",
+    "Grok",
+    "grok",
+    "grok-4.6",
+    "Grok CLI/ACP runtime。ACP 模式支持平台权限回调与结构化工具事件。",
+    {
+      reasoningEffort: "high",
+      transport: "acp",
+      permissionCallbacks: true,
+    }
+  ),
   opencode: agent(
     "opencode",
     "OpenCode",
     "opencode",
     "deepseek-v4-flash",
-    "Review 与交付：代码评审、质量把关；批准后规范 commit、push 和 PR 描述。",
+    "OpenCode CLI runtime。支持代码工具、推理流与结构化使用量事件。",
     { reasoningEffort: "max" }
   ),
 };

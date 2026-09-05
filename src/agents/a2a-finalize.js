@@ -21,6 +21,7 @@ const {
 const { buildFinalizeMetrics, logFinalizeMetrics } = require("./handoff-metrics");
 const crypto = require("node:crypto");
 const collabTaskRegistry = require("./collab-task-registry");
+const { buildDutyBinding, normalizeDuty, resolveEnabledSeat } = require("./duty-routing");
 const {
   HANDOFF_PARSE_STATUS,
   HANDOFF_ROUTE_STATUS,
@@ -66,10 +67,14 @@ function finalizeA2ARoutes(input = {}) {
   const source = input.source || "chat";
   const logger = input.logger || console;
   const taskRegistry = input.collabTaskRegistry || collabTaskRegistry;
+  const threadSeats = input.threadSeats || null;
+  const agents = input.agents || {};
+  const enabledSeats = threadSeats?.listEnabledForThread?.(sessionId) || [];
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
-  let a2aCount = Number.isFinite(Number(input.a2aCount)) ? Number(input.a2aCount) : 0;
+  const a2aState = input.a2aState || {};
+  a2aState.a2aCount ??= Number.isFinite(Number(input.a2aCount)) ? Number(input.a2aCount) : 0;
   const mode = input.policyMode || resolveHandoffPolicyMode();
   const mentionParser =
     typeof input.parseMentions === "function" ? input.parseMentions : parseA2AMentions;
@@ -90,19 +95,21 @@ function finalizeA2ARoutes(input = {}) {
     if (aborted) break;
 
     const fromLabel = agentLabels[fromAgent] || fromAgent;
-    const toLabel = agentLabels[target] || target;
+    const targetSeat = resolveEnabledSeat(threadSeats, sessionId, target, agents);
+    const targetAgent = targetSeat?.providerId || target;
+    const toLabel = targetSeat?.label || agentLabels[targetAgent] || target;
     // Canonical fence only (last matching block); earlier duplicate fences ignored.
     const handoffMatch = agentHandoff.selectCanonicalHandoffMatch(text, {
       currentAgentId: fromAgent,
-      routedTo: target,
+      routedTo: targetAgent,
       mentionCount: mentions.length,
     });
     const handoff = handoffMatch.handoff;
-    const contentHash = hashHandoffContent(handoff, target);
+    const contentHash = hashHandoffContent(handoff, targetAgent);
     const parseStatus = handoff ? HANDOFF_PARSE_STATUS.PARSED : HANDOFF_PARSE_STATUS.FAILED;
     const quality = agentHandoff.evaluateHandoff(handoff, {
-      routedTo: target,
-      toAgentId: target,
+      routedTo: targetAgent,
+      toAgentId: targetAgent,
       fromAgentId: fromAgent,
       useWorktree,
       riskFlags: [
@@ -111,30 +118,44 @@ function finalizeA2ARoutes(input = {}) {
         ...(handoffMatch.blockCount > 1 ? ["multi_handoff_block"] : []),
       ],
     });
+    const duty = normalizeDuty(quality.intent || "discuss");
+    const fromDuty = input.fromDuty || null;
+    const dutyBinding = buildDutyBinding({
+      seat: targetSeat,
+      duty,
+      routingReason: handoff?.to ? "handoff_to" : "explicit_mention",
+      agentConfig: agents[targetAgent],
+    });
     const phaseId =
       input.phaseId ||
       resolveCollabPhase({
         useWorktree,
         intent: quality.intent,
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
       });
     const evidenceSkip = taskRegistry.shouldBlockEvidenceRoute({
       threadId: sessionId,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
     });
     const implementationSkip = taskRegistry.shouldBlockImplementationRoute({
       threadId: sessionId,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
     });
     const reviewSkip = taskRegistry.shouldSkipRedundantReview({
       threadId: sessionId,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
+      fromDuty,
+      toDuty: duty,
       contentHash,
       handoff,
     });
@@ -148,23 +169,28 @@ function finalizeA2ARoutes(input = {}) {
       useWorktree,
       mode,
       fromAgent,
-      toAgent: target,
+      toAgent: targetAgent,
       intent: quality.intent,
       phaseId,
       taskSkip,
+      targetSeat,
+      enabledSeats,
     };
     const decision = decidePolicy(policyInput);
     const phaseCheck = policyInput._phaseCheck || null;
     quality.policy = decision;
     quality.phase = phaseCheck?.phase || phaseId;
     quality.taskSkip = taskSkip.skip ? taskSkip : null;
-    handoffByTarget[target] = handoff;
-    handoffQualityByTarget[target] = quality;
+    handoffByTarget[targetAgent] = handoff;
+    handoffQualityByTarget[targetAgent] = quality;
 
     const summary = {
       ...agentHandoff.summarizeHandoff(handoff, quality),
       from: fromAgent,
-      to: target,
+      to: targetAgent,
+      fromSeatId: input.fromSeatId || null,
+      seatId: targetSeat?.seatId || null,
+      duty,
       policy: decision,
       handoffPolicy: mode,
       source,
@@ -192,7 +218,7 @@ function finalizeA2ARoutes(input = {}) {
         invocationId,
         windowId,
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
         handoff,
         quality,
         blockIndex: handoffMatch.blockIndex,
@@ -205,10 +231,11 @@ function finalizeA2ARoutes(input = {}) {
       }
     }
 
-    if (a2aCount >= maxDepth) {
+    function skipAtDepthLimit() {
+      if (a2aState.a2aCount < maxDepth) return false;
       const skip = {
         from: fromAgent,
-        to: target,
+        to: targetAgent,
         reason: "max_depth",
         maxDepth,
         policy: DECISIONS.REJECT,
@@ -228,8 +255,10 @@ function finalizeA2ARoutes(input = {}) {
         appendToSession,
         source,
       });
-      continue;
+      return true;
     }
+
+    if (skipAtDepthLimit()) continue;
 
     if (!canEnqueue(decision)) {
       // Phase/task reject vs handoff repair (incomplete fence).
@@ -238,14 +267,14 @@ function finalizeA2ARoutes(input = {}) {
       if (isPhaseOrTaskReject) {
         const reject = buildPhaseRejectPayload({
           fromAgent,
-          toAgent: target,
+          toAgent: targetAgent,
           phaseCheck,
           taskSkip,
           mode,
         });
         skipped.push({
           from: fromAgent,
-          to: target,
+          to: targetAgent,
           reason: reject.reason,
           policy: DECISIONS.REJECT,
           phase: reject.phase,
@@ -262,7 +291,7 @@ function finalizeA2ARoutes(input = {}) {
               kind: "a2a-skipped",
               messageType: "a2a-phase-rejected",
               from: fromAgent,
-              to: target,
+              to: targetAgent,
               reason: reject.reason,
               source,
             },
@@ -281,7 +310,7 @@ function finalizeA2ARoutes(input = {}) {
       }
       const repair = buildRepairPayload({
         fromAgent,
-        toAgent: target,
+        toAgent: targetAgent,
         quality,
         mode,
       });
@@ -299,139 +328,129 @@ function finalizeA2ARoutes(input = {}) {
       continue;
     }
 
-    if (!durableRecorder || typeof durableRecorder.acceptHandoff !== "function") {
-      throw new Error("A2A finalize requires durable Handoff storage.");
-    }
-    const accept = durableRecorder.acceptHandoff({
-      threadId: sessionId,
-      sourceAgentId: fromAgent,
-      targetAgentId: target,
-      sourceInvocationId: invocationId || null,
-      contentHash,
-      depth: a2aCount + 1,
-      parseStatus,
-      policy: decision,
-      source,
-      reason: quality.intent || "a2a-route",
-      phaseId: quality.phase || phaseId,
-    });
-    hopRecords.push(accept.record);
-    summary.handoffId = accept.record.handoffId;
-    summary.routeStatus = accept.status;
-    summary.duplicateOf = accept.record.duplicateOf || null;
-
-    if (!accept.accepted) {
-      duplicateRoutes += 1;
-      const skip = {
-        from: fromAgent,
-        to: target,
-        reason: accept.status,
-        policy: DECISIONS.REJECT,
-        routeStatus: accept.status,
-        handoffId: accept.record.handoffId,
-        duplicateOf: accept.record.duplicateOf || accept.record.handoffId,
-        contentHash,
-      };
-      skipped.push(skip);
-      if (sendSse) {
-        sendSse("a2a-skipped", {
-          from: skip.from,
-          to: skip.to,
-          reason: skip.reason,
-          handoffId: skip.handoffId,
-          routeStatus: skip.routeStatus,
-          duplicateOf: skip.duplicateOf,
-        });
+    const enqueueRoute = (routeHandoff, routeQuality, routeDecision, routeContentHash) => {
+      if (skipAtDepthLimit()) return null;
+      if (!durableRecorder || typeof durableRecorder.acceptHandoff !== "function") {
+        throw new Error("A2A finalize requires durable Handoff storage.");
       }
-      appendRouteEvent({
-        eventStore,
-        durableRecorder,
+      const accept = durableRecorder.acceptHandoff({
+        threadId: sessionId,
+        sourceAgentId: fromAgent,
+        targetAgentId: targetAgent,
+        sourceInvocationId: invocationId || null,
+        contentHash: routeContentHash,
+        depth: a2aState.a2aCount + 1,
+        parseStatus,
+        policy: routeDecision,
+        source,
+        reason: routeQuality.intent || "a2a-route",
+        phaseId: routeQuality.phase || phaseId,
+      });
+      hopRecords.push(accept.record);
+      summary.handoffId = accept.record.handoffId;
+      summary.routeStatus = accept.status;
+      summary.duplicateOf = accept.record.duplicateOf || null;
+
+      if (!accept.accepted) {
+        duplicateRoutes += 1;
+        const skip = {
+          from: fromAgent,
+          to: targetAgent,
+          reason: accept.status,
+          policy: DECISIONS.REJECT,
+          routeStatus: accept.status,
+          handoffId: accept.record.handoffId,
+          duplicateOf: accept.record.duplicateOf || accept.record.handoffId,
+          contentHash: routeContentHash,
+        };
+        skipped.push(skip);
+        if (sendSse) sendSse("a2a-skipped", skip);
+        appendRouteEvent({
+          eventStore,
+          durableRecorder,
+          sessionId,
+          invocationId,
+          kind: "a2a-skipped",
+          payload: skip,
+        });
+        return null;
+      }
+
+      if (!worklist) throw new Error("Accepted A2A Handoff requires a scheduler worklist.");
+      worklist.push(targetAgent);
+      try {
+        const marked = durableRecorder.markHandoffEnqueued?.(accept.record.handoffId);
+        if (!marked?.enqueuedAt) {
+          throw new Error(`Failed to persist enqueue for Handoff ${accept.record.handoffId}.`);
+        }
+      } catch (error) {
+        worklist.pop();
+        throw error;
+      }
+      a2aState.a2aCount += 1;
+      const entry = {
+        from: fromAgent,
+        to: targetAgent,
+        fromSeatId: input.fromSeatId || null,
+        seatId: targetSeat.seatId,
+        duty,
+        dutyBinding,
+        parentInvocationId: invocationId || null,
+        policy: routeDecision,
+        handoffOk: routeQuality.ok,
+        handoffDegraded: routeQuality.degraded,
+        emptyPacket: routeQuality.emptyPacket,
+        toMismatch: routeQuality.toMismatch,
+        reentry: worklist.filter((id) => id === targetAgent).length > 1,
+        handoffId: accept.record.handoffId,
+        contentHash: routeContentHash,
+        routeStatus: HANDOFF_ROUTE_STATUS.ACCEPTED,
+        depth: accept.record.depth,
+        parseStatus,
+      };
+      enqueued.push(entry);
+      emitRoute({
+        entry,
+        fromLabel,
+        toLabel,
         sessionId,
         invocationId,
-        kind: "a2a-skipped",
-        payload: skip,
+        durableRecorder,
+        eventStore,
+        sendSse,
+        appendToSession,
+        source,
       });
-      // Re-emit parsed with routeStatus for clients that only watch handoff-parsed.
-      if (sendSse) sendSse("handoff-parsed", { ...summary, routeStatus: accept.status });
-      continue;
-    }
-
-    if (!worklist) {
-      throw new Error("Accepted A2A Handoff requires a scheduler worklist.");
-    }
-    // The in-request queue is appended first; only then may durable enqueued_at
-    // claim that scheduling occurred. A failed confirmation removes this append.
-    worklist.push(target);
-    try {
-      const enqueued = durableRecorder.markHandoffEnqueued?.(accept.record.handoffId);
-      if (!enqueued?.enqueuedAt) {
-        throw new Error(`Failed to persist enqueue for Handoff ${accept.record.handoffId}.`);
+      try {
+        taskRegistry.noteAcceptedRoute({
+          threadId: sessionId,
+          fromAgent,
+          toAgent: targetAgent,
+          intent: routeQuality.intent,
+          fromDuty,
+          toDuty: duty,
+          contentHash: routeContentHash,
+          useWorktree,
+          handoff: routeHandoff,
+          text,
+        });
+      } catch (error) {
+        logger.warn?.(`[collab-task] note route failed: ${error.message}`);
       }
-    } catch (error) {
-      worklist.pop();
-      throw error;
-    }
-    a2aCount += 1;
-    const reentry = worklist ? worklist.filter((id) => id === target).length > 1 : false;
-    const entry = {
-      from: fromAgent,
-      to: target,
-      parentInvocationId: invocationId || null,
-      policy: decision,
-      handoffOk: quality.ok,
-      handoffDegraded: quality.degraded,
-      emptyPacket: quality.emptyPacket,
-      toMismatch: quality.toMismatch,
-      reentry,
-      handoffId: accept.record.handoffId,
-      contentHash,
-      routeStatus: HANDOFF_ROUTE_STATUS.ACCEPTED,
-      depth: accept.record.depth,
-      parseStatus,
+      if (Array.isArray(input.a2aState?.a2aCauses)) {
+        input.a2aState.a2aCauses.push({
+          agentId: targetAgent,
+          parentInvocationId: invocationId || null,
+          triggerMessageId: entry.routeMessageId || null,
+          triggerType: "a2a-handoff",
+          handoffId: entry.handoffId,
+          dutyBinding,
+        });
+      }
+      return entry;
     };
-    enqueued.push(entry);
-    emitRoute({
-      entry,
-      fromLabel,
-      toLabel,
-      sessionId,
-      invocationId,
-      durableRecorder,
-      eventStore,
-      sendSse,
-      appendToSession,
-      source,
-    });
-    // Advance collab task state after successful enqueue.
-    try {
-      taskRegistry.noteAcceptedRoute({
-        threadId: sessionId,
-        fromAgent,
-        toAgent: target,
-        intent: quality.intent,
-        contentHash,
-        useWorktree,
-        handoff,
-        text,
-      });
-    } catch (error) {
-      logger.warn?.(`[collab-task] note route failed: ${error.message}`);
-    }
-    if (Array.isArray(input.a2aState?.a2aCauses)) {
-      input.a2aState.a2aCauses.push({
-        agentId: target,
-        parentInvocationId: invocationId || null,
-        triggerMessageId: entry.routeMessageId || null,
-        triggerType: "a2a-handoff",
-        handoffId: entry.handoffId,
-      });
-    }
-  }
 
-  if (typeof input.onA2ACount === "function") {
-    input.onA2ACount(a2aCount);
-  } else if (input.a2aState && typeof input.a2aState === "object") {
-    input.a2aState.a2aCount = a2aCount;
+    enqueueRoute(handoff, quality, decision, contentHash);
   }
 
   const metrics = buildFinalizeMetrics({
@@ -459,7 +478,9 @@ function finalizeA2ARoutes(input = {}) {
     handoffByTarget,
     handoffQualityByTarget,
     mode,
-    a2aCount,
+    get a2aCount() {
+      return a2aState.a2aCount;
+    },
     metrics,
     capturedCount,
     hopRecords,
@@ -608,6 +629,9 @@ function emitRoute({
         messageType: "a2a-route",
         from: entry.from,
         to: entry.to,
+        fromSeatId: entry.fromSeatId,
+        seatId: entry.seatId,
+        duty: entry.duty,
         parentInvocationId: entry.parentInvocationId,
         handoffOk: entry.handoffOk,
         handoffDegraded: entry.handoffDegraded,
@@ -626,6 +650,9 @@ function emitRoute({
     sendSse("a2a-route", {
       from: entry.from,
       to: entry.to,
+      fromSeatId: entry.fromSeatId,
+      seatId: entry.seatId,
+      duty: entry.duty,
       parentInvocationId: entry.parentInvocationId,
       routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
@@ -649,6 +676,9 @@ function emitRoute({
     payload: {
       from: entry.from,
       to: entry.to,
+      fromSeatId: entry.fromSeatId,
+      seatId: entry.seatId,
+      duty: entry.duty,
       parentInvocationId: entry.parentInvocationId,
       routeMessageId: entry.routeMessageId || null,
       handoffOk: entry.handoffOk,
@@ -694,13 +724,23 @@ function isEffectiveHandoffHop(record) {
 
 function hashHandoffContent(handoff, targetAgent) {
   const h = handoff && typeof handoff === "object" ? handoff : {};
+  const fields = [
+    h.to,
+    h.intent,
+    h.goal,
+    h.what,
+    h.why,
+    h.tradeoff,
+    h.next_action,
+    ...(Array.isArray(h.constraints) ? h.constraints : []),
+    ...(Array.isArray(h.prohibited) ? h.prohibited : []),
+    ...(Array.isArray(h.files) ? h.files : []),
+    ...(Array.isArray(h.evidence) ? h.evidence : []),
+    ...(Array.isArray(h.open_questions) ? h.open_questions : []),
+  ];
   return crypto
     .createHash("sha256")
-    .update(
-      [targetAgent, h.to, h.goal, h.what, h.why, h.next_action]
-        .map((value) => String(value || "").toLowerCase())
-        .join("\n")
-    )
+    .update([targetAgent, ...fields].map((value) => String(value || "").toLowerCase()).join("\n"))
     .digest("hex")
     .slice(0, 16);
 }

@@ -109,7 +109,17 @@ test("buildRepairPayload includes example fence", () => {
   assert.match(payload.example, /intent:/);
 });
 
-test("explicit intents resolve the five workflow phases without changing the reviewer", () => {
+const enabledSeats = [
+  { seatId: "seat-codex", providerId: "codex", enabled: true },
+  { seatId: "seat-grok", providerId: "grok", enabled: true },
+  { seatId: "seat-opencode", providerId: "opencode", enabled: true },
+];
+
+function seat(providerId) {
+  return enabledSeats.find((candidate) => candidate.providerId === providerId) || null;
+}
+
+test("explicit intents resolve workflow phases independently of provider identity", () => {
   assert.equal(resolveCollabPhase({ intent: "discuss", toAgent: "codex" }), "discuss");
   assert.equal(resolveCollabPhase({ intent: "plan", toAgent: "grok" }), "implement");
   assert.equal(resolveCollabPhase({ intent: "review", toAgent: "opencode" }), "review");
@@ -120,42 +130,37 @@ test("explicit intents resolve the five workflow phases without changing the rev
     "discuss"
   );
 
-  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
-  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "codex" }).ok, false);
-  assert.equal(evaluatePhaseRoute({ intent: "accept", toAgent: "codex" }).ok, true);
-  assert.equal(evaluatePhaseRoute({ intent: "discuss", toAgent: "grok" }).ok, true);
-  assert.equal(evaluatePhaseRoute({ intent: "discuss", toAgent: "opencode" }).ok, true);
+  for (const [intent, providerId] of [
+    ["review", "opencode"],
+    ["review", "codex"],
+    ["accept", "opencode"],
+    ["plan", "grok"],
+  ]) {
+    assert.equal(
+      evaluatePhaseRoute({
+        intent,
+        toAgent: providerId,
+        targetSeat: seat(providerId),
+        enabledSeats,
+        useWorktree: true,
+      }).ok,
+      true
+    );
+  }
 });
 
-test("intent capabilities distinguish roles that share the deliver phase", () => {
-  const wrongDelivery = evaluatePhaseRoute({ intent: "deliver", toAgent: "codex" });
-  assert.equal(wrongDelivery.ok, false);
-  assert.equal(wrongDelivery.reason, "target_lacks_intent_capability");
-  assert.deepEqual(wrongDelivery.allowed, ["opencode"]);
-
-  const wrongAcceptance = evaluatePhaseRoute({ intent: "accept", toAgent: "opencode" });
-  assert.equal(wrongAcceptance.ok, false);
-  assert.equal(wrongAcceptance.reason, "target_lacks_intent_capability");
-  assert.deepEqual(wrongAcceptance.allowed, ["codex"]);
-
-  assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "grok" }).ok, true);
-  assert.equal(evaluatePhaseRoute({ intent: "plan", toAgent: "gemini" }).ok, false);
-  assert.equal(
-    evaluatePhaseRoute({ intent: "plan", toAgent: "gemini" }).reason,
-    "target_lacks_intent_capability"
-  );
-  assert.equal(evaluatePhaseRoute({ intent: "fix", toAgent: "grok" }).ok, true);
-  assert.equal(evaluatePhaseRoute({ intent: "review", toAgent: "opencode" }).ok, true);
-});
-
-test("balanced policy rejects routes whose target lacks the requested role capability", () => {
-  const decision = decidePolicy({
-    mode: "balanced",
-    fromAgent: "opencode",
-    toAgent: "opencode",
-    intent: "accept",
-    quality: { hasBlock: true, emptyPacket: false, ok: true, intent: "accept" },
-  });
-
-  assert.equal(decision, DECISIONS.REJECT);
+test("an unenabled target Seat is rejected in every policy mode", () => {
+  for (const mode of ["soft", "balanced", "strict"]) {
+    const input = {
+      mode,
+      toAgent: "gemini",
+      intent: "discuss",
+      targetSeat: null,
+      enabledSeats,
+      quality: { hasBlock: true, emptyPacket: false, ok: true, intent: "discuss" },
+    };
+    assert.equal(decidePolicy(input), DECISIONS.REJECT);
+    assert.equal(input._phaseCheck.reason, "target_seat_not_enabled");
+    assert.deepEqual(input._phaseCheck.allowed, ["codex", "grok", "opencode"]);
+  }
 });

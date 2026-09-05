@@ -1,7 +1,11 @@
 ---
 name: memory-write
 description: 判断并写入可复用的会话级结论（decision / constraint / fact）
-always: true
+duties: [recall]
+preferTags: [memory]
+allow: anyEnabledSeat
+avoid: ""
+always: false
 ---
 
 # Memory Write Policy

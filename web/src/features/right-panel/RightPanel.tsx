@@ -44,6 +44,13 @@ export function RightPanel({
   const closeRef = useRef<HTMLButtonElement>(null);
   const usage = useUsageQuery(sessionId, !compactLayout || open);
   const collaboration = useCollaborationQuery(sessionId, !compactLayout || open);
+  const seats = collaboration.data?.seats;
+  const enabledAgents = seats
+    ? seats.flatMap((seat) => {
+        const agent = agents.find((candidate) => candidate.id === seat.providerId);
+        return agent ? [{ ...agent, label: seat.label || agent.label }] : [];
+      })
+    : agents;
 
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 1050px)");
@@ -68,21 +75,21 @@ export function RightPanel({
     <aside
       id="react-right-panel"
       className="react-right-panel"
-      aria-label="会话 Agent"
+      aria-label="任务与席位"
       aria-modal={open || undefined}
       data-open={open || undefined}
       role={open ? "dialog" : undefined}
     >
       <header className="react-panel-mobile-header">
-        <strong>会话 Agent</strong>
-        <button ref={closeRef} type="button" aria-label="关闭会话信息" onClick={onClose}>
+        <strong>任务与席位</strong>
+        <button ref={closeRef} type="button" aria-label="关闭任务与席位" onClick={onClose}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 6l12 12M18 6 6 18" />
           </svg>
         </button>
       </header>
       <header className="react-panel-title">
-        <strong>Agent</strong>
+        <strong>席位</strong>
       </header>
 
       <div className="react-panel-body react-panel-body-agents">
@@ -99,8 +106,8 @@ export function RightPanel({
             用量暂不可用，Agent 信息不受影响。
           </p>
         ) : null}
-        <div className="react-agent-cards" role="radiogroup" aria-label="当前会话 Agent">
-          {agents.map((agent) => (
+        <div className="react-agent-cards" role="radiogroup" aria-label="本线程席位">
+          {enabledAgents.map((agent) => (
             <AgentUsageCard
               agent={agent}
               usage={usage.data?.agents.find((item) => item.agentId === agent.id)}
@@ -114,6 +121,9 @@ export function RightPanel({
               key={agent.id}
             />
           ))}
+          {sessionId && seats?.length === 0 ? (
+            <p className="react-panel-empty">当前线程没有已启用席位。</p>
+          ) : null}
         </div>
       </div>
     </aside>

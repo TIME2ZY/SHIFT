@@ -429,6 +429,7 @@ describe("MessageList", () => {
           latestInvocationByAgent: {},
           invocationOrder: [],
           notices: [],
+
           optimisticUser: {
             agentId: "codex",
             content: "不要重复我",
@@ -483,6 +484,7 @@ describe("MessageList", () => {
           latestInvocationByAgent: { gemini: "i2" },
           invocationOrder: ["i2"],
           notices: [],
+
           optimisticUser: {
             agentId: "codex",
             content: "检查这个问题",

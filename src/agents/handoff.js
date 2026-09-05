@@ -29,7 +29,6 @@ const {
   toMatchesRoute,
   hasValue,
 } = require("./handoff-parse");
-const { WORKFLOW_ROLES, agentsWithCapability, agentIdsForRole } = require("./role-contracts");
 
 const DEFAULT_APPENDIX_CHARS = 5000;
 /** No handoff fence: even more of the prior text is the only payload. */
@@ -58,15 +57,6 @@ const APPENDIX_ANCHORS = [
   "### P1",
 ];
 
-const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
-const LEAD_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.LEAD));
-const DISCUSSION_AGENT_IDS = new Set([
-  ...agentIdsForRole(WORKFLOW_ROLES.LEAD),
-  ...agentIdsForRole(WORKFLOW_ROLES.DISCUSSION_PARTNER),
-]);
-const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
-
 /**
  * @typedef {object} Handoff
  * @property {string} [to]
@@ -79,6 +69,8 @@ const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
  * @property {string[]} [open_questions]
  * @property {string[]} [files]
  * @property {string[]} [evidence]
+ * @property {string[]} [constraints]
+ * @property {string[]} [prohibited]
  * @property {string} raw
  */
 
@@ -105,7 +97,7 @@ const DELIVERY_AGENT_IDS = new Set(agentsWithCapability("deliver"));
  */
 /**
  * Compact handoff reminder for A2A turns (avoids re-injecting the full
- * always-on a2a-handoff skill body — collaboration rules already cover basics).
+ * the shared handoff Skill body — collaboration rules already cover basics).
  * @returns {string}
  */
 function renderA2AHandoffCard() {
@@ -128,6 +120,10 @@ files:
   - path — 为何重要
 evidence:
   - 失败或验证
+constraints:
+  - 必须保留的约束
+prohibited:
+  - 禁止事项
 \`\`\`
 
 入站：优先执行 Structured Handoff；附录非权威。缺 files/evidence 时先 recall，勿只凭附录改代码。
@@ -162,74 +158,6 @@ function selectAppendix(text, maxChars) {
     return s.slice(start, start + limit).trim();
   }
   return s.slice(tailStart).trim();
-}
-
-/**
- * Whether the A2A target should receive the receiving-review skill.
- * Implementers fixing after a reviewer (or review-shaped handoff) need it.
- *
- * @param {{ targetAgentId?: string, fromAgentId?: string, handoff?: Handoff | null, text?: string }} opts
- * @returns {boolean}
- */
-function shouldInjectReceivingReview(opts = {}) {
-  const target = String(opts.targetAgentId || "")
-    .trim()
-    .toLowerCase();
-  if (!IMPLEMENTER_AGENT_IDS.has(target)) return false;
-
-  const from = String(opts.fromAgentId || "")
-    .trim()
-    .toLowerCase();
-  if (REVIEWER_AGENT_IDS.has(from)) return true;
-
-  const quality = opts.quality || null;
-  if (quality && (quality.intent === "fix" || quality.degraded || quality.emptyPacket)) {
-    return true;
-  }
-
-  const handoff = opts.handoff || null;
-  const blob = [
-    handoff && handoff.what,
-    handoff && handoff.why,
-    handoff && handoff.next_action,
-    handoff && handoff.goal,
-    opts.text,
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .toLowerCase();
-
-  return /request-changes|approve-with-nits|\bp0\b|\bp1\b|review\s*意见|修改意见|请修|fix these|blocking/.test(
-    blob
-  );
-}
-
-/**
- * Turn-forced platform skills for one A2A hop. Native CLI discovery cannot know
- * which playbook this hop needs; identity no longer contains the fenced templates.
- *
- * @param {{ targetAgentId?: string, fromAgentId?: string, intent?: string, handoff?: Handoff | null, quality?: object, text?: string }} opts
- * @returns {string[]}
- */
-function playbookSkillNamesForHop(opts = {}) {
-  const target = String(opts.targetAgentId || "")
-    .trim()
-    .toLowerCase();
-  const intent = normalizeIntent(opts.intent || opts.quality?.intent || opts.handoff?.intent);
-  const names = [];
-  if (target === "grok" && (intent === "plan" || intent === "implement")) {
-    names.push("implementation-plan");
-  }
-  if (target === "opencode" && (intent === "review" || intent === "deliver")) {
-    names.push("code-review-deliver");
-  }
-  if (target === "codex" && intent === "accept") {
-    names.push("solution-baseline-acceptance");
-  }
-  if (shouldInjectReceivingReview(opts)) {
-    names.push("receiving-review");
-  }
-  return names;
 }
 
 /**
@@ -455,6 +383,8 @@ function renderHandoffTask(opts) {
   pushField(lines, "what", handoff.what);
   pushField(lines, "why", handoff.why);
   pushField(lines, "tradeoff", handoff.tradeoff);
+  pushList(lines, "constraints", handoff.constraints);
+  pushList(lines, "prohibited", handoff.prohibited);
   pushList(lines, "files", handoff.files);
   pushList(lines, "evidence", handoff.evidence);
   pushList(lines, "open_questions", handoff.open_questions);
@@ -582,11 +512,6 @@ module.exports = {
   APPENDIX_DEGRADED,
   APPENDIX_EMPTY,
   USER_PROMPT_MAX_CHARS,
-  IMPLEMENTER_AGENT_IDS,
-  REVIEWER_AGENT_IDS,
-  LEAD_AGENT_IDS,
-  DISCUSSION_AGENT_IDS,
-  DELIVERY_AGENT_IDS,
   normalizeIntent,
   parseHandoffBlocks,
   parseHandoffBody,
@@ -604,8 +529,6 @@ module.exports = {
   renderDegradedHandoff,
   renderA2AHandoffCard,
   selectAppendix,
-  shouldInjectReceivingReview,
-  playbookSkillNamesForHop,
   summarizeHandoff,
   normalizeTo,
   toMatchesRoute,

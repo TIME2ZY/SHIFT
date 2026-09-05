@@ -1,13 +1,4 @@
 const { ENV } = require("../shared/brand");
-const { DEFAULT_PHASE_AGENT_ALLOWLIST } = require("../shared/collab-contracts");
-const {
-  DEFAULT_INTENT_AGENT_ALLOWLIST,
-  WORKFLOW_ROLES,
-  agentIdsForRole,
-} = require("./role-contracts");
-
-const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
-const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
 
 const POLICY_MODES = Object.freeze(["soft", "balanced", "strict"]);
 const DECISIONS = Object.freeze({
@@ -34,7 +25,7 @@ function resolveHandoffPolicyMode(env = process.env) {
 
 /**
  * Resolve collaboration phase for route policy.
- * explicit phaseId > intent/reviewer target > worktree > discuss.
+ * explicit phaseId > intent > worktree > discuss.
  */
 function resolveCollabPhase(input = {}) {
   const explicit = String(input.phaseId || input.phase || "")
@@ -45,48 +36,31 @@ function resolveCollabPhase(input = {}) {
   const intent = String(input.intent || input.quality?.intent || "")
     .trim()
     .toLowerCase();
-  const to = String(input.toAgent || input.routedTo || "")
-    .trim()
-    .toLowerCase();
-  const from = String(input.fromAgent || "")
-    .trim()
-    .toLowerCase();
-
   if (intent === "accept" || intent === "deliver") return "deliver";
   if (intent === "review") return "review";
   if (intent === "discuss") return "discuss";
   if (intent === "recall") return "recall";
   if (intent === "fix" || intent === "implement") return "implement";
-  if (intent === "plan") {
-    return IMPLEMENTER_AGENT_IDS.has(to) || !to ? "implement" : "discuss";
-  }
-  if (REVIEWER_AGENT_IDS.has(to)) return "review";
-  if (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to)) {
-    return "implement";
-  }
-  // Worktree / explicit implement intent → implement phase.
-  // Targeting an implementer without worktree and without implement/plan/fix
-  // stays discuss so Grok can join discussion without entering implement.
+  if (intent === "plan") return "implement";
   if (input.useWorktree) return "implement";
   return "discuss";
 }
 
 /**
- * Phase agent allowlist check (platform constraint, not prompt-only).
+ * Enabled Seat and phase-boundary check.
  * @returns {{ ok: boolean, phase: string, reason?: string, allowed?: string[] }}
  */
 function evaluatePhaseRoute(input = {}) {
   const phase = resolveCollabPhase(input);
-  const allowlist = input.allowlist || DEFAULT_PHASE_AGENT_ALLOWLIST;
-  const intentAllowlist = input.intentAllowlist || DEFAULT_INTENT_AGENT_ALLOWLIST;
-  const allowed = Array.isArray(allowlist[phase]) ? allowlist[phase] : [];
+  const enabledSeats = Array.isArray(input.enabledSeats) ? input.enabledSeats : [];
+  const allowed = enabledSeats
+    .filter((seat) => seat && seat.enabled !== false)
+    .map((seat) => seat.providerId || seat.seatId)
+    .filter(Boolean);
   const intent = String(input.intent || input.quality?.intent || "")
     .trim()
     .toLowerCase();
   const to = String(input.toAgent || input.routedTo || "")
-    .trim()
-    .toLowerCase();
-  const from = String(input.fromAgent || "")
     .trim()
     .toLowerCase();
 
@@ -94,46 +68,17 @@ function evaluatePhaseRoute(input = {}) {
     return { ok: false, phase, reason: "missing_target", allowed: [...allowed] };
   }
 
-  const intentAgents = Array.isArray(intentAllowlist[intent]) ? intentAllowlist[intent] : null;
-  if (intentAgents && !intentAgents.includes(to)) {
+  if (!input.targetSeat || input.targetSeat.enabled === false) {
     return {
       ok: false,
       phase,
       intent,
-      reason: "target_lacks_intent_capability",
-      allowed: [...intentAgents],
-    };
-  }
-
-  // discuss: reviewers optional; default allowlist includes all four agents
-  if (allowed.length > 0 && !allowed.includes(to)) {
-    // implement phase may still hand to reviewer even if allowlist is implement-only
-    if (phase === "implement" && REVIEWER_AGENT_IDS.has(to)) {
-      return { ok: true, phase: "review", reason: null, allowed: [...(allowlist.review || [])] };
-    }
-    return {
-      ok: false,
-      phase,
-      reason: "target_not_in_phase_allowlist",
+      reason: "target_seat_not_enabled",
       allowed: [...allowed],
     };
   }
 
-  // review phase: target should be reviewer; implementer only for fix intent
-  if (phase === "review" && IMPLEMENTER_AGENT_IDS.has(to) && input.intent !== "fix") {
-    // allow fix handoff from reviewer → implementer
-    if (!(REVIEWER_AGENT_IDS.has(from) && input.intent === "fix")) {
-      // still ok if intent fix inferred later; soft check only when clearly wrong
-    }
-  }
-
-  // non-worktree implement intent toward implementer: degraded/reject at decidePolicy
-  if (
-    phase === "implement" &&
-    !input.useWorktree &&
-    IMPLEMENTER_AGENT_IDS.has(to) &&
-    input.intent === "implement"
-  ) {
+  if (phase === "implement" && !input.useWorktree && intent === "implement") {
     return {
       ok: false,
       phase,
@@ -170,7 +115,7 @@ function decidePolicy(input = {}) {
     return DECISIONS.REJECT;
   }
 
-  // Phase allowlist / boundary — only when a target agent is known (A2A routes).
+  // Enabled Seat / phase boundary — only when a target agent is known (A2A routes).
   // Legacy callers that only pass quality+mode keep prior fence-only behavior.
   const toAgent = input.toAgent || input.routedTo || null;
   if (toAgent) {
@@ -180,18 +125,15 @@ function decidePolicy(input = {}) {
       toAgent,
       fromAgent: input.fromAgent,
       useWorktree,
+      targetSeat: input.targetSeat,
+      enabledSeats: input.enabledSeats,
     });
     input._phaseCheck = phaseCheck;
     if (!phaseCheck.ok) {
-      if (mode === "soft") {
-        // Soft: discuss→implementer becomes degraded route (still visible) except hard worktree require
-        if (phaseCheck.reason === "implement_requires_worktree") {
-          return DECISIONS.REJECT;
-        }
-        // not in allowlist: soft still degrades rather than hard reject
+      if (mode === "soft" && phaseCheck.reason !== "implement_requires_worktree") {
+        if (phaseCheck.reason === "target_seat_not_enabled") return DECISIONS.REJECT;
         return DECISIONS.ALLOW_DEGRADED;
       }
-      // balanced/strict: hard reject phase violations
       return DECISIONS.REJECT;
     }
   } else {
@@ -229,7 +171,7 @@ function buildPhaseRejectPayload({ fromAgent, toAgent, phaseCheck, taskSkip, mod
   const message = [
     `⛔ 协作阶段/任务策略拒绝路由（policy=${mode || resolveHandoffPolicyMode()}）`,
     `${fromAgent || "?"} → ${toAgent || "?"} phase=${phase} reason=${reason}`,
-    allowed.length ? `本阶段/职责允许: ${allowed.map((a) => "@" + a).join(", ")}` : "",
+    allowed.length ? `当前 Thread 已启用 Seats: ${allowed.map((a) => "@" + a).join(", ")}` : "",
     taskSkip?.state ? `任务状态: ${taskSkip.state}` : "",
   ]
     .filter(Boolean)

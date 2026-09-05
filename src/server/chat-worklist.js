@@ -40,6 +40,7 @@ const {
 } = require("../session/seal-lifecycle");
 const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
+const { activeSkillNames } = require("../agents/duty-routing");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -121,7 +122,9 @@ async function runChatWorklist(ctx) {
     spawnRunner,
     buildChatArgs,
     options,
-    augmentPrompt,
+    prepareSkillDelivery,
+    sessionProjectDir,
+    isolatedWorkspace,
   } = ctx;
 
   let session = ctx.session;
@@ -137,7 +140,7 @@ async function runChatWorklist(ctx) {
   }
 
   try {
-    for (let i = 0; i < worklist.length && threadCtx.a2aCount < maxDepth; i++) {
+    for (let i = 0; i < worklist.length; i++) {
       if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
         aborted = true;
         break;
@@ -177,6 +180,7 @@ async function runChatWorklist(ctx) {
       let preCallSealedRatio = 0;
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
+      const dutyBinding = queuedCause?.dutyBinding || null;
       const parentInvocationId =
         i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
       const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
@@ -225,20 +229,16 @@ async function runChatWorklist(ctx) {
           memoryCard: a2aMemoryCard,
           includeOutboundCard: true,
         });
-        const a2aSkillNames = agentHandoff.playbookSkillNamesForHop({
-          targetAgentId: agent,
-          fromAgentId: prev.agent,
-          intent: quality?.intent,
-          handoff,
-          quality,
-          text: receiveBundle.text,
-        });
-        // Turn-forced playbooks still inject even when native worktree delivery succeeded.
-        const a2aSkills = augmentPrompt(receiveBundle.text, useWorktree, {
-          skillNames: a2aSkillNames,
+        const a2aSkills = prepareSkillDelivery({
+          workspaceDir: runWorkspace.worktreeDir,
+          projectDir: sessionProjectDir,
+          useWorktree,
+          isolated: isolatedWorkspace,
+          rawPrompt: receiveBundle.text,
+          skillNames: activeSkillNames(dutyBinding),
         });
         agentPrompt = a2aSkills.augmentedPrompt;
-        turnSkillNames = ["receive-bundle", ...a2aSkills.skillNames];
+        turnSkillNames = a2aSkills.skillNames;
         // Stash for metrics after full prompt assembly (needs promptBytes).
         threadCtx._pendingA2AInject = {
           agent,
@@ -256,19 +256,28 @@ async function runChatWorklist(ctx) {
       //   2. Collaboration rules (every turn: soft ban nested subagents; A2A uses compact)
       //   3. Session bootstrap (first turn only: coords + digest + recall)
       //   4. Light session header on later turns (correct agent label)
-      //   5. Task body (user/skills or Receive Bundle [+ receiving-review])
+      //   5. Task body (user/skills or Receive Bundle + current Duty Skills)
       //   6. Callback instructions
       const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
-      const collaborationBlock = renderCollaborationRules(agent, AGENTS, {
-        compact: i > 0,
-      });
+      const enabledProviderIds = new Set(
+        storage?.threadSeats?.listEnabledForThread?.(sessionId).map((seat) => seat.providerId) || [
+          agent,
+        ]
+      );
+      const enabledAgents = Object.fromEntries(
+        Object.entries(AGENTS).filter(([providerId]) => enabledProviderIds.has(providerId))
+      );
+      const collaborationBlock = renderCollaborationRules(agent, enabledAgents);
       const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
-        agent,
+        dutyBinding?.duty,
         collabTaskRegistry?.getTask(sessionId) || null,
         { branch: runWorkspace.branch || "" }
       );
-      let grokImplementationPermission = null;
-      if (agent === "grok") {
+      const enforcesImplementationPermission =
+        dutyBinding?.enforcementLevel === "enforced" &&
+        agentConfig.runtimeCapabilities?.permissionCallbacks === true;
+      let implementationPermission = null;
+      if (enforcesImplementationPermission) {
         if (
           collabTaskRegistry &&
           typeof collabTaskRegistry.ensureImplementationPlanRequired === "function"
@@ -278,9 +287,9 @@ async function runChatWorklist(ctx) {
             requestedBy: parentInvocationId ? null : "user",
             force: triggerType === "user-message" && existing.allowed,
           });
-          grokImplementationPermission = collabTaskRegistry.implementationPermission(sessionId);
+          implementationPermission = collabTaskRegistry.implementationPermission(sessionId);
         } else {
-          grokImplementationPermission = {
+          implementationPermission = {
             allowed: false,
             status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
             planHash: null,
@@ -305,14 +314,14 @@ async function runChatWorklist(ctx) {
           sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
         }
       }
-      if (grokImplementationPermission) {
+      if (implementationPermission) {
         promptParts.push(
           renderImplementationGateBlock(
-            grokImplementationPermission.gate || {
-              status: grokImplementationPermission.status,
-              planHash: grokImplementationPermission.planHash,
-              approvedPlanHash: grokImplementationPermission.allowed
-                ? grokImplementationPermission.planHash
+            implementationPermission.gate || {
+              status: implementationPermission.status,
+              planHash: implementationPermission.planHash,
+              approvedPlanHash: implementationPermission.allowed
+                ? implementationPermission.planHash
                 : null,
             }
           )
@@ -449,11 +458,13 @@ async function runChatWorklist(ctx) {
         triggerMessageId,
         triggerType,
         handoffId: queuedCause?.handoffId || null,
+        dutyBinding,
       });
       if (!durableRun) {
         throw new Error(`Failed to persist invocation start for ${invocationId}.`);
       }
       let activeInvocationId = invocationId;
+      threadCtx.currentDutyBinding = durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
       if (durableRun.window) {
         healthTracker = contextHealth.makeTracker(agent, {
@@ -485,9 +496,14 @@ async function runChatWorklist(ctx) {
       });
       sealer.update(healthTracker.getFillRatio());
       threadCtx.sealer = sealer;
-      // Keep this payload stable for existing clients. A2A causality lives on
-      // window-meta and is joined by invocationId in live-test auditing.
-      sendSse(res, "agent-start", { agent, invocationId });
+      // Surface invocation identity together with its immutable Seat/Duty contract.
+      // A2A causality remains on window-meta and is joined by invocationId.
+      sendSse(res, "agent-start", {
+        agent,
+        invocationId,
+        seatId: durableRun.binding?.seatId || null,
+        duty: durableRun.binding?.duty || null,
+      });
       sendSse(res, "window-meta", {
         agent,
         invocationId,
@@ -501,6 +517,8 @@ async function runChatWorklist(ctx) {
         parentInvocationId,
         triggerMessageId,
         triggerType,
+        seatId: durableRun.binding?.seatId || null,
+        duty: durableRun.binding?.duty || null,
       });
       // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
       sendSse(res, "workspace-meta", {
@@ -619,13 +637,13 @@ async function runChatWorklist(ctx) {
         [ENV.BASE_DIR]: runWorkspace.baseDir,
         [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
         [ENV.BRANCH]: runWorkspace.branch || "",
-        ...(agent === "grok"
+        ...(enforcesImplementationPermission
           ? {
-              [ENV.GROK_IMPLEMENTATION_GATE]: grokImplementationPermission?.allowed
+              [ENV.IMPLEMENTATION_GATE]: implementationPermission?.allowed
                 ? IMPLEMENTATION_GATE_STATUS.APPROVED
                 : IMPLEMENTATION_GATE_STATUS.REQUIRED,
-              [ENV.GROK_APPROVED_PLAN_HASH]: grokImplementationPermission?.allowed
-                ? grokImplementationPermission.planHash || ""
+              [ENV.APPROVED_PLAN_HASH]: implementationPermission?.allowed
+                ? implementationPermission.planHash || ""
                 : "",
             }
           : {}),
@@ -804,10 +822,12 @@ async function runChatWorklist(ctx) {
             parentInvocationId,
             triggerMessageId,
             triggerType,
+            dutyBinding: durableRun.binding || dutyBinding,
           });
           if (!retryRun) break;
           durableRun = retryRun;
           activeInvocationId = retry.invocationId;
+          threadCtx.currentDutyBinding = retryRun.binding || dutyBinding;
           invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
           invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
           invocationEnv.INVOKE_SESSION_ID = "";
@@ -819,7 +839,12 @@ async function runChatWorklist(ctx) {
           });
           healthTracker.addInput(promptForAgent.length);
           billingAtStart = { ...healthTracker.snapshot().billing };
-          sendSse(res, "agent-start", { agent, invocationId: retry.invocationId });
+          sendSse(res, "agent-start", {
+            agent,
+            invocationId: retry.invocationId,
+            seatId: retryRun.binding?.seatId || null,
+            duty: retryRun.binding?.duty || null,
+          });
           sendSse(res, "window-meta", {
             agent,
             invocationId: retry.invocationId,
@@ -833,6 +858,8 @@ async function runChatWorklist(ctx) {
             parentInvocationId,
             triggerMessageId,
             triggerType,
+            seatId: retryRun.binding?.seatId || null,
+            duty: retryRun.binding?.duty || null,
           });
           sendSse(res, "workspace-meta", {
             agent,
@@ -1271,31 +1298,9 @@ async function runChatWorklist(ctx) {
         durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
       }
 
-      if (
-        agent === "grok" &&
-        !grokImplementationPermission?.allowed &&
-        collabTaskRegistry &&
-        typeof collabTaskRegistry.submitImplementationPlan === "function"
-      ) {
-        const submission = collabTaskRegistry.submitImplementationPlan(sessionId, {
-          actorAgentId: agent,
-          content: assistantContent,
-        });
-        sendSse(
-          res,
-          submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
-          {
-            agent,
-            invocationId: finalInvocationId,
-            accepted: submission.accepted,
-            reason: submission.reason,
-            planHash: submission.planHash || null,
-          }
-        );
-      }
-
       const workflowEvidenceEvents = processWorkflowEvidenceOutput({
         agent,
+        duty: dutyBinding?.duty,
         content: assistantContent,
         threadId: sessionId,
         registry: collabTaskRegistry,
@@ -1344,7 +1349,6 @@ async function runChatWorklist(ctx) {
         windowId: durableRun?.window?.id || null,
         useWorktree: Boolean(useWorktree),
         worklist,
-        a2aCount: threadCtx.a2aCount,
         maxDepth,
         memoryCapture: memories,
         eventStore: events,
@@ -1358,10 +1362,13 @@ async function runChatWorklist(ctx) {
         a2aState: threadCtx,
         logger: log,
         collabTaskRegistry,
+        threadSeats: storage?.threadSeats || null,
+        agents: AGENTS,
+        fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
+        fromDuty: threadCtx.currentDutyBinding?.duty || null,
       });
       Object.assign(handoffByTarget, finalized.handoffByTarget);
       Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
-      threadCtx.a2aCount = finalized.a2aCount;
 
       const turnWriteStats = mergeWriteStats(
         emptyWriteStats(),

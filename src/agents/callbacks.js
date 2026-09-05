@@ -233,31 +233,10 @@ function postMessage(
   );
   const routeInvocationId = currentInvocationId || invocationId;
   const taskRegistry = thread.collabTaskRegistry || null;
-  if (
-    agent === "grok" &&
-    taskRegistry &&
-    typeof taskRegistry.submitImplementationPlan === "function" &&
-    !taskRegistry.implementationPermission(callbackSessionId).allowed
-  ) {
-    const submission = taskRegistry.submitImplementationPlan(callbackSessionId, {
-      actorAgentId: agent,
-      content,
-    });
-    sendSse(
-      thread.res,
-      submission.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
-      {
-        agent,
-        invocationId: routeInvocationId,
-        accepted: submission.accepted,
-        reused: Boolean(submission.reused),
-        reason: submission.reason,
-        planHash: submission.planHash || null,
-      }
-    );
-  }
+  const currentDuty = thread.currentDutyBinding?.duty || null;
   const workflowEvidenceEvents = processWorkflowEvidenceOutput({
     agent,
+    duty: currentDuty,
     content,
     threadId: callbackSessionId,
     registry: taskRegistry,
@@ -281,7 +260,6 @@ function postMessage(
     windowId: typeof thread.windowId === "string" ? thread.windowId : null,
     useWorktree: Boolean(thread.useWorktree),
     worklist: thread.worklist,
-    a2aCount: thread.a2aCount || 0,
     maxDepth: getMaxA2ADepth(),
     memoryCapture,
     eventStore,
@@ -294,6 +272,10 @@ function postMessage(
     a2aState: thread,
     logger: console,
     collabTaskRegistry: taskRegistry,
+    threadSeats: thread.threadSeats || null,
+    agents: thread.agents || AGENTS,
+    fromSeatId: thread.currentDutyBinding?.seatId || null,
+    fromDuty: thread.currentDutyBinding?.duty || null,
   });
 
   const writeStats = mergeWriteStats(
@@ -361,13 +343,13 @@ node scripts/callback-client.js post-message --content "你的消息"
 
 用法示例：
 - 发现需要 **其它 SHIFT Agent** 处理的问题 → 发消息/回复，行首 @ 对方 + handoff
-- 本 CLI 内并行/探索（含 Grok subagent）→ 用工具即可，不必为了平台而禁用
+- 本 CLI 内并行/探索（含 provider subagent）→ 用工具即可，不必为了平台而禁用
 - 想主动汇报进度 → 直接发消息
 - 需要更多上下文 → 发消息询问
 - 想"回忆"之前做过的决策 → **先读 prompt 顶部 Active Memories**，不足优先调用 \`recall_search\`
 
 注意：
-- @mention 必须单独出现在行首才会触发路由（例如 \`@Codex 请 review\`）
+- @mention 必须单独出现在行首才会触发路由（例如 \`@EnabledSeat 请 review\`）
 - 代码块内的 @mention 不会被路由
 - 跨 Agent 协作只用行首 @mention + handoff；CLI 内嵌 subagent 不能代替 @ 路由
 - 需要别人做事：另起一行写 @对方，并尽量附 \`\`\`handoff 块

@@ -146,8 +146,8 @@ function buildInvocation(cli, prompt) {
   return buildProviderInvocation(config, prompt);
 }
 
-function applyGrokImplementationGate(config, env = process.env) {
-  if ((config?.id || config?.providerId) !== "grok") return config;
+function applyImplementationPermissionGate(config, env = process.env) {
+  if (config?.runtimeCapabilities?.permissionCallbacks !== true) return config;
   const executionGate = resolveImplementationGateEnv(env);
   return {
     ...config,
@@ -173,7 +173,7 @@ function invoke(cli, prompt, options = {}) {
       ...runOptions.providerOptions,
     },
   };
-  config = applyGrokImplementationGate(config, process.env);
+  config = applyImplementationPermissionGate(config, process.env);
   const providerId = config.providerId;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
@@ -292,7 +292,7 @@ module.exports = {
   invoke,
   parseArgs,
   buildInvocation,
-  applyGrokImplementationGate,
+  applyImplementationPermissionGate,
   resolveProxy,
   resolveProviderProxy,
   proxyEnvVars,

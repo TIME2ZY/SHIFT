@@ -35,7 +35,7 @@ HTTP createServer (src/server/index.js)
 Web App (web/src/app/App.tsx)
   ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
   ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
-  ├─ collaboration feature → GET /api/sessions/:id/collaboration（只读 phase/gate 投影）
+  ├─ collaboration feature → GET /api/sessions/:id/collaboration（任务/验收卡投影）
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
@@ -47,23 +47,25 @@ Web App (web/src/app/App.tsx)
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
   execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
-  collaboration-read-model → Session-scoped phase/gate 投影（只读，不回写）
+  collaboration-read-model → Session-scoped 任务卡、Seat/Duty 与证据投影（只读，不回写）
+  thread-seat-repository → Thread enabled Seat 配置与 chat/A2A 目标解析（schema v30）
+  invocation-duty-binding-repository → Invocation start 同事务写入的不可变 DutyBinding（schema v30）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
 
-| 主链路步骤         | 主要代码                                                       |
-| ------------------ | -------------------------------------------------------------- |
-| 1 打开 Project     | `project-repository.openDirectory` ← project-routes            |
-| 2 建 thread        | `sqlite-session-service.createSession({ projectKey })`         |
-| 3 Trace start      | `durable.startTrace` ← chat-routes                             |
-| 4 用户消息         | `appendToSession` ← chat-routes                                |
-| 5 start invocation | `durable.startInvocation({ traceId })` ← chat-routes           |
-| 6 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent` |
-| 7 终态             | `completeInvocation` 后 `completeTrace`                        |
-| 8 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage       |
-| 9 恢复             | SQLite threads/messages/trace_runs/invocations                 |
-| 10 handoff         | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）      |
+| 主链路步骤         | 主要代码                                                            |
+| ------------------ | ------------------------------------------------------------------- |
+| 1 打开 Project     | `project-repository.openDirectory` ← project-routes                 |
+| 2 建 thread        | `sqlite-session-service.createSession({ projectKey })`              |
+| 3 Trace start      | `durable.startTrace` ← chat-routes                                  |
+| 4 用户消息         | `appendToSession` ← chat-routes                                     |
+| 5 start invocation | `durable.startInvocation({ traceId, dutyBinding })` ← chat-worklist |
+| 6 SSE 流式         | chat-routes + child-stream / ACP；事件 `appendInvocationEvent`      |
+| 7 终态             | `completeInvocation` 后 `completeTrace`                             |
+| 8 消息/事件 SQLite | appendMessage / event-store / finishWithAssistantMessage            |
+| 9 恢复             | SQLite threads/messages/trace_runs/invocations                      |
+| 10 handoff         | **见 §3.2**（finalize 已统一，触发与 hop 生命周期仍分叉）           |
 
 ---
 
@@ -85,7 +87,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 | 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                         | 落库                                                                                           |
 | ------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| start               | `durableRecorder.startInvocation`                             | **仅** `chat-routes`（含 retry 再 start）                                                                                                          | `invocations` + `invocation-start` event                                                       |
+| start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                        | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
 | 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | chat-routes 流循环；callbacks 记 callback-post/outcome；a2a-finalize 记 route 事件                                                                 | `invocation_events` + outbox                                                                   |
 | **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed） | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
 | 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                       | 同上                                                                                           |
@@ -116,23 +118,31 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.2 Handoff / A2A 消费
 
-| 步骤                   | 意图上的权威入口                                         | 实际                                                            | 持久性                                                    |
-| ---------------------- | -------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------- |
-| 解析 fence             | `agents/handoff.js`                                      | finalize 内 `selectCanonicalHandoffMatch`                       | 无                                                        |
-| 策略                   | `handoff-policy.js`                                      | finalize 内 `decidePolicy`                                      | 无                                                        |
-| 幂等 accept            | `durableRecorder.acceptHandoff`                          | finalize 内                                                     | SQLite `handoffs`，唯一 accepted flight                   |
-| 入队下一 Agent         | `worklist.push` → `markHandoffEnqueued`                  | finalize 内；确认失败撤销本次 push                              | 请求内存 worklist + SQLite `enqueued_at`                  |
-| 捕获 handoff 协作事件  | `memoryCapture.captureHandoff`                           | finalize 内                                                     | event-store `handoff-captured`（**不是** product memory） |
-| 触发 finalize          | `finalizeA2ARoutes`                                      | **双触发：** chat 回合结束 + callback `postMessage`             | —                                                         |
-| 目标 hop bind/complete | `durableRecorder.startInvocation` / `completeInvocation` | chat-worklist 传 `handoffId`；recorder 与 invocation 同事务写入 | SQLite `handoffs`                                         |
-| 协作 phase / plan gate | `collab-task-registry`                                   | chat 流前检查；callback 侧 plan/workflow evidence               | SQLite repository（若注入）+ 进程逻辑                     |
-| 路由诊断事件           | `appendRouteEvent`                                       | EventStore → else durableRecorder.**无 transcript 双写**（B-2） | SQLite events                                             |
+| 步骤                   | 意图上的权威入口                                         | 实际                                                             | 持久性                                                    |
+| ---------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------- |
+| 解析 fence             | `agents/handoff.js`                                      | finalize 内 `selectCanonicalHandoffMatch`                        | 无                                                        |
+| Seat/Duty 解析         | `duty-routing.js`                                        | 初始 chat 与 finalize；仅从 Thread enabled Seats 选目标          | 读取 `thread_seats`；DutyBinding 随队列因果传递           |
+| 策略                   | `handoff-policy.js`                                      | finalize 内 `decidePolicy`；禁用/缺失 Seat 在所有模式下拒绝      | 无                                                        |
+| 幂等 accept            | `durableRecorder.acceptHandoff`                          | finalize 内；策略通过后立即写入                                  | SQLite `handoffs`，唯一 accepted flight                   |
+| 入队下一 Seat          | `worklist.push` → `markHandoffEnqueued`                  | finalize 内；队列项因果携带不可变 DutyBinding；确认失败撤销 push | 请求内存 worklist + SQLite `enqueued_at`                  |
+| 捕获 handoff 协作事件  | `memoryCapture.captureHandoff`                           | finalize 内                                                      | event-store `handoff-captured`（**不是** product memory） |
+| 触发 finalize          | `finalizeA2ARoutes`                                      | **双触发：** chat 回合结束 + callback `postMessage`              | —                                                         |
+| 目标 hop bind/complete | `durableRecorder.startInvocation` / `completeInvocation` | chat-worklist 传 `handoffId`；recorder 与 invocation 同事务写入  | SQLite `handoffs`                                         |
+| 协作 phase / plan gate | `collab-task-registry`                                   | chat 流前检查；callback 侧 plan/workflow evidence                | SQLite repository（若注入）+ 进程逻辑                     |
+| 路由诊断事件           | `appendRouteEvent`                                       | EventStore → else durableRecorder.**无 transcript 双写**（B-2）  | SQLite events                                             |
 
 **结论（handoff）— durable 0B-2 已落地：**
 
 - Receive Bundle 把 Structured Handoff 当后继续工包（权威）；原文附录非权威且预算收窄。
 - `implement/review/fix/deliver/plan` 缺 `files`/`evidence` 记入 `missingRecommended` 并打续工不足 banner，不因此把 `ok` 打成 degraded，也不新开顶层字段。
-- 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；`enqueued_at` 只在 worklist 实际追加后确认。
+- 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；策略通过后立即调用唯一的
+  `acceptHandoff` 写入口，`enqueued_at` 只在 worklist 实际追加后确认。不插入确认弹窗、
+  预览 API 或请求内等待。
+- 正文与 callback 共享请求内 `a2aState.a2aCount`；finalize 在入队时检查上限，持久化
+  enqueue 成功后递增。调度器不再回写 finalize 的计数快照，也不按已接受次数跳过
+  worklist 中尚未运行的目标；达到上限只拒绝新的交接。
+- A2A 固定 Agent ID/岗位 allowlist 已退出路由策略；明确 mention/handoff 仅能命中当前 Thread 的
+  enabled Seat，目标未启用时不降级、不静默改派。Duty 由 handoff intent 确定，单独改变 Duty 不换 Seat。
 - accept、duplicate、binding 和 terminal 均由 SQLite repository 仲裁；旧进程内 registry 已删除。
 - target Invocation start/bind 与 Invocation terminal/Handoff terminal 各自在同一事务提交。
 - 服务启动按 active Invocation → pending Handoff → active Trace 顺序收口崩溃遗留状态，
@@ -219,16 +229,17 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 | 加载 / 索引     | **仅** `src/server/skills.js`（`skills/*/SKILL.md`）                                                                        | 进程内 cache                                             |
 | 隔离 worktree   | `agents/skill-materialize.js` ← `skills.prepareSkillDelivery` ← `chat-routes` 在 `runWorkspace` 确定后、start invocation 前 | `{worktree}/.agents/skills/<name>/SKILL.md` 副本（copy） |
 | MCP 按需        | `list_platform_skills` / `load_platform_skill`                                                                              | 同一 loader 的只读视图                                   |
-| Prompt 全文注入 | `augmentPrompt` **fallback**；A2A hop 由 `playbookSkillNamesForHop` 强制注入对应 playbook                                   | 用户消息 / receive bundle                                |
+| Prompt 全文注入 | `prepareSkillDelivery` 失败时由 `augmentPrompt` **fallback**；只注入当前 Duty Skill 与短 handoff Skill                      | 用户消息 / receive bundle                                |
 
 **结论（skill）：**
 
-- 权威源只有仓库 `skills/*/SKILL.md`。worktree `.agents/skills` 是派生投递，禁止回读覆盖权威，也禁止写入 `project_dir` 或 `~/.codex` / `~/.grok`。
+- 权威源只有仓库 `skills/*/SKILL.md`。worktree `.agents/skills` 是派生投递，禁止回读覆盖权威，也禁止写入 `project_dir` 或用户级 CLI home。
 - 物化公开入口只有 `materializePlatformSkills`；`ensureWorktree` 不挂钩。
-- 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 只留短 catalog，不再灌 `APPLICATION SKILL` 全文。
-- 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 全文注入，请求不 500。
-- Prompt 全文注入的删除条件：Codex 与 OpenCode 在 SHIFT 隔离 worktree cwd 下能稳定列出平台 skill 后，再默认关闭 `augmentPrompt` 匹配注入。本版本只降级，不删除 fallback。
-- 身份只保留人设；`implementation_plan` / 验收 / 交付模板在 `skills/`。可接收 intent 的真相源是 `role-contracts.js`（C1：Grok/OpenCode 可收 `discuss`；Codex 不加 `review`，Gemini 不加 `plan`）。A2A hop 通过 `playbookSkillNamesForHop` 强制注入对应 skill。
+- 隔离 worktree 且 copy 成功：主路径 = 原生发现 + MCP；prompt 的短 catalog 只列当前 Duty Skill 与 `cross-agent-handoff`，不注入 Skill 全文。
+- 无 worktree、物化失败或 workspace 就是 `project_dir`：fallback 只全文注入同一份当前 Duty allowlist，请求不 500。
+- 物化器只覆盖或清理带 `.shift-platform-skill` 所有权标记的副本；同名用户 Skill 会显式报错并保留原内容。
+- Prompt 全文注入的删除条件：支持原生发现的运行时在 SHIFT 隔离 worktree cwd 下能稳定加载当前 Duty Skill 后，再关闭 fallback。本版本保留降级路径。
+- Provider identity 只描述 CLI/runtime。Duty→Skill 的单一映射在 `agents/duty-routing.js`；固定 Provider 岗位、hop playbook 选择器和重复 review/merge Skill 已删除。
 
 ---
 
@@ -281,38 +292,74 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                              | 责任方 / 调用方               | 结果                                                  |
-| --------------------- | ----------------------------------------------------- | ----------------------------- | ----------------------------------------------------- |
-| 代码 review           | `processWorkflowEvidenceOutput`                       | OpenCode workflow evidence    | changes requested 直接形成事件；approve 继续交付核验  |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                   | OpenCode 提交后由平台只读核对 | 返回真实 Git/GitHub evidence                          |
-| 交付契约校验          | `recordOpenCodeDelivery` → `validateVerifiedDelivery` | collab task registry          | 校验并持久化 review、commit、分支、PR 与 CI gate      |
-| 最终目标验收          | `submitFinalAcceptance`                               | Codex workflow evidence       | 绑定 goal、solution、plan、review 与 commit hash      |
-| 协作状态只读          | `projectCollaboration` ← session-routes               | UI / live harness             | `GET /api/sessions/:id/collaboration` 投影 phase/gate |
+| 步骤                  | 权威入口                                                     | 责任方 / 调用方                                  | 结果                                                                  |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------- |
+| 实现方案证据          | `processWorkflowEvidenceOutput` → `submitImplementationPlan` | 正文与 callback 的 `plan / implement / fix` Duty | 与 Provider 权限回调能力无关；新方案撤销旧批准                        |
+| 代码 review           | `processWorkflowEvidenceOutput`                              | 当前 `review` / `deliver` Duty                   | changes requested 直接形成事件；approve 继续交付核验                  |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                          | 当前交付 Duty 后由平台只读核对                   | 返回真实 Git/GitHub evidence                                          |
+| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery`        | collab task registry                             | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
+| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 证据齐则写入 accepted；reject 写入 rejected；不足则 incomplete        |
+| 任务/验收卡只读       | `projectCollaboration` ← session-routes                      | UI / live harness                                | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
 
-`GET /api/sessions/:sessionId/collaboration` 是协作状态的唯一公开读入口：无 task 返回
-`{ collaboration: null }`，有 task 只投影 phase、四道 gate 摘要和派生 `blocker`，不返回
-plan/review 全文，也不写库。权威仍是 `collaboration_tasks` + `collab-task-registry`。
+`GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
+无 task 仍返回 SQLite 席位条；有 task 从 `collaboration_tasks`、latest DutyBinding 和 Git worktree
+投影目标、当前 Seat/Duty/Skill、枚举 blocker、审查模式、脏文件数、HEAD、PR、CI 与下一动作。
+接口不返回 plan/review 全文，也不写库；权威仍是 SQLite 协作事实与 Git 工作区。
 
-OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–100 个字符，PR body 固定包含
+`accept` Duty 的结构化 `final_acceptance` 是完成态的唯一写入口。`workflow-readiness` 承载从
+registry 移出的方案、交付和完成证据检查，registry 不再导出旧的独立 readiness helper。写入
+`accepted` 前检查 goal、solution、plan、review、commit、PR 与 CI 绑定，并通过 composition
+root 注入的 `worktreeManager.getStatus` 读取当前 Thread 的工作区；HEAD 不匹配、工作区不干净
+或读取失败时持久化为 `incomplete` 并保持 `active`。GET readiness 使用同一检查。SQLite 上游
+证据变化会清除旧决定；Git 外部变化不会改写历史决定，但当前卡片不再投影为已验收。旧数据只有
+phase=`done` 而没有匹配的 Seat 完成决定时，也不会投影为已验收。不得再提供 Human-only 完成
+写入口或交接确认 API。
+
+承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、
 `## 测试（旧接口测试是否处理）`、`## 风险与回滚`；缺少任一章节都会拒绝交付证据。
 
 ---
 
+### 3.8 Seat / Duty 在线路由
+
+Migration 30 已新增 `thread_seats` 和 `invocation_duty_bindings`，并为 collaboration task/event
+增加 ADR-007 的目标、状态、evidence profile、actor 和 duty 字段。旧 Thread 的历史 Agent
+参与者会确定性回填为 enabled Seat；旧 invocation 不猜测 Duty，因此不回填 DutyBinding。
+
+新 Session 暂由 composition root 将当前 catalog 确定性初始化为 enabled Seats；初始 chat 与 A2A
+handoff 都通过 `thread-seat-repository` 解析目标。明确指定未启用 Seat 会显式失败。Worklist 继续保存
+Provider ID 作为现有运行器键，同时相同下标的 cause 保存 `{ seatId, duty, skillName,
+routingReason, enforcementLevel }`，因此没有新增第二套调度器。
+
+`durableRecorder.startInvocation` 在原有 start 事务内写入且只写入一条 DutyBinding，并把 Seat/Duty
+写入首个 `invocation-start` 事件。初始 Duty 为显式请求值，否则 worktree=`implement`、普通会话=
+`discuss`；handoff Duty 来自 intent。当前 catalog 初始化是 Provider 可用性发现接入前的兼容步骤。
+
+`role-contracts.js` 已删除；catalog、identity、handoff policy 与证据门禁不再保存固定岗位。
+`plan` / `implement` / `fix` 的写权限等级由当前 Duty 与 Provider 的 `permissionCallbacks`
+运行能力共同决定；实现门禁通过通用 `SHIFT_IMPLEMENTATION_GATE` / `SHIFT_APPROVED_PLAN_HASH`
+传输批准状态，不形成新的调度入口。
+
+Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invocation/Seat 的 Thread 因果。
+
+---
+
 ## 4. 双路径 / 双语义清单
 
-| ID  | 主题                     | 当前结论                                               | 状态   |
-| --- | ------------------------ | ------------------------------------------------------ | ------ |
-| D1  | Invocation finish 多出口 | 收口为 `completeInvocation`；reconcile/force 独立      | 已收口 |
-| D2  | 规范状态 vs DB 状态      | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态 | 接受   |
-| D3  | Handoff 双触发           | chat end 与 callback post 均触发同一 durable finalize  | 接受   |
-| D4  | Handoff 幂等进程内       | Map 已删除；SQLite partial unique index 仲裁 accepted  | 已收口 |
-| D5  | 事件 sink 回退           | 无 transcript 热路径双写                               | 已收口 |
-| D6  | Message 双用例入口       | 两类用例共用 messageType 契约和物理写入口              | 已收口 |
-| D7  | Memory 双语义            | collaboration event ≠ product Memory；禁止半接线       | 已收口 |
-| D8  | Collab 任务 vs Handoff   | 两者分别为 SQLite 权威事实，不互相借表表达             | 已收口 |
-| D9  | worktree 双地图          | session Map 与 manager 文件职责分离                    | 接受   |
-| D10 | Skill 投递双通道         | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2   | 过渡   |
+| ID  | 主题                      | 当前结论                                                          | 状态   |
+| --- | ------------------------- | ----------------------------------------------------------------- | ------ |
+| D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立                 | 已收口 |
+| D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态            | 接受   |
+| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize             | 接受   |
+| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted             | 已收口 |
+| D5  | 事件 sink 回退            | 无 transcript 热路径双写                                          | 已收口 |
+| D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                         | 已收口 |
+| D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线                  | 已收口 |
+| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                        | 已收口 |
+| D9  | worktree 双地图           | session Map 与 manager 文件职责分离                               | 接受   |
+| D10 | Skill 投递双通道          | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2              | 过渡   |
+| D11 | Seat/Duty vs 固定岗位语义 | 固定岗位合同、prompt、gate 与旧测试已删除；职责仅来自 DutyBinding | 已收口 |
 
 **已收敛（保护，勿回退）：**
 
@@ -328,13 +375,13 @@ OpenCode 是 PR 描述的唯一交付责任人。平台要求 PR title 为 10–
 
 ### 5.1 在线热路径（`npm start` composition）
 
-| 区域     | 代表模块                                                                                                                                                           |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                        |
-| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                               |
-| storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, repositories |
-| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                    |
-| worktree | manager, delivery-verifier                                                                                                                                         |
+| 区域     | 代表模块                                                                                                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| server   | `index.js`, `project-routes.js`, `chat-routes.js`, `callback-routes.js`, `session-routes.js`, `*-transport`                                                                  |
+| agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                                         |
+| storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, Seat/Duty repositories |
+| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                              |
+| worktree | manager, delivery-verifier                                                                                                                                                   |
 
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
 `memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
@@ -446,9 +493,9 @@ Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用�
 | 事件                         | 写入口                                                   | 允许的触发器                                      |
 | ---------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
 | trace start / finish         | `durableRecorder.startTrace` / `completeTrace`           | 仅 chat request 生命周期                          |
-| invocation start             | `durableRecorder.startInvocation`                        | 仅 chat 调度器                                    |
+| invocation start + Duty bind | `durableRecorder.startInvocation`                        | 仅 chat 调度器；同事务写 invocation/binding/event |
 | invocation finish            | `durableRecorder.completeInvocation`                     | chat 调度器；孤儿用 force/reconcile               |
-| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | chat end、callback post                           |
+| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | 策略通过后立即写入                                |
 | hop bind/complete            | `durableRecorder.startInvocation` / `completeInvocation` | chat 调度器                                       |
 | message user/system/callback | `appendToSession` → `appendMessage`                      | routes / callbacks                                |
 | message assistant-final      | `completeInvocation({ message })` → `appendMessage`      | chat 成功收尾 only                                |
@@ -477,5 +524,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-08-27。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-09-03。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

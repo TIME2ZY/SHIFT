@@ -9,14 +9,10 @@ const RECOMMENDED_FIELDS = ["to", "intent", "goal", "tradeoff", "open_questions"
 /** Intents whose successor cannot see tool transcript — files/evidence are resume fields. */
 const RESUME_INTENTS = Object.freeze(["implement", "review", "fix", "deliver", "plan"]);
 const RESUME_FIELDS = Object.freeze(["files", "evidence"]);
-const LIST_FIELDS = new Set(["open_questions", "files", "evidence"]);
+const LIST_FIELDS = new Set(["open_questions", "files", "evidence", "constraints", "prohibited"]);
 const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
 const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
-const { WORKFLOW_ROLES, agentIdsForRole } = require("./role-contracts");
-
-const IMPLEMENTER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.IMPLEMENTER));
-const REVIEWER_AGENT_IDS = new Set(agentIdsForRole(WORKFLOW_ROLES.REVIEWER_DELIVERER));
 
 function parseHandoffBlocks(text) {
   if (!text || typeof text !== "string") return [];
@@ -352,19 +348,12 @@ function computeToMismatch(handoff, routedTo) {
 function inferIntent(handoff, opts = {}) {
   if (opts.intent) return normalizeIntent(opts.intent);
   if (handoff?.intent) return normalizeIntent(handoff.intent);
-  const from = String(opts.fromAgentId || "")
-    .trim()
-    .toLowerCase();
-  const to = String(opts.toAgentId || opts.routedTo || "")
-    .trim()
-    .toLowerCase();
-  if (REVIEWER_AGENT_IDS.has(from) && IMPLEMENTER_AGENT_IDS.has(to)) return "fix";
-  if (REVIEWER_AGENT_IDS.has(to)) return "review";
-  if (opts.useWorktree) return "implement";
   if (handoff && typeof handoff.what === "string") {
     const what = handoff.what.toLowerCase();
-    if (/request-changes|approve-with-nits|\bp0\b|评审|review/.test(what)) return "review";
+    if (/request-changes|需要修复|请修|fix these/.test(what)) return "fix";
+    if (/approve-with-nits|\bp0\b|\bp1\b|评审|review/.test(what)) return "review";
   }
+  if (opts.useWorktree) return "implement";
   return null;
 }
 

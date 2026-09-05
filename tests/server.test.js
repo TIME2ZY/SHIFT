@@ -14,6 +14,8 @@ const { hashImplementationPlan } = require("../src/agents/implementation-plan-ga
 const { createStorage } = require("../src/storage");
 const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
+const { initializeCatalogSeats } = require("../src/agents/duty-routing");
+const { AGENTS } = require("../src/agents/catalog");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -110,7 +112,10 @@ async function withServer(options, fn) {
     const project = storage.projects.openDirectory(tmpDir);
     projectKey = project.projectKey;
     for (const sessionId of initialSessionIds) {
-      storage.threads.create({ id: sessionId, project });
+      const session = storage.threads.create({ id: sessionId, project });
+      initializeCatalogSeats(storage.threadSeats, sessionId, AGENTS, {
+        createdAt: session.createdAt,
+      });
     }
   } finally {
     storage.close();
@@ -167,22 +172,13 @@ test("serves fixed agent list", async () => {
         agent.description && agent.description.length > 0,
         `Agent ${agent.id} missing description`
       );
-      // Identity pack metadata (role / duties) comes from src/agents/identities/*.md
-      assert.ok(agent.role && agent.role.length > 0, `Agent ${agent.id} missing role`);
-      assert.ok(
-        Array.isArray(agent.duties) && agent.duties.length > 0,
-        `Agent ${agent.id} missing duties`
-      );
+      // Identity metadata describes only the provider runtime. Duty is invocation-scoped.
+      assert.equal(agent.role, "provider");
+      assert.deepEqual(agent.duties, []);
       assert.ok(Array.isArray(agent.boundaries), `Agent ${agent.id} missing boundaries array`);
-      assert.ok(agent.workflowRole, `Agent ${agent.id} missing workflow role`);
-      assert.ok(
-        Array.isArray(agent.workflowCapabilities) && agent.workflowCapabilities.length > 0,
-        `Agent ${agent.id} missing workflow capabilities`
-      );
-      assert.ok(
-        Array.isArray(agent.workflowResponsibilities) && agent.workflowResponsibilities.length > 0,
-        `Agent ${agent.id} missing workflow responsibilities`
-      );
+      assert.equal("workflowRole" in agent, false);
+      assert.equal("workflowCapabilities" in agent, false);
+      assert.equal("workflowResponsibilities" in agent, false);
     }
   });
 });
@@ -1392,7 +1388,7 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
         process.nextTick(() => {
           if (agent === "grok") {
             grokRuns += 1;
-            const isApproved = options.env.SHIFT_GROK_IMPLEMENTATION_GATE === "approved";
+            const isApproved = options.env.SHIFT_IMPLEMENTATION_GATE === "approved";
             if (isApproved) {
               fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
             }
@@ -1457,12 +1453,12 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
       );
       assert.equal(reviewedContent, "changed by grok\n");
       assert.equal(grokRuns, 2);
-      assert.equal(runs[0].env.SHIFT_GROK_IMPLEMENTATION_GATE, "required");
-      assert.equal(runs[0].env.SHIFT_GROK_APPROVED_PLAN_HASH, "");
-      assert.match(runs[0].prompt, /Grok 实现门禁/);
+      assert.equal(runs[0].env.SHIFT_IMPLEMENTATION_GATE, "required");
+      assert.equal(runs[0].env.SHIFT_APPROVED_PLAN_HASH, "");
+      assert.match(runs[0].prompt, /## 实现门禁/);
       assert.match(runs[0].prompt, /只读/);
-      assert.equal(runs[2].env.SHIFT_GROK_IMPLEMENTATION_GATE, "approved");
-      assert.match(runs[2].env.SHIFT_GROK_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
+      assert.equal(runs[2].env.SHIFT_IMPLEMENTATION_GATE, "approved");
+      assert.match(runs[2].env.SHIFT_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
       assert.match(runs[2].prompt, /APPROVED/);
       assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
       assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
@@ -1495,6 +1491,8 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
   };
   const implementationPlanHash = hashImplementationPlan(implementationPlan);
   const commitSha = "a".repeat(40);
+  let workspaceHead = commitSha;
+  let workspaceDirty = false;
   const prUrl = "https://github.com/acme/repo/pull/7";
   const branch = "codex/session-pr4";
   const runs = [];
@@ -1584,6 +1582,12 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
   await withServer(
     {
       worktreeManager: {
+        getStatus() {
+          return {
+            headSha: workspaceHead,
+            porcelain: workspaceDirty ? [" M src/audited-delivery.js"] : [],
+          };
+        },
         ensureWorktree({ sessionId }) {
           return {
             sessionId,
@@ -1664,6 +1668,7 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
           prompt: userPrompt,
           sessionId: session.id,
           useWorktree: true,
+          duty: "discuss",
         }),
       });
       const text = await response.text();
@@ -1673,12 +1678,33 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
         ["codex", "grok", "codex", "grok", "opencode", "codex"]
       );
       assert.match(runs[0].prompt, /solution_baseline/);
-      assert.match(runs[4].prompt, /OpenCode Review 与交付门禁/);
+      assert.match(runs[4].prompt, /## Review 与交付门禁/);
       assert.match(runs[5].prompt, /final_acceptance/);
       assert.match(runs[5].prompt, /最初用户目标/);
       assert.match(text, /event: delivery-evidence-verified/);
       assert.match(text, /event: final-acceptance-submitted/);
-      assert.match(text, /event: collaboration-done/);
+
+      const accepted = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(accepted.collaboration.status, "accepted");
+      assert.equal(accepted.collaboration.phase, "done");
+      assert.equal(accepted.collaboration.acceptance.verdict, "accepted");
+
+      workspaceHead = "b".repeat(40);
+      const stale = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(stale.collaboration.acceptance.verdict, "incomplete");
+      assert.equal(stale.collaboration.acceptance.reason, "acceptance_head_mismatch");
+      workspaceHead = commitSha;
+      workspaceDirty = true;
+      const dirty = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(dirty.collaboration.acceptance.verdict, "incomplete");
+      assert.equal(dirty.collaboration.acceptance.reason, "acceptance_worktree_dirty");
+      assert.equal(dirty.collaboration.blocker.reason, "acceptance_worktree_dirty");
     }
   );
 });
@@ -1806,9 +1832,18 @@ test("isolated worktree chat uses native skill delivery instead of full prompt i
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /PLATFORM SKILL CATALOG/);
-  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: a2a-handoff/);
+  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: cross-agent-handoff/);
   assert.doesNotMatch(prompts[0], /APPLICATION SKILL: memory-write/);
-  assert.ok(fs.existsSync(path.join(worktreeDir, ".agents", "skills", "a2a-handoff", "SKILL.md")));
+  assert.ok(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "implementation-plan", "SKILL.md"))
+  );
+  assert.ok(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "cross-agent-handoff", "SKILL.md"))
+  );
+  assert.equal(
+    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "code-review-deliver")),
+    false
+  );
   fs.rmSync(baseDir, { recursive: true, force: true });
   fs.rmSync(worktreeDir, { recursive: true, force: true });
 });
@@ -2193,9 +2228,9 @@ test("chat endpoint aborts previous invocation on same session", async () => {
 
       const text = await second.text();
       const startMatch = text.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)","seatId":"[^"]+","duty":"discuss"\}/
       );
-      assert.ok(startMatch, "agent-start must retain its stable two-field payload");
+      assert.ok(startMatch, "agent-start must expose invocation, Seat, and Duty");
       const windowMeta = text
         .split("\n\n")
         .find(
@@ -2211,7 +2246,7 @@ test("chat endpoint aborts previous invocation on same session", async () => {
 
       const firstText = await first.text();
       const firstInvocationId = firstText.match(
-        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"[^\n]*\}/
       )?.[1];
       assert.ok(firstInvocationId);
       const storage = createStorage({ file: memoryDbFile });
@@ -2345,6 +2380,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
     controller,
     a2aCount: 0,
     tokens: new Map(),
+    ...callbackSeatRouting(sessionId),
   };
 
   const invocationId = "invocation-cb-1";
@@ -2423,52 +2459,62 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   callbacks.unregisterThread(sessionId);
 });
 
-test("Grok callback persists a concrete plan before routing it for Codex approval", () => {
-  const sessionId = "session-cb-grok-plan";
-  const invocationId = "invocation-cb-grok-plan";
-  const sse = [];
-  const registry = createCollabTaskRegistry();
-  registry.ensureImplementationPlanRequired(sessionId, { requestedBy: "codex" });
-  const threadCtx = {
-    res: {
-      destroyed: false,
-      writableEnded: false,
-      write(chunk) {
-        sse.push(chunk);
-        return true;
+for (const provider of ["codex", "gemini", "grok", "opencode"]) {
+  test(`${provider} callback persists a concrete plan regardless of permission capability`, () => {
+    const sessionId = `session-cb-${provider}-plan`;
+    const invocationId = `invocation-cb-${provider}-plan`;
+    const sse = [];
+    const registry = createCollabTaskRegistry();
+    registry.ensureImplementationPlanRequired(sessionId, { requestedBy: "codex" });
+    const threadCtx = {
+      res: {
+        destroyed: false,
+        writableEnded: false,
+        write(chunk) {
+          sse.push(chunk);
+          return true;
+        },
       },
-    },
-    worklist: ["grok"],
-    controller: new AbortController(),
-    a2aCount: 0,
-    useWorktree: true,
-    collabTaskRegistry: registry,
-    tokens: new Map([[invocationId, { agentId: "grok", callbackToken: "token" }]]),
-  };
-  callbacks.registerThread(sessionId, threadCtx);
+      worklist: [provider],
+      controller: new AbortController(),
+      a2aCount: 0,
+      useWorktree: true,
+      collabTaskRegistry: registry,
+      currentDutyBinding: {
+        seatId: `seat-${sessionId}-${provider}`,
+        duty: "plan",
+        skillName: "implementation-plan",
+        routingReason: "sticky",
+        enforcementLevel: provider === "grok" ? "enforced" : "advisory",
+      },
+      tokens: new Map([[invocationId, { agentId: provider, callbackToken: "token" }]]),
+      ...callbackSeatRouting(sessionId),
+    };
+    callbacks.registerThread(sessionId, threadCtx);
 
-  try {
-    const content = [
-      "```implementation_plan",
-      "summary: Implement the callback change",
-      "files:",
-      "  - src/callback-change.js",
-      "changes:",
-      "  - Add the requested callback behavior",
-      "tests:",
-      "  - node --test tests/callback-change.test.js",
-      "```",
-    ].join("\n");
-    const result = callbacks.postMessage(sessionId, invocationId, content);
+    try {
+      const content = [
+        "```implementation_plan",
+        "summary: Implement the callback change",
+        "files:",
+        "  - src/callback-change.js",
+        "changes:",
+        "  - Add the requested callback behavior",
+        "tests:",
+        "  - node --test tests/callback-change.test.js",
+        "```",
+      ].join("\n");
+      const result = callbacks.postMessage(sessionId, invocationId, content);
 
-    assert.equal(result.ok, true);
-    assert.equal(registry.getTask(sessionId).implementationGate.status, "pending_approval");
-    assert.match(registry.getTask(sessionId).implementationGate.planHash, /^[a-f0-9]{16}$/);
-    assert.match(sse.join(""), /event: implementation-plan-submitted/);
-  } finally {
-    callbacks.unregisterThread(sessionId);
-  }
-});
+      assert.equal(result.ok, true);
+      assert.equal(registry.getTask(sessionId).implementationGate.status, "pending_approval");
+      assert.match(registry.getTask(sessionId).implementationGate.planHash, /^[a-f0-9]{16}$/);
+      assert.match(sse.join(""), /event: implementation-plan-submitted/);
+    } finally {
+      callbacks.unregisterThread(sessionId);
+    }
+  });
+}
 
 test("callbacks.postMessage captures structured handoff only for an enqueued target", () => {
   const sessionId = "session-cb-memory";
@@ -2489,6 +2535,7 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
     a2aCount: 0,
     windowId: "window-cb-1",
     tokens: new Map([[invocationId, { agentId: "codex", callbackToken: "token" }]]),
+    ...callbackSeatRouting(sessionId),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -2539,6 +2586,20 @@ test("callbacks.postMessage captures structured handoff only for an enqueued tar
   }
 });
 
+function callbackSeatRouting(threadId) {
+  const seats = Object.entries(AGENTS).map(([providerId, profile]) => ({
+    seatId: `seat-${threadId}-${providerId}`,
+    threadId,
+    providerId,
+    label: profile.label,
+    enabled: true,
+  }));
+  return {
+    agents: AGENTS,
+    threadSeats: { listEnabledForThread: () => seats },
+  };
+}
+
 test("callbacks.postMessage captures handoff even when A2A max depth skips enqueue", () => {
   const sessionId = "session-cb-memory-depth";
   const invocationId = "invocation-cb-memory-depth";
@@ -2560,6 +2621,7 @@ test("callbacks.postMessage captures handoff even when A2A max depth skips enque
     a2aCount: 1,
     windowId: "window-depth-1",
     tokens: new Map([[invocationId, { agentId: "codex", callbackToken: "token" }]]),
+    ...callbackSeatRouting(sessionId),
   };
   callbacks.registerThread(sessionId, threadCtx);
 
@@ -3707,15 +3769,15 @@ test("A2A-routed agents receive structured handoff fields when present", async (
   assert.match(prompts[1], /交接包完整度: ok/);
   assert.match(prompts[1], /做登录/);
   assert.doesNotMatch(prompts[1], /未提供标准/);
-  // A2A follow-up gets compact card (not full always-on a2a-handoff skill body).
+  // A2A follow-up gets the shared short handoff card.
   assert.match(prompts[1], /A2A Handoff Card/);
-  assert.doesNotMatch(prompts[1], /APPLICATION SKILL: a2a-handoff/);
+  assert.match(prompts[1], /APPLICATION SKILL: cross-agent-handoff/);
 });
 
-test("A2A allows the same agent to re-enter worklist (review → fix)", async () => {
+test("A2A allows the same Seat to re-enter the worklist with another Duty", async () => {
   const prompts = [];
   const agentsSeen = [];
-  const grokOut1 = [
+  const firstOut = [
     "@OpenCode",
     "",
     "```handoff",
@@ -3726,10 +3788,11 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
     "```",
   ].join("\n");
   const openCodeOut = [
-    "@Grok",
+    "@Codex",
     "",
     "```handoff",
-    "to: grok",
+    "to: codex",
+    "intent: discuss",
     "what: |",
     "  结论: request-changes",
     "  P0: 缺空指针检查",
@@ -3748,11 +3811,11 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
         const child = createMockChild();
         process.nextTick(() => {
           let text = "done";
-          if (agent === "grok" && agentsSeen.filter((a) => a === "grok").length === 1) {
-            text = grokOut1;
+          if (agent === "codex" && agentsSeen.filter((a) => a === "codex").length === 1) {
+            text = firstOut;
           } else if (agent === "opencode") {
             text = openCodeOut;
-          } else if (agent === "grok") {
+          } else if (agent === "codex") {
             text = "fixed p0";
           }
           child.stdout.write(
@@ -3773,25 +3836,25 @@ test("A2A allows the same agent to re-enter worklist (review → fix)", async ()
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          agent: "grok",
+          agent: "codex",
           prompt: "做登录并走 review",
           sessionId: "reentry-handoff-test",
         }),
       });
       const text = await response.text();
       assert.equal(response.status, 200);
-      assert.deepEqual(agentsSeen, ["grok", "opencode", "grok"]);
+      assert.deepEqual(agentsSeen, ["codex", "opencode", "codex"]);
       assert.equal(prompts.length, 3);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"grok"[^\n]*"to":"opencode"/);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"grok"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"opencode"/);
+      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"codex"/);
       assert.match(text, /"reentry":true/);
-      // Second Grok turn: structured handoff + compact card + receiving-review.
+      // Re-entered Seat gets only the discuss Duty handoff card.
       assert.match(prompts[2], /任务交接/);
       assert.match(prompts[2], /request-changes|缺空指针/);
       assert.match(prompts[2], /A2A Handoff Card/);
-      assert.match(prompts[2], /APPLICATION SKILL: receiving-review/);
-      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: a2a-handoff/);
-      assert.match(prompts[2], /<!-- Agent Identity: grok/);
+      assert.match(prompts[2], /APPLICATION SKILL: cross-agent-handoff/);
+      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: implementation-plan/);
+      assert.match(prompts[2], /<!-- Agent Identity: codex/);
     }
   );
 });
@@ -3877,7 +3940,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.ok(sidMatch, "expected session event");
       const sid = sidMatch[1];
       const invMatch = chatText.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"\}/
+        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"[^\n]*\}/
       );
       assert.ok(invMatch, "expected agent-start with invocationId");
       const invId = invMatch[1];

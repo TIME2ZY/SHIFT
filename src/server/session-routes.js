@@ -1,4 +1,4 @@
-const { projectCollaboration } = require("../storage/collaboration-read-model");
+const { projectCollaboration, projectSeats } = require("../storage/collaboration-read-model");
 const { buildUsageSummary } = require("../storage/usage-summary");
 const { projectInvocationProcess } = require("./invocation-process");
 
@@ -16,6 +16,8 @@ function createSessionRoutes({
   recallService,
   executionStorage,
   collabTaskRegistry = null,
+  threadSeats = null,
+  invocationDutyBindings = null,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -33,6 +35,14 @@ function createSessionRoutes({
     };
   }
 
+  function readWorkspace(sessionId) {
+    try {
+      return worktreeManager?.getStatus?.(sessionId) || null;
+    } catch {
+      return null;
+    }
+  }
+
   return async function handleSessionRoutes(req, res, url) {
     const collaborationMatch = url.pathname.match(
       /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration$/
@@ -47,15 +57,29 @@ function createSessionRoutes({
         collabTaskRegistry && typeof collabTaskRegistry.getTask === "function"
           ? collabTaskRegistry.getTask(sessionId)
           : null;
+      const seats = threadSeats?.listEnabledForThread?.(sessionId) || [];
       if (!task) {
-        sendJson(res, 200, { collaboration: null });
+        sendJson(res, 200, { collaboration: null, seats: projectSeats(seats) });
         return true;
       }
       const permission =
         collabTaskRegistry && typeof collabTaskRegistry.implementationPermission === "function"
           ? collabTaskRegistry.implementationPermission(sessionId)
           : null;
-      sendJson(res, 200, { collaboration: projectCollaboration(task, permission) });
+      const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
+      const acceptanceReadiness = collabTaskRegistry?.acceptanceReadiness?.(sessionId) || null;
+      const workspace = acceptanceReadiness
+        ? acceptanceReadiness.workspace
+        : readWorkspace(sessionId);
+      sendJson(res, 200, {
+        collaboration: projectCollaboration(task, permission, {
+          bindings,
+          seats,
+          workspace,
+          acceptanceReadiness,
+        }),
+        seats: projectSeats(seats),
+      });
       return true;
     }
 
