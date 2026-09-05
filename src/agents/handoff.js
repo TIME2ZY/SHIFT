@@ -499,45 +499,6 @@ function summarizeHandoff(handoff, quality) {
   };
 }
 
-function summarizeHandoffForUser(input = {}) {
-  const handoff = input.handoff || {};
-  const quality = input.quality || evaluateHandoff(input.handoff || null);
-  return {
-    goal: cleanText(handoff.goal),
-    completed: cleanText(handoff.what),
-    constraints: cleanList(
-      Array.isArray(handoff.constraints) ? handoff.constraints : handoff.why ? [handoff.why] : []
-    ),
-    files: cleanList(handoff.files),
-    openQuestions: cleanList(handoff.open_questions),
-    prohibited: cleanList(handoff.prohibited),
-    nextAction: cleanText(handoff.next_action),
-    targetSeat: input.targetSeat
-      ? {
-          seatId: cleanText(input.targetSeat.seatId),
-          providerId: cleanText(input.targetSeat.providerId),
-          label: cleanText(input.targetSeat.label),
-        }
-      : null,
-    duty: cleanText(input.duty),
-    skillName: cleanText(input.skillName),
-    degraded: Boolean(quality.degraded || !quality.ok),
-    missing: Array.isArray(quality.missing) ? quality.missing.slice() : [],
-  };
-}
-
-function cleanText(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function cleanList(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => String(item || "").trim())
-    .filter(Boolean)
-    .slice(0, 50);
-}
-
 module.exports = {
   REQUIRED_FIELDS,
   RECOMMENDED_FIELDS,
@@ -569,7 +530,6 @@ module.exports = {
   renderA2AHandoffCard,
   selectAppendix,
   summarizeHandoff,
-  summarizeHandoffForUser,
   normalizeTo,
   toMatchesRoute,
 };
