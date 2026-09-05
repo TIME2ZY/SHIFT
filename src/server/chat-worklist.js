@@ -95,7 +95,6 @@ async function runChatWorklist(ctx) {
     memories,
     collabTaskRegistry,
     deliveryVerifier,
-    handoffConfirmations,
     log,
     worklist,
     maxDepth,
@@ -1365,13 +1364,9 @@ async function runChatWorklist(ctx) {
         collabTaskRegistry,
         threadSeats: storage?.threadSeats || null,
         agents: AGENTS,
-        handoffConfirmations,
         fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
         fromDuty: threadCtx.currentDutyBinding?.duty || null,
       });
-      Object.assign(handoffByTarget, finalized.handoffByTarget);
-      Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
-      await handoffConfirmations?.waitForThread(sessionId, invocationController.signal);
       Object.assign(handoffByTarget, finalized.handoffByTarget);
       Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
 

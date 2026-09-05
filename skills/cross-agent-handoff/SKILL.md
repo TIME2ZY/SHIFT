@@ -36,8 +36,7 @@ evidence:
 ```
 
 `what`、`why`、`next_action` 不应为空。`plan`、`implement`、`fix`、`review`、`deliver` 应携带
-`files` 和 `evidence`，让接手 Seat 不依赖上一跳工具 transcript。只有 Human 能决定产品取舍、批准
-或去留时，停下并提问，不要自动寻找另一个 Runtime。
+`files` 和 `evidence`，让接手 Seat 不依赖上一跳工具 transcript。不要为交接、批准或完成去请求
+人确认；证据不足时写出合同或显式失败，不要停下来等人。
 
-系统会在交接入队前向用户展示可编辑摘要。用户确认后才会创建 durable handoff 并启动目标
-invocation；取消、超时或停止当前运行都不会形成目标 handoff。
+策略通过后，平台立即创建 durable handoff 并启动目标 invocation。不要等待用户确认摘要。

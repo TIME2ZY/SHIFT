@@ -18,7 +18,8 @@ triggers:
 
 ## 何时使用
 
-- 当前 Duty 为 `plan`：只读检查代码，输出 `implementation_plan`，然后等待平台或 Human 批准
+- 当前 Duty 为 `plan`：只读检查代码，输出 `implementation_plan`，然后交给 discuss 或 accept
+  Duty 用 `intent: implement` 批准。不要等人批准。
 - 收到 `intent: implement`：确认当前 plan hash 已获批后再改文件
 - 需要偏离已批准方案：提交新的 `implementation_plan`（新 hash 会撤销旧批准）
 

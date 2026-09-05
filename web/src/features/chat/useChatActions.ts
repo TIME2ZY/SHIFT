@@ -5,11 +5,6 @@ import type { MemoryInjectEvent } from "../memory/queries";
 import { useToast } from "../notifications/ToastProvider";
 import { runChatStream } from "../../runtime/chat-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
-import {
-  cancelHandoffPreview,
-  confirmHandoffPreview,
-  type HandoffPreviewEdits,
-} from "../handoff/api";
 
 export function useChatActions() {
   const queryClient = useQueryClient();
@@ -144,21 +139,5 @@ export function useChatActions() {
     [store, toast]
   );
 
-  const confirmHandoff = useCallback(
-    async (sessionId: string, previewId: string, edits: HandoffPreviewEdits) => {
-      await confirmHandoffPreview(sessionId, previewId, edits);
-      store.dispatch({ type: "handoff/resolved", sessionId, previewId });
-    },
-    [store]
-  );
-
-  const cancelHandoff = useCallback(
-    async (sessionId: string, previewId: string) => {
-      await cancelHandoffPreview(sessionId, previewId);
-      store.dispatch({ type: "handoff/resolved", sessionId, previewId });
-    },
-    [store]
-  );
-
-  return { send, stop, confirmHandoff, cancelHandoff };
+  return { send, stop };
 }

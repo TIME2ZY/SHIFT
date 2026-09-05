@@ -45,7 +45,6 @@ function createChatRoutes({
   memoryCapture,
   collabTaskRegistry = null,
   deliveryVerifier = null,
-  handoffConfirmations = null,
   logger = console,
 }) {
   if (!durableRecorder) throw new TypeError("durableRecorder is required");
@@ -425,7 +424,6 @@ function createChatRoutes({
       runWorkspace,
       threadSeats: storage?.threadSeats || null,
       agents: AGENTS,
-      handoffConfirmations,
     };
     callbacks.registerThread(sessionId, threadCtx);
 
@@ -452,7 +450,6 @@ function createChatRoutes({
       memories,
       collabTaskRegistry,
       deliveryVerifier,
-      handoffConfirmations,
       log,
       worklist,
       maxDepth,

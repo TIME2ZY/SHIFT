@@ -20,7 +20,7 @@ SHIFT 是一个**本地优先**的多 Agent 协作控制台。它不提供模型
 - 用 SQLite 持久化会话、调用、上下文窗口、Memory 和 Recall 索引——只有一个真相源；
 - 需要改代码时创建会话级 Git worktree，改动隔离、可审查、可显式丢弃；
 - 每次 invocation 都绑定当前席位、职责和 Skill；门禁依据职责与证据，不绑定 Provider 名称；
-- 任务卡展示目标、当前执行者、阻塞和交付证据，只有用户验收通过才算完成。
+- 任务卡展示目标、当前执行者、阻塞和交付证据；`accept` Duty 对照目标核验后，证据齐才算完成。
 
 ## 工作方式
 
@@ -28,10 +28,10 @@ SHIFT 是一个**本地优先**的多 Agent 协作控制台。它不提供模型
 用户提出目标
     │
     ├─ 当前席位按本跳 Duty 加载对应 Skill
-    ├─ 需要交接时，用户先查看并确认交接摘要
+    ├─ 需要交接时，策略通过后直接入队下一席位
     ├─ 同一席位可继续实现和自审，也可交给另一个已启用席位
     ├─ 平台核验方案、review、commit、PR 与 CI 证据
-    └─ 用户对照目标作出 accepted / rejected / incomplete 决定
+    └─ accept Duty 对照目标写入 accepted / rejected / incomplete
 ```
 
 一个已启用席位就能完成整条路径。启用多个席位后，可以通过 `@Agent` 明确交接；没有点名或
@@ -46,8 +46,7 @@ SHIFT 与"把几个 CLI 串起来"的区别在于：平台不信任 Agent 的自
 | 方案批准   | discuss / accept Duty | 新方案 hash 自动撤销旧批准；支持权限回调时，未批准只放行只读操作   |
 | 代码评审   | review / deliver Duty | 结构化 `code_review`；changes requested 回到 implement / fix Duty  |
 | 交付核验   | deliver Duty          | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI     |
-| Agent 核验 | accept Duty           | 将逐项结论绑定目标、方案、review 和实际 commit，不直接写任务完成态 |
-| 最终验收   | 用户                  | 证据完整才能写 `accepted`；证据不足的通过请求会保存为 `incomplete` |
+| 最终完成   | accept Duty           | 对照目标、方案、review 和 commit 写入完成态；证据不足保存为 `incomplete` |
 
 所有协作事实——Trace、Invocation、Handoff、Gate——都落在 SQLite，并通过内置审计控制台可视化：失败断点、Handoff 漏斗、Memory 命中率、每步的因果链路。
 
@@ -72,7 +71,7 @@ SHIFT 不打包这些 CLI，也不管理它们的账号。
 | ---------------- | --------------------------------------------------------------------- |
 | 动态席位与路由   | Thread 持久化 enabled Seats；显式点名、粘性和亲和性只在这些席位中解析 |
 | Duty / Skill     | 每次 invocation 原子绑定职责；运行时只激活当前 Duty Skill 与交接卡    |
-| 任务与验收卡     | 展示目标、执行者、阻塞、Git/PR/CI、审查模式和 Human 最终结论          |
+| 任务与验收卡     | 展示目标、执行者、阻塞、Git/PR/CI、审查模式和 Seat 完成结论           |
 | 流式过程         | Node 服务通过 SSE 推送文本、思考、工具调用、进度、文件变化与运行状态  |
 | 结构化交接       | 解析并记录 Agent 之间的 handoff，保留来源、目标和因果关系，只消费一次 |
 | 会话与调用历史   | SQLite 持久化 thread、message、invocation、event 和 provider session  |

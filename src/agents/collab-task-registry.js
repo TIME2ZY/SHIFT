@@ -330,15 +330,8 @@ function createCollabTaskRegistry(options = {}) {
       diffHash: acceptance.commit_sha,
       testHash: acceptance.solution_hash,
     });
-    if (task.artifacts?.finalAcceptance?.hash === acceptanceHash) {
-      return {
-        accepted: true,
-        reused: true,
-        verdict: acceptance.verdict,
-        acceptanceHash,
-        task,
-      };
-    }
+    const requestedVerdict =
+      String(acceptance.verdict || "").toLowerCase() === "reject" ? "rejected" : "accepted";
     task.artifacts = {
       ...(task.artifacts || {}),
       finalAcceptance: {
@@ -348,9 +341,7 @@ function createCollabTaskRegistry(options = {}) {
         acceptedAt: new Date().toISOString(),
       },
     };
-    delete task.artifacts.acceptanceDecision;
-    task.taskStatus = "waiting_human";
-    if (task.phase === STATE.DONE) {
+    if (task.phase === STATE.DONE && requestedVerdict !== "accepted") {
       task.phase = STATE.DELIVER;
       task.state = STATE.DELIVER;
     }
@@ -364,40 +355,10 @@ function createCollabTaskRegistry(options = {}) {
       acceptedBy: actorAgentId,
       acceptedAt: new Date().toISOString(),
     };
-    const saved = persist(task, {
-      type: "final_acceptance_submitted",
-      from: task.phase,
-      to: task.phase,
-      actorAgentId,
-      intent: "accept",
-      verdict: acceptance.verdict,
-      acceptanceHash,
-      commitSha: acceptance.commit_sha,
-    });
-    return { accepted: true, verdict: acceptance.verdict, acceptanceHash, task: saved };
-  }
-
-  function acceptanceReadiness(threadId) {
-    const task = getTask(threadId);
-    if (!task) return { ok: false, reason: "collaboration_task_missing" };
-    return readAcceptanceReadiness(task, options.readWorkspace);
-  }
-
-  function decideFinalAcceptance(threadId, input = {}) {
-    if (!threadId) return { recorded: false, reason: "missing_thread" };
-    if (input.actorKind !== "human" || !String(input.actorId || "").trim()) {
-      return { recorded: false, reason: "final_decision_requires_human" };
-    }
-    const requestedVerdict = String(input.verdict || "")
-      .trim()
-      .toLowerCase();
-    if (!["accepted", "rejected", "incomplete"].includes(requestedVerdict)) {
-      return { recorded: false, reason: "invalid_final_verdict" };
-    }
-    const task = getTask(threadId);
-    if (!task) return { recorded: false, reason: "collaboration_task_missing" };
-
-    const readiness = acceptanceReadiness(threadId);
+    const readiness =
+      requestedVerdict === "accepted"
+        ? readAcceptanceReadiness(task, options.readWorkspace)
+        : { ok: true, reason: null, workspace: null };
     const verdict =
       requestedVerdict === "accepted" && !readiness.ok ? "incomplete" : requestedVerdict;
     const reason =
@@ -405,13 +366,10 @@ function createCollabTaskRegistry(options = {}) {
         ? null
         : requestedVerdict === "accepted"
           ? readiness.reason
-          : verdict === "rejected"
-            ? "human_rejected"
-            : "human_marked_incomplete";
+          : "accept_duty_rejected";
     const goalHash = String(task.artifacts?.userGoal?.hash || "");
     const planHash = String(task.artifacts?.implementationPlan?.hash || "") || null;
     const commitSha = String(task.deliveryGate?.commitSha || "") || null;
-    const note = String(input.note || "").trim() || null;
     const previousDecision = task.artifacts?.acceptanceDecision;
     if (
       previousDecision?.verdict === verdict &&
@@ -419,71 +377,86 @@ function createCollabTaskRegistry(options = {}) {
       previousDecision?.planHash === planHash &&
       previousDecision?.commitSha === commitSha &&
       previousDecision?.reason === reason &&
-      previousDecision?.note === note
+      previousDecision?.actorKind === "seat" &&
+      previousDecision?.actorId === actorAgentId
     ) {
       return {
-        recorded: true,
+        accepted: true,
         reused: true,
+        recorded: true,
         readiness,
-        accepted: verdict === "accepted",
         verdict,
         reason,
+        acceptanceHash,
+        taskStatus: task.taskStatus,
         task,
       };
     }
 
     const decidedAt = new Date().toISOString();
-    task.artifacts = {
-      ...(task.artifacts || {}),
-      acceptanceDecision: {
-        verdict,
-        requestedVerdict,
-        reason,
-        note,
-        goalHash,
-        planHash,
-        commitSha,
-        actorKind: "human",
-        actorId: String(input.actorId).trim(),
-        decidedAt,
-      },
-    };
-    const previous = task.phase;
-    if (verdict === "accepted") {
-      task.phase = STATE.DONE;
-      task.state = STATE.DONE;
-      task.taskStatus = "accepted";
-    } else {
-      if (task.phase === STATE.DONE) {
-        task.phase = STATE.DELIVER;
-        task.state = STATE.DELIVER;
-      }
-      task.taskStatus = verdict === "rejected" ? "rejected" : "waiting_human";
-    }
-    const saved = persist(task, {
-      type: "final_acceptance_decided",
-      from: previous,
-      to: task.phase,
-      actorKind: "human",
-      actorId: String(input.actorId).trim(),
-      duty: "accept",
-      intent: "accept",
+    task.artifacts.acceptanceDecision = {
       verdict,
       requestedVerdict,
       reason,
       goalHash,
       planHash,
       commitSha,
+      actorKind: "seat",
+      actorId: actorAgentId,
+      decidedAt,
+    };
+    const previous = task.phase;
+    if (verdict === "accepted") {
+      task.phase = STATE.DONE;
+      task.state = STATE.DONE;
+      task.taskStatus = "accepted";
+    } else if (verdict === "rejected") {
+      if (task.phase === STATE.DONE) {
+        task.phase = STATE.DELIVER;
+        task.state = STATE.DELIVER;
+      }
+      task.taskStatus = "rejected";
+    } else {
+      if (task.phase === STATE.DONE) {
+        task.phase = STATE.DELIVER;
+        task.state = STATE.DELIVER;
+      }
+      task.taskStatus = "active";
+    }
+    const saved = persist(task, {
+      type: "final_acceptance_decided",
+      from: previous,
+      to: task.phase,
+      actorKind: "seat",
+      actorId: actorAgentId,
+      actorAgentId,
+      duty: "accept",
+      intent: "accept",
+      verdict,
+      requestedVerdict,
+      reason,
+      acceptanceHash,
+      goalHash,
+      planHash,
+      commitSha,
     });
     return {
-      recorded: true,
+      accepted: true,
       reused: false,
+      recorded: true,
       readiness,
-      accepted: verdict === "accepted",
       verdict,
       reason,
+      acceptanceHash,
+      taskStatus: saved.taskStatus,
       task: saved,
     };
+  }
+
+  function acceptanceReadiness(threadId) {
+    const task = getTask(threadId);
+    if (!task) return { ok: false, reason: "collaboration_task_missing" };
+    return readAcceptanceReadiness(task, options.readWorkspace);
   }
 
   function shouldBlockEvidenceRoute(input = {}) {
@@ -900,7 +873,6 @@ function createCollabTaskRegistry(options = {}) {
     recordDeliveryEvidence,
     submitFinalAcceptance,
     acceptanceReadiness,
-    decideFinalAcceptance,
     shouldBlockEvidenceRoute,
     noteAcceptedRoute,
     ensureImplementationPlanRequired,

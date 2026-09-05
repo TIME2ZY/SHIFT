@@ -111,9 +111,9 @@ CollaborationTask {
 
 - `goalOriginal` 保存触发任务的用户原话，后续不得覆盖。
 - 收敛目标变化产生新 `goalHash`，并使绑定旧 hash 的 final acceptance 失效。
-- `waiting_human` 必须带可枚举 blocker；恢复执行后回到 `active`。
-- `accepted` 只能由 Human 最终决定入口在 evidence gate 通过后写入；Agent 文本中的 done 或
-  `final_acceptance` 只提供证据，不产生完成状态转换。
+- `waiting_human` 不是交接或完成的必经状态；不得用它表达人审批闸门。
+- `accepted` 只能由 `accept` Duty 的 `final_acceptance` 在 evidence gate 通过后写入；Agent
+  文本中的 done 不产生完成状态转换。证据不足时记录 `incomplete` 并保持 `active`。
 - 阶段是读模型投影，不能作为 Seat 或 Provider ID allowlist。
 
 建议 blocker 集合：
@@ -140,12 +140,12 @@ CollaborationEvent {
 
 不变量：
 
-- Human 批准和验收必须进入该权威事件路径。
+- 方案批准、handoff 和最终完成必须进入该权威事件路径，并由 Seat actor 写入。
 - Seat actor 使用 `seatId`，不能把 Provider ID 当作长期人员身份。
 - Message 时间线只投影事件；删除或隐藏投影不影响批准事实。
 - event payload 中的批准、review 和验收必须携带对应证据 hash。
-- 最终验收事件固定记录 `actorKind=human`、Human identity、`duty=accept`，并绑定当前 goal、
-  plan 与 commit；请求通过但证据不足时记录 `incomplete`，不得返回伪成功。
+- 最终完成事件记录 `actorKind=seat`、`duty=accept`，并绑定当前 goal、plan 与 commit；
+  verdict=accept 但证据不足时记录 `incomplete`，不得返回伪成功，也不得改写成 Human 审批。
 
 ## 7. Evidence and invalidation
 
@@ -172,10 +172,10 @@ AcceptanceEvidence {
 4. review changes requested 使 final acceptance 失效并要求 implement/fix Duty；
 5. CI failure 不能产生 `code_change` 的 accepted；CI unknown 是否阻断由显式策略决定。
 
-当前 `code_change` 完成路径的 Human 决定必须在写入前读取 Thread 绑定的 Git worktree：工作区应干净，HEAD
+当前 `code_change` 完成路径的 `accept` Duty 决定必须在写入前读取 Thread 绑定的 Git worktree：工作区应干净，HEAD
 必须匹配已核验的 delivery commit。读取失败、缺少工作区或绑定不匹配时，请求 `accepted`
 应记录为 `incomplete` 并给出原因。任务卡的 readiness 使用同一检查，不能仅凭 SQLite 中的
-历史交付引用继续显示可验收。已有 Human 决定保留为历史事实，当前证据不匹配时不投影为已验收。
+历史交付引用继续显示可验收。已有完成决定保留为历史事实，当前证据不匹配时不投影为已验收。
 
 `implementation_plan` 的提交只依据 `plan | implement | fix` Duty 和方案内容；正文与
 callback 共用 `processWorkflowEvidenceOutput`，再进入唯一 `submitImplementationPlan`
@@ -204,8 +204,9 @@ RouteDecision {
 }
 ```
 
-决策顺序固定为 explicit target、Duty-only handoff affinity、sticky、solo fallback、Human
-escalation。没有 mention/handoff 时禁止仅因 Duty 改变而换 Seat。
+决策顺序固定为 explicit target、Duty-only handoff affinity、sticky、solo fallback。
+没有 mention/handoff 时禁止仅因 Duty 改变而换 Seat。证据无法裁定时显式失败或列出 blocker，
+不升级为人审批。
 
 路由决定本身不单独成为第二真相源；成功启动时随 DutyBinding 保存，启动前拒绝则随 Trace/规范
 事件记录失败原因。
@@ -221,11 +222,10 @@ escalation。没有 mention/handoff 时禁止仅因 Duty 改变而换 Seat。
 
 ## 10. 实施边界
 
-本合同不引入新 Provider、dispatch outbox、SSE cursor、默认四人流水线或人格系统。
-handoff preview/confirm 是请求内的 Human 确认门禁；未确认内容不是业务事实，只保存在运行时，
-取消、超时或重启都不产生 durable handoff。确认后仍通过既有 `finalizeA2ARoutes` 与 handoff
-repository 的唯一 accept/enqueue 路径持久化和消费。
+本合同不引入新 Provider、dispatch outbox、SSE cursor、默认四人流水线、人格系统或 Human
+审批闸门。handoff 在策略通过后通过既有 `finalizeA2ARoutes` 与 handoff repository 的唯一
+accept/enqueue 路径立即持久化和消费。
 
-请求内所有正文、callback 和待确认交接共享同一个 A2A 计数。实际入队成功后才增加计数；
-确认时重新检查上限，不得把预览生成时的快照回写运行状态。已接受的目标必须执行并收口，
-达到上限仅阻止继续接受下一次交接，不能留下已入队但未启动的目标。
+请求内所有正文与 callback 交接共享同一个 A2A 计数。实际入队成功后才增加计数，不得把
+计数快照回写运行状态。已接受的目标必须执行并收口，达到上限仅阻止继续接受下一次交接，
+不能留下已入队但未启动的目标。

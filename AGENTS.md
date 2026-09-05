@@ -20,10 +20,21 @@ SHIFT 是本地多 Agent 协作控制台：不提供模型，只编排本机已�
 5. invocation 进入 completed | failed | aborted 之一，禁止无故长期 active
 6. 消息、invocation 和规范事件写入 SQLite
 7. 刷新或重启后可以恢复会话
-8. 可选的 @Agent handoff 只消费一次，并产生可追踪的目标 invocation
+8. 可选的 @Agent handoff 只消费一次，并产生可追踪的目标 invocation；策略通过后直接入队
+9. 任务完成由 accept Duty 的证据与平台核验写入，不要求 Human 批准
 ```
 
 任何改动都应说明它如何影响这条主链路。不得为新功能旁路出另一套启动、流式、终态或持久化流程。
+
+### Agent 闭环，禁止人审批门禁
+
+SHIFT 是 Agent 编排平台。用户提出最初目标、选择席位、停止运行；之后主链路由 Seat、Duty、结构化合同和证据门禁推进。
+
+- 不得把 Human 确认、批准或验收做成启动、交接、阶段推进或完成的必经闸门。
+- handoff 在策略通过后必须直接进入既有 `acceptHandoff` / enqueue 路径，不得插入预览弹窗、确认 API 或请求内等待。
+- 方案批准由 `discuss` / `accept` Duty 的 implement 交接完成；最终完成由 `accept` Duty 的 `final_acceptance` 加上平台证据核验写入。
+- 禁止新增 Human-only 完成写入口，禁止用 `waiting_human` 表达交接或验收必经状态。
+- UI 只展示证据和状态，不得成为审批闸门。用户消息不是审批。
 
 ---
 
@@ -244,5 +255,6 @@ npm run verify:pr
 - 扩大既有协作 phase 或增加平行工作流。
 - 未经验证的 embedding、gate、metrics 管道或抽象层。
 - 以减少行数、文件数或测试数为目标的重构。
+- 在交接、方案批准、审查、交付或最终完成上新增 Human 审批、确认弹窗或必经等待。
 
 设计与数据边界以 `docs/decisions/`、`docs/memory-data-contract.md` 为准；当前实现地图属于架构文档，不属于本文件的长期规范。

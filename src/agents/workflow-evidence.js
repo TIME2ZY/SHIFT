@@ -40,7 +40,7 @@ function processWorkflowEvidenceOutput(input = {}) {
       });
       events.push({
         event: result.accepted ? "final-acceptance-submitted" : "final-acceptance-rejected",
-        payload: summarize(result, ["verdict", "acceptanceHash"]),
+        payload: summarize(result, ["verdict", "acceptanceHash", "taskStatus", "reason"]),
       });
     }
   }

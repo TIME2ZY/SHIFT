@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -21,15 +20,14 @@ const DUTY_LABELS: Record<string, string> = {
 
 const BLOCKER_LABELS: Record<string, string> = {
   implementation_plan_missing: "尚未提交实现方案",
-  implementation_plan_not_approved: "等待批准实现方案",
+  implementation_plan_not_approved: "等待讨论席位批准方案",
   implementation_plan_artifact_missing: "方案正文缺失",
   code_review_pending: "等待代码审查",
   delivery_evidence_missing: "等待交付证据",
   ci_not_successful: "CI 尚未通过",
-  final_acceptance_missing: "等待最终验收",
-  human_acceptance_required: "等待用户对照目标验收",
+  final_acceptance_missing: "等待验收席位核验证据",
   final_acceptance_rejected: "最终验收已拒绝",
-  human_input_required: "等待用户输入",
+  final_acceptance_not_bound_to_outcome: "验收证据未绑定当前结果",
   acceptance_workspace_unavailable: "无法读取当前工作区",
   acceptance_worktree_dirty: "工作区存在未提交改动",
   acceptance_head_mismatch: "当前提交与交付证据不一致",
@@ -45,18 +43,9 @@ interface CollaborationStatusProps {
   snapshot: CollaborationSnapshot | null;
   loading: boolean;
   error: Error | null;
-  onAcceptanceDecision?(
-    verdict: "accepted" | "rejected" | "incomplete",
-    note?: string
-  ): Promise<unknown>;
 }
 
-export function CollaborationStatus({
-  snapshot,
-  loading,
-  error,
-  onAcceptanceDecision,
-}: CollaborationStatusProps) {
+export function CollaborationStatus({ snapshot, loading, error }: CollaborationStatusProps) {
   return (
     <section className="react-collab-status" aria-label="任务卡">
       <header>
@@ -109,7 +98,7 @@ export function CollaborationStatus({
             <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
             <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
-          <AcceptanceCardView card={snapshot.acceptance} onDecision={onAcceptanceDecision} />
+          <AcceptanceCardView card={snapshot.acceptance} />
           <p className="react-task-next-action">
             <small>下一步</small>
             {snapshot.nextAction}
@@ -120,32 +109,7 @@ export function CollaborationStatus({
   );
 }
 
-function AcceptanceCardView({
-  card,
-  onDecision,
-}: {
-  card: AcceptanceCard;
-  onDecision?: CollaborationStatusProps["onAcceptanceDecision"];
-}) {
-  const [open, setOpen] = useState(false);
-  const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [decisionError, setDecisionError] = useState<string | null>(null);
-
-  async function decide(verdict: "accepted" | "rejected" | "incomplete") {
-    if (!onDecision) return;
-    setSubmitting(true);
-    setDecisionError(null);
-    try {
-      await onDecision(verdict, note.trim() || undefined);
-      setOpen(false);
-    } catch (cause) {
-      setDecisionError(cause instanceof Error ? cause.message : "验收决定保存失败。");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
+function AcceptanceCardView({ card }: { card: AcceptanceCard }) {
   return (
     <section className="react-acceptance-card" aria-label="验收卡" data-verdict={card.verdict}>
       <header>
@@ -173,31 +137,6 @@ function AcceptanceCardView({
       </dl>
       {card.reason && card.verdict !== "accepted" ? (
         <p className="react-acceptance-reason">{acceptanceReasonLabel(card.reason)}</p>
-      ) : null}
-      {card.verdict !== "accepted" && onDecision ? (
-        <button className="react-acceptance-open" type="button" onClick={() => setOpen(true)}>
-          对照目标验收
-        </button>
-      ) : null}
-      {open ? (
-        <div className="react-acceptance-actions">
-          <label>
-            <span>验收说明（可选）</span>
-            <textarea value={note} rows={3} onChange={(event) => setNote(event.target.value)} />
-          </label>
-          {decisionError ? <p role="alert">{decisionError}</p> : null}
-          <div>
-            <button type="button" disabled={submitting} onClick={() => void decide("incomplete")}>
-              暂不验收
-            </button>
-            <button type="button" disabled={submitting} onClick={() => void decide("rejected")}>
-              拒绝交付
-            </button>
-            <button type="button" disabled={submitting} onClick={() => void decide("accepted")}>
-              确认验收
-            </button>
-          </div>
-        </div>
       ) : null}
     </section>
   );
@@ -242,7 +181,7 @@ function dutyAndSkillLabel(snapshot: CollaborationSnapshot) {
 function blockerTypeLabel(type: string) {
   const labels: Record<string, string> = {
     waiting_human: "等待用户",
-    waiting_approval: "等待批准",
+    waiting_approval: "等待方案门禁",
     missing_evidence: "缺少证据",
     provider_unavailable: "执行器不可用",
     execution_failed: "执行失败",
@@ -294,9 +233,7 @@ function reviewVerdictLabel(verdict: AcceptanceCard["reviewVerdict"]) {
 
 function acceptanceReasonLabel(reason: string) {
   const labels: Record<string, string> = {
-    human_acceptance_required: "等待用户对照目标作出最终决定。",
-    human_rejected: "用户已拒绝本次交付。",
-    human_marked_incomplete: "用户认为当前交付尚未完成。",
+    accept_duty_rejected: "验收席位已拒绝本次交付。",
     user_goal_missing: "缺少可核验的用户目标。",
     solution_baseline_missing: "缺少与目标绑定的已批准方案。",
     implementation_plan_not_approved: "实现方案尚未批准。",

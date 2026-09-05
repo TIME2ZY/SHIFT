@@ -96,7 +96,7 @@ test("pending plan projects a categorized approval blocker without dumping the p
     type: "waiting_approval",
     reason: "implementation_plan_not_approved",
   });
-  assert.equal(snapshot.nextAction, "请批准实现方案后继续。");
+  assert.equal(snapshot.nextAction, "请由讨论或验收席位批准方案后继续。");
   assert.equal(JSON.stringify(snapshot).includes("src/index.js"), false);
 });
 
@@ -128,7 +128,7 @@ test("review mode compares implementer and reviewer Duty bindings", () => {
   assert.equal(otherSeat.evidence.commitSha, "b".repeat(40));
 });
 
-test("acceptance card exposes the bound goal, plan, Git, CI, and Human verdict", () => {
+test("acceptance card exposes the bound goal, plan, Git, CI, and Seat verdict", () => {
   const commitSha = "c".repeat(40);
   const snapshot = projectCollaboration(
     {
@@ -185,7 +185,7 @@ test("acceptance card exposes the bound goal, plan, Git, CI, and Human verdict",
   });
 });
 
-test("legacy done state and stale Human decisions cannot project as accepted", () => {
+test("legacy done state and stale Seat decisions cannot project as accepted", () => {
   const commitSha = "d".repeat(40);
   const legacy = projectCollaboration(
     { phase: "done", taskStatus: "accepted", artifacts: {}, deliveryGate: { commitSha } },
@@ -195,8 +195,8 @@ test("legacy done state and stale Human decisions cannot project as accepted", (
   assert.equal(legacy.status, "active");
   assert.equal(legacy.acceptance.verdict, "incomplete");
   assert.deepEqual(legacy.blocker, {
-    type: "waiting_human",
-    reason: "human_acceptance_required",
+    type: "missing_evidence",
+    reason: "final_acceptance_missing",
   });
 
   const stale = projectCollaboration(
@@ -221,5 +221,5 @@ test("legacy done state and stale Human decisions cannot project as accepted", (
   );
   assert.equal(stale.status, "active");
   assert.equal(stale.acceptance.verdict, "incomplete");
-  assert.equal(stale.acceptance.reason, "human_acceptance_required");
+  assert.equal(stale.acceptance.reason, "final_acceptance_missing");
 });

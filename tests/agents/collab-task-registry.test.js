@@ -111,18 +111,25 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(delivered.phase, STATE.DELIVER);
   assert.equal(delivered.codeReviewGate.reviewedBy, "opencode");
 
-  const blocked = registry.decideFinalAcceptance("thread-1", {
-    actorKind: "human",
-    actorId: "local-user",
-    verdict: "accepted",
+  const blocked = registry.submitFinalAcceptance("thread-1", {
+    actorAgentId: "codex",
+    actorDuty: "accept",
+    acceptance: {
+      verdict: "accept",
+      user_goal_hash: baseline.goalHash,
+      solution_hash: baseline.solutionHash,
+      implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
+      commit_sha: "a".repeat(40),
+      checks: ["The workflow is delivered => pass: evidence"],
+      gaps: ["none"],
+    },
   });
-  assert.equal(blocked.verdict, "incomplete");
-  assert.equal(blocked.reason, "code_review_artifact_missing");
-  assert.equal(blocked.task.phase, STATE.DELIVER);
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.reason, "final_commit_mismatch");
+  assert.equal(registry.getTask("thread-1").phase, STATE.DELIVER);
 
   const commitSha = "a".repeat(40);
   const reviewEvidenceHash = delivered.codeReviewGate.evidenceHash;
-  const finalEvidenceHash = "f".repeat(16);
   registry.updateTask("thread-1", {
     artifacts: {
       ...delivered.artifacts,
@@ -133,14 +140,6 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
         prUrl: "https://github.com/acme/repo/pull/1",
         ciStatus: "success",
       },
-      finalAcceptance: {
-        hash: finalEvidenceHash,
-        verdict: "accept",
-        user_goal_hash: baseline.goalHash,
-        solution_hash: baseline.solutionHash,
-        implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
-        commit_sha: commitSha,
-      },
     },
     deliveryGate: {
       commitSha,
@@ -148,22 +147,24 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
       ciStatus: "success",
       reviewEvidenceHash,
     },
-    finalGate: {
-      verdict: "accept",
-      evidenceHash: finalEvidenceHash,
-      acceptedCommitSha: commitSha,
-      userGoalHash: baseline.goalHash,
-      solutionHash: baseline.solutionHash,
-      implementationPlanHash: delivered.artifacts.implementationPlan.hash,
-    },
   });
-  const completed = registry.decideFinalAcceptance("thread-1", {
-    actorKind: "human",
-    actorId: "local-user",
-    verdict: "accepted",
+  const completed = registry.submitFinalAcceptance("thread-1", {
+    actorAgentId: "codex",
+    actorDuty: "accept",
+    acceptance: {
+      verdict: "accept",
+      user_goal_hash: baseline.goalHash,
+      solution_hash: baseline.solutionHash,
+      implementation_plan_hash: delivered.artifacts.implementationPlan.hash,
+      commit_sha: commitSha,
+      checks: ["The workflow is delivered => pass: evidence"],
+      gaps: ["none"],
+    },
   });
   assert.equal(completed.verdict, "accepted");
   assert.equal(completed.task.phase, STATE.DONE);
+  assert.equal(completed.task.taskStatus, "accepted");
+  assert.equal(completed.task.artifacts.acceptanceDecision.actorKind, "seat");
 });
 
 test("review Duty changes return to implement and invalidate downstream gates", () => {
@@ -315,7 +316,7 @@ test("plan Duty cannot route until the solution baseline matches the original us
   );
 });
 
-test("delivery and Human acceptance bind outcome hashes to the current worktree", async () => {
+test("delivery and accept-duty completion bind outcome hashes to the current worktree", async () => {
   let workspace = { headSha: "a".repeat(40), porcelain: [] };
   const registry = createCollabTaskRegistry({
     readWorkspace: () => {
@@ -382,7 +383,7 @@ test("delivery and Human acceptance bind outcome hashes to the current worktree"
     false
   );
 
-  const acceptance = registry.submitFinalAcceptance("thread-1", {
+  const payload = {
     actorAgentId: "codex",
     actorDuty: "accept",
     acceptance: {
@@ -394,32 +395,19 @@ test("delivery and Human acceptance bind outcome hashes to the current worktree"
       checks: ["The workflow is delivered => pass: PR #7 and green CI"],
       gaps: ["none"],
     },
-  });
-  assert.equal(acceptance.accepted, true);
-  assert.equal(acceptance.task.phase, STATE.DELIVER);
-  assert.equal(acceptance.task.taskStatus, "waiting_human");
-  assert.deepEqual(
-    registry.decideFinalAcceptance("thread-1", {
-      actorKind: "agent",
-      actorId: "codex",
-      verdict: "accepted",
-    }),
-    { recorded: false, reason: "final_decision_requires_human" }
-  );
+  };
   const { createSessionRoutes } = require("../../src/server/session-routes");
-  async function acceptanceRequest(method = "POST") {
+  async function collaborationRequest() {
     const res = {};
     const handler = createSessionRoutes({
       collabTaskRegistry: registry,
       getSession: () => ({ id: "thread-1" }),
-      readJsonBody: async () => ({ verdict: "accepted" }),
       sendJson: (_res, status, body) => Object.assign(res, { status, body }),
     });
-    const suffix = method === "POST" ? "/acceptance" : "";
     await handler(
-      { method },
+      { method: "GET" },
       res,
-      new URL(`http://localhost/api/sessions/thread-1/collaboration${suffix}`)
+      new URL("http://localhost/api/sessions/thread-1/collaboration")
     );
     return res;
   }
@@ -431,62 +419,31 @@ test("delivery and Human acceptance bind outcome hashes to the current worktree"
     [new Error("Git unavailable"), "acceptance_workspace_unavailable"],
   ]) {
     workspace = snapshot;
-    const response = await acceptanceRequest();
-    assert.equal(response.status, 200);
-    assert.equal(response.body.collaboration.acceptance.verdict, "incomplete");
-    assert.equal(response.body.collaboration.acceptance.reason, reason);
+    const acceptance = registry.submitFinalAcceptance("thread-1", payload);
+    assert.equal(acceptance.accepted, true);
+    assert.equal(acceptance.verdict, "incomplete");
+    assert.equal(acceptance.reason, reason);
     assert.notEqual(registry.getTask("thread-1").phase, STATE.DONE);
+    assert.equal(registry.getTask("thread-1").taskStatus, "active");
     assert.equal(registry.getTask("thread-1").history.at(-1).reason, reason);
   }
   workspace = { headSha: commitSha, porcelain: [] };
-  const completed = registry.decideFinalAcceptance("thread-1", {
-    actorKind: "human",
-    actorId: "local-user",
-    verdict: "accepted",
-    note: "已对照目标核验",
-  });
-  assert.equal(completed.accepted, true);
+  const completed = registry.submitFinalAcceptance("thread-1", payload);
+  assert.equal(completed.verdict, "accepted");
   assert.equal(completed.task.phase, STATE.DONE);
   assert.equal(completed.task.taskStatus, "accepted");
   const decisionEvent = completed.task.history.at(-1);
   assert.equal(decisionEvent.type, "final_acceptance_decided");
-  assert.equal(decisionEvent.actorKind, "human");
-  assert.equal(decisionEvent.actorId, "local-user");
+  assert.equal(decisionEvent.actorKind, "seat");
+  assert.equal(decisionEvent.actorId, "codex");
 
   workspace = { headSha: "b".repeat(40), porcelain: [] };
-  const stale = await acceptanceRequest("GET");
+  const stale = await collaborationRequest();
+  assert.equal(stale.status, 200);
   assert.equal(stale.body.collaboration.acceptance.verdict, "incomplete");
   assert.equal(stale.body.collaboration.acceptance.reason, "acceptance_head_mismatch");
   assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision.verdict, "accepted");
   workspace = { headSha: commitSha, porcelain: [] };
-
-  registry.updateTask("thread-1", {
-    deliveryGate: { ...completed.task.deliveryGate, commitSha: null },
-  });
-  const missingCommitDecision = registry.decideFinalAcceptance("thread-1", {
-    actorKind: "human",
-    actorId: "local-user",
-    verdict: "accepted",
-  });
-  assert.equal(missingCommitDecision.verdict, "incomplete");
-  assert.equal(missingCommitDecision.reason, "delivery_commit_missing");
-  assert.equal(missingCommitDecision.task.phase, STATE.DELIVER);
-
-  const current = registry.getTask("thread-1");
-  registry.updateTask("thread-1", {
-    artifacts: {
-      ...current.artifacts,
-      delivery: { ...current.artifacts.delivery, ciStatus: "failure" },
-    },
-    deliveryGate: { ...current.deliveryGate, commitSha, ciStatus: "failure" },
-  });
-  const failedCiDecision = registry.decideFinalAcceptance("thread-1", {
-    actorKind: "human",
-    actorId: "local-user",
-    verdict: "accepted",
-  });
-  assert.equal(failedCiDecision.verdict, "incomplete");
-  assert.equal(failedCiDecision.reason, "ci_not_successful");
 
   registry.captureUserGoal("thread-1", { text: "Rewritten goal", force: true });
   assert.equal(registry.getTask("thread-1").artifacts.acceptanceDecision, undefined);

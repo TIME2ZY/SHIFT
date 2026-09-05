@@ -409,11 +409,6 @@ open_questions:
   assert.deepEqual(summary.prohibited, ["Do not add a second queue"]);
   assert.equal(summary.targetSeat.seatId, "seat-gemini");
   assert.equal(JSON.stringify(summary).includes("raw"), false);
-
-  const edited = handoff.applyHandoffPreviewEdits(packet, {
-    constraints: ["Keep SQLite and Git authoritative"],
-  });
-  assert.deepEqual(edited.constraints, ["Keep SQLite and Git authoritative"]);
 });
 
 test("selectAppendix prefers review anchors over pure tail when they would be cut", () => {

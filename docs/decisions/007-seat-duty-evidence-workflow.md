@@ -19,7 +19,7 @@ related:
 
 **Accepted，core model implemented**
 
-本 ADR 的 Seat、Duty、按职责 Skill、任务卡、Human 验收与证据绑定合同已进入在线路径。
+本 ADR 的 Seat、Duty、按职责 Skill、任务卡、accept Duty 完成与证据绑定合同已进入在线路径。
 Provider availability 仍作为派生运行信息逐步收口；当前代码锚点与兼容边界由
 `docs/architecture-map.md` 描述。
 
@@ -49,7 +49,7 @@ Seat             某 Thread 已启用的执行席位
 Duty             某次 Invocation 承担的职责
 DutyBinding      Invocation 与 Seat、Duty、Skill、路由原因的不可变绑定
 Policy           依据 Duty、证据和实际执行能力判定的门禁
-Human            批准、验收、取消和升级的正式 actor
+Human            控制台操作者：提出目标、选择席位、停止运行；不是审批 actor
 ```
 
 ProviderProfile 不保存默认岗位。Seat 不获得终身职责。任何已启用且满足运行能力和 Duty
@@ -91,7 +91,7 @@ explicit_mention | handoff_to | sticky | affinity | solo_fallback
    avoid 对 enabled Seats 排序，并记录 `affinity`。
 3. 没有 mention、没有 handoff 时保持当前 Seat，并记录 `sticky`；Duty 变化本身不得触发换席。
 4. review 等 Duty 只有原执行 Seat 合格时允许自审，并记录 `solo_fallback`。
-5. 产品取舍、批准、去留或证据无法裁定时进入 Human escalation，不继续轮询 Provider。
+5. 证据无法裁定时显式失败或保持 `active` 并列出 blocker，不插入 Human 审批，也不继续轮询 Provider。
 
 禁止在全量 catalog 上轮询、禁止模型自行指定未启用 Seat、禁止把 prefer 写成排他的 Agent ID
 allowlist。现有 mention 代码块过滤、自 mention 过滤、fan-out、深度限制和 handoff 幂等继续保留。
@@ -124,7 +124,9 @@ enforced | advisory | unavailable
 - `unavailable`：该 Provider 无法安全执行所需 Duty，路由必须拒绝。
 
 方案批准绑定规范化 plan hash；目标、方案、diff 或 commit 变化时，依赖旧 hash 的下游证据
-必须失效。Human 批准与验收使用同一协作事件入口持久化，不藏在某个 Provider 的隐式权限中。
+必须失效。方案批准由 `discuss` / `accept` Duty 的 implement 交接写入；最终完成由 `accept`
+Duty 的 `final_acceptance` 加上平台证据核验写入。二者都进入同一协作事件入口，不藏在某个
+Provider 的隐式权限中，也不经过 Human 审批闸门。
 
 ### 3.6 Task 状态与可选阶段投影
 
@@ -133,6 +135,9 @@ Thread 的协作任务以目标、阻塞和验收状态为主，不再以五阶�
 ```text
 active | waiting_human | accepted | rejected
 ```
+
+`waiting_human` 不是交接或完成的必经状态。完成态只能由 `accept` Duty 加上证据门禁写入
+`accepted` 或 `rejected`；证据不足时保持 `active` 并列出 blocker。
 
 当前 Duty 来自 active/latest DutyBinding。`discuss → implement → review → deliver → done` 可以
 作为只读策略投影展示，但不得决定哪个 Agent ID 可以工作，也不得产生第二套写入口。
@@ -159,8 +164,10 @@ PR 和 CI 能读取时必须记录真实值；无法读取时为 `unknown`，不
 accepted | rejected | incomplete
 ```
 
-Agent 自述 done 不改变任务状态。自审允许存在，但必须记录 `same_seat`；有另一合格 Seat 并经
-handoff 选择时记录 `other_seat`。
+Agent 自述 done 不改变任务状态。`accept` Duty 提交的结构化 `final_acceptance` 才是完成写入口：
+证据齐且 verdict=accept 时写入 `accepted`；verdict=reject 时写入 `rejected`；证据不足时记录
+`incomplete` 并保持 `active`。自审允许存在，但必须记录 `same_seat`；有另一合格 Seat 并经
+handoff 选择时记录 `other_seat`。不得新增 Human-only 完成写入口。
 
 ### 3.8 Provider 探测
 
@@ -183,18 +190,18 @@ actorKind: human | seat | system
 actorId: <human identity, seatId, or platform identity>
 ```
 
-Human 可以批准方案、修改或确认 handoff、执行最终验收以及处理升级。Human 事件和 Agent 事件
-共用协作任务事件的唯一写入口；消息时间线可以投影这些事件，但不得反向成为审批真相源。
+Human 是控制台操作者：提出最初目标、选择启用席位、停止运行。Human 不是交接、方案批准或
+最终完成的权威 actor。用户目标捕获可以记录 `actorKind=human`；批准、handoff 和完成事件必须
+记录 Seat。消息时间线可以投影这些事件，但不得反向成为审批真相源。
+
+SHIFT 是 Agent 编排平台。主链路不得要求 Human 确认或批准才能启动下一跳或写入完成态。
 
 ## 5. Handoff 边界
 
 核心 Seat/Duty 迁移沿用现有 durable handoff 的 accept、enqueue、bind 和 terminal 生命周期。
-本阶段核心切换不增加交接预览状态。
-
-人工预览是一次请求内的 Human 确认门禁，不定义 durable proposal。预览只包含将要发出的摘要，
-在确认前保存在运行时；取消、超时、请求中止或重启都视为未发生 handoff。用户确认后，改写后的
-包才进入既有 finalize 和 handoff repository，由 SQLite 的 accept/enqueue/bind/terminal 生命周期
-保证只消费一次。若未来要求跨重启继续确认，必须另行设计 durable proposal 状态并更新本 ADR。
+策略通过后，`finalizeA2ARoutes` 立即调用唯一的 `acceptHandoff` 写入口并入队目标 hop，不插入
+确认弹窗、预览 API 或请求内等待。取消确认语义不存在；未通过策略的交接直接 skip/repair。
+handoff 仍只消费一次，并由 SQLite 的 accept/enqueue/bind/terminal 生命周期仲裁。
 
 ## 6. 真相源与读模型
 
@@ -252,5 +259,5 @@ Human 可以批准方案、修改或确认 handoff、执行最终验收以及处
 - 本机一个 Provider 也能完成主链路，多 Provider 提供换席 review 和工具选择。
 - Provider 能否执行 Duty 由实际运行能力和策略共同决定，不再由品牌名决定。
 - 五阶段仍可用于解释复杂协作，但不是所有任务的强制承诺。
-- DutyBinding 和 Human actor 增加持久化契约，但减少固定工号、隐式批准和重复路由语义。
-- handoff preview 作为请求内确认门禁，不增加 durable 暂停状态；跨重启恢复预览不在本阶段范围。
+- DutyBinding 增加持久化契约，但减少固定工号、隐式批准、Human 审批闸门和重复路由语义。
+- handoff 策略通过后直接 durable accept/enqueue；不保留请求内确认门禁。

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import type { AgentSummary } from "../agents/types";
 import { CollaborationStatus } from "../collaboration/CollaborationStatus";
-import { useAcceptanceDecision, useCollaborationQuery } from "../collaboration/queries";
+import { useCollaborationQuery } from "../collaboration/queries";
 import { AgentUsageCard, type AgentActivityStatus } from "../usage/AgentUsageCard";
 import { useUsageQuery } from "../usage/queries";
 
@@ -44,7 +44,6 @@ export function RightPanel({
   const closeRef = useRef<HTMLButtonElement>(null);
   const usage = useUsageQuery(sessionId, !compactLayout || open);
   const collaboration = useCollaborationQuery(sessionId, !compactLayout || open);
-  const acceptanceDecision = useAcceptanceDecision(sessionId);
   const seats = collaboration.data?.seats;
   const enabledAgents = seats
     ? seats.flatMap((seat) => {
@@ -100,9 +99,6 @@ export function RightPanel({
             snapshot={collaboration.data?.collaboration ?? null}
             loading={collaboration.isPending}
             error={collaboration.error instanceof Error ? collaboration.error : null}
-            onAcceptanceDecision={(verdict, note) =>
-              acceptanceDecision.mutateAsync({ verdict, note })
-            }
           />
         ) : null}
         {usage.error ? (

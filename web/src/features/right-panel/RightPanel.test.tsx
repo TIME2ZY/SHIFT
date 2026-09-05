@@ -181,7 +181,7 @@ describe("RightPanel", () => {
                   reason: "implementation_plan_not_approved",
                   decidedAt: null,
                 },
-                nextAction: "请批准实现方案后继续。",
+                nextAction: "请由讨论或验收席位批准方案后继续。",
               },
               seats: [{ seatId: "seat-codex", providerId: "codex", label: null }],
             }),
@@ -196,7 +196,7 @@ describe("RightPanel", () => {
     );
 
     renderPanel();
-    expect(await screen.findByText("等待批准实现方案")).toBeInTheDocument();
+    expect(await screen.findByText("等待讨论席位批准方案")).toBeInTheDocument();
     expect(screen.getByText("实现 · implementation-plan")).toBeInTheDocument();
   });
 });

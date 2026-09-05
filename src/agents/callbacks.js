@@ -116,7 +116,6 @@ function summarizeHandoffOutcome(finalized) {
   const enqueued = finalized?.enqueued || [];
   const repairs = finalized?.repairs || [];
   const skipped = finalized?.skipped || [];
-  const previews = finalized?.previews || [];
   const queuedAgents = enqueued.map((entry) => entry.to);
   const repairAgents = repairs.map((entry) => entry.to).filter(Boolean);
   const skippedAgents = skipped.map((entry) => entry.to).filter(Boolean);
@@ -127,7 +126,6 @@ function summarizeHandoffOutcome(finalized) {
   if (accepted) status = "accepted";
   else if (enqueued.length > 0) status = "partial";
   else if (repairRequired) status = "repair_required";
-  else if (previews.length > 0) status = "pending_confirmation";
   else if (detected) status = "skipped";
 
   return {
@@ -139,7 +137,6 @@ function summarizeHandoffOutcome(finalized) {
     queuedAgents,
     repairAgents,
     skippedAgents,
-    pendingPreviewIds: previews.map((preview) => preview.previewId),
     policy: finalized?.mode || "",
   };
 }
@@ -277,7 +274,6 @@ function postMessage(
     collabTaskRegistry: taskRegistry,
     threadSeats: thread.threadSeats || null,
     agents: thread.agents || AGENTS,
-    handoffConfirmations: thread.handoffConfirmations || null,
     fromSeatId: thread.currentDutyBinding?.seatId || null,
     fromDuty: thread.currentDutyBinding?.duty || null,
   });

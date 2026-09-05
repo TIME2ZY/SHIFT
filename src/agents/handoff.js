@@ -526,32 +526,6 @@ function summarizeHandoffForUser(input = {}) {
   };
 }
 
-function applyHandoffPreviewEdits(handoff, edits = {}) {
-  const next = handoff && typeof handoff === "object" ? { ...handoff } : {};
-  assignText(next, "goal", edits.goal);
-  assignText(next, "what", edits.completed);
-  assignText(next, "next_action", edits.nextAction);
-  assignList(next, "constraints", edits.constraints);
-  assignList(next, "files", edits.files);
-  assignList(next, "open_questions", edits.openQuestions);
-  assignList(next, "prohibited", edits.prohibited);
-  return next;
-}
-
-function assignText(target, key, value) {
-  if (value === undefined) return;
-  const text = cleanText(value);
-  if (text) target[key] = text;
-  else delete target[key];
-}
-
-function assignList(target, key, value) {
-  if (value === undefined) return;
-  const items = cleanList(value);
-  if (items.length > 0) target[key] = items;
-  else delete target[key];
-}
-
 function cleanText(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -596,7 +570,6 @@ module.exports = {
   selectAppendix,
   summarizeHandoff,
   summarizeHandoffForUser,
-  applyHandoffPreviewEdits,
   normalizeTo,
   toMatchesRoute,
 };

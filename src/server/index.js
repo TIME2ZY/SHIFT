@@ -22,7 +22,7 @@ const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
-const { createHandoffConfirmationGate } = require("../agents/handoff-confirmation");
+
 const { initializeCatalogSeats } = require("../agents/duty-routing");
 const skills = require("./skills");
 const { createSafeRequestListener, sendJson, sendSse, readJsonBody } = require("./http-transport");
@@ -137,9 +137,6 @@ function createServer(options = {}) {
     repository: storageContext.storage?.collaborationTasks || null,
     readWorkspace: (threadId) => worktreeManager.getStatus(threadId),
   });
-  const handoffConfirmations = Object.hasOwn(options, "handoffConfirmations")
-    ? options.handoffConfirmations
-    : createHandoffConfirmationGate({ timeoutMs: options.handoffConfirmationTimeoutMs });
   const activeInvocations = new Map();
   const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
   const { buildChatArgs } = createInvokeArgsBuilder({
@@ -237,7 +234,6 @@ function createServer(options = {}) {
     collabTaskRegistry,
     threadSeats: storageContext.storage.threadSeats,
     invocationDutyBindings: storageContext.storage.invocationDutyBindings,
-    handoffConfirmations,
   });
   const handleMemoryRoutes = createMemoryRoutes({
     memoryService,
@@ -302,7 +298,6 @@ function createServer(options = {}) {
     memoryCapture,
     collabTaskRegistry,
     deliveryVerifier,
-    handoffConfirmations,
     logger,
   });
 

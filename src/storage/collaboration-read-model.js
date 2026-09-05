@@ -99,7 +99,7 @@ function projectAcceptance(task, readiness, workspace, reviewMode) {
         ? null
         : nullableString(decisionMatches ? decision.reason : null) ||
           nullableString(gate.reason) ||
-          "human_acceptance_required",
+          "final_acceptance_missing",
     decidedAt: decisionMatches ? nullableString(decision.decidedAt) : null,
   };
 }
@@ -162,17 +162,11 @@ function projectEvidence(deliveryGate, workspace) {
 function deriveBlocker(task, implementation, acceptance) {
   const phase = String(task.phase || task.state || "");
   if (acceptance?.verdict === "accepted") return null;
+  if (acceptance?.verdict === "rejected") {
+    return { type: "missing_evidence", reason: "final_acceptance_rejected" };
+  }
   if (!acceptance?.ready && acceptance?.reason?.startsWith("acceptance_")) {
     return { type: "missing_evidence", reason: acceptance.reason };
-  }
-  if (phase === "done") {
-    return { type: "waiting_human", reason: "human_acceptance_required" };
-  }
-  if (task.taskStatus === "rejected") {
-    return { type: "waiting_human", reason: "final_acceptance_rejected" };
-  }
-  if (task.taskStatus === "waiting_human") {
-    return { type: "waiting_human", reason: "human_input_required" };
   }
   if (implementation.status && implementation.allowed === false && implementation.reason) {
     const reason = implementation.reason;
@@ -184,7 +178,7 @@ function deriveBlocker(task, implementation, acceptance) {
   if (phase === "review" && !task.codeReviewGate) {
     return { type: "missing_evidence", reason: "code_review_pending" };
   }
-  if (phase === "deliver") {
+  if (phase === "deliver" || phase === "done") {
     if (!task.deliveryGate) {
       return { type: "missing_evidence", reason: "delivery_evidence_missing" };
     }
@@ -194,7 +188,10 @@ function deriveBlocker(task, implementation, acceptance) {
     if (!task.finalGate || task.finalGate.verdict !== "accept") {
       return { type: "missing_evidence", reason: "final_acceptance_missing" };
     }
-    return { type: "waiting_human", reason: "human_acceptance_required" };
+    return {
+      type: "missing_evidence",
+      reason: acceptance?.reason || "final_acceptance_not_bound_to_outcome",
+    };
   }
   return null;
 }
@@ -216,16 +213,15 @@ function deriveReviewMode(bindings, reviewGate) {
 
 function deriveNextAction(duty, task, blocker) {
   const blockerActions = {
-    implementation_plan_not_approved: "请批准实现方案后继续。",
+    implementation_plan_not_approved: "请由讨论或验收席位批准方案后继续。",
     implementation_plan_missing: "请补充可执行的实现方案。",
     implementation_plan_artifact_missing: "请补充方案正文。",
     code_review_pending: "请完成代码审查并记录结论。",
     delivery_evidence_missing: "请补充 commit、PR 和 CI 交付证据。",
     ci_not_successful: "请修复 CI 后重新核验交付。",
-    final_acceptance_missing: "请核对证据并完成最终验收。",
-    human_acceptance_required: "请对照目标确认最终验收。",
+    final_acceptance_missing: "请由验收席位核对证据并完成验收。",
     final_acceptance_rejected: "验收已拒绝，请决定是否继续修复。",
-    human_input_required: "等待用户提供信息或作出决定。",
+    final_acceptance_not_bound_to_outcome: "请重新绑定目标、方案和提交后验收。",
     acceptance_workspace_unavailable: "请恢复工作区访问后重新核验交付。",
     acceptance_worktree_dirty: "工作区存在未提交改动，请重新核验交付证据。",
     acceptance_head_mismatch: "当前提交已变化，请重新审查并核验交付。",
@@ -234,7 +230,7 @@ function deriveNextAction(duty, task, blocker) {
   if (task.phase === "done" || task.taskStatus === "accepted") return "任务已验收。";
   const dutyActions = {
     discuss: "收敛目标并确认解决方向。",
-    plan: "形成可执行方案并提交批准。",
+    plan: "形成可执行方案并提交讨论席位批准。",
     implement: "完成实现并留下验证证据。",
     fix: "修复审查发现并重新验证。",
     review: "审查实现与验证证据。",

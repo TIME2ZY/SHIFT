@@ -172,7 +172,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
                   reason: "implementation_plan_not_approved",
                   decidedAt: null,
                 },
-                nextAction: "请批准实现方案后继续。",
+                nextAction: "请由讨论或验收席位批准方案后继续。",
               }
             : null,
           seats: [
@@ -520,7 +520,7 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
-  await expect(page.getByRole("region", { name: "任务卡" })).toContainText("等待批准实现方案");
+  await expect(page.getByRole("region", { name: "任务卡" })).toContainText("等待讨论席位批准方案");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();

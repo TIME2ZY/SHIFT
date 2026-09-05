@@ -101,9 +101,6 @@ async function withServer(options, fn) {
     ? options.initialSessionIds
     : [];
   const serverOptions = { ...options };
-  if (!Object.hasOwn(serverOptions, "handoffConfirmations")) {
-    serverOptions.handoffConfirmations = null;
-  }
   delete serverOptions.initialSessionIds;
   const patchStorage = serverOptions.patchStorage;
   delete serverOptions.patchStorage;
@@ -1686,43 +1683,21 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       assert.match(runs[5].prompt, /最初用户目标/);
       assert.match(text, /event: delivery-evidence-verified/);
       assert.match(text, /event: final-acceptance-submitted/);
-      assert.doesNotMatch(text, /event: collaboration-done/);
 
-      const pending = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+      const accepted = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
         (result) => result.json()
       );
-      assert.equal(pending.collaboration.status, "waiting_human");
-      assert.equal(pending.collaboration.acceptance.ready, true);
-      assert.equal(pending.collaboration.acceptance.verdict, "incomplete");
-
-      workspaceHead = "b".repeat(40);
-      const staleDecision = await fetch(
-        `${baseUrl}/api/sessions/${session.id}/collaboration/acceptance`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            verdict: "accepted",
-            workspace: { headSha: commitSha, porcelain: [] },
-          }),
-        }
-      ).then((result) => result.json());
-      assert.equal(staleDecision.collaboration.acceptance.verdict, "incomplete");
-      assert.equal(staleDecision.collaboration.acceptance.reason, "acceptance_head_mismatch");
-      workspaceHead = commitSha;
-      const decision = await fetch(
-        `${baseUrl}/api/sessions/${session.id}/collaboration/acceptance`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ verdict: "accepted", note: "已对照目标核验" }),
-        }
-      );
-      assert.equal(decision.status, 200);
-      const accepted = await decision.json();
       assert.equal(accepted.collaboration.status, "accepted");
       assert.equal(accepted.collaboration.phase, "done");
       assert.equal(accepted.collaboration.acceptance.verdict, "accepted");
+
+      workspaceHead = "b".repeat(40);
+      const stale = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+        (result) => result.json()
+      );
+      assert.equal(stale.collaboration.acceptance.verdict, "incomplete");
+      assert.equal(stale.collaboration.acceptance.reason, "acceptance_head_mismatch");
+      workspaceHead = commitSha;
       workspaceDirty = true;
       const dirty = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
         (result) => result.json()

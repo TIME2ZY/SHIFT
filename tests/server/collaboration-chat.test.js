@@ -21,29 +21,13 @@ function apiFetch(url, init = {}) {
   return fetch(url, { ...init, headers });
 }
 
-async function chatAndConfirm(baseUrl, sessionId, body, edits, beforeConfirm) {
-  const streamPromise = apiFetch(`${baseUrl}/api/chat`, {
+async function chat(baseUrl, body) {
+  const response = await apiFetch(`${baseUrl}/api/chat`, {
     method: "POST",
     body: JSON.stringify(body),
-  }).then((response) => response.text());
-
-  let previews = [];
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    previews = await apiFetch(`${baseUrl}/api/sessions/${sessionId}/handoff-previews`)
-      .then((response) => response.json())
-      .then((payload) => payload.previews);
-    if (previews.length > 0) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.equal(previews.length, 1);
-  await beforeConfirm?.(previews[0]);
-
-  const confirmed = await apiFetch(
-    `${baseUrl}/api/sessions/${sessionId}/handoff-previews/${previews[0].previewId}/confirm`,
-    { method: "POST", body: JSON.stringify(edits || {}) }
-  );
-  assert.equal(confirmed.status, 200);
-  return streamPromise;
+  });
+  assert.equal(response.status, 200);
+  return response.text();
 }
 
 function spawnText(text) {
@@ -193,7 +177,7 @@ test("each Provider persists plan Duty output through the chat API", async () =>
   }
 });
 
-test("confirmed chat hops honor the depth limit and finish every accepted target", async () => {
+test("chat hops honor the depth limit and finish every accepted target", async () => {
   const previousDepth = process.env.MAX_A2A_DEPTH;
   process.env.MAX_A2A_DEPTH = "2";
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-depth-"));
@@ -239,32 +223,7 @@ test("confirmed chat hops honor the depth limit and finish every accepted target
         prompt: "Compare the options",
       }),
     });
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let stream = "";
-    let confirmations = 0;
-    for await (const chunk of response.body) {
-      const text = decoder.decode(chunk, { stream: true });
-      stream += text;
-      buffer += text;
-      let boundary;
-      while ((boundary = buffer.indexOf("\n\n")) >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        if (!frame.startsWith("event: handoff-preview\n")) continue;
-        const preview = JSON.parse(frame.slice(frame.indexOf("data: ") + 6));
-        const confirmed = await apiFetch(
-          `${baseUrl}/api/sessions/${session.id}/handoff-previews/${preview.previewId}/confirm`,
-          {
-            method: "POST",
-            body: "{}",
-          }
-        );
-        assert.equal(confirmed.status, 200);
-        confirmations += 1;
-      }
-    }
-    assert.equal(confirmations, 2);
+    const stream = await response.text();
     assert.deepEqual(spawned, ["codex", "gemini", "codex"]);
     assert.match(stream, /"reason":"max_depth"/);
     const { traces } = await apiFetch(`${baseUrl}/api/sessions/${session.id}/traces`).then((r) =>
@@ -332,26 +291,18 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
     );
     assert.equal(before.collaboration, null);
 
-    const planStream = await chatAndConfirm(
-      baseUrl,
-      session.id,
-      {
-        sessionId: session.id,
-        agent: "codex",
-        prompt: USER_PLAN_PROMPT,
-        useWorktree: true,
-        duty: "discuss",
-      },
-      { constraints: ["Keep the public utcOffset API unchanged"] },
-      () => assert.deepEqual(spawned, ["codex"])
-    );
-    assert.match(planStream, /event: handoff-preview/);
-    assert.match(planStream, /event: handoff-confirmed/);
+    const planStream = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: USER_PLAN_PROMPT,
+      useWorktree: true,
+      duty: "discuss",
+    });
     assert.match(planStream, /event: handoff-captured/);
     assert.match(planStream, /event: a2a-route/);
     assert.match(planStream, /event: implementation-plan-submitted/);
     assert.deepEqual(spawned, ["codex", "grok"]);
-    assert.match(prompts[1], /Keep the public utcOffset API unchanged/);
+    assert.match(prompts[1], /Keep the public utcOffset API/);
 
     const pending = await apiFetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
       (response) => response.json()
@@ -380,21 +331,13 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
     assert.equal(accepted[0].targetAgent, "grok");
     assert.ok(accepted[0].targetInvocationId);
 
-    const approveStream = await chatAndConfirm(
-      baseUrl,
-      session.id,
-      {
-        sessionId: session.id,
-        agent: "codex",
-        prompt: USER_APPROVE_PROMPT,
-        useWorktree: true,
-        duty: "discuss",
-      },
-      {},
-      () => assert.deepEqual(spawned, ["codex", "grok", "codex"])
-    );
-    assert.match(approveStream, /event: handoff-preview/);
-    assert.match(approveStream, /event: handoff-confirmed/);
+    const approveStream = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: USER_APPROVE_PROMPT,
+      useWorktree: true,
+      duty: "discuss",
+    });
     assert.match(approveStream, /event: handoff-captured/);
     assert.deepEqual(spawned, ["codex", "grok", "codex", "grok"]);
 

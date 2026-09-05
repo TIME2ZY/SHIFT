@@ -62,9 +62,8 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-live" },
-      invocationOrder: ["i-live"],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: ["i-live"],
+          notices: [],
         }}
         isLoading={false}
         error={null}
@@ -280,9 +279,8 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i1" },
-      invocationOrder: ["i1"],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: ["i1"],
+          notices: [],
         }}
         isLoading={false}
         error={null}
@@ -429,9 +427,9 @@ describe("MessageList", () => {
           doneReceived: false,
           liveMessages: {},
           latestInvocationByAgent: {},
-      invocationOrder: [],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: [],
+          notices: [],
+
           optimisticUser: {
             agentId: "codex",
             content: "不要重复我",
@@ -484,9 +482,9 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { gemini: "i2" },
-      invocationOrder: ["i2"],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: ["i2"],
+          notices: [],
+
           optimisticUser: {
             agentId: "codex",
             content: "检查这个问题",
@@ -585,9 +583,8 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-handoff" },
-      invocationOrder: ["i-handoff"],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: ["i-handoff"],
+          notices: [],
         }}
         isLoading={false}
         error={null}
@@ -643,9 +640,8 @@ describe("MessageList", () => {
             },
           },
           latestInvocationByAgent: { codex: "i-mid" },
-      invocationOrder: ["i-mid"],
-      notices: [],
-      handoffPreviews: [],
+          invocationOrder: ["i-mid"],
+          notices: [],
         }}
         isLoading={false}
         error={null}

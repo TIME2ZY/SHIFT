@@ -36,7 +36,6 @@ Web App (web/src/app/App.tsx)
   ├─ projects feature  → /api/projects（选择、打开、归档、恢复）
   ├─ sessions feature  → /api/projects/:projectKey/sessions + Project-bound create
   ├─ collaboration feature → GET /api/sessions/:id/collaboration（任务/验收卡投影）
-  │                         + POST /api/sessions/:id/collaboration/acceptance（Human 最终决定）
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
@@ -124,8 +123,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 解析 fence             | `agents/handoff.js`                                      | finalize 内 `selectCanonicalHandoffMatch`                        | 无                                                        |
 | Seat/Duty 解析         | `duty-routing.js`                                        | 初始 chat 与 finalize；仅从 Thread enabled Seats 选目标          | 读取 `thread_seats`；DutyBinding 随队列因果传递           |
 | 策略                   | `handoff-policy.js`                                      | finalize 内 `decidePolicy`；禁用/缺失 Seat 在所有模式下拒绝      | 无                                                        |
-| 用户确认预览           | `handoff-confirmation.js`                                | finalize 生成可编辑摘要；chat 请求等待确认、取消或超时           | 请求内存，未确认不是业务事实                              |
-| 幂等 accept            | `durableRecorder.acceptHandoff`                          | finalize 内                                                      | SQLite `handoffs`，唯一 accepted flight                   |
+| 幂等 accept            | `durableRecorder.acceptHandoff`                          | finalize 内；策略通过后立即写入                                  | SQLite `handoffs`，唯一 accepted flight                   |
 | 入队下一 Seat          | `worklist.push` → `markHandoffEnqueued`                  | finalize 内；队列项因果携带不可变 DutyBinding；确认失败撤销 push | 请求内存 worklist + SQLite `enqueued_at`                  |
 | 捕获 handoff 协作事件  | `memoryCapture.captureHandoff`                           | finalize 内                                                      | event-store `handoff-captured`（**不是** product memory） |
 | 触发 finalize          | `finalizeA2ARoutes`                                      | **双触发：** chat 回合结束 + callback `postMessage`              | —                                                         |
@@ -137,12 +135,11 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 - Receive Bundle 把 Structured Handoff 当后继续工包（权威）；原文附录非权威且预算收窄。
 - `implement/review/fix/deliver/plan` 缺 `files`/`evidence` 记入 `missingRecommended` 并打续工不足 banner，不因此把 `ok` 打成 degraded，也不新开顶层字段。
-- 解析→策略→预览确认→accept→enqueue 仍统一在 `finalizeA2ARoutes`；确认后继续调用唯一的
-  `acceptHandoff` 写入口，`enqueued_at` 只在 worklist 实际追加后确认。
-- 待确认预览仅存在于服务进程内存；取消、超时、源请求停止或服务重启都会释放它，不创建
-  `handoffs` 行或目标 invocation。服务重启丢失预览不会伪造已交接事实。
-- 正文与 callback 的预览共享请求内 `a2aState.a2aCount`；finalize 在确认入队时再次检查上限，
-  持久化 enqueue 成功后递增。调度器不再回写 finalize 的计数快照，也不按已接受次数跳过
+- 解析→策略→accept→enqueue 仍统一在 `finalizeA2ARoutes`；策略通过后立即调用唯一的
+  `acceptHandoff` 写入口，`enqueued_at` 只在 worklist 实际追加后确认。不插入确认弹窗、
+  预览 API 或请求内等待。
+- 正文与 callback 共享请求内 `a2aState.a2aCount`；finalize 在入队时检查上限，持久化
+  enqueue 成功后递增。调度器不再回写 finalize 的计数快照，也不按已接受次数跳过
   worklist 中尚未运行的目标；达到上限只拒绝新的交接。
 - A2A 固定 Agent ID/岗位 allowlist 已退出路由策略；明确 mention/handoff 仅能命中当前 Thread 的
   enabled Seat，目标未启用时不降级、不静默改派。Duty 由 handoff intent 确定，单独改变 Duty 不换 Seat。
@@ -301,8 +298,7 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 | 代码 review           | `processWorkflowEvidenceOutput`                              | 当前 `review` / `deliver` Duty                   | changes requested 直接形成事件；approve 继续交付核验                  |
 | commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                          | 当前交付 Duty 后由平台只读核对                   | 返回真实 Git/GitHub evidence                                          |
 | 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery`        | collab task registry                             | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
-| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 绑定 goal、solution、plan、review 与 commit hash，不写完成态          |
-| Human 最终决定        | `decideFinalAcceptance` ← session-routes                     | 本地用户                                         | 唯一写入 accepted/rejected/incomplete 与 `final_acceptance_decided`   |
+| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 证据齐则写入 accepted；reject 写入 rejected；不足则 incomplete        |
 | 任务/验收卡只读       | `projectCollaboration` ← session-routes                      | UI / live harness                                | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
 
 `GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
@@ -310,15 +306,14 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 投影目标、当前 Seat/Duty/Skill、枚举 blocker、审查模式、脏文件数、HEAD、PR、CI 与下一动作。
 接口不返回 plan/review 全文，也不写库；权威仍是 SQLite 协作事实与 Git 工作区。
 
-Agent 的结构化 `final_acceptance` 只是逐项核验证据，不能把任务推进到 `done`。用户通过
-`POST /api/sessions/:sessionId/collaboration/acceptance` 作出最终决定；服务端固定记录可信
-Human actor。`workflow-readiness` 承载从 registry 移出的方案、交付和完成证据检查，registry
-不再导出旧的独立 readiness helper。请求 `accepted` 时检查 goal、solution、plan、review、
-commit、PR 与 CI 绑定，并通过 composition root 注入的 `worktreeManager.getStatus` 读取当前
-Thread 的工作区；HEAD 不匹配、工作区不干净或读取失败时持久化为 `incomplete`。POST 响应复用
-本次写入前检查的快照，不在写入后另读工作区充当验收依据。GET readiness 使用同一检查。
-SQLite 上游证据变化会清除旧决定；Git 外部变化不会改写历史决定，但当前卡片不再投影为已验收。
-旧数据只有 phase=`done` 而没有匹配的 Human 决定时，也不会投影为已验收。
+`accept` Duty 的结构化 `final_acceptance` 是完成态的唯一写入口。`workflow-readiness` 承载从
+registry 移出的方案、交付和完成证据检查，registry 不再导出旧的独立 readiness helper。写入
+`accepted` 前检查 goal、solution、plan、review、commit、PR 与 CI 绑定，并通过 composition
+root 注入的 `worktreeManager.getStatus` 读取当前 Thread 的工作区；HEAD 不匹配、工作区不干净
+或读取失败时持久化为 `incomplete` 并保持 `active`。GET readiness 使用同一检查。SQLite 上游
+证据变化会清除旧决定；Git 外部变化不会改写历史决定，但当前卡片不再投影为已验收。旧数据只有
+phase=`done` 而没有匹配的 Seat 完成决定时，也不会投影为已验收。不得再提供 Human-only 完成
+写入口或交接确认 API。
 
 承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、
@@ -500,8 +495,7 @@ Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用�
 | trace start / finish         | `durableRecorder.startTrace` / `completeTrace`           | 仅 chat request 生命周期                          |
 | invocation start + Duty bind | `durableRecorder.startInvocation`                        | 仅 chat 调度器；同事务写 invocation/binding/event |
 | invocation finish            | `durableRecorder.completeInvocation`                     | chat 调度器；孤儿用 force/reconcile               |
-| handoff preview              | `createHandoffConfirmationGate`                          | finalize；仅运行时待决状态                        |
-| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | 用户确认后；测试可显式禁用 gate                   |
+| handoff accept/enqueue       | `finalizeA2ARoutes` → `durableRecorder.acceptHandoff`    | 策略通过后立即写入                                |
 | hop bind/complete            | `durableRecorder.startInvocation` / `completeInvocation` | chat 调度器                                       |
 | message user/system/callback | `appendToSession` → `appendMessage`                      | routes / callbacks                                |
 | message assistant-final      | `completeInvocation({ message })` → `appendMessage`      | chat 成功收尾 only                                |

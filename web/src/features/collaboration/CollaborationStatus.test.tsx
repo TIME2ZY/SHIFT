@@ -1,6 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CollaborationStatus } from "./CollaborationStatus";
 import type { CollaborationSnapshot } from "./types";
 
@@ -31,7 +30,7 @@ function snapshot(overrides: Partial<CollaborationSnapshot> = {}): Collaboration
       reviewVerdict: "unknown",
       verdict: "incomplete",
       ready: false,
-      reason: "human_acceptance_required",
+      reason: "final_acceptance_missing",
       decidedAt: null,
     },
     nextAction: "继续推进当前目标。",
@@ -69,28 +68,26 @@ describe("CollaborationStatus", () => {
             prUrl: null,
             ciStatus: null,
           },
-          nextAction: "请批准实现方案后继续。",
+          nextAction: "请由讨论或验收席位批准方案后继续。",
         })}
       />
     );
     expect(screen.getByText("实现席")).toBeInTheDocument();
     expect(screen.getByText("实现 · implementation-plan")).toBeInTheDocument();
-    expect(screen.getByText("等待批准实现方案")).toBeInTheDocument();
+    expect(screen.getByText("等待讨论席位批准方案")).toBeInTheDocument();
     expect(screen.getByText("Fix utcOffset clone")).toBeInTheDocument();
     expect(screen.getByText("Clone first")).toBeInTheDocument();
     expect(screen.getByText("abcdef1")).toBeInTheDocument();
-    expect(screen.getByText("请批准实现方案后继续。")).toBeInTheDocument();
+    expect(screen.getByText("请由讨论或验收席位批准方案后继续。")).toBeInTheDocument();
   });
 
-  it("shows unknown delivery facts, self-review, and records Human acceptance", async () => {
-    const onDecision = vi.fn(async () => undefined);
+  it("shows unknown delivery facts and self-review on the acceptance card", () => {
     render(
       <CollaborationStatus
         loading={false}
         error={null}
-        onAcceptanceDecision={onDecision}
         snapshot={snapshot({
-          status: "waiting_human",
+          status: "active",
           phase: "deliver",
           reviewMode: "same_seat",
           acceptance: {
@@ -109,13 +106,10 @@ describe("CollaborationStatus", () => {
     expect(card).toHaveTextContent("1234567890ab");
     expect(card).toHaveTextContent("当前席位自审");
     expect(card).toHaveTextContent("unknown");
-    await userEvent.click(screen.getByRole("button", { name: "对照目标验收" }));
-    await userEvent.type(screen.getByRole("textbox", { name: "验收说明（可选）" }), "目标已满足");
-    await userEvent.click(screen.getByRole("button", { name: "确认验收" }));
-    expect(onDecision).toHaveBeenCalledWith("accepted", "目标已满足");
+    expect(screen.queryByRole("button", { name: "对照目标验收" })).not.toBeInTheDocument();
   });
 
-  it("shows a rejected Human verdict explicitly", () => {
+  it("shows a rejected Seat verdict explicitly", () => {
     render(
       <CollaborationStatus
         loading={false}
@@ -125,12 +119,12 @@ describe("CollaborationStatus", () => {
           acceptance: {
             ...snapshot().acceptance,
             verdict: "rejected",
-            reason: "human_rejected",
+            reason: "accept_duty_rejected",
           },
         })}
       />
     );
     expect(screen.getByRole("region", { name: "验收卡" })).toHaveTextContent("已拒绝");
-    expect(screen.getByText("用户已拒绝本次交付。")).toBeInTheDocument();
+    expect(screen.getByText("验收席位已拒绝本次交付。")).toBeInTheDocument();
   });
 });

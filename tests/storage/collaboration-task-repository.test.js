@@ -119,7 +119,7 @@ test("collaboration task repository rejects unknown phases and intents", () => {
   }
 });
 
-test("a done phase does not synthesize accepted without a Human decision", () => {
+test("a done phase does not synthesize accepted without a Seat decision", () => {
   const storage = createStorage({ file: ":memory:" });
   try {
     storage.threads.create({ id: "thread-1", title: "Collaboration" });

@@ -119,6 +119,19 @@ test("repo skills load from skills/*/SKILL.md", () => {
   );
 });
 
+test("workflow skills do not wait for Human confirmation or approval", () => {
+  const byName = Object.fromEntries(
+    loadSkills(DEFAULT_SKILLS_DIR).map((skill) => [skill.name, skill.body])
+  );
+  assert.match(byName["cross-agent-handoff"], /策略通过后，平台立即创建 durable handoff/);
+  assert.doesNotMatch(byName["cross-agent-handoff"], /用户确认后才会创建/);
+  assert.doesNotMatch(byName["cross-agent-handoff"], /只有 Human 能决定/);
+  assert.match(byName["implementation-plan"], /intent: implement/);
+  assert.doesNotMatch(byName["implementation-plan"], /等待平台或 Human 批准/);
+  assert.doesNotMatch(byName["uncertainty-ask"], /优先问用户/);
+  assert.match(byName["uncertainty-ask"], /不要为交接、方案批准或完成去问用户/);
+});
+
 test("createSkillsService loads dir, indexes skills, and applies readonly rule", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skills-"));
   try {

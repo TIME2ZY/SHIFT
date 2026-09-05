@@ -13,7 +13,6 @@ function emptyRun(sessionId: string, now = Date.now()): SessionRun {
     latestInvocationByAgent: {},
     invocationOrder: [],
     notices: [],
-    handoffPreviews: [],
   };
 }
 
@@ -353,26 +352,6 @@ export function sessionRunReducer(
         notices: [...run.notices, action.message],
       }));
 
-    case "handoff/previewed":
-      return updateRun(state, action.sessionId, (run) => ({
-        ...run,
-        updatedAt: now,
-        handoffPreviews: run.handoffPreviews.some(
-          (preview) => preview.previewId === action.preview.previewId
-        )
-          ? run.handoffPreviews
-          : [...run.handoffPreviews, action.preview],
-      }));
-
-    case "handoff/resolved":
-      return updateRun(state, action.sessionId, (run) => ({
-        ...run,
-        updatedAt: now,
-        handoffPreviews: run.handoffPreviews.filter(
-          (preview) => preview.previewId !== action.previewId
-        ),
-      }));
-
     case "run/done":
       // Server SSE `done` is authoritative: seal any still-open live agent bubbles.
       return updateRun(state, action.sessionId, (run) => {
@@ -397,7 +376,6 @@ export function sessionRunReducer(
         ...run,
         status: "error",
         error: action.error,
-        handoffPreviews: [],
         liveMessages: finishOpenLiveMessages(run.liveMessages, "error"),
         updatedAt: now,
       }));
@@ -406,7 +384,6 @@ export function sessionRunReducer(
       return updateRun(state, action.sessionId, (run) => ({
         ...run,
         status: "aborted",
-        handoffPreviews: [],
         liveMessages: finishOpenLiveMessages(run.liveMessages, "aborted"),
         updatedAt: now,
       }));

@@ -15,6 +15,7 @@ test("routing contract is provider-neutral and delegates behavior to the Duty Sk
   assert.match(text, /无行首 @、无结构化 handoff\.to 时继续由当前 Seat/);
   assert.match(text, /当前 Thread 已启用的 Seat/);
   assert.match(text, /具体操作步骤以当前 Duty Skill 为准/);
+  assert.match(text, /不要为了交接、批准或完成去请求人审批/);
   assert.doesNotMatch(text, /reviewer|implementer|唯一.*交付|固定岗位/i);
 });
 

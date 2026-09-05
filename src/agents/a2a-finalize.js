@@ -68,7 +68,6 @@ function finalizeA2ARoutes(input = {}) {
   const logger = input.logger || console;
   const taskRegistry = input.collabTaskRegistry || collabTaskRegistry;
   const threadSeats = input.threadSeats || null;
-  const handoffConfirmations = input.handoffConfirmations || null;
   const agents = input.agents || {};
   const enabledSeats = threadSeats?.listEnabledForThread?.(sessionId) || [];
   const aborted =
@@ -89,7 +88,6 @@ function finalizeA2ARoutes(input = {}) {
   const skipped = [];
   const repairs = [];
   const hopRecords = [];
-  const previews = [];
   let capturedCount = 0;
   let duplicateRoutes = 0;
 
@@ -452,82 +450,6 @@ function finalizeA2ARoutes(input = {}) {
       return entry;
     };
 
-    if (handoffConfirmations?.request) {
-      const preview = handoffConfirmations.request({
-        threadId: sessionId,
-        sourceInvocationId: invocationId,
-        summary: agentHandoff.summarizeHandoffForUser({
-          handoff,
-          quality,
-          targetSeat,
-          duty,
-          skillName: dutyBinding.skillName,
-        }),
-        onConfirm(edits) {
-          const confirmedHandoff = agentHandoff.applyHandoffPreviewEdits(handoff, edits);
-          const confirmedQuality = agentHandoff.evaluateHandoff(confirmedHandoff, {
-            routedTo: targetAgent,
-            toAgentId: targetAgent,
-            fromAgentId: fromAgent,
-            useWorktree,
-            riskFlags: quality.riskFlags,
-          });
-          const confirmedDecision = decidePolicy({ ...policyInput, quality: confirmedQuality });
-          if (!canEnqueue(confirmedDecision)) {
-            throw new Error("Edited handoff no longer satisfies the routing policy.");
-          }
-          const confirmedHash = hashHandoffContent(confirmedHandoff, targetAgent);
-          handoffByTarget[targetAgent] = confirmedHandoff;
-          handoffQualityByTarget[targetAgent] = confirmedQuality;
-          const entry = enqueueRoute(
-            confirmedHandoff,
-            confirmedQuality,
-            confirmedDecision,
-            confirmedHash
-          );
-          appendRouteEvent({
-            eventStore,
-            durableRecorder,
-            sessionId,
-            invocationId,
-            kind: "handoff-confirmed",
-            payload: { previewId: preview.previewId, from: fromAgent, to: targetAgent },
-          });
-          if (sendSse) sendSse("handoff-confirmed", { previewId: preview.previewId });
-          return entry;
-        },
-        onCancel(reason) {
-          const skip = {
-            from: fromAgent,
-            to: targetAgent,
-            reason: `confirmation_${reason}`,
-            policy: DECISIONS.REJECT,
-          };
-          skipped.push(skip);
-          appendRouteEvent({
-            eventStore,
-            durableRecorder,
-            sessionId,
-            invocationId,
-            kind: "handoff-cancelled",
-            payload: { ...skip, previewId: preview.previewId },
-          });
-          if (sendSse) sendSse("handoff-cancelled", { ...skip, previewId: preview.previewId });
-        },
-      });
-      previews.push(preview);
-      appendRouteEvent({
-        eventStore,
-        durableRecorder,
-        sessionId,
-        invocationId,
-        kind: "handoff-preview",
-        payload: preview,
-      });
-      if (sendSse) sendSse("handoff-preview", preview);
-      continue;
-    }
-
     enqueueRoute(handoff, quality, decision, contentHash);
   }
 
@@ -563,7 +485,6 @@ function finalizeA2ARoutes(input = {}) {
     capturedCount,
     hopRecords,
     duplicateRoutes,
-    previews,
     effectiveHops: hopRecords.filter(isEffectiveHandoffHop),
   };
 }

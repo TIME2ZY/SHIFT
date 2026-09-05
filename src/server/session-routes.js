@@ -18,7 +18,6 @@ function createSessionRoutes({
   collabTaskRegistry = null,
   threadSeats = null,
   invocationDutyBindings = null,
-  handoffConfirmations = null,
 }) {
   const MAX_WORKTREE_DIFF_CHARS = 200 * 1024;
 
@@ -45,41 +44,6 @@ function createSessionRoutes({
   }
 
   return async function handleSessionRoutes(req, res, url) {
-    const handoffPreviewsMatch = url.pathname.match(
-      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/handoff-previews$/
-    );
-    if (handoffPreviewsMatch && req.method === "GET") {
-      const sessionId = handoffPreviewsMatch[1];
-      if (!getSession(sessionId)) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
-      sendJson(res, 200, { previews: handoffConfirmations?.list?.(sessionId) || [] });
-      return true;
-    }
-
-    const handoffPreviewActionMatch = url.pathname.match(
-      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/handoff-previews\/([a-zA-Z0-9_-]+)\/(confirm|cancel)$/
-    );
-    if (handoffPreviewActionMatch && req.method === "POST") {
-      const [, sessionId, previewId, action] = handoffPreviewActionMatch;
-      if (!getSession(sessionId)) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
-      try {
-        const result =
-          action === "confirm"
-            ? handoffConfirmations?.confirm?.(sessionId, previewId, await readJsonBody(req))
-            : handoffConfirmations?.cancel?.(sessionId, previewId);
-        if (!result) throw new Error("Handoff confirmation is unavailable.");
-        sendJson(res, 200, result);
-      } catch (error) {
-        sendJson(res, error.statusCode || 400, { error: error.message });
-      }
-      return true;
-    }
-
     const collaborationMatch = url.pathname.match(
       /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration$/
     );
@@ -116,48 +80,6 @@ function createSessionRoutes({
         }),
         seats: projectSeats(seats),
       });
-      return true;
-    }
-
-    const acceptanceMatch = url.pathname.match(
-      /^\/api\/sessions\/([a-zA-Z0-9_-]+)\/collaboration\/acceptance$/
-    );
-    if (acceptanceMatch && req.method === "POST") {
-      const sessionId = acceptanceMatch[1];
-      if (!getSession(sessionId)) {
-        sendJson(res, 404, { error: "Session not found." });
-        return true;
-      }
-      try {
-        const body = await readJsonBody(req);
-        const result = collabTaskRegistry?.decideFinalAcceptance?.(sessionId, {
-          verdict: body?.verdict,
-          note: body?.note,
-          actorKind: "human",
-          actorId: "local-user",
-        });
-        if (!result?.recorded) {
-          sendJson(res, 400, { error: result?.reason || "Final acceptance is unavailable." });
-          return true;
-        }
-        const task = result.task;
-        const seats = threadSeats?.listEnabledForThread?.(sessionId) || [];
-        const bindings = invocationDutyBindings?.listForThread?.(sessionId) || [];
-        const permission = collabTaskRegistry?.implementationPermission?.(sessionId) || null;
-        const acceptanceReadiness = result.readiness;
-        sendJson(res, 200, {
-          recorded: true,
-          collaboration: projectCollaboration(task, permission, {
-            bindings,
-            seats,
-            workspace: acceptanceReadiness?.workspace,
-            acceptanceReadiness,
-          }),
-          seats: projectSeats(seats),
-        });
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
-      }
       return true;
     }
 
