@@ -9,8 +9,60 @@ vi.mock("./TraceExplorer", () => ({
   TraceExplorer: () => <div>Trace 工作台</div>,
 }));
 
+const rate = (numerator: number, denominator: number) => ({
+  value: denominator ? numerator / denominator : null,
+  numerator,
+  denominator,
+  pending: 0,
+  censored: 0,
+  unknown: 0,
+  excluded: 0,
+});
+
 vi.mock("./queries", () => ({
   useSessionTracesQuery: () => ({ data: { traces: [] }, isPending: false, error: null }),
+  useObservabilityHealthQuery: () => ({ data: { alerts: [] }, isPending: false, error: null }),
+  useObservabilityMetricsQuery: () => ({
+    data: {
+      handoff: {
+        completion: rate(1, 2),
+        funnel: {
+          attempted: 3,
+          accepted: 2,
+          enqueued: 2,
+          started: 1,
+          completed: 1,
+          losses: {
+            duplicate: 1,
+            alreadyCompleted: 0,
+            rejected: 0,
+            notEnqueued: 0,
+            notStarted: 0,
+            executionFailed: 1,
+            aborted: 0,
+          },
+        },
+      },
+      memory: {
+        search: { memoryHitRate: rate(1, 2) },
+        injection: {
+          coverageRate: rate(1, 2),
+          budgetDropRate: rate(0, 1),
+          truncationRate: rate(0, 2),
+        },
+        write: { calls: 1, created: 1, unchanged: 0, superseded: 0, rejected: 0 },
+        strictRecallAtK: null,
+      },
+      comparison: {
+        indicators: [
+          { metric: "handoff.completion", state: "regressed", delta: -0.25 },
+          { metric: "memory.searchHitRate", state: "unknown", delta: null },
+        ],
+      },
+    },
+    isPending: false,
+    error: null,
+  }),
   useSessionAuditSummaryQuery: () => ({
     data: {
       session: {
@@ -46,7 +98,20 @@ vi.mock("./queries", () => ({
         maxHandoffDepth: 1,
       },
       tools: { calls: 2, completed: 2, failed: 0, incomplete: 0, orphanFinishes: 0 },
-      memory: { searches: 1, injections: 1, writes: 1, active: 1 },
+      memory: {
+        searches: 5,
+        searchHits: 4,
+        averageMemoryHits: 1.6,
+        injections: 15,
+        injectionsDelivered: 13,
+        truncatedInjections: 3,
+        writes: 7,
+        writeCreated: 5,
+        writeUnchanged: 0,
+        writeSuperseded: 2,
+        writeRejected: 0,
+        active: 1,
+      },
       usage: { available: true, session: { totalTokens: 1200, costUsd: 0.12 }, agents: [] },
     },
     isPending: false,
@@ -83,7 +148,7 @@ vi.mock("../memory/queries", () => ({
 }));
 
 describe("AuditPage", () => {
-  it("places trace metrics and read-only Memory in the main audit workspace", () => {
+  it("shows a session strip, trace lane, and Memory rail", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
@@ -98,15 +163,18 @@ describe("AuditPage", () => {
       </QueryClientProvider>
     );
 
-    expect(screen.getByText("审计测试")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "审计测试" })).toBeInTheDocument();
     expect(screen.getByText("Trace 工作台")).toBeInTheDocument();
-    expect(screen.getByText("会话证据概览")).toBeInTheDocument();
     expect(screen.getByText("2 轮")).toBeInTheDocument();
-    expect(screen.getByText("1 Trace")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "当前 Memory" })).toBeInTheDocument();
+    expect(screen.getByText("4/5 检索命中")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "航线" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("存储")).toBeInTheDocument();
     expect(screen.getByText("检索 2 · 注入 1")).toBeInTheDocument();
-    expect(screen.getByText(/不设人工审核状态/)).toBeInTheDocument();
+    expect(screen.getByText("近 24 小时对照")).toBeInTheDocument();
+    expect(screen.getByText("无离线标注")).toBeInTheDocument();
+    expect(screen.queryByText("会话证据概览")).not.toBeInTheDocument();
+    expect(screen.queryByText("ONLINE")).not.toBeInTheDocument();
   });
 
   it("discloses memory provenance only after expanding the card", async () => {

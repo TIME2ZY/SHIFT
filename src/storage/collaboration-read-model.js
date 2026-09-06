@@ -175,8 +175,14 @@ function deriveBlocker(task, implementation, acceptance) {
       reason,
     };
   }
-  if (phase === "review" && !task.codeReviewGate) {
+  if (!task.codeReviewGate && phase === "review") {
     return { type: "missing_evidence", reason: "code_review_pending" };
+  }
+  if (task.codeReviewGate?.verdict === "changes_requested") {
+    return { type: "missing_evidence", reason: "code_review_changes_requested" };
+  }
+  if (task.codeReviewGate?.verdict === "approve" && !task.deliveryGate) {
+    return { type: "missing_evidence", reason: "delivery_evidence_missing" };
   }
   if (phase === "deliver" || phase === "done") {
     if (!task.deliveryGate) {
@@ -217,6 +223,7 @@ function deriveNextAction(duty, task, blocker) {
     implementation_plan_missing: "请补充可执行的实现方案。",
     implementation_plan_artifact_missing: "请补充方案正文。",
     code_review_pending: "请完成代码审查并记录结论。",
+    code_review_changes_requested: "请按审查意见修复后再提交复审。",
     delivery_evidence_missing: "请补充 commit、PR 和 CI 交付证据。",
     ci_not_successful: "请修复 CI 后重新核验交付。",
     final_acceptance_missing: "请由验收席位核对证据并完成验收。",

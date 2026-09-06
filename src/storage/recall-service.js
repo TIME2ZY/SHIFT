@@ -141,6 +141,7 @@ function createRecallService({
     });
     const response = toAgentRecallResult(result, { threadId });
     const counts = layerHitCounts(result.hits);
+    const hitIds = collectSearchHitIds(result.hits);
     storage?.memoryEvents?.recordSafe?.({
       eventType: "memory_searched",
       threadId,
@@ -156,6 +157,10 @@ function createRecallService({
         availability: result.availability,
         totalHits: result.hits.length,
         ...counts,
+        memoryIds: hitIds.memoryIds,
+        messageIds: hitIds.messageIds,
+        evidenceIds: hitIds.evidenceIds,
+        projectDocIds: hitIds.projectDocIds,
         truncated: Boolean(result.truncated),
         recallMode: result.recallMode || "fts",
       },
@@ -556,9 +561,7 @@ function createRecallService({
     };
 
     if (deferQuotas) {
-      return ALL_LAYERS.filter((layer) => layers.includes(layer)).flatMap(
-        (layer) => scored[layer]
-      );
+      return ALL_LAYERS.filter((layer) => layers.includes(layer)).flatMap((layer) => scored[layer]);
     }
     return allocateByLayerQuotas(scored, {
       limit,
@@ -890,14 +893,20 @@ function createRecallService({
       byKind[item.kind || "memory"] = (byKind[item.kind || "memory"] || 0) + 1;
     }
 
-    const renderedCount = cardMeta.renderedIds?.length || selected.length;
-    const budgetDropped = Math.max(0, selected.length - renderedCount);
+    const selectedIds = selected.map((item) => item.id).filter(Boolean);
+    const renderedIds = Array.isArray(cardMeta.renderedIds)
+      ? cardMeta.renderedIds.filter(Boolean)
+      : [];
+    const budgetDropped = Math.max(0, selected.length - (renderedIds.length || selected.length));
+    const deliveredIds = renderedIds.length ? renderedIds : selectedIds;
+    const deliveredSet = new Set(deliveredIds);
+    const deliveredItems = selected.filter((item) => item.id && deliveredSet.has(item.id));
     const funnel = buildFunnelStats({
       retrieved: byId.size,
       ranked: ranked.length,
       selected: selected.length,
-      rendered: renderedCount,
-      delivered: renderedCount,
+      rendered: deliveredIds.length,
+      delivered: deliveredIds.length,
       used: null,
       correct: null,
       dropped: dedupeDropped.length + budgetDropped,
@@ -915,6 +924,8 @@ function createRecallService({
       ],
       conflictCount: dedupeDropped.filter((d) => d.dropReason === MEMORY_DROP_REASONS.TOPIC_DEDUP)
         .length,
+      selectedIds,
+      deliveredIds,
     });
 
     const stats = {
@@ -935,6 +946,7 @@ function createRecallService({
 
     return {
       items: selected,
+      deliveredItems,
       rendered,
       stats,
       funnel,
@@ -1013,6 +1025,41 @@ function layerHitCounts(hits = []) {
     else if (layer === "project-doc") counts.projectDocHits += 1;
   }
   return counts;
+}
+
+function collectSearchHitIds(hits = []) {
+  const memoryIds = [];
+  const messageIds = [];
+  const evidenceIds = [];
+  const projectDocIds = [];
+  const seen = {
+    memory: new Set(),
+    message: new Set(),
+    evidence: new Set(),
+    projectDoc: new Set(),
+  };
+  function push(list, set, value) {
+    if (typeof value !== "string" || !value || set.has(value)) return;
+    set.add(value);
+    list.push(value);
+  }
+  for (const hit of hits) {
+    const layer = hit.layer || hit.metadata?.layer;
+    if (layer === "memory") {
+      push(
+        memoryIds,
+        seen.memory,
+        hit.memoryId || (hit.sourceKind === "memory-entry" ? hit.sourceId : null)
+      );
+    } else if (layer === "message") {
+      push(messageIds, seen.message, hit.sourceId || hit.messageId);
+    } else if (layer === "evidence") {
+      push(evidenceIds, seen.evidence, hit.sourceId);
+    } else if (layer === "project-doc") {
+      push(projectDocIds, seen.projectDoc, hit.sourceId);
+    }
+  }
+  return { memoryIds, messageIds, evidenceIds, projectDocIds };
 }
 
 module.exports = {

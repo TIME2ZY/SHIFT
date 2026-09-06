@@ -384,15 +384,10 @@ describe("TraceExplorer", () => {
         />
       </QueryClientProvider>
     );
-    expect(await screen.findByText("Handoff 完成")).toBeInTheDocument();
-    expect(await screen.findByText("系统健康")).toBeInTheDocument();
-    expect(screen.getByText("Handoff 证据轨道")).toBeInTheDocument();
-    expect(screen.getByText("Memory 漏斗诊断")).toBeInTheDocument();
-    expect(screen.getByText("未变化")).toBeInTheDocument();
+    expect(await screen.findByText("告警")).toBeInTheDocument();
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
-    expect(screen.getByText("需标注集")).toBeInTheDocument();
-    expect(screen.getByText("-25pp")).toBeInTheDocument();
-    expect(screen.getByText("样本不足")).toBeInTheDocument();
+    expect(screen.queryByText("Handoff 证据轨道")).not.toBeInTheDocument();
+    expect(screen.queryByText("Memory 漏斗诊断")).not.toBeInTheDocument();
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
     expect(screen.getAllByText("provider_exit_7").length).toBeGreaterThanOrEqual(2);
@@ -403,7 +398,7 @@ describe("TraceExplorer", () => {
     expect(screen.getAllByText("Memory 检索").length).toBeGreaterThan(0);
     expect(screen.getByText("命中 3（Memory 2）")).toBeInTheDocument();
     expect(screen.getAllByText("Memory 注入").length).toBeGreaterThan(0);
-    expect(screen.getByText("delivered 2")).toBeInTheDocument();
+    expect(screen.getByText("送达 2")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
     expect(screen.getByText("3 Invocation · 0 Handoff · 无失败")).toBeInTheDocument();
     expect(screen.getAllByText("handoff").length).toBe(2);

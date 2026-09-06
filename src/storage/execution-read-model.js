@@ -122,16 +122,12 @@ function createExecutionReadModel(db) {
       SUM(CASE WHEN starts = 0 AND finishes > 0 THEN 1 ELSE 0 END) AS orphan_finishes
     FROM lifecycles
   `);
-  const countAuditMemory = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM memory_events WHERE thread_id = @threadId
-        AND event_type = 'memory_searched') AS searches,
-      (SELECT COUNT(*) FROM memory_events WHERE thread_id = @threadId
-        AND event_type = 'memory_injected') AS injections,
-      (SELECT COUNT(*) FROM memory_events WHERE thread_id = @threadId
-        AND event_type = 'memory_write_completed') AS writes,
-      (SELECT COUNT(*) FROM memory_entries WHERE status = 'active'
-        AND (owner_thread_id = @threadId OR origin_thread_id = @threadId)) AS active
+  const listAuditMemoryEvents = db.prepare(`
+    SELECT event_type, payload_json FROM memory_events WHERE thread_id = ?
+  `);
+  const countAuditActiveMemory = db.prepare(`
+    SELECT COUNT(*) AS count FROM memory_entries
+    WHERE status = 'active' AND (owner_thread_id = ? OR origin_thread_id = ?)
   `);
 
   function traceSummary(row) {
@@ -242,7 +238,10 @@ function createExecutionReadModel(db) {
           incomplete: toolRows.incomplete,
           orphanFinishes: toolRows.orphan_finishes,
         },
-        memory: numericCounts(countAuditMemory.get({ threadId })),
+        memory: summarizeThreadMemory(
+          listAuditMemoryEvents.all(threadId),
+          Number(countAuditActiveMemory.get(threadId, threadId)?.count || 0)
+        ),
       };
     },
     listForThread(threadId) {
@@ -452,6 +451,61 @@ function outcome(row) {
     failureStage: row.failure_stage || null,
     errorCode: row.error_code || null,
     retryable: row.retryable == null ? null : row.retryable === 1,
+  };
+}
+
+function summarizeThreadMemory(rows, active) {
+  let searches = 0;
+  let searchHits = 0;
+  let memoryHitSum = 0;
+  let memoryEligible = 0;
+  let injections = 0;
+  let injectionsDelivered = 0;
+  let truncatedInjections = 0;
+  let writes = 0;
+  let writeCreated = 0;
+  let writeUnchanged = 0;
+  let writeSuperseded = 0;
+  let writeRejected = 0;
+  for (const row of rows || []) {
+    const payload = parseJson(row.payload_json);
+    if (row.event_type === "memory_searched") {
+      searches += 1;
+      const layers = payload.requestedLayers;
+      const eligible = !Array.isArray(layers) || layers.includes("memory");
+      if (!eligible) continue;
+      memoryEligible += 1;
+      const hits = Number(payload.memoryHits || 0);
+      memoryHitSum += hits;
+      if (hits > 0) searchHits += 1;
+    } else if (row.event_type === "memory_injected") {
+      injections += 1;
+      const delivered = Number(payload.delivered || payload.funnel?.delivered || 0);
+      if (delivered > 0) injectionsDelivered += 1;
+      if (payload.truncated === true || payload.funnel?.truncated === true) {
+        truncatedInjections += 1;
+      }
+    } else if (row.event_type === "memory_write_completed") {
+      writes += 1;
+      if (payload.outcome === "created") writeCreated += 1;
+      else if (payload.outcome === "unchanged") writeUnchanged += 1;
+      else if (payload.outcome === "superseded") writeSuperseded += 1;
+      else if (payload.outcome === "rejected") writeRejected += 1;
+    }
+  }
+  return {
+    searches,
+    searchHits,
+    averageMemoryHits: memoryEligible > 0 ? memoryHitSum / memoryEligible : null,
+    injections,
+    injectionsDelivered,
+    truncatedInjections,
+    writes,
+    writeCreated,
+    writeUnchanged,
+    writeSuperseded,
+    writeRejected,
+    active,
   };
 }
 

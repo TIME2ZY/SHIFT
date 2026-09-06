@@ -120,11 +120,12 @@ function createCollabTaskRegistry(options = {}) {
     task.phase = normalizePhase(task.phase || task.state);
     task.state = task.phase;
     task.updatedAt = new Date().toISOString();
-    if (repository) return repository.save(task, event);
+    const recorded = event ? decorateCollabEvent(event) : null;
+    if (repository) return repository.save(task, recorded);
 
-    if (event) {
+    if (recorded) {
       task.history = Array.isArray(task.history) ? task.history : [];
-      task.history.push({ ...event, at: event.at || new Date().toISOString() });
+      task.history.push({ ...recorded, at: recorded.at || new Date().toISOString() });
       if (task.history.length > 40) task.history.shift();
     }
     task.version = Number(task.version || 0) + 1;
@@ -204,6 +205,77 @@ function createCollabTaskRegistry(options = {}) {
       solutionHash,
     });
     return { accepted: true, reused: false, solutionHash, task: saved };
+  }
+
+  function recordCodeReview(threadId, input = {}) {
+    if (!threadId) return { accepted: false, reason: "missing_thread" };
+    const actorAgentId = String(input.actorAgentId || "").toLowerCase();
+    const actorDuty = String(input.actorDuty || "").toLowerCase();
+    if (!isReviewDuty(actorDuty) && !isDeliverDuty(actorDuty)) {
+      return { accepted: false, reason: "review_requires_review_or_deliver_duty" };
+    }
+    const review = input.review || parseCodeReview(input.content);
+    if (!review) return { accepted: false, reason: "invalid_or_missing_code_review" };
+    const task = getTask(threadId);
+    if (!task) return { accepted: false, reason: "collaboration_task_missing" };
+
+    const reviewEvidenceHash = hashCodeReview(review);
+    if (
+      task.codeReviewGate?.evidenceHash === reviewEvidenceHash &&
+      task.codeReviewGate?.verdict === review.verdict
+    ) {
+      return {
+        accepted: true,
+        reused: true,
+        verdict: review.verdict,
+        reviewEvidenceHash,
+        task,
+      };
+    }
+
+    const reviewedAt = new Date().toISOString();
+    task.artifacts = {
+      ...(task.artifacts || {}),
+      codeReview: {
+        ...review,
+        hash: reviewEvidenceHash,
+        reviewedBy: actorAgentId,
+        reviewedAt,
+      },
+    };
+    if (review.verdict === "changes_requested") {
+      delete task.artifacts.delivery;
+      delete task.artifacts.finalAcceptance;
+      delete task.artifacts.acceptanceDecision;
+      task.deliveryGate = null;
+      task.finalGate = null;
+      task.approvalHash = null;
+    }
+    task.taskStatus = "active";
+    task.codeReviewGate = {
+      verdict: review.verdict,
+      evidenceHash: reviewEvidenceHash,
+      reviewedBy: actorAgentId,
+      reviewedAt,
+    };
+    const saved = persist(task, {
+      type: review.verdict === "approve" ? "code_review_approved" : "code_review_changes_requested",
+      from: task.phase,
+      to: task.phase,
+      actorAgentId,
+      actorId: input.fromSeatId || actorAgentId,
+      duty: actorDuty,
+      intent: "review",
+      verdict: review.verdict,
+      reviewEvidenceHash,
+    });
+    return {
+      accepted: true,
+      reused: false,
+      verdict: review.verdict,
+      reviewEvidenceHash,
+      task: saved,
+    };
   }
 
   function recordDeliveryEvidence(threadId, input = {}) {
@@ -706,7 +778,6 @@ function createCollabTaskRegistry(options = {}) {
     task.lastFrom = from || null;
     task.lastTo = to || null;
     task.contentHash = contentHash || task.contentHash;
-    if (handoff.goal) task.goal = handoff.goal;
     let implementationApproved = false;
 
     if (intent === "plan" && isImplementationDuty(toDuty)) {
@@ -750,39 +821,7 @@ function createCollabTaskRegistry(options = {}) {
       next = STATE.IMPLEMENT;
     }
 
-    const reviewBlob = [handoff.what, handoff.next_action, handoff.goal, input.text]
-      .filter(Boolean)
-      .join("\n")
-      .toLowerCase();
-    if (isReviewDuty(fromDuty)) {
-      if (/request-changes|request_changes|请修|需修改|\bp0\b/.test(reviewBlob)) {
-        next = STATE.IMPLEMENT;
-        task.codeReviewGate = null;
-        task.artifacts = { ...(task.artifacts || {}) };
-        delete task.artifacts.codeReview;
-        delete task.artifacts.delivery;
-        delete task.artifacts.finalAcceptance;
-        delete task.artifacts.acceptanceDecision;
-        task.taskStatus = "active";
-        task.approvalHash = null;
-      } else if (/approve-with-nits|approve\b|批准|可交付|可合入|lgtm/.test(reviewBlob)) {
-        next = STATE.DELIVER;
-        const deliveryBound =
-          task.codeReviewGate?.verdict === "approve" &&
-          task.deliveryGate?.reviewEvidenceHash === task.codeReviewGate.evidenceHash;
-        if (!deliveryBound) {
-          task.approvalHash = evidenceHash;
-          task.codeReviewGate = {
-            verdict: "approve",
-            evidenceHash,
-            reviewedBy: from,
-            reviewedAt: new Date().toISOString(),
-          };
-        }
-      }
-    }
-
-    invalidateDownstreamGates(task, previous, next);
+    invalidateDownstreamGates(task, previous, next, { intent, toDuty });
     task.phase = next;
     task.state = next;
 
@@ -795,6 +834,7 @@ function createCollabTaskRegistry(options = {}) {
       from: previous,
       to: next,
       actorAgentId: from || null,
+      actorId: input.fromSeatId || from || "system",
       intent: intent || null,
       contentHash,
       targetAgentId: to || null,
@@ -870,6 +910,7 @@ function createCollabTaskRegistry(options = {}) {
     getOrCreateTask,
     captureUserGoal,
     submitSolutionBaseline,
+    recordCodeReview,
     recordDeliveryEvidence,
     submitFinalAcceptance,
     acceptanceReadiness,
@@ -936,13 +977,32 @@ function invalidateAfterSolutionRevision(task) {
   task.taskStatus = "active";
 }
 
-function invalidateDownstreamGates(task, previous, next) {
+function decorateCollabEvent(event) {
+  if (event.actorKind) {
+    return event.actorId ? event : { ...event, actorId: event.actorAgentId || "system" };
+  }
+  const actorAgentId = String(event.actorAgentId || "").toLowerCase();
+  if (actorAgentId === "user") {
+    return { ...event, actorKind: "human", actorId: event.actorId || "user" };
+  }
+  if (actorAgentId) {
+    return { ...event, actorKind: "seat", actorId: event.actorId || actorAgentId };
+  }
+  return { ...event, actorKind: "system", actorId: event.actorId || "system" };
+}
+
+function invalidateDownstreamGates(task, previous, next, route = {}) {
   task.artifacts = { ...(task.artifacts || {}) };
   if (next === STATE.IMPLEMENT && previous !== STATE.IMPLEMENT) {
-    task.codeReviewGate = null;
+    const keepRequestedReview =
+      task.codeReviewGate?.verdict === "changes_requested" &&
+      (route.intent === "fix" || route.toDuty === "fix");
+    if (!keepRequestedReview) {
+      task.codeReviewGate = null;
+      delete task.artifacts.codeReview;
+    }
     task.deliveryGate = null;
     task.finalGate = null;
-    delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
     delete task.artifacts.acceptanceDecision;

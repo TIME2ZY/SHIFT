@@ -113,10 +113,18 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
 }
 
 function recallAttributes(payload) {
+  const deliveredIds = Array.isArray(payload?.deliveredIds)
+    ? payload.deliveredIds
+    : Array.isArray(payload?.memoryIds)
+      ? payload.memoryIds
+      : [];
   return {
     totalHits: Number(payload?.totalHits || 0),
     memoryHits: Number(payload?.memoryHits || 0),
-    delivered: Number(payload?.delivered || 0),
+    delivered: Number(payload?.delivered || deliveredIds.length || 0),
+    selected: Number(payload?.selected || 0),
+    dropped: Array.isArray(payload?.droppedIds) ? payload.droppedIds.length : 0,
+    memoryIds: Array.isArray(payload?.memoryIds) ? payload.memoryIds : deliveredIds,
     availability: payload?.availability?.state || null,
     requestedLayers: Array.isArray(payload?.requestedLayers) ? payload.requestedLayers : [],
   };

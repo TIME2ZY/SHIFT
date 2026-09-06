@@ -91,8 +91,7 @@ function dedupeRankedByTopic(ranked) {
     const nextScore = Number(item.score) || 0;
     const prevTs = String(prev.createdAt || "");
     const nextTs = String(item.createdAt || "");
-    const preferNext =
-      nextScore > prevScore || (nextScore === prevScore && nextTs > prevTs);
+    const preferNext = nextScore > prevScore || (nextScore === prevScore && nextTs > prevTs);
     if (preferNext) {
       dropped.push({
         id: prev.id,
@@ -172,6 +171,17 @@ function applyGuaranteedSlots(selected, ranked, queryTopics, totalLimit) {
 /**
  * Build funnel stats object for inject SSE / metrics.
  */
+function uniqueIds(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    if (typeof value !== "string" || !value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
 function buildFunnelStats({
   retrieved = 0,
   ranked = 0,
@@ -186,7 +196,16 @@ function buildFunnelStats({
   guaranteedTopics = [],
   droppedTopics = [],
   conflictCount = 0,
+  selectedIds = [],
+  deliveredIds = [],
+  droppedIds = [],
 } = {}) {
+  const selectedIdList = uniqueIds(selectedIds);
+  const deliveredIdList = uniqueIds(deliveredIds);
+  const deliveredSet = new Set(deliveredIdList);
+  const droppedIdList = uniqueIds(
+    droppedIds.length ? droppedIds : selectedIdList.filter((id) => !deliveredSet.has(id))
+  );
   return {
     retrieved,
     ranked,
@@ -201,6 +220,9 @@ function buildFunnelStats({
     guaranteedTopics: guaranteedTopics.slice(0, 12),
     droppedTopics: droppedTopics.slice(0, 16),
     conflictCount: Number(conflictCount) || 0,
+    selectedIds: selectedIdList,
+    deliveredIds: deliveredIdList,
+    droppedIds: droppedIdList,
     layers: MEMORY_FUNNEL_LAYERS,
   };
 }
@@ -225,6 +247,7 @@ module.exports = {
   dedupeRankedByTopic,
   applyGuaranteedSlots,
   buildFunnelStats,
+  uniqueIds,
   validateCaptureEncoding,
   MEMORY_DROP_REASONS,
 };

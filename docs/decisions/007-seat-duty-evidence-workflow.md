@@ -131,6 +131,11 @@ enforced | advisory | unavailable
 Duty 的 `final_acceptance` 加上平台证据核验写入。二者都进入同一协作事件入口，不藏在某个
 Provider 的隐式权限中，也不经过 Human 审批闸门。
 
+结构化 `code_review` 由 `recordCodeReview` 单独写入 `codeReviewGate`，不要求同一轮输出
+`delivery_receipt`。`delivery_receipt` 只进入 `recordDeliveryEvidence`。handoff 正文不得用
+正则猜测 approve / request-changes 来改写或清空审查门禁；`handoff.goal` 不得覆盖
+`goalOriginal`。
+
 ### 3.6 Task 状态与可选阶段投影
 
 Thread 的协作任务以目标、阻塞和验收状态为主，不再以五阶段作为权威状态机。权威状态固定为：

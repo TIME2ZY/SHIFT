@@ -440,6 +440,7 @@ function finalizeA2ARoutes(input = {}) {
           intent: routeQuality.intent,
           fromDuty,
           toDuty: duty,
+          fromSeatId: input.fromSeatId || null,
           contentHash: routeContentHash,
           useWorktree,
           handoff: routeHandoff,

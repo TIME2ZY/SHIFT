@@ -22,6 +22,7 @@ body {
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
@@ -29,6 +30,28 @@ body {
 :root[data-density="compact"] body {
   font-size: 14px;
   line-height: 1.55;
+}
+
+pre,
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--font-mono-features);
+  font-variant-ligatures: none;
+  font-synthesis: none;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Source listings (chat fences, tool dumps). Not UI labels or IDs. */
+.code-surface,
+.react-markdown pre,
+.react-tool-call-body pre {
+  font-size: var(--text-code);
+  line-height: var(--text-code-line);
+  tab-size: 2;
+  color: var(--text-primary);
 }
 
 button,

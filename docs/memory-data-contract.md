@@ -141,21 +141,35 @@ Memory 的业务状态仍以 `memory_entries` 为权威；审计事件不得反�
 Agent 对 Memory 的公开行为只有经认证 Invocation 绑定的 `memory_write` 与 `recall_search` MCP。
 
 - `memory_write_completed` 记录 MCP 操作结果：`created | unchanged | superseded | rejected`。
-- `memory_searched` 只记录 `recall_search` MCP；内部 `searchSession` 不进入 MCP 指标。
+- `memory_searched` 只记录 `recall_search` MCP；内部 `searchSession` 不进入 MCP 指标。payload
+  必须带 `memoryIds`（Memory 层命中去重 id）以及 `memoryHits` / `totalHits`；没有命中时
+  `memoryIds` 为空数组，不得省略该字段。
 - `memory_injected` 只在 Memory 已交付给目标 Invocation 后记录一次；检索 service 不重复写入。
+  payload 区分 `selectedIds`（预算裁剪前）与 `deliveredIds`（实际写入 prompt 的 rendered id）；
+  `memoryIds` 与 `deliveredIds` 同义。被预算丢掉的 id 放在 `droppedIds`。
 - 上述在线指标事件必须带 `invocation_id`、`agent_id`、`operation_key` 和 payload version。
 - 历史缺少这些坐标的事件保留供审计，但不进入新指标，也不得猜测回填。
+
+`GET /api/memories/usage` 从上述 payload 派生每条 Memory 的 `searched` / `injected` /
+`selected` / `dropped`。`injected` 只计 `deliveredIds`（旧事件回退 `memoryIds`）；不得把
+selected 但未送达的条目计成注入命中。
+
+`GET /api/sessions/:id/audit-summary` 的 Memory 块是本 Thread 全生命周期的操作指标：检索次数、
+Memory 层命中次数、平均命中条数、注入次数、送达次数、截断次数和 MCP 写入分类。这是审计页
+默认展示的量化证据。
 
 在线指标口径：
 
 - MCP 检索可用率：`available / attempted`。
-- Memory 层命中率：请求 memory layer 且可用的 MCP 检索中，`memoryHits > 0` 的比例。
+- Memory 层命中率：请求 memory layer 且可用的 MCP 检索中，`memoryHits > 0` 的比例。这不是
+  相关性 Recall@K。
 - 注入可用率：`available / attempted`。
 - 注入覆盖率：可用注入中 `delivered > 0` 的比例；`delivered` 以实际 rendered IDs 为准，
   不使用预算裁剪前的 selected 数量。
 - 写入指标只按 MCP 结果分类，不把写入数量解释为质量。
 
-严格 Recall@K、MRR 与 nDCG 属于带数据集版本的离线评估，不属于“近 24 小时”在线窗口。
+严格 Recall@K、MRR 与 nDCG 属于带数据集版本的离线评估，不属于“近 24 小时”在线窗口，也
+不得用在线命中率填数。未导入标注集时审计页必须显式写“无离线标注”，不能显示空白或 0%。
 Memory used/correct 若无自动证据保持不可用；业务 outcome 必须按 Invocation 去重，不能按
 Memory judgment 行重复计数。
 

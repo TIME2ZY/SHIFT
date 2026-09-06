@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { MemoryItem } from "../memory/queries";
 import { useMemoriesQuery, useMemoryUsageQuery } from "../memory/queries";
+import { ObservabilityContrast } from "./ObservabilityContrast";
 import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
@@ -17,9 +18,13 @@ function shortId(value: string) {
   return value.length > 12 ? value.slice(-8) : value;
 }
 
-function usageEvidence(usage: { searched: number; injected: number } | undefined) {
-  if (!usage) return "未被检索";
-  return `检索 ${usage.searched} · 注入 ${usage.injected}`;
+function usageEvidence(
+  usage: { searched: number; injected: number; dropped?: number } | undefined
+) {
+  if (!usage) return "未检索 · 未注入";
+  const parts = [`检索 ${usage.searched}`, `注入 ${usage.injected}`];
+  if (Number(usage.dropped || 0) > 0) parts.push(`丢弃 ${usage.dropped}`);
+  return parts.join(" · ");
 }
 
 export function AuditPage({
@@ -38,11 +43,12 @@ export function AuditPage({
   const memoryUsage = useMemoryUsageQuery(sessionId, true);
   const summary = useSessionAuditSummaryQuery(sessionId);
   const usageOf = (id: string) => memoryUsage.data?.[id];
+  const activeCount = memories.data?.memories.length ?? summary.data?.memory.active ?? 0;
 
   return (
     <main id="main-content" className="audit-page">
       <header className="audit-page-header">
-        <span className="audit-page-chip">{sessionTitle}</span>
+        <h1>{sessionTitle}</h1>
         {sessionId ? (
           <span className="audit-page-chip audit-page-chip-id" title={sessionId}>
             {shortId(sessionId)}
@@ -50,47 +56,35 @@ export function AuditPage({
         ) : null}
         {summary.data ? (
           <span className="audit-page-chip">
-            最后活动 {formatMemoryDate(summary.data.execution.lastActivityAt)}
+            {formatMemoryDate(summary.data.execution.lastActivityAt)}
           </span>
         ) : null}
-        <span className="audit-page-chip-hint">Memory 由 Agent 自动抽取，不设人工审核状态。</span>
       </header>
 
       {summary.data ? <SessionAuditOverview summary={summary.data} agents={agents} /> : null}
       {summary.isPending && sessionId ? (
-        <section className="audit-overview audit-overview-loading" aria-live="polite">
-          正在汇总会话证据…
+        <section className="audit-status audit-status-loading" aria-live="polite">
+          正在汇总会话结论…
         </section>
       ) : null}
       {summary.error ? (
         <p className="react-panel-error" role="alert">
-          会话证据概览暂不可用：{summary.error.message}
+          会话结论暂不可用：{summary.error.message}
         </p>
       ) : null}
 
       <div className="audit-layout">
-        <section
-          className="audit-traces"
-          aria-label="在线运行观测"
-          aria-labelledby="audit-traces-title"
-        >
-          <header className="audit-section-heading">
-            <div>
-              <span>ONLINE</span>
-              <h2 id="audit-traces-title">在线运行观测</h2>
-            </div>
-            <p>指标默认使用近 24 小时合格事件；历史旧契约事件不会被猜测回填。</p>
+        <section className="audit-traces" aria-labelledby="audit-traces-title">
+          <header className="audit-column-heading">
+            <h2 id="audit-traces-title">航线</h2>
           </header>
           <TraceExplorer agents={agents} sessionId={sessionId} />
         </section>
 
         <aside className="audit-memory" aria-labelledby="audit-memory-title">
-          <header className="audit-section-heading">
-            <div>
-              <span>READ ONLY</span>
-              <h2 id="audit-memory-title">当前 Memory</h2>
-            </div>
-            <p>展示当前有效产品记忆；写入和检索结果在运行审计中追踪。</p>
+          <header className="audit-column-heading">
+            <h2 id="audit-memory-title">Memory</h2>
+            <small>{activeCount} 条有效</small>
           </header>
           {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
           {memories.isPending && sessionId ? (
@@ -109,6 +103,7 @@ export function AuditPage({
               <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
             ))}
           </div>
+          <ObservabilityContrast sessionId={sessionId} />
         </aside>
       </div>
     </main>
@@ -120,7 +115,7 @@ function MemoryCard({
   usage,
 }: {
   memory: MemoryItem;
-  usage: { searched: number; injected: number } | undefined;
+  usage: { searched: number; injected: number; dropped?: number } | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (

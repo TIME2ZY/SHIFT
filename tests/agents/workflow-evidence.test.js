@@ -85,8 +85,16 @@ test("discuss Duty output becomes the baseline regardless of Seat provider", () 
 test("review Duty output is independently verified regardless of Seat provider", () => {
   const calls = [];
   const registry = {
+    recordCodeReview(threadId, input) {
+      calls.push({ kind: "review", threadId, input });
+      return {
+        accepted: true,
+        verdict: input.review.verdict,
+        reviewEvidenceHash: "review-1",
+      };
+    },
     recordDeliveryEvidence(threadId, input) {
-      calls.push({ threadId, input });
+      calls.push({ kind: "delivery", threadId, input });
       return { accepted: true, readyForAcceptance: true, reviewEvidenceHash: "review-1" };
     },
   };
@@ -122,8 +130,63 @@ test("review Duty output is independently verified regardless of Seat provider",
       },
     },
   });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].input.actorAgentId, "gemini");
-  assert.equal(calls[0].input.actorDuty, "review");
-  assert.equal(events[0].event, "delivery-evidence-verified");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].kind, "review");
+  assert.equal(calls[1].kind, "delivery");
+  assert.equal(calls[1].input.actorAgentId, "gemini");
+  assert.equal(calls[1].input.actorDuty, "review");
+  assert.equal(events[0].event, "code-review-approved");
+  assert.equal(events[1].event, "delivery-evidence-verified");
+});
+
+test("review approve without a delivery receipt records the review gate only", () => {
+  const registry = createCollabTaskRegistry();
+  registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
+  const events = processWorkflowEvidenceOutput({
+    agent: "codex",
+    duty: "review",
+    threadId: "thread-1",
+    registry,
+    content: [
+      "```code_review",
+      "verdict: approve",
+      "summary: Implementation matches the approved plan.",
+      "findings:",
+      "  - none",
+      "tests:",
+      "  - npm test: passed",
+      "```",
+    ].join("\n"),
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "code-review-approved");
+  assert.equal(events[0].payload.verdict, "approve");
+  const task = registry.getTask("thread-1");
+  assert.equal(task.codeReviewGate.verdict, "approve");
+  assert.equal(task.codeReviewGate.reviewedBy, "codex");
+  assert.equal(task.deliveryGate, null);
+  assert.equal(task.artifacts.codeReview.hash, events[0].payload.reviewEvidenceHash);
+});
+
+test("review changes requested persist without pretending the review is missing", () => {
+  const registry = createCollabTaskRegistry();
+  registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
+  const events = processWorkflowEvidenceOutput({
+    agent: "codex",
+    duty: "review",
+    threadId: "thread-1",
+    registry,
+    content: [
+      "```code_review",
+      "verdict: changes_requested",
+      "summary: Seat duties are not bound together.",
+      "findings:",
+      "  - P1 deriveThreadParticipation drops Seat to Duty mapping",
+      "tests:",
+      "  - targeted tests passed",
+      "```",
+    ].join("\n"),
+  });
+  assert.equal(events[0].event, "code-review-changes-requested");
+  assert.equal(registry.getTask("thread-1").codeReviewGate.verdict, "changes_requested");
 });

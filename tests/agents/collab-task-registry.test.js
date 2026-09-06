@@ -102,14 +102,26 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
     route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" }).phase,
     STATE.REVIEW
   );
+  const reviewed = registry.recordCodeReview("thread-1", {
+    actorAgentId: "opencode",
+    actorDuty: "review",
+    review: {
+      verdict: "approve",
+      summary: "No blocking findings",
+      findings: ["none"],
+      tests: ["npm run verify:pr: passed"],
+    },
+  });
+  assert.equal(reviewed.accepted, true);
   const delivered = route(registry, {
     fromAgent: "opencode",
     toAgent: "codex",
     intent: "accept",
-    what: "approve: diff reviewed and ready for delivery",
   });
   assert.equal(delivered.phase, STATE.DELIVER);
   assert.equal(delivered.codeReviewGate.reviewedBy, "opencode");
+  assert.equal(reviewed.task.history.at(-1).actorKind, "seat");
+  assert.equal(reviewed.task.history.at(-1).type, "code_review_approved");
 
   const blocked = registry.submitFinalAcceptance("thread-1", {
     actorAgentId: "codex",
@@ -167,10 +179,21 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
   assert.equal(completed.task.artifacts.acceptanceDecision.actorKind, "seat");
 });
 
-test("review Duty changes return to implement and invalidate downstream gates", () => {
+test("review Duty changes return to implement and keep the requested review gate", () => {
   const registry = createCollabTaskRegistry();
   approveConcretePlan(registry);
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
+  const reviewed = registry.recordCodeReview("thread-1", {
+    actorAgentId: "opencode",
+    actorDuty: "review",
+    review: {
+      verdict: "changes_requested",
+      summary: "P1 missing boundary test",
+      findings: ["P1 src/workflow.js missing a regression"],
+      tests: ["targeted tests passed"],
+    },
+  });
+  assert.equal(reviewed.accepted, true);
   const task = route(registry, {
     fromAgent: "opencode",
     toAgent: "grok",
@@ -179,9 +202,40 @@ test("review Duty changes return to implement and invalidate downstream gates", 
   });
 
   assert.equal(task.phase, STATE.IMPLEMENT);
-  assert.equal(task.codeReviewGate, null);
+  assert.equal(task.codeReviewGate.verdict, "changes_requested");
+  assert.equal(task.codeReviewGate.reviewedBy, "opencode");
   assert.equal(task.deliveryGate, null);
   assert.equal(task.finalGate, null);
+});
+
+test("handoff goal does not overwrite the captured user goal", () => {
+  const registry = createCollabTaskRegistry();
+  const captured = registry.captureUserGoal("thread-1", {
+    text: "项目上只补两件，不要再堆功能",
+  });
+  const task = route(registry, {
+    fromAgent: "codex",
+    toAgent: "grok",
+    intent: "plan",
+    handoff: { goal: "按首轮 review 的 P1/P2 修复参与上下文", what: "submit the plan" },
+  });
+  assert.equal(task.goal, "项目上只补两件，不要再堆功能");
+  assert.equal(task.artifacts.userGoal.text, "项目上只补两件，不要再堆功能");
+  assert.equal(task.artifacts.userGoal.hash, captured.goalHash);
+});
+
+test("informal approve language on a handoff does not write the review gate", () => {
+  const registry = createCollabTaskRegistry();
+  approveConcretePlan(registry);
+  route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
+  const task = route(registry, {
+    fromAgent: "opencode",
+    toAgent: "codex",
+    intent: "accept",
+    what: "approve: diff reviewed and ready for delivery",
+  });
+  assert.equal(task.phase, STATE.DELIVER);
+  assert.equal(task.codeReviewGate, null);
 });
 
 test("implementation Duty stays read-only until a concrete plan is approved", () => {

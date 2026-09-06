@@ -23,6 +23,7 @@ const BLOCKER_LABELS: Record<string, string> = {
   implementation_plan_not_approved: "等待讨论席位批准方案",
   implementation_plan_artifact_missing: "方案正文缺失",
   code_review_pending: "等待代码审查",
+  code_review_changes_requested: "审查要求修改",
   delivery_evidence_missing: "等待交付证据",
   ci_not_successful: "CI 尚未通过",
   final_acceptance_missing: "等待验收席位核验证据",

@@ -28,6 +28,7 @@ const {
   buildMemoryWriteMetrics,
   logMemoryWriteMetrics,
   buildMemoryInjectPayload,
+  collectInjectIdSets,
 } = require("../storage/memory-metrics");
 const { refreshDigest } = require("../storage/memory-digest");
 const {
@@ -578,9 +579,10 @@ async function runChatWorklist(ctx) {
           sessionId,
           agent,
           source: "bootstrap",
-          items: bootstrapInject.items,
+          items: bootstrapInject.deliveredItems || bootstrapInject.items,
           stats: bootstrapInject.stats,
         });
+        const injectIds = collectInjectIdSets(bootstrapInject, injectPayload.items);
         sendSse(res, "memory-inject", injectPayload);
         storage?.memoryEvents?.recordSafe?.({
           eventType: "memory_injected",
@@ -591,12 +593,15 @@ async function runChatWorklist(ctx) {
           payloadVersion: 1,
           payload: {
             source: "bootstrap",
-            memoryIds: (injectPayload.items || []).map((item) => item.id).filter(Boolean),
-            renderedIds: bootstrapInject.stats?.funnel?.renderedIds || [],
+            selectedIds: injectIds.selectedIds,
+            deliveredIds: injectIds.deliveredIds,
+            droppedIds: injectIds.droppedIds,
+            memoryIds: injectIds.deliveredIds,
+            renderedIds: injectIds.deliveredIds,
             availability: injectPayload.availability,
             funnel: injectPayload.funnel,
-            delivered: Number(injectPayload.funnel?.delivered || 0),
-            selected: Number(injectPayload.funnel?.selected || injectPayload.count || 0),
+            delivered: Number(injectPayload.funnel?.delivered || injectIds.deliveredIds.length),
+            selected: Number(injectPayload.funnel?.selected || injectIds.selectedIds.length),
             truncated: Boolean(injectPayload.funnel?.truncated),
           },
         });
@@ -621,9 +626,10 @@ async function runChatWorklist(ctx) {
             sessionId,
             agent: pending.agent,
             source: "a2a",
-            items: pending.inject.items,
+            items: pending.inject.deliveredItems || pending.inject.items,
             stats: pending.inject.stats,
           });
+          const a2aIds = collectInjectIdSets(pending.inject, a2aInject.items);
           sendSse(res, "memory-inject", a2aInject);
           storage?.memoryEvents?.recordSafe?.({
             eventType: "memory_injected",
@@ -634,11 +640,15 @@ async function runChatWorklist(ctx) {
             payloadVersion: 1,
             payload: {
               source: "a2a",
-              memoryIds: (a2aInject.items || []).map((item) => item.id).filter(Boolean),
+              selectedIds: a2aIds.selectedIds,
+              deliveredIds: a2aIds.deliveredIds,
+              droppedIds: a2aIds.droppedIds,
+              memoryIds: a2aIds.deliveredIds,
+              renderedIds: a2aIds.deliveredIds,
               availability: a2aInject.availability,
               funnel: a2aInject.funnel,
-              delivered: Number(a2aInject.funnel?.delivered || 0),
-              selected: Number(a2aInject.funnel?.selected || a2aInject.count || 0),
+              delivered: Number(a2aInject.funnel?.delivered || a2aIds.deliveredIds.length),
+              selected: Number(a2aInject.funnel?.selected || a2aIds.selectedIds.length),
               truncated: Boolean(a2aInject.funnel?.truncated),
             },
           });
