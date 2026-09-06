@@ -149,13 +149,16 @@ function createMemoryEventRepository(db) {
       const usage = {};
       for (const row of listUsageByThread.all(threadId, normalizeLimit(options.limit, 1000))) {
         const payload = parsePayload(row.payload_json);
-        const memoryIds = Array.isArray(payload?.memoryIds) ? payload.memoryIds : [];
-        const field = row.event_type === "memory_injected" ? "injected" : "searched";
-        for (const memoryId of memoryIds) {
-          if (typeof memoryId !== "string" || !memoryId) continue;
-          usage[memoryId] = usage[memoryId] || { searched: 0, injected: 0 };
-          usage[memoryId][field] += 1;
+        if (row.event_type === "memory_searched") {
+          addUsageIds(usage, payload?.memoryIds, "searched");
+          continue;
         }
+        const deliveredIds = Array.isArray(payload?.deliveredIds)
+          ? payload.deliveredIds
+          : payload?.memoryIds;
+        addUsageIds(usage, payload?.selectedIds, "selected");
+        addUsageIds(usage, deliveredIds, "injected");
+        addUsageIds(usage, payload?.droppedIds, "dropped");
       }
       return usage;
     },
@@ -182,6 +185,15 @@ function createMemoryEventRepository(db) {
       }))();
     },
   };
+}
+
+function addUsageIds(usage, ids, field) {
+  if (!Array.isArray(ids)) return;
+  for (const memoryId of ids) {
+    if (typeof memoryId !== "string" || !memoryId) continue;
+    usage[memoryId] = usage[memoryId] || { searched: 0, injected: 0, selected: 0, dropped: 0 };
+    usage[memoryId][field] += 1;
+  }
 }
 
 function requiredDate(value) {

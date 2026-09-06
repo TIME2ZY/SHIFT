@@ -74,9 +74,15 @@ export function SessionAuditOverview({
           detail={
             latest
               ? latest.errorCode || latest.terminalReason || `Trace ${latest.traceId.slice(-8)}`
-              : `${summary.memory.active} 条有效 Memory`
+              : "尚无 Trace"
           }
           tone={latest?.state}
+        />
+        <OverviewFact
+          label="Memory 证据"
+          value={memoryEvidenceValue(summary.memory)}
+          detail={memoryEvidenceDetail(summary.memory)}
+          title="检索命中率是请求了 Memory 层且返回了结果的 MCP 搜索，不是离线相关性 Recall@K"
         />
       </div>
     </section>
@@ -108,6 +114,19 @@ function OverviewFact({
       <small>{detail}</small>
     </article>
   );
+}
+
+function memoryEvidenceValue(memory: SessionAuditSummary["memory"]) {
+  if (memory.searches > 0) return `${memory.searchHits}/${memory.searches} 检索命中`;
+  if (memory.injections > 0) {
+    return `${memory.injectionsDelivered}/${memory.injections} 注入送达`;
+  }
+  return `${memory.active} 条有效`;
+}
+
+function memoryEvidenceDetail(memory: SessionAuditSummary["memory"]) {
+  const average = memory.averageMemoryHits == null ? "—" : memory.averageMemoryHits.toFixed(1);
+  return `${memory.active} 条有效 · 平均命中 ${average} · 截断 ${memory.truncatedInjections} · 写入 ${memory.writes}`;
 }
 
 function formatDuration(ms: number) {

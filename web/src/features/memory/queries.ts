@@ -64,6 +64,8 @@ export function useMemoriesQuery(sessionId: string | null, enabled: boolean) {
 export interface MemoryUsageEntry {
   searched: number;
   injected: number;
+  selected?: number;
+  dropped?: number;
 }
 
 export type MemoryUsage = Record<string, MemoryUsageEntry>;

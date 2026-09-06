@@ -4168,7 +4168,7 @@ body {
 
 .audit-overview-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .audit-overview-fact {
@@ -4217,12 +4217,12 @@ body {
   font-size: 13px;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1280px) {
   .audit-overview-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .audit-overview-fact:nth-child(3n) {
+  .audit-overview-fact:nth-child(4n) {
     border-right: 0;
   }
 }

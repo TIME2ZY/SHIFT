@@ -79,6 +79,7 @@ function MemoryDiagnostics({
   memory: import("./types").ObservabilityMetrics["memory"];
 }) {
   const values = [
+    ["Memory 层命中率", formatRate(memory.search.memoryHitRate)],
     ["总结果命中", formatRate(memory.search.totalResultRate)],
     ["平均 Memory 命中", formatAverage(memory.search.averageMemoryHits)],
     ["平均注入", formatAverage(memory.injection.averageDelivered)],
@@ -246,8 +247,12 @@ function TraceWaterfall({
               {children.map((span) => {
                 const attributes = span.attributes || {};
                 const isInjection = span.name === "memory_injected";
+                const selected = Number(attributes.selected || 0);
+                const delivered = Number(attributes.delivered || 0);
                 const detail = isInjection
-                  ? `delivered ${Number(attributes.delivered || 0)}`
+                  ? selected > delivered
+                    ? `送达 ${delivered} / 选中 ${selected}`
+                    : `送达 ${delivered}`
                   : `命中 ${Number(attributes.totalHits || 0)}（Memory ${Number(
                       attributes.memoryHits || 0
                     )}）`;
@@ -441,12 +446,12 @@ export function TraceExplorer({
                 <b>
                   {metrics.data.memory.strictRecallAtK
                     ? `${Math.round(metrics.data.memory.strictRecallAtK.value! * 100)}%`
-                    : "需标注集"}
+                    : "无离线标注"}
                 </b>
                 <small>
                   {metrics.data.memory.strictRecallAtK
                     ? `K=${metrics.data.memory.strictRecallAtK.cutoffK} · MRR ${metrics.data.memory.strictRecallAtK.mrr.toFixed(2)} · nDCG ${metrics.data.memory.strictRecallAtK.ndcgAtK.toFixed(2)}`
-                    : "在线命中率不能替代相关性 Recall"}
+                    : "需要导入标注集后才有数值；上面的检索命中率只表示搜索是否返回了 Memory 层结果"}
                 </small>
               </div>
             </section>

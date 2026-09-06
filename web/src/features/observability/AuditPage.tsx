@@ -17,9 +17,13 @@ function shortId(value: string) {
   return value.length > 12 ? value.slice(-8) : value;
 }
 
-function usageEvidence(usage: { searched: number; injected: number } | undefined) {
-  if (!usage) return "未被检索";
-  return `检索 ${usage.searched} · 注入 ${usage.injected}`;
+function usageEvidence(
+  usage: { searched: number; injected: number; dropped?: number } | undefined
+) {
+  if (!usage) return "未被检索或注入";
+  const parts = [`检索 ${usage.searched}`, `注入 ${usage.injected}`];
+  if (Number(usage.dropped || 0) > 0) parts.push(`丢弃 ${usage.dropped}`);
+  return parts.join(" · ");
 }
 
 export function AuditPage({
@@ -90,7 +94,9 @@ export function AuditPage({
               <span>READ ONLY</span>
               <h2 id="audit-memory-title">当前 Memory</h2>
             </div>
-            <p>展示当前有效产品记忆；写入和检索结果在运行审计中追踪。</p>
+            <p>
+              检索次数来自 MCP recall_search 命中的 Memory id；注入次数只计实际写入 prompt 的条目。
+            </p>
           </header>
           {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
           {memories.isPending && sessionId ? (

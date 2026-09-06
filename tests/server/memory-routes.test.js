@@ -111,8 +111,18 @@ test("memory routes aggregate per-memory usage evidence from telemetry", async (
 
     assert.equal(handled, true);
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.body.usage[memory.id], { searched: 2, injected: 1 });
-    assert.deepEqual(res.body.usage["memory-other"], { searched: 1, injected: 0 });
+    assert.deepEqual(res.body.usage[memory.id], {
+      searched: 2,
+      injected: 1,
+      selected: 0,
+      dropped: 0,
+    });
+    assert.deepEqual(res.body.usage["memory-other"], {
+      searched: 1,
+      injected: 0,
+      selected: 0,
+      dropped: 0,
+    });
 
     const missing = response();
     await handle(

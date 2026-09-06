@@ -201,7 +201,7 @@ test("retrieveForTurn prepares injection without recording delivery", async () =
 test("only authenticated agent search records memory_searched", async () => {
   const storage = createFixture();
   try {
-    storage.memory.createProduct({
+    const written = storage.memory.createProduct({
       threadId: "thread-1",
       kind: "fact",
       topic: "redis",
@@ -236,6 +236,106 @@ test("only authenticated agent search records memory_searched", async () => {
     assert.equal(event.agent_id, "codex");
     assert.equal(event.operation_key, "recall:invocation-1:test");
     assert.equal(event.payload_version, 1);
+    const payload = JSON.parse(event.payload_json);
+    assert.equal(payload.memoryHits, 1);
+    assert.deepEqual(payload.memoryIds, [written.memory.id]);
+    assert.deepEqual(payload.messageIds, []);
+    const usage = storage.memoryEvents.usageForThread("thread-1");
+    assert.equal(usage[payload.memoryIds[0]].searched, 1);
+    assert.equal(usage[payload.memoryIds[0]].injected, 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("injection usage counts delivered ids and not budget-dropped selected ids", () => {
+  const storage = createFixture();
+  try {
+    storage.memoryEvents.record({
+      eventType: "memory_injected",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "inject:inv-1:bootstrap",
+      payloadVersion: 1,
+      payload: {
+        selectedIds: ["keep-1", "drop-1"],
+        deliveredIds: ["keep-1"],
+        droppedIds: ["drop-1"],
+        memoryIds: ["keep-1"],
+        selected: 2,
+        delivered: 1,
+        truncated: true,
+      },
+    });
+    const usage = storage.memoryEvents.usageForThread("thread-1");
+    assert.deepEqual(usage["keep-1"], { searched: 0, injected: 1, selected: 1, dropped: 0 });
+    assert.deepEqual(usage["drop-1"], { searched: 0, injected: 0, selected: 1, dropped: 1 });
+  } finally {
+    storage.close();
+  }
+});
+
+test("audit summary projects session memory hit and inject rates", () => {
+  const storage = createFixture();
+  try {
+    storage.memoryEvents.record({
+      eventType: "memory_searched",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "recall:inv-1:a",
+      payloadVersion: 1,
+      payload: {
+        requestedLayers: ["memory"],
+        memoryHits: 2,
+        totalHits: 2,
+        memoryIds: ["m-1", "m-2"],
+        availability: { state: "available" },
+      },
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_searched",
+      threadId: "thread-1",
+      invocationId: "inv-2",
+      agentId: "codex",
+      operationKey: "recall:inv-2:a",
+      payloadVersion: 1,
+      payload: {
+        requestedLayers: ["memory"],
+        memoryHits: 0,
+        totalHits: 0,
+        memoryIds: [],
+        availability: { state: "available", empty: true },
+      },
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_injected",
+      threadId: "thread-1",
+      invocationId: "inv-2",
+      agentId: "codex",
+      operationKey: "inject:inv-2:bootstrap",
+      payloadVersion: 1,
+      payload: { delivered: 1, selected: 2, truncated: true },
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_write_completed",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "memory-write:inv-1:op",
+      payloadVersion: 1,
+      payload: { outcome: "created" },
+    });
+    const summary = storage.executions.auditSummary("thread-1");
+    assert.equal(summary.memory.searches, 2);
+    assert.equal(summary.memory.searchHits, 1);
+    assert.equal(summary.memory.averageMemoryHits, 1);
+    assert.equal(summary.memory.injections, 1);
+    assert.equal(summary.memory.injectionsDelivered, 1);
+    assert.equal(summary.memory.truncatedInjections, 1);
+    assert.equal(summary.memory.writes, 1);
+    assert.equal(summary.memory.writeCreated, 1);
   } finally {
     storage.close();
   }

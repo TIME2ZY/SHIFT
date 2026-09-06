@@ -46,7 +46,20 @@ vi.mock("./queries", () => ({
         maxHandoffDepth: 1,
       },
       tools: { calls: 2, completed: 2, failed: 0, incomplete: 0, orphanFinishes: 0 },
-      memory: { searches: 1, injections: 1, writes: 1, active: 1 },
+      memory: {
+        searches: 5,
+        searchHits: 4,
+        averageMemoryHits: 1.6,
+        injections: 15,
+        injectionsDelivered: 13,
+        truncatedInjections: 3,
+        writes: 7,
+        writeCreated: 5,
+        writeUnchanged: 0,
+        writeSuperseded: 2,
+        writeRejected: 0,
+        active: 1,
+      },
       usage: { available: true, session: { totalTokens: 1200, costUsd: 0.12 }, agents: [] },
     },
     isPending: false,
@@ -103,6 +116,7 @@ describe("AuditPage", () => {
     expect(screen.getByText("会话证据概览")).toBeInTheDocument();
     expect(screen.getByText("2 轮")).toBeInTheDocument();
     expect(screen.getByText("1 Trace")).toBeInTheDocument();
+    expect(screen.getByText("4/5 检索命中")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "当前 Memory" })).toBeInTheDocument();
     expect(screen.getByText("存储")).toBeInTheDocument();
     expect(screen.getByText("检索 2 · 注入 1")).toBeInTheDocument();

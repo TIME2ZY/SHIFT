@@ -133,6 +133,11 @@ test("execution read model restores failure and handoff causality from SQLite", 
     assert.equal(summary.tools.incomplete, 1);
     assert.equal(summary.tools.orphanFinishes, 1);
     assert.equal(summary.execution.latestTrace.state, "active");
+    assert.equal(summary.memory.searches, 0);
+    assert.equal(summary.memory.searchHits, 0);
+    assert.equal(summary.memory.injections, 0);
+    assert.equal(summary.memory.writes, 0);
+    assert.equal(summary.memory.active, 0);
     assert.equal(storage.executions.auditSummary("other-thread"), null);
   } finally {
     recorder.close();

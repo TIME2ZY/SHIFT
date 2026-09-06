@@ -141,7 +141,20 @@ export interface SessionAuditSummary {
     incomplete: number;
     orphanFinishes: number;
   };
-  memory: { searches: number; injections: number; writes: number; active: number };
+  memory: {
+    searches: number;
+    searchHits: number;
+    averageMemoryHits: number | null;
+    injections: number;
+    injectionsDelivered: number;
+    truncatedInjections: number;
+    writes: number;
+    writeCreated: number;
+    writeUnchanged: number;
+    writeSuperseded: number;
+    writeRejected: number;
+    active: number;
+  };
   usage: UsageSummary;
 }
 

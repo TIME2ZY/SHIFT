@@ -441,9 +441,14 @@ source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP s
 时保持 `null`。旧 storage-level Trace detail 路由已删除。
 
 `GET /api/memories/usage?sessionId=` 是 Memory 使用证据的只读聚合入口：从
-`memory_searched` / `memory_injected` 事件 payload 的 `memoryIds` 派生每条 Memory 的
-被检索 / 被注入计数，供审计页 Memory 卡片展示；不写库、不建立第二真相源。审计页 Trace
-详情展示 Memory 检索 / 注入证据与工具执行汇总，逐条工具过程只在主会话展示。
+`memory_searched.memoryIds` 累计检索命中，从 `memory_injected.deliveredIds`（旧事件回退
+`memoryIds`）累计实际注入，并单独累计 `selected` / `dropped`。供审计页 Memory 卡片展示；
+不写库、不建立第二真相源。审计页 Trace 详情展示 Memory 检索 / 注入证据与工具执行汇总，
+逐条工具过程只在主会话展示。
+
+`GET /api/sessions/:sessionId/audit-summary` 的 `memory` 块除事件计数外，还投影本 Thread
+的检索命中次数、平均 Memory 层命中、注入送达/截断和 MCP 写入分类。会话证据概览默认展示
+这些数字。严格 Recall@K 仍只来自离线标注导入，无标注时保持 `null` 并显示“无离线标注”。
 
 `/api/storage/observability/metrics` 接受可选 `threadId` 并将 Thread scope 与时间窗一起下推到
 Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Console 必须传当前 Thread，
@@ -455,8 +460,9 @@ Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航�
 pending/unknown 分类的 Handoff 与 Memory 指标。Trace 详情以单条 waterfall 时间轴表达因果：每次
 模型 invocation 一条 generation 行，Memory 检索 / 注入为其子行，durable Handoff 渲染为 generation
 之间的连接行；逐条工具过程只在主会话展示，审计页仅保留工具执行汇总。Memory 卡片展示既有 row 的
-来源 Invocation、Message、创建者与 evidence anchor，并从 `memory_events` 使用证据聚合展示被检索 /
-被注入次数（只读派生，不回写）。
+来源 Invocation、Message、创建者与 evidence anchor，并从 `memory_events` 使用证据聚合展示被检索、
+被注入和预算丢弃次数（只读派生，不回写）。卡片上的「检索」只计 MCP `recall_search` 命中的
+Memory id；「注入」只计实际写入 prompt 的 delivered id。
 界面不自行聚合或缓存业务事实。右侧会话栏只保留 Agent 与用量，不再承载完整 Trace/Memory 工作台。
 
 Memory 在线指标按 Agent 行为拆分为 MCP search、实际 injection 与 MCP write。`memory_searched`

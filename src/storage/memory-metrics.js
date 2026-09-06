@@ -4,6 +4,7 @@
  */
 
 const { ENV } = require("../shared/brand");
+const { uniqueIds } = require("./memory-funnel");
 
 function isMemoryMetricsLogEnabled(env = process.env) {
   return /^(1|true|yes|on)$/i.test(String(env[ENV.MEMORY_METRICS_LOG] || ""));
@@ -96,10 +97,22 @@ function normalizeAvailability(stats = {}) {
     };
   }
   const empty =
-    stats.empty === true ||
-    (Array.isArray(stats.items) && stats.items.length === 0) ||
-    false;
+    stats.empty === true || (Array.isArray(stats.items) && stats.items.length === 0) || false;
   return { state: "available", empty, partial: false, reason: null };
+}
+
+function collectInjectIdSets(pack = {}, deliveredItems = []) {
+  const funnel = pack.funnel || pack.stats?.funnel || {};
+  const selectedIds = uniqueIds(funnel.selectedIds || (pack.items || []).map((item) => item.id));
+  const deliveredIds = uniqueIds(
+    funnel.deliveredIds ||
+      (deliveredItems.length ? deliveredItems : pack.items || []).map((item) => item.id)
+  );
+  const deliveredSet = new Set(deliveredIds);
+  const droppedIds = uniqueIds(
+    funnel.droppedIds || selectedIds.filter((id) => !deliveredSet.has(id))
+  );
+  return { selectedIds, deliveredIds, droppedIds };
 }
 
 function buildMemoryInjectPayload(input = {}) {
@@ -142,5 +155,6 @@ module.exports = {
   logMemoryWriteMetrics,
   slimInjectItems,
   buildMemoryInjectPayload,
+  collectInjectIdSets,
   normalizeAvailability,
 };
