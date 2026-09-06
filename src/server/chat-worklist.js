@@ -292,7 +292,10 @@ async function runChatWorklist(ctx) {
       const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
         dutyBinding?.duty,
         collabTaskRegistry?.getTask(sessionId) || null,
-        { branch: runWorkspace.branch || "" }
+        {
+          branch: runWorkspace.branch || "",
+          modelId: agentConfig.model || "",
+        }
       );
       const enforcesImplementationPermission =
         dutyBinding?.enforcementLevel === "enforced" &&

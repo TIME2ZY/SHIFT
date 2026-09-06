@@ -1706,6 +1706,7 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
               "相关验证通过，未保留旧接口测试",
               "## 风险与回滚",
               "风险可通过回滚该提交消除",
+              "来自 deepseek-v4-flash",
             ].join("\n\n"),
             ciStatus: "success",
           };
