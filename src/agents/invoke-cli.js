@@ -6,6 +6,7 @@ const {
   buildProviderTransportMcpServers,
   buildProviderEnvironment,
   getProviderDiagnostics,
+  getProviderAdapter,
 } = require("./providers");
 const { normalizeRunOptions } = require("./run-options");
 const { resolveProxy, resolveProviderProxy, proxyEnvVars } = require("./proxy");
@@ -179,7 +180,7 @@ function invoke(cli, prompt, options = {}) {
   // CLI session; if absent, cold start.
   const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
-  const transport = resolvedCli.transport || "cli";
+  const transport = resolvedCli.transport || getProviderAdapter(providerId).protocol || "cli";
   const workspaceCwd = process.env[ENV.WORKTREE_DIR] || process.cwd();
   const invocationId = process.env[ENV.INVOCATION_ID] || "standalone";
   const providerInvocation = buildProviderTransportInvocation(resolvedCli, prompt, transport, {

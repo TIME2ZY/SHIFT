@@ -217,12 +217,14 @@ test("provider options configure adapters without central provider branches", ()
   const grok = buildProviderInvocation(
     {
       ...CONFIGS.grok,
-      providerOptions: { alwaysApprove: false, autoUpdate: true },
+      providerOptions: { alwaysApprove: false },
     },
     "hello"
   );
   assert.equal(grok.args.includes("--always-approve"), false);
-  assert.equal(grok.args.includes("--no-auto-update"), false);
+  assert.ok(grok.args.includes("agent"));
+  assert.ok(grok.args.includes("stdio"));
+  assert.ok(!grok.args.includes("streaming-json"));
 });
 
 test("provider adapter owns provider-specific proxy precedence", () => {
