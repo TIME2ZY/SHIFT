@@ -77,7 +77,7 @@ function createGrokRuntime(cli) {
             ...base,
             sessionId: sessionId || "",
             provider: "grok",
-            model: (cli && cli.model) || "grok-4.6",
+            model: (cli && cli.model) || "",
           })
         );
       };

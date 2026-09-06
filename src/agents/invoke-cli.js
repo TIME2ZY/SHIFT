@@ -1,4 +1,4 @@
-const { AGENTS } = require("./catalog");
+const { AGENTS, loadAgentCatalogFromHome } = require("./catalog");
 const {
   createProviderRuntime,
   buildProviderInvocation,
@@ -17,7 +17,7 @@ const {
   superviseProviderProcess,
 } = require("./process-supervisor");
 const { ENV } = require("../shared/brand");
-const { ROOT } = require("../shared/runtime-paths");
+const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
 const { loadProjectEnv } = require("../shared/load-env");
 const { invokeAcp } = require("./invoke-acp");
 const { resolveImplementationGateEnv } = require("./workflow-gates");
@@ -284,6 +284,7 @@ if (require.main === module) {
   // Standalone CLI: pick up project .env (proxy, CODEX_HOME, …).
   // When spawned by the server, process.env is already populated; load is a no-op for set keys.
   loadProjectEnv(ROOT);
+  loadAgentCatalogFromHome(createRuntimePaths().shiftHome);
   main();
 }
 

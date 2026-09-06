@@ -336,6 +336,13 @@ routingReason, enforcementLevel }`，因此没有新增第二套调度器。
 写入首个 `invocation-start` 事件。初始 Duty 为显式请求值，否则 worktree=`implement`、普通会话=
 `discuss`；handoff Duty 来自 intent。当前 catalog 初始化是 Provider 可用性发现接入前的兼容步骤。
 
+Seat 绑定的模型 ID 不是 Provider 适配层。代码默认在 `src/agents/catalog.js`；本机覆盖为
+`SHIFT_HOME/agents.json`（可重建绑定，不是 SQLite 真相）。`createServer` 与 `invoke-cli`
+进程入口通过 `loadAgentCatalogFromHome` 套用绑定，公开启动路径仍是 catalog →
+`validateProviderConfig` → adapter。未知模型不再拒绝启动：`resolveModelProfile` 继承该
+Provider 已测档案的窗口/seal，并标记 `capacitySource=fallback`。不得再把模型名写成
+adapter fallback，也不得把模型列表写入 SQLite。
+
 `role-contracts.js` 已删除；catalog、identity、handoff policy 与证据门禁不再保存固定岗位。
 `plan` / `implement` / `fix` 的写权限等级由当前 Duty 与 Provider 的 `permissionCallbacks`
 运行能力共同决定；实现门禁通过通用 `SHIFT_IMPLEMENTATION_GATE` / `SHIFT_APPROVED_PLAN_HASH`

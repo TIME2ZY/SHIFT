@@ -27,24 +27,27 @@ test("provider registry includes antigravity", () => {
   assert.equal(typeof runtime.parseStdoutLine, "function");
 });
 
-test("AGENTS.gemini is catalogued as a Gemini 3.6 Flash runtime", () => {
+test("AGENTS.gemini is catalogued as a Gemini 3.8 Flash runtime", () => {
   assert.ok(AGENTS.gemini);
   assert.equal(AGENTS.gemini.label, "Gemini");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
-  assert.equal(AGENTS.gemini.model, "gemini-3.6-flash");
+  assert.equal(AGENTS.gemini.model, "gemini-3.8-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.match(AGENTS.gemini.description, /Antigravity CLI runtime/);
 });
 
 test("resolveAgyModelLabel embeds effort in CLI model name", () => {
+  assert.equal(resolveAgyModelLabel("gemini-3.8-flash", "high"), "Gemini 3.8 Flash (High)");
+  assert.equal(resolveAgyModelLabel("gemini-3.8-flash", "medium"), "Gemini 3.8 Flash (Medium)");
   assert.equal(resolveAgyModelLabel("gemini-3.6-flash", "high"), "Gemini 3.6 Flash (High)");
-  assert.equal(resolveAgyModelLabel("gemini-3.6-flash", "medium"), "Gemini 3.6 Flash (Medium)");
   assert.equal(resolveAgyModelLabel("gemini-3.5-flash", "high"), "Gemini 3.5 Flash (High)");
   assert.equal(resolveAgyModelLabel("gemini-3.1-pro", "low"), "Gemini 3.1 Pro (Low)");
+  assert.equal(resolveAgyModelLabel("gemini-3.7-flash", "high"), "Gemini 3.7 Flash (High)");
   assert.equal(
-    resolveAgyModelLabel("Gemini 3.6 Flash (High)", "medium"),
-    "Gemini 3.6 Flash (High)"
+    resolveAgyModelLabel("Gemini 3.8 Flash (High)", "medium"),
+    "Gemini 3.8 Flash (High)"
   );
+  assert.throws(() => resolveAgyModelLabel(""), /Antigravity model is required/);
 });
 
 test("buildInvocation for gemini uses the platform-safe print mode", () => {
@@ -53,7 +56,7 @@ test("buildInvocation for gemini uses the platform-safe print mode", () => {
   assert.ok(inv.args.includes("-p"));
   assert.ok(inv.args.includes("brainstorm names"));
   assert.ok(inv.args.includes("--model"));
-  assert.ok(inv.args.includes("Gemini 3.6 Flash (High)"));
+  assert.ok(inv.args.includes("Gemini 3.8 Flash (High)"));
   assert.ok(inv.args.includes("--dangerously-skip-permissions"));
   assert.ok(inv.args.includes("--mode"));
   assert.ok(inv.args.includes("plan"));
@@ -156,7 +159,7 @@ test("createAntigravityRuntime maps plain stdout lines to text.delta", () => {
   const events = runtime.transform(synthetic, ctx);
   assert.equal(events[0].type, "run.started");
   assert.equal(events[0].provider, "antigravity");
-  assert.equal(events[0].model, "Gemini 3.6 Flash (High)");
+  assert.equal(events[0].model, "Gemini 3.8 Flash (High)");
   assert.equal(events[1].type, "text.delta");
   assert.equal(events[1].text, "fresh idea one\n");
 

@@ -3,7 +3,11 @@ const test = require("node:test");
 const { resolveSealThresholds } = require("../../src/session/context-budget");
 const { getAgentSealThresholds } = require("../../src/session/health");
 const { makeSealer } = require("../../src/session/sealer");
-const { getAgentModelProfile, MODEL_PROFILES } = require("../../src/agents/catalog");
+const {
+  getAgentModelProfile,
+  getModelProfile,
+  MODEL_PROFILES,
+} = require("../../src/agents/catalog");
 
 test("resolveSealThresholds: absolute Gemini cap at 300k / 270k", () => {
   const t = resolveSealThresholds({
@@ -85,10 +89,15 @@ test("catalog: Codex 258400 @ 90%, OpenCode native 980k, Grok 85%", () => {
   assert.equal(opencode.nativeCompactTokens, 980_000);
 
   const gemini = getAgentModelProfile("gemini");
+  assert.equal(gemini.id, "gemini-3.8-flash");
   assert.equal(gemini.sealActionTokens, 300_000);
   assert.equal(gemini.sealSoftTokens, 270_000);
 
-  assert.equal(MODEL_PROFILES.length, 4);
+  const gemini36 = getModelProfile("antigravity", "gemini-3.6-flash");
+  assert.equal(gemini36.sealActionTokens, 300_000);
+
+  const providers = new Set(MODEL_PROFILES.map((profile) => profile.providerId));
+  assert.deepEqual([...providers].sort(), ["antigravity", "codex", "grok", "opencode"]);
 });
 
 test("shouldSoftSealAfterTurn respects Gemini softRatio ~0.34 usable", () => {

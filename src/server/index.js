@@ -2,7 +2,7 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { ENV } = require("../shared/brand");
-const { AGENTS, getAgentModelProfile } = require("../agents/catalog");
+const { AGENTS, getAgentModelProfile, loadAgentCatalogFromHome } = require("../agents/catalog");
 const { getProviderAdapter } = require("../agents/providers");
 const { parseA2AMentions, getMaxA2ADepth } = require("../agents/routing");
 const agentIdentity = require("../agents/identity");
@@ -88,12 +88,13 @@ function publicAgents() {
 }
 
 function createServer(options = {}) {
-  // Surface missing identity packs early so new agents aren't silent no-ops.
-  agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const uiToken = uiSecurity.createUiToken(options.uiToken);
   const appPaths =
     options.runtimePaths ||
     createRuntimePaths({ env: options.env || process.env, homeDir: options.homeDir });
+  loadAgentCatalogFromHome(appPaths.shiftHome);
+  // Surface missing identity packs early so new agents aren't silent no-ops.
+  agentIdentity.assertIdentitiesForAgents(Object.keys(AGENTS));
   const webDistDir = options.webDistDir || path.join(ROOT, "dist", "web");
   const webIndexPath = options.webIndexPath || path.join(webDistDir, "index.html");
   const spawnRunner = options.spawnRunner || spawn;

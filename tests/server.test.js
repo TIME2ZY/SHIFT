@@ -15,7 +15,8 @@ const { createStorage } = require("../src/storage");
 const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 const { initializeCatalogSeats } = require("../src/agents/duty-routing");
-const { AGENTS } = require("../src/agents/catalog");
+const { AGENTS, resetAgentCatalog } = require("../src/agents/catalog");
+const { createRuntimePaths } = require("../src/shared/runtime-paths");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -181,6 +182,30 @@ test("serves fixed agent list", async () => {
       assert.equal("workflowResponsibilities" in agent, false);
     }
   });
+});
+
+test("GET /api/agents reflects SHIFT_HOME model bindings", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "shift-agent-bind-home-"));
+  const runtimePaths = createRuntimePaths({ env: { SHIFT_HOME: home } });
+  fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
+  fs.writeFileSync(
+    runtimePaths.agentsConfigFile,
+    `${JSON.stringify({
+      agents: { gemini: { model: "gemini-3.7-flash", reasoningEffort: "medium" } },
+    })}\n`
+  );
+  try {
+    await withServer({ runtimePaths }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/agents`);
+      const body = await response.json();
+      const gemini = body.agents.find((agent) => agent.id === "gemini");
+      assert.equal(gemini.model, "gemini-3.7-flash");
+      assert.equal(gemini.reasoningEffort, "medium");
+    });
+  } finally {
+    resetAgentCatalog();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("server startup rejects retired online storage modes", () => {
