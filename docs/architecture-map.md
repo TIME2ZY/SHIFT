@@ -292,14 +292,14 @@ wire）。不订阅 `_x.ai/session_notification`，避免与 prompt result 双�
 
 ### 3.7 协作交付证据
 
-| 步骤                  | 权威入口                                                     | 责任方 / 调用方                                  | 结果                                                                  |
-| --------------------- | ------------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------- |
-| 实现方案证据          | `processWorkflowEvidenceOutput` → `submitImplementationPlan` | 正文与 callback 的 `plan / implement / fix` Duty | 与 Provider 权限回调能力无关；新方案撤销旧批准                        |
-| 代码 review           | `processWorkflowEvidenceOutput`                              | 当前 `review` / `deliver` Duty                   | changes requested 直接形成事件；approve 继续交付核验                  |
-| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                          | 当前交付 Duty 后由平台只读核对                   | 返回真实 Git/GitHub evidence                                          |
-| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery`        | collab task registry                             | 校验并持久化 review、commit、分支、PR 与 CI gate                      |
-| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 证据齐则写入 accepted；reject 写入 rejected；不足则 incomplete        |
-| 任务/验收卡只读       | `projectCollaboration` ← session-routes                      | UI / live harness                                | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据 |
+| 步骤                  | 权威入口                                                     | 责任方 / 调用方                                  | 结果                                                                   |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------- |
+| 实现方案证据          | `processWorkflowEvidenceOutput` → `submitImplementationPlan` | 正文与 callback 的 `plan / implement / fix` Duty | 与 Provider 权限回调能力无关；新方案撤销旧批准                         |
+| 代码 review           | `processWorkflowEvidenceOutput` → `recordCodeReview`         | 当前 `review` / `deliver` Duty                   | 结构化 `code_review` 单独写入 `codeReviewGate`；approve 不要求 receipt |
+| commit / PR / CI 取证 | `worktree/delivery-verifier.verify`                          | 当前交付 Duty 后由平台只读核对                   | 返回真实 Git/GitHub evidence                                           |
+| 交付契约校验          | `recordDeliveryEvidence` → `validateVerifiedDelivery`        | collab task registry                             | 校验并持久化已批准 review、commit、分支、PR 与 CI；不回写未审查状态    |
+| Agent 目标核验        | `submitFinalAcceptance`                                      | 当前 `accept` Duty                               | 证据齐则写入 accepted；reject 写入 rejected；不足则 incomplete         |
+| 任务/验收卡只读       | `projectCollaboration` ← session-routes                      | UI / live harness                                | `GET /api/sessions/:id/collaboration` 投影目标、Seat/Duty、阻塞与证据  |
 
 `GET /api/sessions/:sessionId/collaboration` 是任务卡与本线程 enabled Seats 的唯一公开读入口：
 无 task 仍返回 SQLite 席位条；有 task 从 `collaboration_tasks`、latest DutyBinding 和 Git worktree

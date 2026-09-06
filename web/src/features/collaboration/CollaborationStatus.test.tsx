@@ -109,6 +109,35 @@ describe("CollaborationStatus", () => {
     expect(screen.queryByRole("button", { name: "对照目标验收" })).not.toBeInTheDocument();
   });
 
+  it("shows approved review waiting for delivery instead of unreviewed", () => {
+    render(
+      <CollaborationStatus
+        loading={false}
+        error={null}
+        snapshot={snapshot({
+          phase: "review",
+          reviewMode: "other_seat",
+          blocker: {
+            type: "missing_evidence",
+            reason: "delivery_evidence_missing",
+          },
+          acceptance: {
+            ...snapshot().acceptance,
+            reviewMode: "other_seat",
+            reviewVerdict: "approved",
+          },
+          nextAction: "请补充 commit、PR 和 CI 交付证据。",
+        })}
+      />
+    );
+    expect(screen.getAllByText("另一席位审查").length).toBeGreaterThan(0);
+    expect(screen.getByText("等待交付证据")).toBeInTheDocument();
+    expect(screen.queryByText("等待代码审查")).not.toBeInTheDocument();
+    expect(screen.queryByText("尚未审查")).not.toBeInTheDocument();
+    expect(screen.getByText("通过")).toBeInTheDocument();
+    expect(screen.getByText("请补充 commit、PR 和 CI 交付证据。")).toBeInTheDocument();
+  });
+
   it("shows a rejected Seat verdict explicitly", () => {
     render(
       <CollaborationStatus

@@ -100,6 +100,55 @@ test("pending plan projects a categorized approval blocker without dumping the p
   assert.equal(JSON.stringify(snapshot).includes("src/index.js"), false);
 });
 
+test("approved review without delivery is waiting for evidence, not unreviewed", () => {
+  const snapshot = projectCollaboration(
+    {
+      phase: "review",
+      taskStatus: "active",
+      codeReviewGate: { verdict: "approve", evidenceHash: "rev-1" },
+      artifacts: { codeReview: { hash: "rev-1" } },
+    },
+    { allowed: true, status: "approved", planHash: "plan-1" },
+    {
+      bindings: [
+        { seatId: "seat-grok", duty: "implement" },
+        { seatId: "seat-codex", duty: "review" },
+      ],
+    }
+  );
+  assert.equal(snapshot.reviewMode, "other_seat");
+  assert.equal(snapshot.acceptance.reviewVerdict, "approved");
+  assert.deepEqual(snapshot.blocker, {
+    type: "missing_evidence",
+    reason: "delivery_evidence_missing",
+  });
+  assert.equal(snapshot.nextAction, "请补充 commit、PR 和 CI 交付证据。");
+});
+
+test("changes requested keep an explicit review blocker through the fix hop", () => {
+  const snapshot = projectCollaboration(
+    {
+      phase: "implement",
+      codeReviewGate: { verdict: "changes_requested", evidenceHash: "rev-2" },
+      artifacts: { codeReview: { hash: "rev-2" } },
+    },
+    { allowed: true, status: "approved" },
+    {
+      bindings: [
+        { seatId: "seat-grok", duty: "implement" },
+        { seatId: "seat-codex", duty: "review" },
+        { seatId: "seat-grok", duty: "fix" },
+      ],
+    }
+  );
+  assert.equal(snapshot.reviewMode, "other_seat");
+  assert.equal(snapshot.acceptance.reviewVerdict, "changes_requested");
+  assert.deepEqual(snapshot.blocker, {
+    type: "missing_evidence",
+    reason: "code_review_changes_requested",
+  });
+});
+
 test("review mode compares implementer and reviewer Duty bindings", () => {
   const task = {
     phase: "deliver",

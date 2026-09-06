@@ -121,12 +121,18 @@ CollaborationTask {
 
 不变量：
 
-- `goalOriginal` 保存触发任务的用户原话，后续不得覆盖。
+- `goalOriginal` 保存触发任务的用户原话，后续不得覆盖。handoff.goal 只属于该跳上下文，
+  不得改写任务目标。
 - 收敛目标变化产生新 `goalHash`，并使绑定旧 hash 的 final acceptance 失效。
 - `waiting_human` 不是交接或完成的必经状态；不得用它表达人审批闸门。
 - `accepted` 只能由 `accept` Duty 的 `final_acceptance` 在 evidence gate 通过后写入；Agent
   文本中的 done 不产生完成状态转换。证据不足时记录 `incomplete` 并保持 `active`。
 - 阶段是读模型投影，不能作为 Seat 或 Provider ID allowlist。
+- `codeReviewGate` 由 `recordCodeReview` 写入，是审查结论的唯一写入口；`deliveryGate` 由
+  `recordDeliveryEvidence` 写入。approve 不要求同一轮 `delivery_receipt`；缺少 receipt 时
+  任务保持 `active`，blocker 为等待交付，而不是尚未审查。
+- 协作事件必须带 `actorKind` 与 `actorId`。用户目标为 `human`；批准、审查、handoff 与完成
+  为 `seat`。
 
 建议 blocker 集合：
 

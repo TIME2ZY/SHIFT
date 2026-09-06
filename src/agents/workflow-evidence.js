@@ -63,13 +63,23 @@ function processWorkflowEvidenceOutput(input = {}) {
   if (["review", "deliver"].includes(duty)) {
     const review = parseCodeReview(content);
     const receipt = parseDeliveryReceipt(content);
-    if (review?.verdict === "approve") {
-      if (!receipt) {
-        events.push({
-          event: "delivery-evidence-rejected",
-          payload: { accepted: false, reason: "invalid_or_missing_delivery_receipt" },
-        });
-      } else if (!input.deliveryVerifier || typeof input.deliveryVerifier.verify !== "function") {
+    if (review) {
+      const recorded = registry.recordCodeReview(threadId, {
+        actorAgentId: agent,
+        actorDuty: duty,
+        review,
+      });
+      events.push({
+        event: recorded.accepted
+          ? review.verdict === "approve"
+            ? "code-review-approved"
+            : "code-review-changes-requested"
+          : "code-review-rejected",
+        payload: summarize(recorded, ["verdict", "reviewEvidenceHash", "reused"]),
+      });
+    }
+    if (review?.verdict === "approve" && receipt) {
+      if (!input.deliveryVerifier || typeof input.deliveryVerifier.verify !== "function") {
         events.push({
           event: "delivery-evidence-rejected",
           payload: { accepted: false, reason: "delivery_verifier_unavailable" },
@@ -92,11 +102,6 @@ function processWorkflowEvidenceOutput(input = {}) {
           payload: summarize(result, ["readyForAcceptance", "reviewEvidenceHash"]),
         });
       }
-    } else if (review) {
-      events.push({
-        event: "code-review-changes-requested",
-        payload: { accepted: true, verdict: review.verdict, summary: review.summary },
-      });
     }
   }
 

@@ -40,7 +40,9 @@ tests:
 ```
 ````
 
-可放行时进入 deliver Duty；若当前只要求 review，应明确给出下一动作。
+可放行时进入 deliver Duty。若当前只要求 review：必须输出 `code_review`，不得补假
+`delivery_receipt`；平台会把审查结论单独入账，任务卡显示已审查、等待交付。放行后的下一跳是
+`deliver`，除非用户明确只要审查。
 
 ## 交付（approve 之后）
 
