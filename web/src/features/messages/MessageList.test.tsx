@@ -503,7 +503,7 @@ describe("MessageList", () => {
     expect(screen.getByText("Gemini 正在继续分析")).toBeInTheDocument();
   });
 
-  it("does not paint the same final answer on callback and final for one invocation", async () => {
+  it("replaces a callback with the final at its pre-handoff transcript position", async () => {
     const user = userEvent.setup();
     const finalText =
       "我查一下这次 handoff 有没有被平台接受，以及 Gemini 是否真的产生了 invocation。";
@@ -542,7 +542,7 @@ describe("MessageList", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    renderMessageList(
+    const { container } = renderMessageList(
       <MessageList
         sessionId="s1"
         messages={[
@@ -554,6 +554,14 @@ describe("MessageList", () => {
             invocationId: "i-handoff",
             messageType: "assistant-callback",
             content: handoffText,
+          },
+          {
+            id: "route1",
+            role: "system",
+            messageType: "a2a-route",
+            from: "codex",
+            to: "gemini",
+            content: "Codex → Gemini",
           },
           {
             id: "f1",
@@ -594,7 +602,15 @@ describe("MessageList", () => {
     );
 
     expect(screen.getAllByText(finalText)).toHaveLength(1);
-    expect(screen.getByText("@Gemini", { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText("@Gemini", { exact: false })).not.toBeInTheDocument();
+    const transcriptItems = Array.from(
+      container.querySelector(".react-messages")?.children || []
+    );
+    expect(transcriptItems.map((item) => item.className)).toEqual([
+      "react-message",
+      "react-message",
+      "react-handoff-divider",
+    ]);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("shell")).not.toBeInTheDocument();
 
@@ -610,6 +626,40 @@ describe("MessageList", () => {
       "/api/sessions/s1/invocations/i-handoff/process",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
+  });
+
+  it("keeps a completed callback when no handoff divider separates it from the final", () => {
+    renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[
+          {
+            id: "cb1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i-progress",
+            messageType: "assistant-callback",
+            content: "中途状态",
+          },
+          {
+            id: "f1",
+            role: "assistant",
+            agentId: "codex",
+            invocationId: "i-progress",
+            messageType: "assistant-final",
+            content: "最终结果",
+          },
+        ]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={null}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("中途状态")).toBeInTheDocument();
+    expect(screen.getByText("最终结果")).toBeInTheDocument();
   });
 
   it("keeps a standalone live bubble while only a callback exists for the invocation", () => {
