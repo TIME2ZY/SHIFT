@@ -82,13 +82,21 @@
   --focus-ring-danger:
     0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 60%, transparent);
 
-  /* Typography roles */
-  --font-brand: "Space Grotesk", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-ui: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* UI copy and source code stay different. Each role is the same on every page. */
+  --font-brand:
+    "Space Grotesk", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-ui:
+    "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
   --font-body: var(--font-ui);
   --font-sans: var(--font-ui);
-  --font-mono: "JetBrains Mono", Consolas, "Courier New", ui-monospace, monospace;
-
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas,
+    "Microsoft YaHei Mono", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace;
+  --font-mono-features: "liga" 0, "calt" 0;
+  --text-code: 13px;
+  --text-code-line: 1.65;
 
   /* Spacing scale (8px base) */
   --space-1: 4px;

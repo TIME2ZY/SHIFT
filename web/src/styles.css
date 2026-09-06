@@ -1052,11 +1052,11 @@ body {
 }
 
 .react-chat-empty code {
-  padding: 2px 6px;
+  padding: 0.15em 0.4em;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   background: var(--surface-inset);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-code);
   color: var(--accent);
 }
 
@@ -1355,32 +1355,39 @@ body {
   word-break: break-all;
 }
 
-.react-markdown code {
-  padding: 0.15em 0.4em;
+.react-markdown :not(pre) > code {
+  padding: 0.12em 0.38em;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   background: var(--surface-inset);
-  font: 0.9em/1.5 var(--font-mono);
-  word-break: break-word;
+  font-size: 0.875em;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .react-markdown pre {
   max-width: 100%;
   box-sizing: border-box;
-  padding: var(--space-4);
+  padding: 12px 14px;
   overflow-x: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-inset);
   white-space: pre;
   word-break: normal;
+  overflow-wrap: normal;
 }
 
 .react-markdown pre code {
+  display: block;
   padding: 0;
   border: 0;
   background: transparent;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .react-markdown blockquote {
@@ -1596,7 +1603,9 @@ body {
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: var(--text-secondary);
-  font: 12px/1.6 var(--font-mono);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
@@ -1694,7 +1703,7 @@ body {
   border-radius: 999px;
   background: var(--surface-inset);
   color: var(--text-tertiary);
-  font: 10px/1.4 var(--font-sans);
+  font: 10px/1.4 var(--font-ui);
   white-space: nowrap;
 }
 
@@ -1751,17 +1760,19 @@ body {
 .react-tool-call-body pre {
   max-height: 260px;
   margin: 0;
-  padding: var(--space-2);
+  padding: 12px 14px;
   overflow: auto;
-  border-radius: var(--radius-xs);
-  background: var(--surface);
-  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .react-tool-call-body code {
-  font: 11px/1.55 var(--font-mono);
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .react-tool-empty {
@@ -3489,7 +3500,7 @@ body {
   border-radius: var(--radius-sm);
   background: var(--surface-canvas);
   color: var(--text-primary);
-  font: 12px/1.4 var(--font-sans);
+  font: 12px/1.4 var(--font-ui);
 }
 
 .react-acceptance-actions > div {
@@ -3605,7 +3616,7 @@ body {
   padding: 8px 10px;
   background: var(--surface-instrument);
   color: var(--text-primary);
-  font: 12px/1.45 var(--font-sans);
+  font: 12px/1.45 var(--font-ui);
 }
 
 .react-handoff-fields textarea:focus {
