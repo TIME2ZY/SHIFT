@@ -3,7 +3,7 @@ const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
 const { grokAcpAdapter } = require("./grok-acp");
 const { antigravityProvider } = require("./antigravity");
-const { requireModelProfile } = require("../catalog");
+const { resolveModelProfile } = require("../catalog");
 const {
   assertCanonicalEvent,
   makeEvent,
@@ -91,7 +91,7 @@ function validateProviderOptions(adapter, providerOptions) {
 function validateProviderConfig(config) {
   const providerId = config && config.providerId;
   const adapter = getProviderAdapter(providerId);
-  const modelProfile = config.model ? requireModelProfile(providerId, config.model) : null;
+  const modelProfile = config.model ? resolveModelProfile(providerId, config.model) : null;
 
   validateProviderOptions(adapter, config.providerOptions);
 
@@ -294,11 +294,7 @@ function buildProviderTransportInvocation(
   return adapter.buildInvocation(config, prompt, context);
 }
 
-function buildProviderTransportMcpServers(
-  config,
-  env,
-  transport = config?.transport || "cli"
-) {
+function buildProviderTransportMcpServers(config, env, transport = config?.transport || "cli") {
   const adapter = getProviderTransportAdapter(config, transport);
   if (typeof adapter.buildMcpServers !== "function") return [];
   const servers = adapter.buildMcpServers(config, env);

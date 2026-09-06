@@ -27,7 +27,7 @@ const CONFIGS = {
   grok: { providerId: "grok", model: "grok-4.6", reasoningEffort: "high" },
   antigravity: {
     providerId: "antigravity",
-    model: "gemini-3.6-flash",
+    model: "gemini-3.8-flash",
     reasoningEffort: "high",
   },
 };

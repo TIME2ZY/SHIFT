@@ -15,7 +15,8 @@ const { createStorage } = require("../src/storage");
 const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 const { initializeCatalogSeats } = require("../src/agents/duty-routing");
-const { AGENTS } = require("../src/agents/catalog");
+const { AGENTS, resetAgentCatalog } = require("../src/agents/catalog");
+const { createRuntimePaths } = require("../src/shared/runtime-paths");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -132,6 +133,7 @@ async function withServer(options, fn) {
       serverOptions.storage = liveStorage;
     }
     const server = createServer({
+      availabilityProbe: async () => ({ status: "unknown", reason: null }),
       memoryDbFile,
       worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
       uiToken: TEST_UI_TOKEN,
@@ -155,6 +157,55 @@ async function withServer(options, fn) {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
+
+test("availability refresh preserves seats and never creates business runs", async () => {
+  let available = false;
+  let probes = 0;
+  await withServer(
+    {
+      availabilityProbe: async () => {
+        probes += 1;
+        return {
+          status: available ? "available" : "unavailable",
+          reason: available ? null : "地区限制",
+        };
+      },
+    },
+    async (baseUrl) => {
+      const created = await createProjectSession(baseUrl).then((res) => res.json());
+      const sessionId = created.session.id;
+      const getSeats = () =>
+        fetch(`${baseUrl}/api/sessions/${sessionId}/collaboration`).then((res) => res.json());
+      const before = await getSeats();
+      assert.equal(before.seats.length, 4);
+      const unavailable = await fetch(`${baseUrl}/api/agents`).then((res) => res.json());
+      assert.equal(
+        unavailable.agents.every((agent) => agent.routable === false),
+        true
+      );
+      const rejected = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        body: JSON.stringify({ sessionId, agent: "gemini", prompt: "hello" }),
+      });
+      assert.equal(rejected.status, 503);
+      assert.equal((await rejected.json()).code, "NO_ROUTABLE_SEATS");
+      available = true;
+      const refreshed = await fetch(`${baseUrl}/api/agents/refresh`, {
+        method: "POST",
+        body: JSON.stringify({ agent: "gemini" }),
+      });
+      assert.equal(refreshed.status, 202);
+      const current = await fetch(`${baseUrl}/api/agents`).then((res) => res.json());
+      assert.equal(current.agents.find((agent) => agent.id === "gemini").routable, true);
+      assert.deepEqual((await getSeats()).seats, before.seats);
+      const restored = await fetch(`${baseUrl}/api/sessions/${sessionId}`).then((res) =>
+        res.json()
+      );
+      assert.equal(restored.session.messages.length, 0);
+      assert.equal(probes, 5);
+    }
+  );
+});
 
 test("serves fixed agent list", async () => {
   await withServer({}, async (baseUrl) => {
@@ -181,6 +232,30 @@ test("serves fixed agent list", async () => {
       assert.equal("workflowResponsibilities" in agent, false);
     }
   });
+});
+
+test("GET /api/agents reflects SHIFT_HOME model bindings", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "shift-agent-bind-home-"));
+  const runtimePaths = createRuntimePaths({ env: { SHIFT_HOME: home } });
+  fs.mkdirSync(runtimePaths.dataDir, { recursive: true });
+  fs.writeFileSync(
+    runtimePaths.agentsConfigFile,
+    `${JSON.stringify({
+      agents: { gemini: { model: "gemini-3.7-flash", reasoningEffort: "medium" } },
+    })}\n`
+  );
+  try {
+    await withServer({ runtimePaths }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/agents`);
+      const body = await response.json();
+      const gemini = body.agents.find((agent) => agent.id === "gemini");
+      assert.equal(gemini.model, "gemini-3.7-flash");
+      assert.equal(gemini.reasoningEffort, "medium");
+    });
+  } finally {
+    resetAgentCatalog();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("server startup rejects retired online storage modes", () => {
@@ -1946,6 +2021,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
   seedStorage.close();
 
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     uiToken: TEST_UI_TOKEN,
     memoryDbFile,
     storageMode: "sqlite",

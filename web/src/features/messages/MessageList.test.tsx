@@ -34,11 +34,12 @@ describe("MessageList", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "使用推荐提示：讨论并交给 Grok 出方案" }));
+    await user.click(screen.getByRole("button", { name: "使用推荐提示：收敛问题与方案" }));
     expect(onUsePrompt).toHaveBeenCalledWith({
-      title: "讨论并交给 Grok 出方案",
-      description: "先收敛问题，再让 Grok 提交可批准的 implementation_plan",
-      prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
+      title: "收敛问题与方案",
+      description: "先确认目标与约束，再整理实施方案",
+      prompt:
+        "请先确认问题和约束，再提交 implementation_plan；需要协作时选择当前可路由席位。本轮不要改代码。",
     });
   });
 

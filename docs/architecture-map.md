@@ -334,7 +334,22 @@ routingReason, enforcementLevel }`，因此没有新增第二套调度器。
 
 `durableRecorder.startInvocation` 在原有 start 事务内写入且只写入一条 DutyBinding，并把 Seat/Duty
 写入首个 `invocation-start` 事件。初始 Duty 为显式请求值，否则 worktree=`implement`、普通会话=
-`discuss`；handoff Duty 来自 intent。当前 catalog 初始化是 Provider 可用性发现接入前的兼容步骤。
+`discuss`；handoff Duty 来自 intent。catalog 初始化只创建编制；`src/agents/provider-availability.js` 维护独立的进程内可用性。
+`src/agents/probe-provider.js` 在 server listening 后通过既有 invoke-cli.js 和配置的 CLI/ACP
+短生成检测一次，25 秒墙钟终止进程树，无 TTL。GET /api/agents 返回观测，
+POST /api/agents/refresh 手动重新检测。探测无业务写入，close 时取消。
+chat-routes 在发送前检查可用性，chat-worklist 注入可路由 @ 表并回写真实 Provider 观测；
+a2a-finalize（含 callback）在 fan-out 截断前过滤不可路由席位，继续既有 acceptHandoff/enqueue。
+前端 App 以 enabled Seat 与可用性求交，RightPanel 保留编制、原因和重新检测入口。
+Codex 已在 turn.completed 输出最终文本时，进程 finish 不再误报空回答；
+OpenCode/Antigravity 的 Provider 错误通过规范 stderr 保留原因，供真实观测与探测共同使用。
+
+Seat 绑定的模型 ID 不是 Provider 适配层。代码默认在 `src/agents/catalog.js`；本机覆盖为
+`SHIFT_HOME/agents.json`（可重建绑定，不是 SQLite 真相）。`createServer` 与 `invoke-cli`
+进程入口通过 `loadAgentCatalogFromHome` 套用绑定，公开启动路径仍是 catalog →
+`validateProviderConfig` → adapter。未知模型不再拒绝启动：`resolveModelProfile` 继承该
+Provider 已测档案的窗口/seal，并标记 `capacitySource=fallback`。不得再把模型名写成
+adapter fallback，也不得把模型列表写入 SQLite。
 
 `role-contracts.js` 已删除；catalog、identity、handoff policy 与证据门禁不再保存固定岗位。
 `plan` / `implement` / `fix` 的写权限等级由当前 Duty 与 Provider 的 `permissionCallbacks`

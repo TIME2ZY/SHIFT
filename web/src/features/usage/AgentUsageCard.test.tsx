@@ -1,9 +1,41 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { AgentUsageCard } from "./AgentUsageCard";
 import { compactTokens, contextLabel, contextRatio, contextSourceLabel } from "./format";
 
 describe("AgentUsageCard", () => {
+  it("keeps unavailable seat and reason visible, blocks selection, and allows refresh", async () => {
+    const select = vi.fn();
+    const refresh = vi.fn();
+    render(
+      <AgentUsageCard
+        agent={{
+          id: "gemini",
+          label: "Gemini",
+          routable: false,
+          availability: {
+            providerId: "antigravity",
+            status: "unavailable",
+            reason: "当前出口地区不受支持",
+            checking: false,
+            observedAt: null,
+          },
+        }}
+        disabled
+        selected={false}
+        status="idle"
+        onSelect={select}
+        onRefresh={refresh}
+      />
+    );
+    expect(screen.getByText("不可用")).toBeVisible();
+    expect(screen.getByText("当前出口地区不受支持")).toBeVisible();
+    await userEvent.click(screen.getByRole("radio"));
+    expect(select).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "重新检测 Gemini" }));
+    expect(refresh).toHaveBeenCalledOnce();
+  });
   it("formats compact token values", () => {
     expect(compactTokens(999)).toBe("999");
     expect(compactTokens(2_400)).toBe("2.4k");

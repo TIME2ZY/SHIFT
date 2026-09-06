@@ -101,11 +101,13 @@ test("buildInvocation for grok resumes with -r session id", () => {
   assert.equal(inv.args[rIdx + 1], "019f50e8-88a0-7ee1-b525-df3b193ced6b");
 });
 
-test("buildInvocation rejects unsupported grok model", () => {
-  assert.throws(
-    () => buildInvocation({ providerId: "grok", model: "grok-nope" }, "x"),
-    /Unsupported grok model/
+test("buildInvocation passes unknown grok models through to the CLI", () => {
+  const inv = buildInvocation(
+    { providerId: "grok", model: "grok-nope", reasoningEffort: "high" },
+    "x"
   );
+  assert.ok(inv.args.includes("-m"));
+  assert.ok(inv.args.includes("grok-nope"));
 });
 
 test("resolveGrokCommand returns a string", () => {

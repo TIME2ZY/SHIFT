@@ -29,6 +29,7 @@ const { ensureAntigravityShiftContextConfig } = require("../shift-context-mcp-co
  * capabilities.thinking stays false until a real reasoning text stream exists.
  *
  * Available models (agy models):
+ *   Gemini 3.8 Flash (Low|Medium|High)
  *   Gemini 3.6 Flash (Low|Medium|High)
  *   Gemini 3.5 Flash (Low|Medium|High)
  *   Gemini 3.1 Pro (Low|High)
@@ -40,12 +41,21 @@ const SUPPORTED_EFFORTS = new Set(["low", "medium", "high"]);
 const SUPPORTED_MODES = new Set(["accept-edits", "plan"]);
 const SUPPORTED_OUTPUT_FORMATS = new Set(["text", "json", "stream-json"]);
 
-/** Catalog model id → CLI family label prefix. */
+/** Known catalog ids that should not rely on kebab-case humanizing. */
 const MODEL_FAMILY = {
+  "gemini-3.8-flash": "Gemini 3.8 Flash",
   "gemini-3.6-flash": "Gemini 3.6 Flash",
   "gemini-3.5-flash": "Gemini 3.5 Flash",
   "gemini-3.1-pro": "Gemini 3.1 Pro",
 };
+
+function humanizeAgyModelId(modelId) {
+  return String(modelId)
+    .split("-")
+    .filter(Boolean)
+    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
 
 /**
  * Map catalog model + reasoningEffort to the Antigravity CLI --model string.
@@ -53,11 +63,13 @@ const MODEL_FAMILY = {
  */
 function resolveAgyModelLabel(modelId, reasoningEffort = "high") {
   const raw = String(modelId || "").trim();
-  if (!raw) return "Gemini 3.6 Flash (High)";
-  // Already a full CLI label, e.g. "Gemini 3.6 Flash (High)"
+  if (!raw) {
+    throw new Error("Antigravity model is required.");
+  }
+  // Already a full CLI label, e.g. "Gemini 3.8 Flash (High)"
   if (/\(.*\)\s*$/.test(raw)) return raw;
 
-  const family = MODEL_FAMILY[raw] || raw;
+  const family = MODEL_FAMILY[raw] || humanizeAgyModelId(raw);
   const effortRaw = String(reasoningEffort || "high").toLowerCase();
   const effort = SUPPORTED_EFFORTS.has(effortRaw) ? effortRaw : "high";
   const effortLabel = effort.charAt(0).toUpperCase() + effort.slice(1);
@@ -202,7 +214,7 @@ function toolIdFromStep(step, toolName) {
 function createAntigravityRuntime(cli) {
   let emittedRunStarted = false;
   let sawTextDelta = false;
-  let modelLabel = resolveAgyModelLabel(cli && cli.model, cli && cli.reasoningEffort);
+  let modelLabel = cli && cli.model ? resolveAgyModelLabel(cli.model, cli.reasoningEffort) : "";
 
   return {
     extractSessionId(event) {
@@ -223,6 +235,10 @@ function createAntigravityRuntime(cli) {
         invocationId: ctx.invocationId,
       };
       if (!event || typeof event !== "object") return [];
+
+      if (typeof event.error === "string" && event.error) {
+        return [makeEvent("stderr", { ...base, text: event.error })];
+      }
 
       const out = [];
       const ensureStarted = (sessionId) => {

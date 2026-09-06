@@ -19,6 +19,8 @@ interface AgentUsageCardProps {
   selected: boolean;
   disabled?: boolean;
   onSelect(agentId: string): void;
+  onRefresh?(): void;
+  refreshing?: boolean;
 }
 
 const STATUS_LABELS: Record<AgentActivityStatus, string> = {
@@ -37,6 +39,8 @@ export function AgentUsageCard({
   selected,
   disabled,
   onSelect,
+  onRefresh,
+  refreshing = false,
 }: AgentUsageCardProps) {
   const billing = usage?.billing;
   const context = usage?.context;
@@ -44,6 +48,12 @@ export function AgentUsageCard({
   const ratio = contextRatio(context);
   const totalTokens = Number(billing?.totalTokens || 0);
   const model = [agent.modelVendor, agent.model].filter(Boolean).join(" · ");
+  const unavailable = agent.routable === false;
+  const availabilityLabel = unavailable
+    ? "不可用"
+    : agent.availability?.status === "available"
+      ? "可接活"
+      : "待确认";
 
   function select() {
     if (disabled) return;
@@ -64,13 +74,14 @@ export function AgentUsageCard({
       data-agent-color={agentColorSlot(agent.id)}
       data-selected={selected || undefined}
       data-status={status}
+      data-unavailable={unavailable || undefined}
     >
       <div
         className="react-agent-select"
         role="radio"
         aria-checked={selected}
         aria-disabled={disabled || undefined}
-        aria-label={`${agent.label}${model ? `，${model}` : ""}，${STATUS_LABELS[status]}`}
+        aria-label={`${agent.label}${model ? `，${model}` : ""}，${STATUS_LABELS[status]}${unavailable ? "，不可用" : ""}`}
         tabIndex={disabled ? -1 : 0}
         onClick={select}
         onKeyDown={handleKeyDown}
@@ -89,6 +100,28 @@ export function AgentUsageCard({
           </span>
         ) : null}
       </div>
+
+      {agent.availability ? (
+        <div className="react-agent-availability" data-unavailable={unavailable || undefined}>
+          <div className="react-agent-availability-row">
+            <span>
+              <i aria-hidden="true" />
+              {refreshing ? "检测中" : availabilityLabel}
+            </span>
+            {onRefresh ? (
+              <button
+                type="button"
+                disabled={refreshing}
+                onClick={onRefresh}
+                aria-label={`重新检测 ${agent.label}`}
+              >
+                {refreshing ? "请稍候…" : "重新检测"}
+              </button>
+            ) : null}
+          </div>
+          {agent.availability.reason ? <p>{agent.availability.reason}</p> : null}
+        </div>
+      ) : null}
 
       {selected ? (
         <div className="react-agent-details">

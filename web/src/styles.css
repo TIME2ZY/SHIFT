@@ -3659,7 +3659,7 @@ body {
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.react-agent-card:hover:not([aria-disabled="true"]) {
+.react-agent-card:hover:not([aria-disabled="true"]):not([data-unavailable]) {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border));
   box-shadow: var(--shadow-md);
@@ -4657,4 +4657,80 @@ body {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+/* Seat roster remains visible when a provider cannot accept work. */
+.react-seat-availability-summary {
+  margin: 0 0 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.react-seat-availability-summary strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 20px;
+}
+.react-seat-availability-summary small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+.react-agent-card[data-unavailable] {
+  cursor: default;
+  border-color: var(--border-subtle);
+  background: var(--surface-instrument);
+  box-shadow: none;
+}
+.react-agent-card[data-unavailable] .react-agent-select {
+  cursor: default;
+  filter: grayscale(1);
+  color: var(--text-secondary);
+}
+.react-agent-availability {
+  margin: 0 12px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.react-agent-availability-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.react-agent-availability-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.react-agent-availability i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.react-agent-availability p {
+  margin: 6px 0 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.react-agent-availability button {
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-nav);
+  font: inherit;
+  cursor: pointer;
+}
+.react-agent-availability button:hover:not(:disabled) {
+  background: var(--accent-nav-bg);
+}
+.react-agent-availability button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.react-agent-availability button:disabled {
+  color: var(--text-secondary);
+  cursor: wait;
 }

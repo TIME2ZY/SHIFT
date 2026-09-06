@@ -41,26 +41,37 @@ handoff 时保持当前席位，不会因为职责变化随机换人。
 
 SHIFT 与"把几个 CLI 串起来"的区别在于：平台不信任 Agent 的自述，每个关键跃迁都要拿出证据。
 
-| 门禁       | 谁触发                | 平台核对什么                                                       |
-| ---------- | --------------------- | ------------------------------------------------------------------ |
-| 方案批准   | discuss / accept Duty | 新方案 hash 自动撤销旧批准；支持权限回调时，未批准只放行只读操作   |
-| 代码评审   | review / deliver Duty | 结构化 `code_review`；changes requested 回到 implement / fix Duty  |
-| 交付核验   | deliver Duty          | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI     |
-| 最终完成   | accept Duty           | 对照目标、方案、review 和 commit 写入完成态；证据不足保存为 `incomplete` |
+| 门禁     | 谁触发                | 平台核对什么                                                             |
+| -------- | --------------------- | ------------------------------------------------------------------------ |
+| 方案批准 | discuss / accept Duty | 新方案 hash 自动撤销旧批准；支持权限回调时，未批准只放行只读操作         |
+| 代码评审 | review / deliver Duty | 结构化 `code_review`；changes requested 回到 implement / fix Duty        |
+| 交付核验 | deliver Duty          | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI           |
+| 最终完成 | accept Duty           | 对照目标、方案、review 和 commit 写入完成态；证据不足保存为 `incomplete` |
 
 所有协作事实——Trace、Invocation、Handoff、Gate——都落在 SQLite，并通过内置审计控制台可视化：失败断点、Handoff 漏斗、Memory 命中率、每步的因果链路。
 
 ### Provider 与席位
 
-Agent 配置以 [`src/agents/catalog.js`](src/agents/catalog.js) 为准。
+Provider 适配层以 [`src/agents/catalog.js`](src/agents/catalog.js) 和
+[`src/agents/providers/`](src/agents/providers/) 为准。默认模型可被
+`SHIFT_HOME/agents.json` 覆盖，不必为换模型版本改代码。
 
-| Provider     | 默认模型                  | 运行方式        |
-| ------------ | ------------------------- | --------------- |
-| **Codex**    | `gpt-5.6-sol`             | Codex CLI       |
-| **Gemini**   | `gemini-3.6-flash`        | Antigravity CLI |
-| **Grok**     | `grok-4.6`                | Grok Build ACP  |
-| **OpenCode** | `deepseek-v4-flash` (max) | OpenCode CLI    |
+| Provider     | 默认模型            | 默认推理 | 运行方式        |
+| ------------ | ------------------- | -------- | --------------- |
+| **Codex**    | `gpt-5.6-sol`       | medium   | Codex CLI       |
+| **Gemini**   | `gemini-3.8-flash`  | high     | Antigravity CLI |
+| **Grok**     | `grok-4.6`          | high     | Grok Build ACP  |
+| **OpenCode** | `deepseek-v4-flash` | max      | OpenCode CLI    |
 
+```json
+{
+  "agents": {
+    "gemini": { "model": "gemini-3.8-flash", "reasoningEffort": "high" }
+  }
+}
+```
+
+未知模型会继承该 Provider 已测过的窗口/seal 档案，不再作为启动白名单拒绝。
 Provider 只描述启动方式、模型和运行能力。Thread 的 enabled Seat 决定谁可参与，每次 invocation
 再绑定 `discuss | plan | implement | fix | review | deliver | accept | recall` 中的一项 Duty。
 SHIFT 不打包这些 CLI，也不管理它们的账号。

@@ -1,4 +1,8 @@
+import type { ProviderAvailability } from "../../../../src/shared/provider-availability";
+
 export interface AgentSummary {
+  availability?: ProviderAvailability;
+  routable?: boolean;
   id: string;
   label: string;
   mention?: string;

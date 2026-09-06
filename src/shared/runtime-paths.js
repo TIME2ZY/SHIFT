@@ -23,6 +23,7 @@ function createRuntimePaths(options = {}) {
   return Object.freeze({
     shiftHome,
     dataDir,
+    agentsConfigFile: path.join(shiftHome, "agents.json"),
     databaseFile: path.join(dataDir, "shift.sqlite"),
     auditTranscriptDir: path.join(dataDir, "audit-transcripts"),
     rawEventsDir: path.join(dataDir, "raw-events"),

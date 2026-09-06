@@ -69,7 +69,16 @@ function finalizeA2ARoutes(input = {}) {
   const taskRegistry = input.collabTaskRegistry || collabTaskRegistry;
   const threadSeats = input.threadSeats || null;
   const agents = input.agents || {};
-  const enabledSeats = threadSeats?.listEnabledForThread?.(sessionId) || [];
+  const enabledSeats = (threadSeats?.listEnabledForThread?.(sessionId) || []).filter(
+    (seat) => !input.availability || input.availability.isRoutable(seat.providerId)
+  );
+  const routableAgents = Object.fromEntries(
+    Object.entries(agents).filter(
+      ([id]) =>
+        enabledSeats.some((seat) => seat.providerId === id) &&
+        (!input.availability || input.availability.isRoutable(id))
+    )
+  );
   const aborted =
     input.controller && input.controller.signal && input.controller.signal.aborted ? true : false;
 
@@ -78,7 +87,9 @@ function finalizeA2ARoutes(input = {}) {
   const mode = input.policyMode || resolveHandoffPolicyMode();
   const mentionParser =
     typeof input.parseMentions === "function" ? input.parseMentions : parseA2AMentions;
-  const mentions = mentionParser(text, fromAgent);
+  const mentions = mentionParser(text, fromAgent, routableAgents).filter(
+    (id) => !input.availability || input.availability.isRoutable(id)
+  );
 
   /** @type {Record<string, object|null>} */
   const handoffByTarget = {};

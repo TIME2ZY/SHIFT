@@ -15,7 +15,7 @@ triggers:
 
 # 代码 review 与交付
 
-当前 invocation 承担 review 或 deliver Duty。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。同一份剧本可由任意已启用 Seat 执行。
+当前 invocation 承担 review 或 deliver Duty。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。同一份剧本可由任意当前可跑的启用席位 执行。
 
 ## Review
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import type { AgentSummary } from "../agents/types";
+import { useRefreshAgentMutation } from "../agents/queries";
 import { CollaborationStatus } from "../collaboration/CollaborationStatus";
 import { useCollaborationQuery } from "../collaboration/queries";
 import { AgentUsageCard, type AgentActivityStatus } from "../usage/AgentUsageCard";
@@ -43,6 +44,7 @@ export function RightPanel({
   );
   const closeRef = useRef<HTMLButtonElement>(null);
   const usage = useUsageQuery(sessionId, !compactLayout || open);
+  const refresh = useRefreshAgentMutation();
   const collaboration = useCollaborationQuery(sessionId, !compactLayout || open);
   const seats = collaboration.data?.seats;
   const enabledAgents = seats
@@ -93,6 +95,18 @@ export function RightPanel({
       </header>
 
       <div className="react-panel-body react-panel-body-agents">
+        {sessionId ? (
+          <p className="react-seat-availability-summary">
+            <strong>{enabledAgents.filter((agent) => agent.routable !== false).length}</strong>
+            <span> / {enabledAgents.length} 席位可接活</span>
+            <small>不可用席位保留，恢复后可再次选择</small>
+          </p>
+        ) : null}
+        {refresh.error ? (
+          <p className="react-panel-error" role="alert">
+            重新检测未能启动，请重试。
+          </p>
+        ) : null}
         {!sessionId ? <p className="react-panel-empty">请先选择对话。</p> : null}
         {sessionId ? (
           <CollaborationStatus
@@ -113,7 +127,12 @@ export function RightPanel({
               usage={usage.data?.agents.find((item) => item.agentId === agent.id)}
               status={activityStatus(agent.id, run)}
               selected={selectedAgentId === agent.id}
-              disabled={!sessionId}
+              disabled={!sessionId || agent.routable === false}
+              onRefresh={() => refresh.mutate(agent.id)}
+              refreshing={
+                agent.availability?.checking ||
+                (refresh.isPending && refresh.variables === agent.id)
+              }
               onSelect={(agentId) => {
                 onAgentChange(agentId);
                 if (compactLayout) onClose();

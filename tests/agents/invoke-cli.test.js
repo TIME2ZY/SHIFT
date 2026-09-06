@@ -303,7 +303,7 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.codex.model, "gpt-5.6-sol");
   assert.equal(AGENTS.codex.reasoningEffort, "medium");
   assert.equal(AGENTS.codex.label, "Codex");
-  assert.equal(AGENTS.gemini.model, "gemini-3.6-flash");
+  assert.equal(AGENTS.gemini.model, "gemini-3.8-flash");
   assert.equal(AGENTS.gemini.reasoningEffort, "high");
   assert.equal(AGENTS.gemini.providerId, "antigravity");
   assert.equal(AGENTS.grok.model, "grok-4.6");

@@ -8,6 +8,7 @@ const {
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
+const { observeAvailabilityEvent } = require("../agents/provider-availability");
 const { renderCollaborationRules } = require("../agents/collaboration-rules");
 const {
   IMPLEMENTATION_GATE_STATUS,
@@ -265,7 +266,11 @@ async function runChatWorklist(ctx) {
         ]
       );
       const enabledAgents = Object.fromEntries(
-        Object.entries(AGENTS).filter(([providerId]) => enabledProviderIds.has(providerId))
+        Object.entries(AGENTS).filter(
+          ([providerId]) =>
+            enabledProviderIds.has(providerId) &&
+            (!ctx.availability || ctx.availability.isRoutable(providerId))
+        )
       );
       const collaborationBlock = renderCollaborationRules(agent, enabledAgents);
       const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
@@ -885,6 +890,7 @@ async function runChatWorklist(ctx) {
           signal: invocationController.signal,
           env: invocationEnv,
           onEvent(event) {
+            observeAvailabilityEvent(ctx.availability, agent, event);
             sendSse(res, "agent-event", event);
             if (typeof event.sessionId === "string" && event.sessionId && durableRun?.window?.id) {
               observedProviderSessionId = event.sessionId;
@@ -911,6 +917,7 @@ async function runChatWorklist(ctx) {
             durableCoalescer.accept(event);
           },
           onStderr(text) {
+            ctx.availability?.observeFailure(agent, text);
             durableCoalescer.flushAll();
             persistDurableEvent("stderr", { agent, text });
             const visible = filterBenignStderr(text);
@@ -1364,6 +1371,7 @@ async function runChatWorklist(ctx) {
         collabTaskRegistry,
         threadSeats: storage?.threadSeats || null,
         agents: AGENTS,
+        availability: ctx.availability,
         fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
         fromDuty: threadCtx.currentDutyBinding?.duty || null,
       });

@@ -20,7 +20,7 @@ related:
 **Accepted，core model implemented**
 
 本 ADR 的 Seat、Duty、按职责 Skill、任务卡、accept Duty 完成与证据绑定合同已进入在线路径。
-Provider availability 仍作为派生运行信息逐步收口；当前代码锚点与兼容边界由
+Provider availability 是进程内派生观测，启动后检测一次，手动重新检测，无 TTL；当前代码锚点由
 `docs/architecture-map.md` 描述。
 
 ADR-004 中 Invocation 终态、handoff 幂等、SQLite 真相源、artifact hash 绑定和证据失效等
@@ -84,12 +84,15 @@ explicit_mention | handoff_to | sticky | affinity | solo_fallback
 
 ### 3.3 路由顺序
 
-路由只在当前 Thread 的 enabled Seats 中选择，顺序如下：
+路由只在当前 Thread 的可路由 Seats 中选择：enabled 与 available/unknown 的交集。
+可用性不改 Seat 编制；明确不可用的 mention 忽略，其他目标继续；零可路由席位发送显式失败。
+检测使用真实传输短生成与约 25 秒墙钟超时，不写业务实体；超时记 unknown。
+真实 Provider 认证、地区和启动失败立即更新观测，普通任务失败不影响名单。顺序如下：
 
 1. 行首 `@Seat` 或结构化 `handoff.to` 明确指定 Seat 时，选择该 Seat；未启用则拒绝。
 2. 结构化 handoff 指定下一跳 Duty、但未指定 Seat 时，按 Duty allow、运行能力、prefer 和
-   avoid 对 enabled Seats 排序，并记录 `affinity`。
-3. 没有 mention、没有 handoff 时保持当前 Seat，并记录 `sticky`；Duty 变化本身不得触发换席。
+   avoid 对可路由 Seats 排序，并记录 `affinity`。
+3. 没有 mention、没有 handoff 时保持当前可路由 Seat，并记录 `sticky`；当前不可用时选择可路由席位；Duty 变化本身不得触发换席。
 4. review 等 Duty 只有原执行 Seat 合格时允许自审，并记录 `solo_fallback`。
 5. 证据无法裁定时显式失败或保持 `active` 并列出 blocker，不插入 Human 审批，也不继续轮询 Provider。
 

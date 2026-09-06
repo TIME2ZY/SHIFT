@@ -20,19 +20,20 @@ interface QuickPrompt {
 
 const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
   {
-    title: "讨论并交给 Grok 出方案",
-    description: "先收敛问题，再让 Grok 提交可批准的 implementation_plan",
-    prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
+    title: "收敛问题与方案",
+    description: "先确认目标与约束，再整理实施方案",
+    prompt:
+      "请先确认问题和约束，再提交 implementation_plan；需要协作时选择当前可路由席位。本轮不要改代码。",
   },
   {
     title: "交叉验证实现方向",
-    description: "Gemini 提出方向与反例，Codex 负责收敛",
-    prompt: "@Gemini 针对当前目标提出两个实现方向和反例，再交给 @Codex 收敛。",
+    description: "比较实现方向与反例，选择可用席位交叉验证",
+    prompt: "针对当前目标提出两个实现方向和反例；有其他可路由席位时交叉验证，否则自行检查并收敛。",
   },
   {
     title: "在隔离 worktree 中实现",
-    description: "按已批准方案改代码，完成后交给 OpenCode 审查",
-    prompt: "请按已批准方案在隔离 worktree 中实现，完成后交给 @OpenCode 审查。",
+    description: "按已批准方案改代码，再完成审查与验证",
+    prompt: "请按已批准方案在隔离 worktree 中实现，完成后选择可路由席位审查；单席位时自审。",
     useWorktree: true,
   },
 ];

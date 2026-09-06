@@ -103,7 +103,7 @@ export function Composer({
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     const prompt = draft.trim();
-    if (!sessionId || running || !prompt || submittingRef.current) return;
+    if (!sessionId || running || !prompt || !targetAgent || submittingRef.current) return;
     submittingRef.current = true;
     const clientTurnId = crypto.randomUUID();
     setDrafts((current) => ({ ...current, [sessionId]: "" }));
@@ -178,7 +178,7 @@ export function Composer({
                 ? "将在隔离 worktree 中运行"
                 : targetAgent
                   ? `发给 ${targetAgent.label} · Enter 发送`
-                  : "只读讨论 · Enter 发送"}
+                  : "暂无可接活席位 · 请查看席位卡并重新检测"}
         </span>
       </div>
 

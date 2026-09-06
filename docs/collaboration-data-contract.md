@@ -79,13 +79,24 @@ ProviderAvailability {
   providerId: string
   status: available | authentication_required | unavailable | unknown
   reason: string | null
-  observedAt: timestamp
-  expiresAt: timestamp
+  observedAt: timestamp | null
+  checking: boolean
 }
 ```
 
 该对象是缓存和读模型，不是核心业务事实。探测不得写 Message、Invocation、Handoff 或协作任务。
-用户手动选择 `unknown` Provider 时只改变 Seat 配置；启动失败仍由正常 Invocation/Trace 失败语义记录。
+运行配置按 catalog Agent ID 绑定（例如 gemini 的实际 Provider 为 antigravity），不能混用两个 ID。
+服务 listen 后后台短生成检测一次，走配置的真实 CLI/ACP 传输，墙钟上限约 25 秒；
+结果在本进程内保留，无 TTL 和定时重测。手动重新检测或重启后重新观测。
+`routable = enabled Seat ∩ (available | unknown)`；检测、失败与恢复均不修改 Seat。
+初始、超时和不确定错误为 unknown；认证、地区限制、二进制缺失为明确不可用。
+探测中的非临时生成失败也记 unavailable（短生成没有业务任务）；CLI 未返回详细原因时明确显示原因未知。
+余额不足也排除路由；真实会话的普通任务失败仍不改变 Provider 可用性。
+真实调用中的明确 Provider 错误立即回写；任务失败、用户取消不改变可用性。
+同一 Agent 检测去重，旧检测结果不能覆盖检测期间较新的真实调用观测。
+prompt、mention（在 fan-out 截断之前）、当前发送席位均使用当前可路由名单。
+不可用 mention 忽略，不创建 Handoff 或 repair；全部不可路由时发送显式失败。
+已启动 Invocation 仍通过原终态入口闭环。UI 同时展示编制、可用性原因和重新检测入口。
 
 ## 5. Collaboration task
 

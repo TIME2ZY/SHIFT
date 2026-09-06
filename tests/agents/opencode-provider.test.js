@@ -10,6 +10,23 @@ const { createProviderRuntime, buildProviderEnvironment } = require("../../src/a
 const { buildInvocation } = require("../../src/agents/invoke-cli");
 const { AGENTS } = require("../../src/agents/catalog");
 
+test("provider API error retains its actionable message", () => {
+  const runtime = createOpencodeRuntime(AGENTS.opencode);
+  const events = runtime.transform(
+    {
+      type: "error",
+      error: {
+        name: "APIError",
+        data: { message: "Insufficient balance", responseHeaders: { secret: "omit" } },
+      },
+    },
+    { agent: "opencode", invocationId: "probe" }
+  );
+  assert.equal(events[0].type, "stderr");
+  assert.equal(events[0].text, "Insufficient balance");
+  assert.equal(JSON.stringify(events).includes("secret"), false);
+});
+
 test("normalizeToolArgs maps filePath to path for UI", () => {
   assert.deepEqual(normalizeToolArgs({ filePath: "a/b.js" }).path, "a/b.js");
   assert.deepEqual(normalizeToolArgs({ file_path: "x" }).path, "x");

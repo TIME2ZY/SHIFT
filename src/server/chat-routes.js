@@ -6,10 +6,16 @@ const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
 const { prepareSkillDelivery: defaultPrepareSkillDelivery } = require("./skills");
-const { buildDutyBinding, initialDuty, resolveEnabledSeat } = require("../agents/duty-routing");
+const {
+  buildDutyBinding,
+  initialDuty,
+  resolveEnabledSeat,
+  seatAvailabilityError,
+} = require("../agents/duty-routing");
 const { activeSkillNames } = require("../agents/duty-routing");
 
 function createChatRoutes({
+  availability,
   selfGitRoot,
   options,
   AGENTS,
@@ -117,6 +123,15 @@ function createChatRoutes({
         error: `Seat for agent "${requestedAgent}" is not enabled in this Session.`,
         code: "SEAT_NOT_ENABLED",
       });
+      return true;
+    }
+    const availabilityError = seatAvailabilityError(
+      storage.threadSeats.listEnabledForThread(sessionId),
+      requestedAgent,
+      availability
+    );
+    if (availabilityError) {
+      sendJson(res, 503, availabilityError);
       return true;
     }
     let requestedDuty;
@@ -397,6 +412,7 @@ function createChatRoutes({
     let aborted = false;
     const runObs = createRunObservability({ startedAt: Date.now() });
     const threadCtx = {
+      availability,
       sessionId,
       traceId,
       res,
@@ -430,6 +446,7 @@ function createChatRoutes({
     let ownedInvocationSlotAtCleanup = false;
 
     const workCtx = {
+      availability,
       res,
       sendSse,
       sessionId,
