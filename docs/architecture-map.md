@@ -447,8 +447,9 @@ source tables，不建立第二业务真相源；Memory 在线指标拆为 MCP s
 逐条工具过程只在主会话展示。
 
 `GET /api/sessions/:sessionId/audit-summary` 的 `memory` 块除事件计数外，还投影本 Thread
-的检索命中次数、平均 Memory 层命中、注入送达/截断和 MCP 写入分类。会话证据概览默认展示
-这些数字。严格 Recall@K 仍只来自离线标注导入，无标注时保持 `null` 并显示“无离线标注”。
+的检索命中次数、平均 Memory 层命中、注入送达/截断和 MCP 写入分类。审计页顶栏会话结论条
+默认展示这些数字；近 24 小时对照与离线 Recall 收在 Memory 栏折叠区。严格 Recall@K 仍只
+来自离线标注导入，无标注时保持 `null` 并显示“无离线标注”。
 
 `/api/storage/observability/metrics` 接受可选 `threadId` 并将 Thread scope 与时间窗一起下推到
 Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Console 必须传当前 Thread，
