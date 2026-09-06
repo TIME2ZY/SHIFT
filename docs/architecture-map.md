@@ -6,6 +6,10 @@
 >
 > **依据：** `AGENTS.md` 主链路、目录职责、真相源与架构实现地图维护要求。
 >
+> **ADR：** 现行 `001` 真相源、`002` Trace/Handoff 契约、`003` 可选向量召回、`005` Memory
+> 仅 thread、`006` Project/`SHIFT_HOME`、`007` Seat/Duty、`008` FTS trigram。
+> `004` 已被 `007` 取代，不得再当选席或门禁依据。
+>
 > **维护：** 代码改变本文件所列路径、入口、边界或结论时，必须在同一 PR 中同步更新。
 
 ---
@@ -99,10 +103,14 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 调度器面对的唯一写入口 = `completeInvocation({ invocationId, code, signal, reason, endPayload, message? })`。
 - 底层 `finishInvocation` / `finishWithAssistantMessage` 仅为模块私有实现，公开 recorder 不再导出。
 - 分支决策（何时带 message、何时 aborted）仍在 chat-routes；B-1 收口的是**写入口**，不是把业务 if 全部下沉（避免夹带行为变更）。
-- Codex 正文权威：中途 `agent_message` 只发 `commentary.delta`；`turn.completed` 把末条
-  `agent_message` 提升为 `text.delta`；`finish()` 仅在尚未提升时读 `--output-last-message`。
-  失败/中止若已有 `text.delta`，`completeInvocation` 仍带 assistant-final，handoff 仍只在
-  成功路径解析正文。
+- Codex 正文权威：中途 `agent_message` 只发 `commentary.delta`，不得当作 assistant-final。
+  最终回答只有一次 `text.delta`：`turn.completed` 提升末条 commentary；`finish()` 仅在尚未
+  提升时读 `--output-last-message`（否则回退末条 commentary）。成功结束却没有最终文本则
+  `run.failed`。失败/中止若已有 `text.delta`，`completeInvocation` 仍带 assistant-final，
+  handoff 仍只在成功路径解析正文。
+- Grok 只走 ACP（`grok agent --no-leader stdio`）。已删除 streaming-json CLI runtime、
+  `cliCapabilities` 和 `--output-format streaming-json` 启动路径；请求 `transport=cli`
+  会显式失败。
 - Provider 空闲超时只 terminate 一次；Windows 用 `taskkill /T /F` 杀掉进程树。超时
   `console.error` 不得重复刷 stderr，以免上层把终止日志当成 child 活动。
 - Callback **仍不** finish invocation；孤儿 reconcile 仍走 force 终端 API。
@@ -211,8 +219,9 @@ invocation 的 `SHIFT_*` 环境传入：
 | Grok ACP    | `session/new` / `session/load` 的 `mcpServers` stdio descriptor | invocation                                       |
 | Antigravity | `~/.gemini/config/mcp_config.json` 的 `shift_context` 注册      | 持久注册；不落 token，子进程继承 invocation 环境 |
 
-Grok 使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都注入当前 invocation 的
-`SHIFT_*` 凭据；旧 `--plugin-dir` 与仓库内 Grok MCP 插件已删除。Antigravity 项目插件不是
+Grok 只使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都注入当前 invocation 的
+`SHIFT_*` 凭据。streaming-json CLI 适配器已删除。旧 `--plugin-dir` 与仓库内 Grok MCP 插件
+已删除。Antigravity 项目插件不是
 在线路径；全局注册合并既有 server，若同名 server 不属于 SHIFT 则显式失败。
 
 Grok ACP billing usage 只从 `acp.prompt_result` 映射为一条 `usage.update`：优先
@@ -318,6 +327,7 @@ phase=`done` 而没有匹配的 Seat 完成决定时，也不会投影为已验�
 承担 `deliver` Duty 的 Seat 负责 PR 描述。平台要求 PR title 为 10–100 个字符，PR body 固定包含
 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、
 `## 测试（旧接口测试是否处理）`、`## 风险与回滚`；缺少任一章节都会拒绝交付证据。
+正文末尾另起一行 `来自 <模型 ID>`，写当前 Seat 绑定的模型 ID，不要写厂家或 Seat 名；缺少该行同样拒绝交付证据。
 
 ---
 
@@ -550,5 +560,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-09-03。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-09-06。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。

@@ -3,6 +3,7 @@ title: "ADR-005: Product Memory is thread-only; project truth in docs"
 status: accepted
 decision_id: ADR-005
 created: 2026-08-06
+amended: 2026-09-06
 scope: memory write, inject, recall memory layer, project knowledge
 supersedes:
   - "Default decision/constraint → project scope in memory-data-contract"
@@ -14,7 +15,10 @@ related:
 
 ## 状态
 
-**Accepted — implementing on `feat/model-defaults-and-memory-scope`**
+**Accepted — implemented**
+
+产品 Memory 只允许 thread；`scope=project` 写入被拒绝。现行 schema、ownership 和注入
+规则以 `docs/memory-data-contract.md` 为准。
 
 ## 背景
 
@@ -28,7 +32,8 @@ related:
 3. Active Memory 注入与 `listActiveForTurn` **只读当前 thread**。
 4. 跨会话项目结论必须 **主动写入仓库文档**（优先 `docs/decisions/`），经 project
    evidence 索引后用 `recall_search` 的 `project-doc` 检索；不自动注入 prompt。
-5. 存量 active project 产品记忆用脚本 supersede 退役（`scripts/retire-project-memories.js`）。
+5. 存量 active project 产品记忆用脚本 supersede 退役（`scripts/retire-project-memories.js`，
+   在线库为 `SHIFT_HOME/data/shift.sqlite`，不要默认仓库 `data/runtime`）。
 6. Agent / session 检索的 product Memory 固定 `memoryScope=thread`，不得再通过
    `project`/`all` 跨 thread 命中 project 行。
 7. 退役导出写到 `archive/memory-exports/`（不进 `docs/**` project-doc 索引）；

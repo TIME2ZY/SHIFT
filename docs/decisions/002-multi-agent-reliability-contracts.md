@@ -3,11 +3,12 @@ title: "ADR-002: Multi-Agent Reliability and Trace Contracts"
 status: accepted
 decision_id: ADR-002
 created: 2026-07-28
-amended: 2026-08-12
+amended: 2026-09-06
 scope: trace identity, invocation lifecycle, A2A handoff hops, metric eligibility, memory funnel, and observability boundaries
 supersedes: []
 related:
   - ./001-storage-truth-boundary.md
+  - ./007-seat-duty-evidence-workflow.md
   - ./004-five-phase-collaboration-workflow.md
   - ../../src/shared/collab-contracts.js
 ---
@@ -16,25 +17,25 @@ related:
 
 ## 1. 状态
 
-**Accepted — Phase 0–3 implemented**
+**Accepted — Trace / Invocation / durable Handoff 已落地**
 
-本 ADR 冻结 Trace、Invocation、Handoff、指标资格和 Memory 漏斗的命名与边界。现有
-Invocation durable finish、Handoff 进程内幂等和 Memory funnel 已部分实现；本次 0A 只修改
-契约，不宣称 Trace source tables、durable Handoff 或 Trace 查询已经落地。
+本 ADR 冻结 Trace、Invocation、Handoff、指标资格和 Memory 漏斗的命名与边界。
+`trace_runs`、handoff repository、重启 reconcile 和 Trace 查询已进入在线热路径；
+进程内 Handoff Map 不再仲裁 accept / bind / terminal。当前代码锚点以
+`docs/architecture-map.md` 为准。
 
-当前实现路径以 `docs/architecture-map.md` 为准。0B 完成代码切换后必须同步更新该文件，
-不得为了匹配本 ADR 的目标状态而保留旧热路径。
+协作任务状态与选席合同以 ADR-007 为准；ADR-004 的固定工号和 phase allowlist 已退出。
 
-共享枚举和校验的代码真相源是 `src/shared/collab-contracts.js`。0B 新增或改变公开状态时，
+共享枚举和校验的代码真相源是 `src/shared/collab-contracts.js`。新增或改变公开状态时，
 必须先修改本 ADR，再修改共享契约和运行实现。
 
 ## 2. 背景
 
-现有系统已经具备 SQLite Invocation、规范化 durable events、canonical audit outbox、
-Provider diagnostics、Memory telemetry 和一次性 Handoff metrics，但它们的耐久度不同：
+落地前系统已经具备 SQLite Invocation、规范化 durable events、canonical audit outbox、
+Provider diagnostics、Memory telemetry 和一次性 Handoff metrics，但耐久度不同：
 
-- Invocation start/finish 和 invocation events 是权威 SQLite 写入；
-- Handoff accept、bind、complete 主要由进程内 registry 仲裁，重启后不能恢复；
+- Invocation start/finish 和 invocation events 已是权威 SQLite 写入；
+- Handoff accept、bind、complete 当时主要由进程内 registry 仲裁，重启后不能恢复；
 - Memory telemetry 使用 best-effort 写入，不能天然成为可靠指标分母；
 - `run-observability` 是请求内存对象并通过 SSE 输出，不是历史成功率真相源；
 - `thread`、用户 turn、HTTP request attempt 和 invocation 尚未形成稳定的 Trace 身份；
@@ -51,9 +52,9 @@ Provider diagnostics、Memory telemetry 和一次性 Handoff metrics，但它们
 | ---------------- | ---------------------------------------------------------- | ------------------------------- |
 | `thread_id`      | 多轮会话和 Project 绑定；等价于 Trace 系统的 group/session | SQLite Thread                   |
 | `client_turn_id` | 用户提交的幂等意图标识，不代表一次执行尝试                 | SQLite Message                  |
-| `trace_id`       | 服务端接受的一次 chat request attempt                      | SQLite Trace source row（0B）   |
+| `trace_id`       | 服务端接受的一次 chat request attempt                      | SQLite Trace source row         |
 | `invocation_id`  | 一次 Agent/Provider 执行                                   | SQLite Invocation               |
-| `handoff_id`     | 一次跨 Agent 路由尝试                                      | SQLite Handoff source row（0B） |
+| `handoff_id`     | 一次跨 Agent 路由尝试                                      | SQLite Handoff source row       |
 
 规则：
 
@@ -129,7 +130,7 @@ Trace 默认展示为父子树，但业务因果是有向无环图：
 caused_by | handoff_to | retry_of | supersedes | duplicate_of | repairs | resumes
 ```
 
-0B 必须持久化 Invocation 与 Handoff 的必需因果坐标。通用 `span` / `span_link` 是后续可重建
+Invocation 与 Handoff 的必需因果坐标必须持久化。通用 `span` / `span_link` 是可重建
 Trace read model，不得成为 Invocation 或 Handoff 的第二业务真相源。
 
 ## 5. Durable Handoff 契约
@@ -168,7 +169,7 @@ complete_status: pending | completed | failed | aborted
 5. target Invocation terminal 与 Handoff terminal 必须在同一 SQLite 事务中提交。
 6. completed Handoff 不得退回 pending；恢复只能补齐可由权威数据证明的状态。
 7. chat end 与 callback 可以触发同一 finalize 用例，但幂等必须在 SQLite 权威入口完成。
-8. 0B 完成后，进程内 registry 必须退出 duplicate、binding 和 terminal 仲裁职责。
+8. 进程内 registry 不得再承担 duplicate、binding 和 terminal 仲裁；权威入口是 SQLite。
 9. `accepted` 只表示 SQLite 已接受路由；`enqueued_at` 必须在目标确实加入本次调度队列后写入，
    不得在 accept 时预填。enqueue 确认写失败时必须撤销对应的进程内队列追加并 fail closed。
 10. 服务启动必须先将遗留 active Invocation 写为 failed 并追加 durable `invocation-end`，再收口
@@ -243,9 +244,9 @@ retrieved → ranked → selected → rendered → delivered → used → correc
 
 | 数据                         | 分类                                         |
 | ---------------------------- | -------------------------------------------- |
-| Trace request lifecycle      | SQLite 权威业务事实（0B）                    |
+| Trace request lifecycle      | SQLite 权威业务事实                          |
 | Invocation lifecycle         | SQLite 权威业务事实                          |
-| Handoff lifecycle            | SQLite 权威业务事实（0B）                    |
+| Handoff lifecycle            | SQLite 权威业务事实                          |
 | Invocation durable events    | SQLite 权威规范事件                          |
 | Trace spans、links、聚合指标 | 可重建读模型                                 |
 | Memory telemetry             | best-effort 诊断事实，除非与业务事务原子写入 |
@@ -358,26 +359,17 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   `sentry-envelope`，不得把自定义 JSON 声称为标准 OTLP。不得发送 ID、prompt、response、query、
   tool payload、文件或环境变量。发送失败只影响 exporter health，不改变在线业务结果。
 
-## 9. Phase 0 实施边界
+## 9. 实施边界
 
-### 9.1 Phase 0A（本次文档提交）
-
-- 更新 ADR-001 和本 ADR；
-- 冻结身份、状态、因果、指标和隐私契约；
-- 不修改 schema、runtime、SSE、UI 或 `architecture-map.md`；
-- 不提前声称 durable Handoff 或 Trace source tables 已实现。
-
-### 9.2 Phase 0B（后续实现提交）
-
-按顺序落地：
+下列目标已落地，不再作为未完成工作：
 
 1. Trace identity、request lifecycle 和统一 Invocation outcome。
 2. Durable Handoff accept/enqueue/bind/complete 与重启 reconcile。
-3. Trace 完整性查询、health 和旧进程内仲裁路径退出。
-4. 更新 `architecture-map.md`，执行恢复演练和完整回归。
+3. Trace 完整性查询、health；进程内 Handoff Map 退出仲裁。
+4. `docs/architecture-map.md` 描述当前入口。
 
-阶段 0 不包含 Trace Explorer、Dashboard、通用 tool/generation spans、feedback/evaluator、
-告警或 OTLP exporter。
+本 ADR 仍不把 Dashboard 内存对象、通用 tool/generation spans 或 OTLP exporter 当成
+业务真相源。协作选席与完成合同以 ADR-007 为准。
 
 ## 10. 后果
 

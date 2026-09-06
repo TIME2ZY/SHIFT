@@ -1,7 +1,22 @@
-# ADR 003: Optional sqlite-vec projection for hybrid recall
+---
+title: "ADR-003: Optional sqlite-vec projection for hybrid recall"
+status: accepted
+decision_id: ADR-003
+created: 2026-07-30
+amended: 2026-09-06
+scope: embedding_items, sqlite-vec, hybrid recall
+supersedes: []
+related:
+  - ./001-storage-truth-boundary.md
+  - ./008-recall-fts-tokenizer.md
+  - ./006-project-first-runtime-home.md
+---
 
-- Status: Accepted
-- Date: 2026-07-30
+# ADR-003: Optional sqlite-vec projection for hybrid recall
+
+## 状态
+
+**Accepted — implemented as an optional, default-off projection**
 
 ## Decision
 
@@ -51,10 +66,11 @@ SHIFT_EMBEDDING_DIMENSIONS=...
 SHIFT_EMBEDDING_API_KEY=...
 ```
 
-Backfill active Memory and eligible L0/project passages:
+Backfill active Memory and eligible L0/project passages against the online
+database (`SHIFT_HOME/data/shift.sqlite`, or an explicit `--db`):
 
 ```text
-npm run backfill:embeddings -- --db data/runtime/shift.sqlite
+npm run backfill:embeddings -- --db "$SHIFT_HOME/data/shift.sqlite"
 ```
 
 Limit a resumable run to selected layers with `--kinds`, for example

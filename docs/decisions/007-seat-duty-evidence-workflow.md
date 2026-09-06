@@ -3,6 +3,7 @@ title: "ADR-007: Seat, Duty, and Evidence-Based Workflow"
 status: accepted
 decision_id: ADR-007
 created: 2026-09-03
+amended: 2026-09-06
 scope: provider availability, thread seats, invocation duties, routing, gates, and completion
 supersedes:
   - ./004-five-phase-collaboration-workflow.md
@@ -29,7 +30,7 @@ ADR-004 中 Invocation 终态、handoff 幂等、SQLite 真相源、artifact has
 
 ## 2. 背景
 
-当前实现把三类概念绑定在同一个 Agent ID 上：
+落地前的实现把三类概念绑定在同一个 Agent ID 上：
 
 - Provider 决定 CLI/ACP 如何启动；
 - 固定角色决定该 Agent 能做什么；
@@ -185,9 +186,11 @@ Provider 探测是带时间戳的派生运行状态，不是业务真相源：
 available | authentication_required | unavailable | unknown
 ```
 
-探测必须有超时和缓存，不得创建业务 invocation、message 或 handoff。SQLite 中的 enabled Seat
-仍是 Thread 编制的唯一真相源。用户可以手动启用状态为 `unknown` 的 Provider；实际拉起失败时
-必须产生显式 invocation/trace 失败，不能静默改派。
+探测在 server listening 后通过真实传输做一次短生成，约 25 秒墙钟超时，无 TTL；之后只在
+用户手动刷新时再探。探测不得创建业务 invocation、message 或 handoff。上次结果一直保留到
+下一次探测，不是带过期的缓存。SQLite 中的 enabled Seat 仍是 Thread 编制的唯一真相源。
+用户可以手动启用状态为 `unknown` 的 Provider；实际拉起失败时必须产生显式
+invocation/trace 失败，不能静默改派。
 
 ## 4. Human actor
 
@@ -236,19 +239,18 @@ handoff 仍只消费一次，并由 SQLite 的 accept/enqueue/bind/terminal 生�
 
 ## 8. 迁移和旧路径退出
 
-目标实现采用一次后端纵向切换，不长期维护两套公开语义：
+后端已完成一次纵向切换，不再维护两套公开选席/门禁语义：
 
-1. 现有 Thread 中出现过的 Agent ID 按 Provider 映射为 enabled Seat；没有历史参与者的 Thread
-   使用可用 Provider 或进入明确的零 Seat 状态。
-2. 迁移 collaboration task 的 goal、artifact、gate 和历史事件；五阶段只供兼容读取和迁移，
-   不继续作为在线路由真相。
-3. invocation 创建切换为 Seat/DutyBinding 后，删除 `AGENT_ROLE_CONTRACTS`、
-   `agentIdsForRole` 和按 Agent ID 的 intent/phase allowlist 在线依赖。
-4. gate、identity、handoff policy、Skill 投递和 Web 类型全部切到共享 Seat/Duty 合同。
-5. 删除或合并保护固定工号语义的测试，新增单 Seat、双 Seat、恢复和证据失效测试。
-6. 代码完成后同步更新 `docs/architecture-map.md` 与 README；在此之前两者继续描述当前实现。
+1. 现有 Thread 中出现过的 Agent ID 按 Provider 回填为 enabled Seat。
+2. collaboration task 的 goal、artifact、gate 和历史事件已迁移；五阶段只供只读投影，
+   不是在线路由真相。
+3. `AGENT_ROLE_CONTRACTS`、`agentIdsForRole`、`role-contracts.js` 和按 Agent ID 的
+   intent/phase allowlist 已退出在线热路径。
+4. gate、identity、handoff policy、Skill 投递和 Web 类型使用 Seat/Duty 合同。
+5. 保护固定工号语义的测试已删除或合并。
+6. `docs/architecture-map.md` 与 README 描述当前 Seat/Duty 路径。
 
-允许迁移内部存在一个有删除条件的私有适配器，但不得新增第二个公开路由、门禁或写入口。
+不得重新引入第二个公开路由、门禁或写入口，也不得把 ADR-004 的工号表接回热路径。
 
 ## 9. 验收条件
 

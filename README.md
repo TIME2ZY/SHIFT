@@ -1,244 +1,42 @@
 # SHIFT · 交班台
 
-> 一个本地控制台，让 Codex、Gemini、Grok 与 OpenCode 围绕同一条任务线程讨论、实现、审查和交付——每一次交接都有据可查。
-
-![Node.js 20.19+](https://img.shields.io/badge/Node.js-20.19%2B-3c873a?style=flat-square)
-![Providers](https://img.shields.io/badge/Providers-4-5b55e7?style=flat-square)
-![Storage](https://img.shields.io/badge/Storage-SQLite-2563eb?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active%20development-c46a16?style=flat-square)
-
-[快速开始](#快速开始) · [工作方式](#工作方式) · [核心能力](#核心能力) · [架构与数据边界](#架构与数据边界) · [开发与验证](#开发与验证)
+本机已经装着 Codex、Gemini、Grok、OpenCode，可是同一件事还是要来回粘贴上下文，做没做完也只能听 Agent 自己说。SHIFT 不提供模型，只把这些本机 CLI 编进**同一条任务线程**：讨论、实现、审查、交付都留在会话里，刷新或重启后还能接上。
 
 ![SHIFT 控制台](assets/shift-console.png)
 
-## 项目定位
+打开本机项目，选一个席位，说出目标。需要换人时 `@` 一下；需要改代码时打开隔离工作区。一个席位就能走完全程，多席位只在你点名或交接时换人，不会因为换了职责就随机换人。
 
-SHIFT 是一个**本地优先**的多 Agent 协作控制台。它不提供模型，也不替代各家 Agent CLI。要解决的需求是：同一项编码任务在多个本机 Agent 之间状态不连续——上下文要人肉复制，完成与否缺少可核验证据。约束是使用者往往只有 CLI/ACP 订阅，没有统一模型 API。
+## 它实际解决什么
 
-因此 SHIFT 把已经安装和登录的 Agent 接入一条可审计的工作流：
+- **上下文不断档。** 用户消息、Agent 输出、工具过程和交接关系写在同一条会话里，不是各开一个终端各聊各的。
+- **完成有证据。** 方案、代码审查、commit、PR、CI 由平台对照 Git / GitHub 核对。Agent 说 done 不算完成。
+- **主分支不被下手。** 改代码跑在会话自己的 Git worktree 里，聊天里能看到文件变更，不要的改动可以丢掉。
+- **过程可回看。** 思考、工具、进度和失败断点进审计页，不是刷完就消失的终端日志。
 
-- 同一会话保留用户消息、Agent 输出、工具过程和交接关系，刷新或重启后可恢复；
-- 通过 `@Agent` 指定下一位协作者，平台对 handoff 做幂等与生命周期仲裁，而不是只解析一句 mention；
-- 用 SQLite 持久化会话、调用、上下文窗口、Memory 和 Recall 索引——只有一个真相源；
-- 需要改代码时创建会话级 Git worktree，改动隔离、可审查、可显式丢弃；
-- 每次 invocation 都绑定当前席位、职责和 Skill；门禁依据职责与证据，不绑定 Provider 名称；
-- 任务卡展示目标、当前执行者、阻塞和交付证据；`accept` Duty 对照目标核验后，证据齐才算完成。
+任务卡只展示目标和证据，不是审批弹窗。你提出目标、选择席位、必要时停下；交接和验收由席位与证据门禁推进。
 
-## 工作方式
+## 一次典型任务
 
-```text
-用户提出目标
-    │
-    ├─ 当前席位按本跳 Duty 加载对应 Skill
-    ├─ 需要交接时，策略通过后直接入队下一席位
-    ├─ 同一席位可继续实现和自审，也可交给另一个已启用席位
-    ├─ 平台核验方案、review、commit、PR 与 CI 证据
-    └─ accept Duty 对照目标写入 accepted / rejected / incomplete
-```
+1. 左侧打开项目，新建对话，右侧选一个已登录的席位。
+2. 说出目标。当前席位按这一跳的职责工作；需要换人时写 `@席位` 并交代下一步。
+3. 要改仓库时打开「隔离改代码」，实现发生在会话 worktree，不直接改你正在看的目录。
+4. 审查通过后由交付席位提交 PR；平台核验真实 commit、PR 和 CI。
+5. 对照最初目标验收。证据齐了才写入完成，缺了会明确标成未完成。
 
-一个已启用席位就能完成整条路径。启用多个席位后，可以通过 `@Agent` 明确交接；没有点名或
-handoff 时保持当前席位，不会因为职责变化随机换人。
+默认席位是本机的 Codex、Gemini、Grok、OpenCode。模型可以在本机改，SHIFT 不打包这些 CLI，也不管账号。
 
-### 证据门禁
-
-SHIFT 与"把几个 CLI 串起来"的区别在于：平台不信任 Agent 的自述，每个关键跃迁都要拿出证据。
-
-| 门禁     | 谁触发                | 平台核对什么                                                             |
-| -------- | --------------------- | ------------------------------------------------------------------------ |
-| 方案批准 | discuss / accept Duty | 新方案 hash 自动撤销旧批准；支持权限回调时，未批准只放行只读操作         |
-| 代码评审 | review / deliver Duty | 结构化 `code_review`；changes requested 回到 implement / fix Duty        |
-| 交付核验 | deliver Duty          | 独立读取 Git/GitHub 核对 clean worktree、真实 commit、PR 与 CI           |
-| 最终完成 | accept Duty           | 对照目标、方案、review 和 commit 写入完成态；证据不足保存为 `incomplete` |
-
-所有协作事实——Trace、Invocation、Handoff、Gate——都落在 SQLite，并通过内置审计控制台可视化：失败断点、Handoff 漏斗、Memory 命中率、每步的因果链路。
-
-### Provider 与席位
-
-Provider 适配层以 [`src/agents/catalog.js`](src/agents/catalog.js) 和
-[`src/agents/providers/`](src/agents/providers/) 为准。默认模型可被
-`SHIFT_HOME/agents.json` 覆盖，不必为换模型版本改代码。
-
-| Provider     | 默认模型            | 默认推理 | 运行方式        |
-| ------------ | ------------------- | -------- | --------------- |
-| **Codex**    | `gpt-5.6-sol`       | medium   | Codex CLI       |
-| **Gemini**   | `gemini-3.8-flash`  | high     | Antigravity CLI |
-| **Grok**     | `grok-4.6`          | high     | Grok Build ACP  |
-| **OpenCode** | `deepseek-v4-flash` | max      | OpenCode CLI    |
-
-```json
-{
-  "agents": {
-    "gemini": { "model": "gemini-3.8-flash", "reasoningEffort": "high" }
-  }
-}
-```
-
-未知模型会继承该 Provider 已测过的窗口/seal 档案，不再作为启动白名单拒绝。
-Provider 只描述启动方式、模型和运行能力。Thread 的 enabled Seat 决定谁可参与，每次 invocation
-再绑定 `discuss | plan | implement | fix | review | deliver | accept | recall` 中的一项 Duty。
-SHIFT 不打包这些 CLI，也不管理它们的账号。
-
-## 核心能力
-
-| 能力             | 当前实现                                                              |
-| ---------------- | --------------------------------------------------------------------- |
-| 动态席位与路由   | Thread 持久化 enabled Seats；显式点名、粘性和亲和性只在这些席位中解析 |
-| Duty / Skill     | 每次 invocation 原子绑定职责；运行时只激活当前 Duty Skill 与交接卡    |
-| 任务与验收卡     | 展示目标、执行者、阻塞、Git/PR/CI、审查模式和 Seat 完成结论           |
-| 流式过程         | Node 服务通过 SSE 推送文本、思考、工具调用、进度、文件变化与运行状态  |
-| 结构化交接       | 解析并记录 Agent 之间的 handoff，保留来源、目标和因果关系，只消费一次 |
-| 会话与调用历史   | SQLite 持久化 thread、message、invocation、event 和 provider session  |
-| 上下文窗口       | 按 Agent、模型、工作区跟踪容量、用量、seal 和 generation rotation     |
-| Memory 与 Recall | 项目/会话范围 Memory、FTS 检索、可选向量召回和证据来源                |
-| 隔离改代码       | 按会话创建或复用 Git worktree；聊天内展示文件变更摘要                 |
-| 审计控制台       | Trace 航线、失败断点、Handoff 漏斗、Memory 指标、脱敏导出             |
-| 本地安全边界     | 默认仅监听 `127.0.0.1`，UI 和 Agent callback 使用独立令牌             |
-
-## 快速开始
-
-### 环境要求
-
-- Node.js `20.19+`、`22.12+` 或 `24+`；
-- Git；
-- 至少一个受支持且已登录的 Agent CLI；
-- Windows 建议安装 PowerShell 7。
-
-### 安装并初始化
+## 上手
 
 ```bash
 git clone https://github.com/TIME2ZY/SHIFT.git
 cd SHIFT
 npm ci
 npm run storage:init-home
-```
-
-`storage:init-home` 在 `SHIFT_HOME/data`（默认 `~/.shift/data`）下创建全新 SQLite epoch，不会覆盖已有数据。从旧版本仓库内数据升级使用 `npm run storage:migrate-home`。
-
-### 启动
-
-```bash
 npm start
 ```
 
-`npm start` 会先构建 React 前端，再启动 Node 服务。浏览器打开 [http://127.0.0.1:8787/](http://127.0.0.1:8787/)。
+浏览器打开 [http://127.0.0.1:8787/](http://127.0.0.1:8787/)。需要 Node.js 20.19+、Git，以及至少一个已登录的 Agent CLI。数据在 `~/.shift/data`，不进这个仓库。
 
-开发模式使用 Vite：
+从旧版本的仓库内数据库升级，用 `npm run storage:migrate-home`。开发时用 `npm run dev:web`。
 
-```bash
-npm run dev:web
-```
-
-开发入口为 [http://127.0.0.1:5173/](http://127.0.0.1:5173/)。开发脚本会为 Node API 与 Vite 生成并共享临时 UI Token。
-
-### 第一次对话
-
-1. 在左侧项目栏打开一个本机项目目录；
-2. 新建会话（自动绑定该项目）；
-3. 选择一个 Agent，输入任务；
-4. 需要改代码时打开"改代码"，让任务运行在会话 worktree；
-5. 聊天中查看文件变更摘要，审计页查看完整 Trace 与交付证据。
-
-示例：
-
-```text
-分析这个项目最需要优先修复的三个问题。
-@Gemini 提出三个实现方向，再交给 @Codex 收敛。
-@Grok 在 worktree 中实现方案，完成后交给 @OpenCode 审查。
-```
-
-## 配置
-
-所有配置都是可选环境变量，但 SQLite clean epoch 必须预先存在。复制示例文件：
-
-```bash
-# macOS / Linux / Git Bash
-cp .env.example .env
-
-# Windows PowerShell
-Copy-Item .env.example .env
-```
-
-常用配置：
-
-| 变量                      | 用途                                      | 默认值     |
-| ------------------------- | ----------------------------------------- | ---------- |
-| `PORT`                    | Node 服务端口                             | `8787`     |
-| `INVOKE_CLI_PROXY`        | 所有 CLI 子进程共用的 HTTP(S) 代理        | 空         |
-| `GROK_PROXY`              | Grok 专用代理覆盖                         | 空         |
-| `INVOKE_CODEX_HOME`       | 隔离 Codex CLI 状态目录                   | 空         |
-| `SHIFT_PWSH_PATH`         | Windows Provider 使用的 PowerShell 7 路径 | 自动发现   |
-| `SHIFT_HOME`              | 应用根目录，运行数据位于其 `data/` 子目录 | `~/.shift` |
-| `SHIFT_AUDIT_TRANSCRIPT`  | 是否写 canonical audit archive            | `on`       |
-| `SHIFT_EMBEDDING_ENABLED` | 是否启用向量召回                          | `false`    |
-
-完整配置及 Embedding 参数见 [`.env.example`](.env.example)。Shell 或 CI 中已经设置的环境变量优先于 `.env` / `.env.local`。
-
-## 架构与数据边界
-
-```text
-React / Vite UI
-       │ HTTP + SSE
-       ▼
-Node.js service
-   ├── Agent adapters ── CLI / ACP ── 本机 Agent
-   ├── SQLite ────────── 在线业务唯一真相源
-   ├── audit JSONL ───── 审计、导出和核对，不是在线恢复源
-   ├── Memory / Recall ─ FTS + 可选 sqlite-vec
-   └── Git worktree ──── 可选的代码修改隔离层
-```
-
-### 本地数据
-
-- 权威数据：`SHIFT_HOME/data/shift.sqlite`（默认 `~/.shift/data/`）；
-- SQLite sidecar：`shift.sqlite-wal`、`shift.sqlite-shm`，属于同一数据库；
-- Canonical audit：`SHIFT_HOME/data/audit-transcripts/<epoch-id>/`；
-- 本地运行数据、构建产物和测试输出均已加入 `.gitignore`；
-- Memory、Recall、上下文窗口和调用记录都随项目保存在本机；
-- Git worktree 位于项目的独立工作目录，不会直接改写当前工作区。
-
-### 安全边界
-
-- 服务默认只监听 `127.0.0.1`；
-- 浏览器 API 使用每进程 UI Token，并检查请求来源；
-- Agent callback 使用调用级 Token，并绑定 thread / invocation；
-- Agent 子进程沿用本机 CLI 登录状态和必要的代理配置；
-- `.env`、运行数据、密钥和凭据不应提交到 Git。
-
-设计与数据契约详见 [`docs/decisions/`](docs/decisions/)（ADR）与 [`docs/architecture-map.md`](docs/architecture-map.md)（当前实现地图）。
-
-## 项目结构
-
-```text
-src/
-  agents/       Agent catalog、Provider adapter、事件协议、handoff
-  server/       HTTP/SSE 服务、路由、安全和静态资源
-  session/      bootstrap、上下文预算、seal 与 transcript
-  storage/      SQLite schema、repository、Memory、Recall、审计与恢复
-  worktree/     Git worktree 生命周期
-web/
-  src/          React UI、运行态 store、API query/mutation
-  e2e/          Playwright 浏览器测试
-scripts/        开发、审计、迁移、评测和 live scenario
-tests/          Node.js 单元、集成与存储测试
-docs/           数据契约、ADR 和阶段验收记录
-skills/         平台协作 Skill（`skills/<name>/SKILL.md`）；运行时物化到隔离 worktree 供 CLI 发现
-```
-
-## 开发与验证
-
-| 命令                    | 用途                         |
-| ----------------------- | ---------------------------- |
-| `npm run check`         | JavaScript 语法检查          |
-| `npm run lint`          | ESLint                       |
-| `npm run format:check`  | Prettier 格式检查            |
-| `npm run typecheck:web` | React / TypeScript 类型检查  |
-| `npm test`              | Node.js 单元与集成测试       |
-| `npm run test:web`      | Vitest 前端测试              |
-| `npm run test:web:e2e`  | Playwright 核心浏览器流程    |
-| `npm run build:web`     | 构建 React 前端到 `dist/web` |
-
-`npm run verify:pr` 会运行上述静态检查、后端测试、Web 测试、浏览器 E2E 和生产构建；本地与 GitHub PR 使用同一门禁。真实 Provider 的 live 验收（`npm run test:live:issue-fix`，在独立 sandbox 仓库上修真实 issue）保持手工执行，避免普通 PR 依赖外部凭据。
-
----
-
-**SHIFT** — 让 Agent 不只回答问题，也能在可审计的本地工作流中完成交接。
+环境变量见 [`.env.example`](.env.example)。工程约定、实现路径和设计决策见 [`AGENTS.md`](AGENTS.md)、[`docs/architecture-map.md`](docs/architecture-map.md)、[`docs/decisions/`](docs/decisions/)。
