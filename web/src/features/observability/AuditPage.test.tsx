@@ -166,7 +166,9 @@ describe("AuditPage", () => {
     expect(screen.getByRole("heading", { name: "审计测试" })).toBeInTheDocument();
     expect(screen.getByText("Trace 工作台")).toBeInTheDocument();
     expect(screen.getByText("2 轮")).toBeInTheDocument();
-    expect(screen.getByText("4/5 检索命中")).toBeInTheDocument();
+    expect(screen.getByText("最近一轮：已完成")).toBeInTheDocument();
+    expect(screen.queryByText("已完成", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("写入 7（创建 5 · 替代 2） · 4/5 检索命中")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "航线" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("存储")).toBeInTheDocument();

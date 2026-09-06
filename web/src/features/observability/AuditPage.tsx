@@ -78,7 +78,9 @@ export function AuditPage({
           <header className="audit-column-heading">
             <h2 id="audit-traces-title">航线</h2>
           </header>
-          <TraceExplorer agents={agents} sessionId={sessionId} />
+          <div className="audit-column-body" tabIndex={0} aria-label="航线内容">
+            <TraceExplorer agents={agents} sessionId={sessionId} />
+          </div>
         </section>
 
         <aside className="audit-memory" aria-labelledby="audit-memory-title">
@@ -86,24 +88,26 @@ export function AuditPage({
             <h2 id="audit-memory-title">Memory</h2>
             <small>{activeCount} 条有效</small>
           </header>
-          {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
-          {memories.isPending && sessionId ? (
-            <p className="react-panel-empty">正在读取 Memory…</p>
-          ) : null}
-          {memories.error ? (
-            <p className="react-panel-error" role="alert">
-              {memories.error.message}
-            </p>
-          ) : null}
-          {memories.data?.memories.length === 0 ? (
-            <p className="react-panel-empty">当前会话没有有效 Memory。</p>
-          ) : null}
-          <div className="react-memory-list">
-            {memories.data?.memories.map((memory) => (
-              <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
-            ))}
+          <div className="audit-column-body" tabIndex={0} aria-label="记忆与对照内容">
+            {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
+            {memories.isPending && sessionId ? (
+              <p className="react-panel-empty">正在读取 Memory…</p>
+            ) : null}
+            {memories.error ? (
+              <p className="react-panel-error" role="alert">
+                {memories.error.message}
+              </p>
+            ) : null}
+            {memories.data?.memories.length === 0 ? (
+              <p className="react-panel-empty">当前会话没有有效 Memory。</p>
+            ) : null}
+            <div className="react-memory-list">
+              {memories.data?.memories.map((memory) => (
+                <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
+              ))}
+            </div>
+            <ObservabilityContrast sessionId={sessionId} />
           </div>
-          <ObservabilityContrast sessionId={sessionId} />
         </aside>
       </div>
     </main>
@@ -126,8 +130,11 @@ function MemoryCard({
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
+        <strong>{memory.topic || "未命名记忆"}</strong>
+        <svg className="audit-memory-chevron" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m6 3 5 5-5 5" />
+        </svg>
         <span>{memory.kind || "memory"}</span>
-        {memory.topic ? <strong>{memory.topic}</strong> : null}
         <small>{usageEvidence(usage)}</small>
       </button>
       {expanded ? (

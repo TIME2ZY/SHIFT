@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TraceExplorer } from "./TraceExplorer";
-import type { TraceSummary } from "./types";
+import type { ExecutionHandoff, ExecutionInvocation, TraceSpan, TraceSummary } from "./types";
 
 const rate = (numerator: number, denominator: number) => ({
   value: denominator ? numerator / denominator : null,
@@ -343,9 +343,22 @@ describe("TraceExplorer", () => {
               totalHits: 0,
               memoryHits: 0,
               delivered: 2,
+              source: "bootstrap",
               availability: "available",
               requestedLayers: [],
             },
+          },
+          {
+            spanId: "recall:3",
+            invocationId: "i2",
+            parentSpanId: "generation:i2",
+            kind: "recall",
+            name: "memory_write_completed",
+            state: "completed",
+            complete: true,
+            startedAt: base.startedAt,
+            endedAt: base.startedAt,
+            attributes: { outcome: "created", topic: "storage" },
           },
         ],
         invocationCounts: { total: 1, failed: 1 },
@@ -384,7 +397,9 @@ describe("TraceExplorer", () => {
         />
       </QueryClientProvider>
     );
-    expect(await screen.findByText("告警")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /系统告警/ })).toBeInTheDocument();
+    expect(screen.queryByText("执行区段缺少结束事件")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /系统告警/ }));
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
     expect(screen.queryByText("Handoff 证据轨道")).not.toBeInTheDocument();
     expect(screen.queryByText("Memory 漏斗诊断")).not.toBeInTheDocument();
@@ -393,14 +408,296 @@ describe("TraceExplorer", () => {
     expect(screen.getAllByText("provider_exit_7").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Grok").length).toBeGreaterThan(0);
     expect(screen.getByText("执行时间轴")).toBeInTheDocument();
+    expect(screen.getByText("1 Invocation · 0 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("执行 1 失败 · 交接无失败 · 工具 1 失败 · 1 孤儿")).toBeInTheDocument();
+    expect(screen.queryByText("无失败")).not.toBeInTheDocument();
     expect(screen.getByText("工具执行")).toBeInTheDocument();
     expect(screen.getByText(/2 次调用 · 1 失败 · 1 孤儿 · 1 未闭合/)).toBeInTheDocument();
+    expect(screen.queryByText("Memory 检索")).not.toBeInTheDocument();
+    expect(screen.queryByText("0ms")).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "启动注入 2 条 · 检索命中 2 条 · 写入 1 条" })
+    );
     expect(screen.getAllByText("Memory 检索").length).toBeGreaterThan(0);
     expect(screen.getByText("命中 3（Memory 2）")).toBeInTheDocument();
-    expect(screen.getAllByText("Memory 注入").length).toBeGreaterThan(0);
+    expect(screen.getByText("启动注入")).toBeInTheDocument();
     expect(screen.getByText("送达 2")).toBeInTheDocument();
+    expect(screen.getByText("Memory 写入")).toBeInTheDocument();
+    expect(screen.getByText("已创建 · storage")).toBeInTheDocument();
+    expect(screen.queryByText("0ms")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "展开 2 条失败或未闭合" }));
+    expect(screen.getByText("failed-tool")).toBeInTheDocument();
+    expect(screen.getByText("orphan-tool")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
-    expect(screen.getByText("3 Invocation · 0 Handoff · 无失败")).toBeInTheDocument();
+    expect(screen.getByText("3 Invocation · 0 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
+    expect(screen.getByText("2 个 Agent · 0 次交接")).toBeInTheDocument();
+    expect(screen.queryByText("Codex → Grok → Codex")).not.toBeInTheDocument();
     expect(screen.getAllByText("handoff").length).toBe(2);
   });
+
+  it("places every handoff before its target and keeps fan-out hops", async () => {
+    const traces: TraceSummary[] = [
+      {
+        ...base,
+        traceId: "trace-linear",
+        state: "completed",
+        request: { ...base.request, turnNumber: 5, preview: "多 Agent 协作" },
+        invocationCounts: { total: 7, failed: 0 },
+        handoffCounts: { total: 6, accepted: 6, failed: 0 },
+        outcome: {
+          terminalReason: "request-completed",
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [
+          testInvocation("i1", "codex", "user-message"),
+          testInvocation("i2", "grok"),
+          testInvocation("i3", "codex"),
+          testInvocation("i4", "grok"),
+          testInvocation("i5", "codex"),
+          testInvocation("i6", "grok"),
+          testInvocation("i7", "codex"),
+        ],
+        handoffs: [
+          testHandoff("h1", "i1", "i2", "codex", "grok"),
+          testHandoff("h2", "i2", "i3", "grok", "codex"),
+          testHandoff("h3", "i3", "i4", "codex", "grok"),
+          testHandoff("h4", "i4", "i5", "grok", "codex"),
+          testHandoff("h5", "i5", "i6", "codex", "grok"),
+          testHandoff("h6", "i6", "i7", "grok", "codex"),
+        ],
+        spans: [
+          testRecall("i1", "memory_injected", { source: "bootstrap", delivered: 2 }),
+          testRecall("i1", "memory_write_completed", { outcome: "created", topic: "storage" }),
+          testRecall("i2", "memory_injected", { source: "a2a", delivered: 2, selected: 3 }),
+          testRecall("i2", "memory_searched", { memoryHits: 3, totalHits: 4 }),
+        ],
+      },
+      {
+        ...base,
+        traceId: "trace-fanout",
+        state: "completed",
+        request: { ...base.request, turnNumber: 6, preview: "同一来源两条交接" },
+        invocationCounts: { total: 3, failed: 0 },
+        handoffCounts: { total: 3, accepted: 2, failed: 1 },
+        outcome: {
+          terminalReason: "request-completed",
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [
+          testInvocation("root", "codex", "user-message"),
+          testInvocation("branch-b", "grok"),
+          testInvocation("branch-a", "codex"),
+        ],
+        handoffs: [
+          testHandoff("hf1", "root", "branch-b", "codex", "grok"),
+          testHandoff("hf2", "root", "branch-a", "codex", "codex"),
+          {
+            ...testHandoff("hf3", "branch-a", "missing", "codex", "grok"),
+            targetInvocationId: null,
+            completeStatus: "failed",
+          },
+        ],
+      },
+      {
+        ...base,
+        traceId: "trace-active",
+        state: "active",
+        endedAt: null,
+        request: { ...base.request, turnNumber: 7, preview: "仍在执行" },
+        invocationCounts: { total: 1, failed: 0 },
+        outcome: {
+          terminalReason: null,
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [
+          {
+            ...testInvocation("live", "codex", "user-message"),
+            state: "active",
+            endedAt: null,
+          },
+        ],
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/api/storage/health")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ storage: { observability: { alerts: [] } } }))
+          );
+        }
+        if (/\/api\/sessions\/s1\/traces\/[^?]+/.test(url)) {
+          const traceId = new URL(url, "http://shift.local").pathname.split("/").at(-1);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ trace: traces.find((trace) => trace.traceId === traceId) })
+            )
+          );
+        }
+        if (url.includes("/api/sessions/") && url.includes("/traces")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ traces, page: { total: traces.length } }))
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify({})));
+      })
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TraceExplorer
+          traces={traces}
+          sessionId="s1"
+          agents={[
+            { id: "codex", label: "Codex" },
+            { id: "grok", label: "Grok" },
+          ]}
+        />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("7 Invocation · 6 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
+    expect(screen.getByText("2 个 Agent · 6 次交接")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "启动注入 2 条 · 写入 1 条" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "交接注入 2 条 · 检索命中 3 条" })
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "交接注入 2 条 · 检索命中 3 条" }));
+    expect(screen.getByText("交接注入")).toBeInTheDocument();
+    expect(screen.getByText("送达 2 / 选中 3")).toBeInTheDocument();
+    expect(timelineSequence()).toEqual([
+      "Codex",
+      "Codex → Grok",
+      "Grok",
+      "Grok → Codex",
+      "Codex",
+      "Codex → Grok",
+      "Grok",
+      "Grok → Codex",
+      "Codex",
+      "Codex → Grok",
+      "Grok",
+      "Grok → Codex",
+      "Codex",
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: /同一来源两条交接/ }));
+    expect(screen.getByText("3 Invocation · 3 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("执行完成 · 交接 1 失败")).toBeInTheDocument();
+    expect(timelineSequence()).toEqual([
+      "Codex",
+      "Codex → Grok",
+      "Grok",
+      "Codex → Codex",
+      "Codex",
+      "Codex → Grok",
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: /仍在执行/ }));
+    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
+    expect(document.querySelector(".trace-waterfall-track i[data-open='true']")).not.toBeNull();
+    expect(screen.getByTitle("未结束")).toBeInTheDocument();
+  });
 });
+
+function testInvocation(
+  invocationId: string,
+  agentId: string,
+  triggerType = "handoff"
+): ExecutionInvocation {
+  return {
+    invocationId,
+    traceId: "trace-linear",
+    agentId,
+    state: "completed",
+    parentInvocationId: null,
+    triggerMessageId: null,
+    triggerType,
+    startedAt: base.startedAt,
+    endedAt: base.endedAt,
+    exitCode: 0,
+    signal: null,
+    outcome: {
+      terminalReason: "assistant-final",
+      failureStage: null,
+      errorCode: null,
+      retryable: null,
+    },
+  };
+}
+
+function testHandoff(
+  handoffId: string,
+  sourceInvocationId: string,
+  targetInvocationId: string,
+  sourceAgent: string,
+  targetAgent: string
+): ExecutionHandoff {
+  return {
+    handoffId,
+    sourceInvocationId,
+    targetInvocationId,
+    sourceAgent,
+    targetAgent,
+    routeStatus: "accepted",
+    receiveStatus: "started",
+    completeStatus: "completed",
+    reason: "handoff",
+    depth: 1,
+    duplicateOf: null,
+    repairOf: null,
+    phaseId: null,
+    policy: null,
+    createdAt: base.startedAt,
+    enqueuedAt: base.startedAt,
+    startedAt: base.startedAt,
+    completedAt: base.endedAt,
+    outcome: {
+      terminalReason: "handoff-completed",
+      failureStage: null,
+      errorCode: null,
+      retryable: null,
+    },
+  };
+}
+
+function testRecall(
+  invocationId: string,
+  name: TraceSpan["name"],
+  attributes: TraceSpan["attributes"]
+): TraceSpan {
+  return {
+    spanId: `recall:${invocationId}:${name}`,
+    invocationId,
+    parentSpanId: `generation:${invocationId}`,
+    kind: "recall",
+    name,
+    state: "completed",
+    complete: true,
+    startedAt: base.startedAt,
+    endedAt: base.startedAt,
+    attributes,
+  };
+}
+
+function timelineSequence() {
+  const timeline = document.querySelector(".trace-waterfall");
+  return [
+    ...(timeline?.querySelectorAll(
+      ".trace-waterfall-hop, .trace-waterfall-row[data-kind='generation']"
+    ) || []),
+  ].map((node) => {
+    if (node.classList.contains("trace-waterfall-hop")) {
+      return node.querySelector("span")?.textContent?.replace(/\s+/g, " ").trim() || "";
+    }
+    return node.querySelector("strong")?.textContent || "";
+  });
+}
