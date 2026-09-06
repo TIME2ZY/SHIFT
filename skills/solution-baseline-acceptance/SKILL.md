@@ -17,6 +17,8 @@ triggers:
 
 平台保存最初用户目标 hash，并校验 `solution_baseline` / `final_acceptance`。本 skill 给出完整可过关形状；hash 不匹配或缺证据时交接会被拒绝。
 
+discuss 批准 plan 与 accept 核验都从注入的可路由名单选席，并参考已参与历史。若存在另一可路由席位，避免让唯一 implement 席同时做最终验收。不要为批准或完成去请求人确认。
+
 ## 进入 plan / implement 之前
 
 收敛方案必须区分用户目标、选择的方案、非目标与逐项验收标准。不得自行改写平台提供的用户目标 hash。

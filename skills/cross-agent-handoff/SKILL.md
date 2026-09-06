@@ -16,6 +16,8 @@ always: false
 没有点名、没有 handoff 时继续由当前 Seat 工作。需要切换 Seat 时，行首写 `@Seat`，并附同一份
 `handoff`；目标必须属于当前 Thread 当前可跑的启用席位，以注入的可路由名单为准。不要猜测或点名名单外的 Provider。
 
+选下一席时只使用注入的可路由名单，并参考已参与历史中每个 Seat 实际出现过的 Duty。`why` 写清选席理由（独立审查、能力匹配、sticky 或单席 fallback）。若只有一席可跑，不要 @ 自己，也不要写指向自己的 handoff；继续当前席，并在正文标明 solo fallback。当下一跳是 review，且存在另一可路由席位时，不要把 review 交给刚完成 implement/fix 的同一席。deliver 不要求换席。平台不按岗位自动换席。
+
 ```handoff
 to: <routable Seat label or provider id>
 intent: <discuss|plan|implement|review|fix|deliver|accept|recall>

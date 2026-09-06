@@ -9,7 +9,10 @@ const {
 } = require("./stream-delta-coalescer");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
-const { renderCollaborationRules } = require("../agents/collaboration-rules");
+const {
+  deriveThreadParticipation,
+  renderCollaborationRules,
+} = require("../agents/collaboration-rules");
 const {
   IMPLEMENTATION_GATE_STATUS,
   renderImplementationGateBlock,
@@ -272,7 +275,19 @@ async function runChatWorklist(ctx) {
             (!ctx.availability || ctx.availability.isRoutable(providerId))
         )
       );
-      const collaborationBlock = renderCollaborationRules(agent, enabledAgents);
+      const participation = deriveThreadParticipation({
+        bindings: storage?.invocationDutyBindings?.listForThread?.(sessionId) || [],
+        seats: storage?.threadSeats?.listForThread?.(sessionId) || [],
+        invocations: storage?.invocations?.listForThread?.(sessionId) || [],
+        agents: AGENTS,
+        current: {
+          seatId: dutyBinding?.seatId || null,
+          providerId: agent,
+          label: agentConfig.label || agent,
+          duty: dutyBinding?.duty || null,
+        },
+      });
+      const collaborationBlock = renderCollaborationRules(agent, enabledAgents, participation);
       const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
         dutyBinding?.duty,
         collabTaskRegistry?.getTask(sessionId) || null,

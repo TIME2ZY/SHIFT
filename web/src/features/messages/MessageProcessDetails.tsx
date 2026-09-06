@@ -51,6 +51,23 @@ function timelineBodyText(timeline: Array<InvocationTimelineItem | RunTimelineIt
 
 type NarrativeTimelineItem = Exclude<InvocationTimelineItem | RunTimelineItem, { type: "tool" }>;
 
+function mergeAdjacentThinking(timeline: NarrativeTimelineItem[]): NarrativeTimelineItem[] {
+  const merged: NarrativeTimelineItem[] = [];
+  for (const item of timeline) {
+    const previous = merged.at(-1);
+    if (item.type === "thinking" && previous?.type === "thinking") {
+      merged[merged.length - 1] = {
+        ...previous,
+        text: previous.text + item.text,
+        ...("lastEventNo" in item ? { lastEventNo: item.lastEventNo } : {}),
+      };
+      continue;
+    }
+    merged.push(item);
+  }
+  return merged;
+}
+
 function normalizedText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -173,8 +190,8 @@ export function MessageProcessDetails({
     canLoadDurable &&
     (summaryProcess.isPending || (processExpanded && !liveMessage && detailProcess.isPending));
   const processError = summaryProcess.isError || (processExpanded && detailProcess.isError);
-  const narrativeTimeline = timeline.filter(
-    (item): item is NarrativeTimelineItem => item.type !== "tool"
+  const narrativeTimeline = mergeAdjacentThinking(
+    timeline.filter((item): item is NarrativeTimelineItem => item.type !== "tool")
   );
   const timelineTools = timeline.filter(
     (item): item is Extract<typeof item, { type: "tool" }> => item.type === "tool"

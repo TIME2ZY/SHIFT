@@ -114,6 +114,55 @@ describe("MessageProcessDetails", () => {
     expect(screen.queryByRole("button", { name: "在工作区查看差异" })).not.toBeInTheDocument();
   });
 
+  it("merges thinking separated only by tools until the next body text", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProcess({
+      version: 1,
+      invocationId: "i1",
+      status: "done",
+      thinking: {
+        text: "先定位。再验证。新一段思考。",
+        segments: [
+          { eventNo: 1, text: "先定位。" },
+          { eventNo: 3, text: "再验证。" },
+          { eventNo: 5, text: "新一段思考。" },
+        ],
+      },
+      commentary: { text: "", segments: [] },
+      tools: [{ toolId: "t1", toolName: "search", status: "done", changedFiles: [] }],
+      timeline: [
+        { id: "text-0", type: "text", eventNo: 0, lastEventNo: 0, text: "正文一。" },
+        { id: "thinking-1", type: "thinking", eventNo: 1, lastEventNo: 1, text: "先定位。" },
+        { id: "tool-t1", type: "tool", eventNo: 2, toolId: "t1" },
+        { id: "thinking-3", type: "thinking", eventNo: 3, lastEventNo: 3, text: "再验证。" },
+        { id: "text-4", type: "text", eventNo: 4, lastEventNo: 4, text: "正文二。" },
+        {
+          id: "thinking-5",
+          type: "thinking",
+          eventNo: 5,
+          lastEventNo: 5,
+          text: "新一段思考。",
+        },
+      ],
+      progress: [],
+      changedFiles: [],
+    });
+
+    expect(screen.getAllByText("思考")).toHaveLength(2);
+    const flowItems = Array.from(container.querySelector(".react-message-flow")?.children || []);
+    expect(flowItems.map((item) => item.className)).toEqual([
+      "react-timeline-text react-message-body",
+      "react-thinking-step",
+      "react-timeline-text react-message-body",
+      "react-thinking-step",
+    ]);
+
+    await user.click(screen.getAllByText("思考")[0]);
+    expect(screen.getByText("先定位。再验证。")).toBeInTheDocument();
+    expect(screen.queryByText("先定位。")).not.toBeInTheDocument();
+    expect(screen.queryByText("再验证。")).not.toBeInTheDocument();
+  });
+
   it("removes final commentary that exactly repeats the authoritative text", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

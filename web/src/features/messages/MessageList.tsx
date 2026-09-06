@@ -88,6 +88,57 @@ function isAssistantFinal(message: PersistedMessage): boolean {
   return isAssistantFinalMessage(message);
 }
 
+/**
+ * A callback can be persisted before its handoff divider while the authoritative
+ * final is persisted only after process exit. Collapse both records into the
+ * final bubble, but keep that bubble at the callback's earlier transcript slot.
+ */
+function collapseCompletedInvocationMessages(messages: PersistedMessage[]): PersistedMessage[] {
+  const groups = new Map<
+    string,
+    { indices: number[]; final: { message: PersistedMessage; index: number } | null }
+  >();
+
+  messages.forEach((message, index) => {
+    if (
+      message.role !== "assistant" ||
+      !message.invocationId ||
+      (!isAssistantCallback(message) && !isAssistantFinal(message))
+    ) {
+      return;
+    }
+    const group = groups.get(message.invocationId) || { indices: [], final: null };
+    group.indices.push(index);
+    if (isAssistantFinal(message)) group.final = { message, index };
+    groups.set(message.invocationId, group);
+  });
+
+  const replacementByIndex = new Map<number, PersistedMessage>();
+  const suppressedIndices = new Set<number>();
+  for (const group of groups.values()) {
+    if (!group.final || group.indices.length < 2) continue;
+    const anchorIndex = Math.min(...group.indices);
+    const hasHandoffBetween = messages.some(
+      (message, index) =>
+        index > anchorIndex &&
+        index < group.final!.index &&
+        message.messageType === MESSAGE_TYPES.A2A_ROUTE
+    );
+    if (!hasHandoffBetween) continue;
+    replacementByIndex.set(anchorIndex, group.final.message);
+    for (const index of group.indices) {
+      if (index !== anchorIndex || group.final.index !== anchorIndex) suppressedIndices.add(index);
+    }
+    suppressedIndices.delete(anchorIndex);
+  }
+
+  return messages.flatMap((message, index) => {
+    const replacement = replacementByIndex.get(index);
+    if (replacement) return [replacement];
+    return suppressedIndices.has(index) ? [] : [message];
+  });
+}
+
 function liveMessageStatusLabel(
   status: NonNullable<SessionRun>["liveMessages"][string]["status"]
 ): string {
@@ -282,15 +333,16 @@ export function MessageList({
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const [activeMessageKey, setActiveMessageKey] = useState<string | null>(null);
   const [followingLatest, setFollowingLatest] = useState(true);
+  const displayMessages = useMemo(() => collapseCompletedInvocationMessages(messages), [messages]);
   const visibleMessages = useMemo(
     () =>
-      messages.filter(
+      displayMessages.filter(
         (
           message
         ): message is PersistedMessage & { role: Exclude<PersistedMessage["role"], "system"> } =>
           message.role !== "system"
       ),
-    [messages]
+    [displayMessages]
   );
   const persistedInvocationIds = useMemo(
     () => new Set(messages.map((message) => message.invocationId).filter(Boolean)),
@@ -308,10 +360,10 @@ export function MessageList({
   );
   const transcriptMessages = useMemo(
     () =>
-      messages.filter(
+      displayMessages.filter(
         (message) => message.role !== "system" || message.messageType === MESSAGE_TYPES.A2A_ROUTE
       ),
-    [messages]
+    [displayMessages]
   );
   const liveMessages = run
     ? run.invocationOrder

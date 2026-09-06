@@ -338,7 +338,9 @@ routingReason, enforcementLevel }`，因此没有新增第二套调度器。
 `src/agents/probe-provider.js` 在 server listening 后通过既有 invoke-cli.js 和配置的 CLI/ACP
 短生成检测一次，25 秒墙钟终止进程树，无 TTL。GET /api/agents 返回观测，
 POST /api/agents/refresh 手动重新检测。探测无业务写入，close 时取消。
-chat-routes 在发送前检查可用性，chat-worklist 注入可路由 @ 表并回写真实 Provider 观测；
+chat-routes 在发送前检查可用性。chat-worklist 每次 invocation 注入可路由 @ 表，以及从
+DutyBinding + 当前 in-memory binding 派生的已参与 Seat 及其 Duty（按 Seat 保留对应关系，相同 Provider 的不同 seatId 不合并；无 binding 的历史 invocation 只补席位、不猜 Duty）；
+这是 prompt 派生读模型，无新表或新写入口。选席原则写在 Duty Skill，平台不按岗位自动换席。
 a2a-finalize（含 callback）在 fan-out 截断前过滤不可路由席位，继续既有 acceptHandoff/enqueue。
 前端 App 以 enabled Seat 与可用性求交，RightPanel 保留编制、原因和重新检测入口。
 Codex 已在 turn.completed 输出最终文本时，进程 finish 不再误报空回答；
