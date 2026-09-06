@@ -34,11 +34,11 @@ function renderCollaborationRules(currentAgentId, agents = AGENTS) {
 
 - 当前执行席位：${selfLabel}（${selfId || "unknown"}）
 - 无行首 @、无结构化 handoff.to 时继续由当前 Seat 工作；Duty 改变本身不换 Seat
-- 需要换席时只可行首 @ 当前 Thread 已启用的 Seat，并附共用 handoff；禁止 @ 自己
+- 需要换席时只可行首 @ 当前 Thread 中可跑的启用席位，并附共用 handoff；禁止 @ 自己
 - 句中 @ 与代码块内 @ 不触发路由；不要通过 shell 启动其他 Agent CLI 绕过平台
 - 不要为了交接、批准或完成去请求人审批；证据不足时写出合同或显式失败
 
-| 已启用 Seat | Provider key |
+| 当前可路由席位 | Provider key |
 | --- | --- |
 ${roster}
 

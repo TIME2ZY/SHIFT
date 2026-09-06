@@ -131,6 +131,7 @@ test("each Provider persists plan Duty output through the chat API", async () =>
   storage.metadata.activateCleanCutover();
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     spawnRunner: () => spawnText(IMPLEMENTATION_PLAN),
@@ -186,6 +187,7 @@ test("chat hops honor the depth limit and finish every accepted target", async (
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const spawned = [];
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     uiToken: UI_TOKEN,
@@ -259,6 +261,7 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
   const spawned = [];
   const prompts = [];
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     spawnRunner(_command, args) {

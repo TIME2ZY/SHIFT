@@ -273,6 +273,7 @@ function postMessage(
     logger: console,
     collabTaskRegistry: taskRegistry,
     threadSeats: thread.threadSeats || null,
+    availability: thread.availability,
     agents: thread.agents || AGENTS,
     fromSeatId: thread.currentDutyBinding?.seatId || null,
     fromDuty: thread.currentDutyBinding?.duty || null,

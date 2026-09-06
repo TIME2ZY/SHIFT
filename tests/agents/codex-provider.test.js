@@ -15,8 +15,18 @@ test("Codex child leaves CODEX_HOME unchanged without an override", () => {
   assert.deepEqual(buildCodexEnvironment({}, {}), {});
 });
 
-test("turn.completed promotes the last agent_message to text.delta once", () => {
-  const runtime = createProviderRuntime({ providerId: "codex", id: "codex", model: "gpt-5.6-sol" });
+test("turn.completed final is not misclassified as empty at process exit", () => {
+  const runtime = createProviderRuntime({
+    providerId: "codex",
+    id: "codex",
+    model: "gpt-5.6-sol",
+    invocationArtifacts: {
+      finalOutputPath: require("node:path").join(
+        require("node:os").tmpdir(),
+        `shift-missing-final-${require("node:crypto").randomUUID()}.txt`
+      ),
+    },
+  });
   const ctx = { agent: "codex", invocationId: "inv-promote" };
   runtime.transform(
     { type: "item.completed", item: { type: "agent_message", text: "checking" } },
@@ -35,6 +45,14 @@ test("turn.completed promotes the last agent_message to text.delta once", () => 
     ["final review"]
   );
   const finished = runtime.finish(ctx, { terminal: true, ok: true, exitCode: 0 });
+  assert.equal(
+    finished.some((event) => event.type === "run.failed"),
+    false
+  );
+  assert.equal(
+    finished.some((event) => event.type === "run.finished"),
+    true
+  );
   assert.equal(
     finished.filter((event) => event.type === "text.delta").length,
     0,

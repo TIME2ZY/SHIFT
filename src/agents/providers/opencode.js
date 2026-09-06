@@ -307,6 +307,15 @@ function createOpencodeRuntime(cli) {
       };
       if (!event || typeof event !== "object") return [];
 
+      if (event.type === "error") {
+        const error = event.error;
+        const message =
+          typeof error === "string"
+            ? error
+            : error?.data?.message || error?.message || "OpenCode generation failed.";
+        return [makeEvent("stderr", { ...base, text: message })];
+      }
+
       const part = normalizePart(event);
       const sessionId = sessionIdFromEvent(event);
 

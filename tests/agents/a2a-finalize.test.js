@@ -241,7 +241,7 @@ test("finalize routes an explicit Duty to any enabled Seat", () => {
   );
 });
 
-test("finalize hard rejects a target without an enabled Seat", () => {
+test("finalize ignores mentions outside the thread routable roster", () => {
   const worklist = ["codex"];
   const result = finalizeA2ARoutes({
     ...seatRouting("t-seat-disabled", ["codex"]),
@@ -255,8 +255,25 @@ test("finalize hard rejects a target without an enabled Seat", () => {
   });
 
   assert.equal(result.enqueued.length, 0);
-  assert.equal(result.skipped[0].reason, "target_seat_not_enabled");
+  assert.deepEqual(result.mentions, []);
+  assert.deepEqual(result.skipped, []);
   assert.deepEqual(worklist, ["codex"]);
+});
+
+test("unavailable mention consumes no fan-out slot and creates no repair", () => {
+  const worklist = ["codex"];
+  const result = finalizeA2ARoutes({
+    text: "@Gemini continue\n@Grok continue\n@OpenCode continue",
+    fromAgent: "codex",
+    threadId: "t-available",
+    invocationId: "inv-available",
+    worklist,
+    availability: { isRoutable: (id) => id !== "gemini" },
+  });
+  assert.deepEqual(result.mentions, ["grok", "opencode"]);
+  assert.deepEqual(worklist, ["codex", "grok", "opencode"]);
+  assert.deepEqual(result.repairs, []);
+  assert.deepEqual(result.skipped, []);
 });
 
 test("finalize rejects Codex implementation handoff before Grok submits a plan", () => {

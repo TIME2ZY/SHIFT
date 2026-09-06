@@ -69,6 +69,7 @@ async function withSealServer(spawnRunner, fn) {
   storage.metadata.activateCleanCutover();
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     spawnRunner,
@@ -232,6 +233,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   let spawns = 0;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     spawnRunner() {

@@ -63,13 +63,16 @@ process.on("exit", () => {
     } catch {}
   }
 });
-function publicAgents() {
+function publicAgents(availability) {
   return Object.values(AGENTS).map((agent) => {
     const identity = agentIdentity.getIdentity(agent.id);
     const modelProfile = getAgentModelProfile(agent.id);
     const provider = getProviderAdapter(agent.providerId);
     return {
       id: agent.id,
+      ...(availability
+        ? { availability: availability.get(agent.id), routable: availability.isRoutable(agent.id) }
+        : {}),
       label: agent.label,
       providerId: agent.providerId,
       model: agent.model,
@@ -140,6 +143,19 @@ function createServer(options = {}) {
   });
   const activeInvocations = new Map();
   const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
+  const { createProviderAvailability } = require("../agents/provider-availability");
+  const { createProviderProbe } = require("../agents/probe-provider");
+  const availability = createProviderAvailability({
+    agents: AGENTS,
+    logger,
+    probe:
+      options.availabilityProbe ||
+      createProviderProbe({
+        runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
+        shiftHome: appPaths.shiftHome,
+        env: options.env || process.env,
+      }),
+  });
   const { buildChatArgs } = createInvokeArgsBuilder({
     agents: AGENTS,
     runnerPath: path.join(runtimeRoot, "src", "agents", "invoke-cli.js"),
@@ -264,6 +280,7 @@ function createServer(options = {}) {
     logger,
   });
   const handleChatRoutes = createChatRoutes({
+    availability,
     selfGitRoot: SELF_GIT_ROOT,
     options,
     AGENTS,
@@ -323,7 +340,17 @@ function createServer(options = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/agents") {
-      sendJson(res, 200, { agents: publicAgents() });
+      sendJson(res, 200, { agents: publicAgents(availability) });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/agents/refresh") {
+      const body = await readJsonBody(req);
+      if (typeof body.agent !== "string" || !AGENTS[body.agent]) {
+        sendJson(res, 400, { error: "A known agent is required." });
+        return;
+      }
+      void availability.refresh(body.agent);
+      sendJson(res, 202, { agents: publicAgents(availability) });
       return;
     }
 
@@ -369,8 +396,10 @@ function createServer(options = {}) {
   const server = http.createServer(
     createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
   );
+  server.once("listening", () => availability.start());
   let storageClosePromise = null;
   function closeStorageContext() {
+    availability.close();
     if (storageClosePromise) return storageClosePromise;
     _previewManagers.delete(worktreeManager);
     storageClosePromise = (async () => {

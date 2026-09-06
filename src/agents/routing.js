@@ -14,7 +14,7 @@ const DEFAULT_MAX_A2A_DEPTH = 15;
  * @param {string} currentAgentId — the agent that produced this text
  * @returns {string[]} agent IDs mentioned (e.g. ["sage", "reviewer"])
  */
-function parseA2AMentions(text, currentAgentId) {
+function parseA2AMentions(text, currentAgentId, agents = AGENTS) {
   if (!text || typeof text !== "string") return [];
 
   // Step 1: Strip fenced code blocks (backtick and tilde)
@@ -26,7 +26,7 @@ function parseA2AMentions(text, currentAgentId) {
   // use either form, so we must route both consistently.
   const mentions = new Set();
 
-  for (const [id, config] of Object.entries(AGENTS)) {
+  for (const [id, config] of Object.entries(agents)) {
     if (id === currentAgentId) continue; // Rule 3: can't @ yourself
 
     const candidates = new Set([id, config.label].filter(Boolean));

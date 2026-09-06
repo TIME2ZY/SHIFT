@@ -67,6 +67,17 @@ function buildDutyBinding({ seat, duty, routingReason, agentConfig }) {
   };
 }
 
+function seatAvailabilityError(seats, target, availability) {
+  if (!availability || availability.isRoutable(target)) return null;
+  const anyRoutable = seats.some((seat) => availability.isRoutable(seat.providerId));
+  return {
+    error: anyRoutable
+      ? availability.get(target).reason
+      : "当前没有可接活的席位，请检查席位卡中的原因并重新检测。",
+    code: anyRoutable ? "AGENT_UNAVAILABLE" : "NO_ROUTABLE_SEATS",
+  };
+}
+
 function initialDuty({ requestedDuty, useWorktree = false } = {}) {
   if (requestedDuty !== undefined && requestedDuty !== null && requestedDuty !== "") {
     return normalizeDuty(requestedDuty);
@@ -102,6 +113,7 @@ module.exports = {
   DUTY_SKILLS,
   initializeCatalogSeats,
   resolveEnabledSeat,
+  seatAvailabilityError,
   buildDutyBinding,
   initialDuty,
   normalizeDuty,

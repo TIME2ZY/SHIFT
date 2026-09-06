@@ -434,7 +434,7 @@ function createCodexRuntime(cli) {
       removeFinalOutput();
       const promoted = promoteFinalText(ctx, fileText || lastAgentMessage);
       if (promoted.length) return promoted;
-      if (outcome.ok === true && finalOutputPath) {
+      if (outcome.ok === true && finalOutputPath && !lastEmittedFinal) {
         return [
           makeEvent("run.failed", {
             ...ctx,

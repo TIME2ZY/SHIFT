@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppNavigation } from "./navigation";
 import { AgentAvatar } from "../features/agents/AgentAvatar";
 import { useAgentsQuery } from "../features/agents/queries";
+import { useCollaborationQuery } from "../features/collaboration/queries";
 import { findExplicitLeadingAgent } from "../features/agents/routing";
 import { Composer, type ComposerDraftSeed } from "../features/chat/Composer";
 import { useChatActions } from "../features/chat/useChatActions";
@@ -99,11 +100,20 @@ export function App() {
   const messages = useMessagesQuery(activeSessionId);
   const traces = useSessionTracesQuery(activeSessionId, { limit: 100 });
   const run = useSessionRun(activeSessionId);
-  const selectedAgentId =
+  const collaboration = useCollaborationQuery(activeSessionId);
+  const routableAgents = (agents.data ?? []).filter(
+    (agent) =>
+      agent.routable !== false &&
+      collaboration.data?.seats.some((seat) => seat.providerId === agent.id)
+  );
+  const preferredAgentId =
     (activeSessionId ? agentBySession[activeSessionId] : undefined) ||
     activeSession?.lastAgent ||
     agents.data?.[0]?.id ||
     "";
+  const selectedAgentId = routableAgents.some((agent) => agent.id === preferredAgentId)
+    ? preferredAgentId
+    : routableAgents[0]?.id || "";
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
   const activeSessionTitle = sessionDisplayTitle(activeSession);
   const activeParticipantIds = uniqueAgentIds([
@@ -147,13 +157,13 @@ export function App() {
   }, [activeProjectKey]);
 
   function selectAgent(agentId: string) {
-    if (!activeSessionId) return;
+    if (!activeSessionId || !routableAgents.some((agent) => agent.id === agentId)) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
   }
 
   function sendPrompt(prompt: string, useWorktree: boolean, clientTurnId: string) {
     if (!activeSessionId) return Promise.resolve();
-    const explicitAgent = findExplicitLeadingAgent(prompt, agents.data ?? []);
+    const explicitAgent = findExplicitLeadingAgent(prompt, routableAgents);
     const targetAgentId = explicitAgent?.id || selectedAgentId;
     if (!targetAgentId) return Promise.resolve();
     return chat.send(activeSessionId, targetAgentId, prompt, useWorktree, clientTurnId);
@@ -373,7 +383,7 @@ export function App() {
 
             <Composer
               sessionId={activeSessionId}
-              agents={agents.data ?? []}
+              agents={routableAgents}
               selectedAgentId={selectedAgentId}
               running={running}
               draftSeed={composerDraftSeed}

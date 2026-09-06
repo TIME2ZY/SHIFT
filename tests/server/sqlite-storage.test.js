@@ -101,6 +101,7 @@ test("sqlite server ignores the retired online transcript path override", async 
   let server;
   try {
     server = createServer({
+      availabilityProbe: async () => ({ status: "unknown", reason: null }),
       storageMode: "sqlite",
       memoryDbFile: databaseFile,
       auditTranscriptDir: transcriptDir,
@@ -125,6 +126,7 @@ test("chat persists thread state through SQLite repositories", async () => {
   storage.metadata.activateCleanCutover();
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
 
@@ -200,6 +202,7 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   let run = 0;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
 
@@ -255,6 +258,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const prompts = [];
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
 
@@ -338,6 +342,7 @@ test("default sqlite mode restores sessions after restart", async () => {
 
   function startServer() {
     const server = createServer({
+      availabilityProbe: async () => ({ status: "unknown", reason: null }),
       memoryDbFile,
 
       spawnRunner: providerSessionSpawn(providerCalls, [firstConclusion, "hello"]),

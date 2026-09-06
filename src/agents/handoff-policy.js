@@ -171,7 +171,7 @@ function buildPhaseRejectPayload({ fromAgent, toAgent, phaseCheck, taskSkip, mod
   const message = [
     `⛔ 协作阶段/任务策略拒绝路由（policy=${mode || resolveHandoffPolicyMode()}）`,
     `${fromAgent || "?"} → ${toAgent || "?"} phase=${phase} reason=${reason}`,
-    allowed.length ? `当前 Thread 已启用 Seats: ${allowed.map((a) => "@" + a).join(", ")}` : "",
+    allowed.length ? `当前 Thread 可路由席位: ${allowed.map((a) => "@" + a).join(", ")}` : "",
     taskSkip?.state ? `任务状态: ${taskSkip.state}` : "",
   ]
     .filter(Boolean)

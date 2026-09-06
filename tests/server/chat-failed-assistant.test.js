@@ -76,6 +76,7 @@ test("failed provider runs persist streamed assistant text", async () => {
   storage.metadata.activateCleanCutover();
   const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
     storageMode: "sqlite",
     storage,
     spawnRunner: () => spawnTextThenSignal("初审结论：方向合理"),

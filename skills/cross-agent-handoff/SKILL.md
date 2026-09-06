@@ -14,10 +14,10 @@ always: false
 # 共用交接卡
 
 没有点名、没有 handoff 时继续由当前 Seat 工作。需要切换 Seat 时，行首写 `@Seat`，并附同一份
-`handoff`；目标必须属于当前 Thread 的 enabled Seats。不要猜测或点名 catalog 中未启用的 Provider。
+`handoff`；目标必须属于当前 Thread 当前可跑的启用席位，以注入的可路由名单为准。不要猜测或点名名单外的 Provider。
 
 ```handoff
-to: <enabled Seat label or provider id>
+to: <routable Seat label or provider id>
 intent: <discuss|plan|implement|review|fix|deliver|accept|recall>
 goal: <用户目标与范围>
 what: |

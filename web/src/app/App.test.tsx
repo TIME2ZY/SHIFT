@@ -3,7 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
+vi.mock("../features/collaboration/queries", () => ({
+  useCollaborationQuery: () => ({
+    data: {
+      seats: [
+        { providerId: "codex" },
+        { providerId: "grok" },
+        { providerId: "gemini" },
+        { providerId: "opencode" },
+      ],
+    },
+  }),
+}));
+
 const mocks = vi.hoisted(() => ({
+  agents: [{ id: "codex", label: "Codex", routable: true }],
   send: vi.fn().mockResolvedValue(undefined),
   stop: vi.fn(),
   navigate: vi.fn(),
@@ -34,8 +48,9 @@ vi.mock("./navigation", () => ({
 }));
 
 vi.mock("../features/agents/queries", () => ({
+  useRefreshAgentMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   useAgentsQuery: () => ({
-    data: [{ id: "codex", label: "Codex" }],
+    data: mocks.agents,
     isPending: false,
     error: null,
   }),
@@ -119,6 +134,7 @@ vi.mock("../features/right-panel/RightPanel", () => ({ RightPanel: () => null })
 vi.mock("../features/observability/AuditPage", () => ({ AuditPage: () => null }));
 
 beforeEach(() => {
+  mocks.agents = [{ id: "codex", label: "Codex", routable: true }];
   window.localStorage.clear();
   vi.clearAllMocks();
   mocks.sessions.splice(0, mocks.sessions.length, {
@@ -130,6 +146,32 @@ beforeEach(() => {
 });
 
 describe("App recommended prompt integration", () => {
+  it("falls back from unavailable preferred seat and excludes it from mentions", async () => {
+    mocks.agents = [
+      { id: "codex", label: "Codex", routable: false },
+      { id: "grok", label: "Grok", routable: true },
+    ];
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: "消息" });
+    await userEvent.type(input, "@");
+    expect(screen.queryByRole("option", { name: /Codex/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Grok/ })).toBeInTheDocument();
+    await userEvent.clear(input);
+    await userEvent.type(input, "继续");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(mocks.send).toHaveBeenCalledWith("s1", "grok", "继续", false, expect.any(String));
+  });
+
+  it("keeps draft and blocks sending when all seats are unavailable", async () => {
+    mocks.agents = [{ id: "codex", label: "Codex", routable: false }];
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: "消息" });
+    await userEvent.type(input, "继续{Enter}");
+    expect(input).toHaveValue("继续");
+    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
+    expect(screen.getByText(/暂无可接活席位/)).toBeVisible();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
   it("passes prompt text and explicit worktree mode from MessageList to Composer", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -137,12 +179,13 @@ describe("App recommended prompt integration", () => {
     const input = screen.getByRole("textbox", { name: "消息" });
     const toggle = screen.getByRole("checkbox", { name: "隔离改代码" });
     const first = {
-      title: "讨论并交给 Grok 出方案",
-      prompt: "请先确认问题和约束，收敛方案后交给 @Grok 提交 implementation_plan。本轮不要改代码。",
+      title: "收敛问题与方案",
+      prompt:
+        "请先确认问题和约束，再提交 implementation_plan；需要协作时选择当前可路由席位。本轮不要改代码。",
     };
     const refactor = {
       title: "在隔离 worktree 中实现",
-      prompt: "请按已批准方案在隔离 worktree 中实现，完成后交给 @OpenCode 审查。",
+      prompt: "请按已批准方案在隔离 worktree 中实现，完成后选择可路由席位审查；单席位时自审。",
     };
 
     await user.click(screen.getByRole("button", { name: `使用推荐提示：${first.title}` }));

@@ -236,6 +236,10 @@ function createAntigravityRuntime(cli) {
       };
       if (!event || typeof event !== "object") return [];
 
+      if (typeof event.error === "string" && event.error) {
+        return [makeEvent("stderr", { ...base, text: event.error })];
+      }
+
       const out = [];
       const ensureStarted = (sessionId) => {
         if (emittedRunStarted) return;
