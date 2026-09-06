@@ -17,6 +17,8 @@ triggers:
 
 当前 invocation 承担 review 或 deliver Duty。平台独立读取 worktree、commit、PR 和 GitHub checks；文本声明不能替代真实交付。同一份剧本可由任意当前可跑的启用席位 执行。
 
+用注入的已参与历史识别哪个 Seat 执行过 implement / fix。若另有可路由席位，不要把 review 交给该实现席（`avoid: sameSeatIfImplementerAndAnotherSeatExists`）。deliver 可以留在当前席，不要求为了独立性再换席。仅一席可跑时不要 @ 自己；自审必须在 code_review 中显式标明 same-seat，不能伪装成换席审查。
+
 ## Review
 
 先弄清改动目标与约束，再按 P0 / P1 / P2 分级。每条问题给位置、原因、建议。区分必须改与可选改进。

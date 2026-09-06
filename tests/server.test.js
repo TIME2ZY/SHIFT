@@ -443,6 +443,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       );
       // Soft collab rules must be present on the first (non-A2A) turn.
       assert.match(calls[0].args[3], /<!-- Collaboration Rules -->/);
+      assert.match(calls[0].args[3], /本 Thread 已参与/);
+      assert.match(calls[0].args[3], /@OpenCode/);
       assert.match(
         text,
         /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/
@@ -796,7 +798,11 @@ test("chat endpoint passes previous agent output to A2A-routed agent", async () 
       assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"gemini"/);
       // Soft collab rules on first turn and A2A follow-up turn.
       assert.match(prompts[0], /<!-- Collaboration Rules -->/);
+      assert.match(prompts[0], /本 Thread 已参与/);
+      assert.match(prompts[0], /@Codex/);
       assert.match(prompts[1], /<!-- Collaboration Rules -->/);
+      assert.match(prompts[1], /本 Thread 已参与/);
+      assert.match(prompts[1], /@Gemini/);
       assert.match(prompts[1], /任务交接/);
       assert.match(prompts[1], /codex result/);
       assert.match(prompts[1], /用户原始请求/);

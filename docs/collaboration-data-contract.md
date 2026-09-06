@@ -95,6 +95,7 @@ ProviderAvailability {
 真实调用中的明确 Provider 错误立即回写；任务失败、用户取消不改变可用性。
 同一 Agent 检测去重，旧检测结果不能覆盖检测期间较新的真实调用观测。
 prompt、mention（在 fan-out 截断之前）、当前发送席位均使用当前可路由名单。
+协作合同额外注入本 Thread 已参与 Seat 及其 Duty 的派生列表（按 Seat 保留对应关系，不拆成两个全局列表），来源是 DutyBinding 与当前 in-memory binding，不构成新写入口；相同 Provider 的不同 seatId 保持独立；禁用或不可用席位只出现在参与历史，不能当作可 @ 目标。
 不可用 mention 忽略，不创建 Handoff 或 repair；全部不可路由时发送显式失败。
 已启动 Invocation 仍通过原终态入口闭环。UI 同时展示编制、可用性原因和重新检测入口。
 
