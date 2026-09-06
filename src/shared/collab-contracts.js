@@ -1,12 +1,13 @@
 /**
- * Multi-agent reliability contracts (phase 0).
+ * Multi-agent reliability contracts.
  *
  * Canonical enums and payload shapes for invocation lifecycle, A2A handoff
  * closed-loop hops, memory funnel metrics, collab task/phase policy, and live
- * report schemas. Runtime wiring lands in later phases — this module is the
- * single source of names so later commits fill values without renaming.
+ * report schemas. Runtime wiring lives in storage/agents/server; this module
+ * is the single source of names.
  *
  * @see docs/decisions/002-multi-agent-reliability-contracts.md
+ * @see docs/decisions/007-seat-duty-evidence-workflow.md
  */
 
 "use strict";
@@ -37,8 +38,8 @@ const TERMINAL_INVOCATION_STATES = Object.freeze([
 ]);
 
 /**
- * Current SQLite CHECK on invocations.state (schema v1).
- * Do not expand here in phase 0 — migration belongs with phase 1–2.
+ * Current SQLite CHECK on invocations.state.
+ * Canonical states map onto these DB values; expanding CHECK needs a migration.
  */
 const LEGACY_DB_INVOCATION_STATES = Object.freeze(["active", "completed", "failed", "aborted"]);
 

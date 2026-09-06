@@ -1,7 +1,6 @@
 const { codexProvider } = require("./codex");
 const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
-const { grokAcpAdapter } = require("./grok-acp");
 const { antigravityProvider } = require("./antigravity");
 const { resolveModelProfile } = require("../catalog");
 const {
@@ -17,8 +16,6 @@ const { windowsUtf8Environment } = require("../windows-runtime");
 const { limitCanonicalEvent } = require("../event-size-policy");
 
 const REQUIRED_ADAPTER_METHODS = ["createRuntime", "buildInvocation"];
-
-grokProvider.acp = grokAcpAdapter;
 
 function isTruthyEnv(value) {
   return /^(1|true|yes|on)$/i.test(String(value || ""));
@@ -117,7 +114,7 @@ function validateProviderConfig(config) {
  */
 function createProviderRuntime(config, options = {}) {
   const { adapter } = validateProviderConfig(config);
-  const transportAdapter = options.transport === "acp" && adapter.acp ? adapter.acp : adapter;
+  const transportAdapter = getProviderTransportAdapter(config, options.transport);
   const runtime = transportAdapter.createRuntime(config);
   if (!runtime || typeof runtime.transform !== "function") {
     throw new Error(`Provider runtime "${adapter.id}" must implement transform().`);
@@ -277,24 +274,29 @@ function buildProviderInvocation(config, prompt, context = {}) {
   return adapter.buildInvocation(config, prompt, context);
 }
 
-function getProviderTransportAdapter(config, transport = config?.transport || "cli") {
+function getProviderTransportAdapter(config, requestedTransport) {
   const { adapter } = validateProviderConfig(config);
-  if (transport === "cli") return adapter;
-  if (transport === "acp" && adapter.acp) return adapter.acp;
+  const transport = requestedTransport || config?.transport || adapter.protocol || "cli";
+  if (transport === "acp") {
+    if (adapter.acp) return adapter.acp;
+    if (adapter.protocol === "acp") return adapter;
+    throw new Error(`Provider "${adapter.id}" does not support transport "acp".`);
+  }
+  if (transport === "cli") {
+    if (adapter.protocol === "acp") {
+      throw new Error(`Provider "${adapter.id}" does not support transport "cli".`);
+    }
+    return adapter;
+  }
   throw new Error(`Provider "${adapter.id}" does not support transport "${transport}".`);
 }
 
-function buildProviderTransportInvocation(
-  config,
-  prompt,
-  transport = config?.transport || "cli",
-  context = {}
-) {
+function buildProviderTransportInvocation(config, prompt, transport, context = {}) {
   const adapter = getProviderTransportAdapter(config, transport);
   return adapter.buildInvocation(config, prompt, context);
 }
 
-function buildProviderTransportMcpServers(config, env, transport = config?.transport || "cli") {
+function buildProviderTransportMcpServers(config, env, transport) {
   const adapter = getProviderTransportAdapter(config, transport);
   if (typeof adapter.buildMcpServers !== "function") return [];
   const servers = adapter.buildMcpServers(config, env);

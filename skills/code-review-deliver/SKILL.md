@@ -52,6 +52,7 @@ tests:
 - commit body：说明改动与原因
 - PR title：10–100 个字符
 - PR body 必须包含：`## 意图` / `## 主链路影响` / `## 路径变化（公开入口 / 双写）` / `## 测试（旧接口测试是否处理）` / `## 风险与回滚`
+- PR body 末尾另起一行：`来自 <当前模型 ID>`，写模型 ID，不要写厂家或 Seat 名，不要新增章节
 
 ````markdown
 ```delivery_receipt

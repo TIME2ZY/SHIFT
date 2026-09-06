@@ -3,6 +3,7 @@ title: "ADR-004: Five-Phase Collaboration Workflow"
 status: superseded
 decision_id: ADR-004
 created: 2026-08-05
+amended: 2026-09-06
 scope: handoff intent, collaboration phase, durable artifacts and approval gates
 superseded_by:
   - ./007-seat-duty-evidence-workflow.md
@@ -18,14 +19,17 @@ related:
 
 ## 1. 状态
 
-**Superseded by ADR-007**
+**Superseded by ADR-007。实现已迁出，不得再当现行路径。**
 
-本 ADR 取代 ADR-002 中七状态协作任务模型和旧 phase allowlist。Invocation、handoff
-幂等、memory funnel 与报告 schema 等其余 ADR-002 契约保持有效。
+本 ADR 曾取代 ADR-002 中七状态协作任务模型和旧 phase allowlist。Invocation、handoff
+幂等、memory funnel 与报告 schema 等其余 ADR-002 契约仍有效。
 
-ADR-007 将固定 Agent 角色、五阶段权威状态和按 Agent ID 的路由合同替换为
-Provider / Seat / Duty / Policy 模型。本文件保留为已经实施过的历史决策；在 ADR-007
-完成代码迁移前，当前运行路径仍以本文件描述的旧实现为准。
+ADR-007 已把固定 Agent 角色、五阶段权威状态和按 Agent ID 的路由替换为
+Provider / Seat / Duty / Policy。`role-contracts.js`、工号 allowlist 和按品牌名的
+implement / review / deliver / accept 门禁已退出在线热路径。下文角色表、
+`WORKFLOW_ROLES` 和分阶段 PR 计划只是当时落地记录，不能再用来选席、写门禁或要求
+特定 Provider 才能验收。当前实现以 ADR-007、`docs/collaboration-data-contract.md`
+和 `docs/architecture-map.md` 为准。五阶段只允许作为只读投影，不是路由真相。
 
 ## 2. 背景
 
@@ -62,8 +66,9 @@ discuss | plan | implement | review | fix | deliver | accept | recall
 ```
 
 路由优先使用显式 `intent`；旧消息缺失 intent 时才根据目标、worktree 和正文弱推断。
+intent 集合被 ADR-007 保留为 Duty 名；选席不再按下面的工号表。
 
-### 3.3 角色集合
+### 3.3 当时的固定角色（已废止）
 
 ```text
 lead:       codex
@@ -75,7 +80,7 @@ delivery:   opencode
 
 Codex 的最终成果验收属于 deliver 阶段，不取代 OpenCode 的代码 review。
 
-### 3.4 Phase allowlist
+### 3.4 当时的 Phase allowlist（已废止）
 
 ```text
 discuss: codex, gemini
@@ -85,10 +90,10 @@ deliver: opencode, codex
 recall: all four agents
 ```
 
-### 3.5 角色能力契约
+### 3.5 当时的角色能力契约（已废止）
 
-Phase allowlist 只表达某阶段有哪些参与者，不能区分同处 `deliver` 阶段的 OpenCode 交付和
-Codex 最终验收。因此运行时还必须按 handoff `intent` 校验接收方 capability：
+当时 Phase allowlist 只表达某阶段有哪些参与者，不能区分同处 `deliver` 阶段的 OpenCode
+交付和 Codex 最终验收，所以还按 handoff `intent` 校验接收方 capability：
 
 ```text
 discuss:   codex, gemini, grok, opencode
@@ -101,27 +106,28 @@ accept:    codex
 recall:    all four agents
 ```
 
-`capabilities` 只表示谁可以被 handoff 到该 intent。阶段主人和硬 gate 仍按
+当时 `capabilities` 只表示谁可以被 handoff 到该 intent。阶段主人和硬 gate 按
 `WORKFLOW_ROLES`：仅 Grok 驱动 implement/plan 门禁，仅 OpenCode 驱动 code review /
-deliver，仅 Codex 发出 implement 批准与最终 accept。不得用 capability 冒充角色
-（例如不得因「可讨论」就把 Grok 当成 discussion_partner）。
+deliver，仅 Codex 发出 implement 批准与最终 accept。这套工号门禁已删除。
 
-四个角色的单一机器真相源是 `src/agents/role-contracts.js`。Agent catalog、identity prompt、
-handoff 角色集合和路由策略必须从该契约派生，避免提示词职责与平台实际权限漂移。
+当时四个角色的机器真相源是 `src/agents/role-contracts.js`。该文件和按工号派生的
+catalog / identity / handoff 合同已删除；现行路由只看 Thread Seat 与 DutyBinding。
 
-其中：
+当时的岗位说明（已废止）：
 
-- Gemini 是正常讨论与验证伙伴，不要求固定脑暴数量，也不以奇思妙想为默认输出；
-- Codex 负责开始把关、参与讨论、收敛方案，以及按用户最初目标和收敛方案最终验收；
-- Grok 负责先给具体修改方案，获批后实现，完成后总结改动与验证；
-- OpenCode 负责代码 review；通过后负责规范 commit、push 与 PR 交付。
+- Gemini：讨论与验证伙伴；
+- Codex：把关、讨论、收敛方案，以及最终目标验收；
+- Grok：先给具体修改方案，获批后实现；
+- OpenCode：代码 review，通过后 commit / push / PR。
 
 ### 3.6 持久化与审计
 
-SQLite 是 collaboration task、artifact、gate 和 transition event 的真相源。Gate 后续必须
-绑定对应 plan/diff/commit/goal hash；进程内状态只能作为无持久化调用的兼容路径。
+SQLite 是 collaboration task、artifact、gate 和 transition event 的真相源。Gate 绑定
+plan/diff/commit/goal hash。进程内 registry 不再作为协作任务真相源。
 
-## 4. 分阶段实现范围
+## 4. 当时的分阶段落地（已完成，角色绑定已废止）
+
+下列 PR 计划已经做过；其中按工号绑定义务的部分随后被 ADR-007 删除。
 
 首个实现 PR 只交付：
 
@@ -174,7 +180,14 @@ PR4 仍不增加 phase。`solutionBaseline`、`codeReviewGate`、`deliveryGate` 
 
 ## 5. 后果
 
-- `changes_requested` 是 `review → implement` transition event，不是 phase。
-- OpenCode approve 进入 `deliver`，但不能直接进入 `done`。
-- `done` 最终必须由目标、方案、review、commit 与 CI gate 共同决定。
-- 旧 handoff 无 intent 时继续兼容，但会在提示模板中引导生成显式 intent。
+当时留下、ADR-007 仍承认的部分：
+
+- `changes_requested` 是 `review → implement` 的 transition event，不是 phase。
+- 最终完成由目标、方案、review、commit 与 CI 等证据门禁决定，而不是 Agent 自述 done。
+- 旧 handoff 无 intent 时的弱推断只是兼容，新路径应写显式 Duty。
+
+已废止、不得再执行的部分：
+
+- 按 Codex / Grok / OpenCode 工号分配 discuss / implement / review / accept。
+- `role-contracts.js` / `WORKFLOW_ROLES` 作为运行时真相。
+- 只有指定品牌才能批准方案、提交 PR 或写最终验收。

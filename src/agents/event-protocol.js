@@ -4,6 +4,13 @@
  * surface as tool.* (e.g. spawn_subagent / get_command_or_subagent_output).
  * Cross-agent work uses platform @ / handoff (see collaboration-rules).
  * Shell/command executions map to tool.* (toolName often "command_execution" / "bash").
+ *
+ * Live vs final text:
+ * - commentary.delta is in-progress narration. It is not assistant-final.
+ * - text.delta is the user-visible answer.
+ * Codex streams agent_message as commentary.delta, then promotes exactly once
+ * to text.delta (turn.completed last commentary, else finish() from
+ * --output-last-message). Other providers emit text.delta directly.
  */
 const PROTOCOL_VERSION = 2;
 

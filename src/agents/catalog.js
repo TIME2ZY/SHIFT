@@ -170,7 +170,7 @@ const DEFAULT_AGENTS = Object.freeze({
       "Grok",
       "grok",
       "grok-4.6",
-      "Grok CLI/ACP runtime。ACP 模式支持平台权限回调与结构化工具事件。",
+      "Grok ACP runtime。支持平台权限回调与结构化工具事件。",
       {
         reasoningEffort: "high",
         transport: "acp",

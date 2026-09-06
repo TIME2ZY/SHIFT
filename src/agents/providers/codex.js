@@ -136,6 +136,16 @@ function createCodexRuntime(cli) {
   let lastAgentMessage = "";
   let lastEmittedFinal = "";
 
+  /**
+   * Codex live/final contract:
+   * - Live agent_message and generic text envelopes → commentary.delta only.
+   * - The single assistant-final is text.delta, emitted once by promoteFinalAnswer.
+   * - turn.completed promotes the last commentary snapshot.
+   * - finish({ terminal: true }) promotes --output-last-message only if nothing
+   *   has been promoted yet; otherwise it is a no-op.
+   * - Successful finish with a final-output path but no text is run.failed.
+   */
+
   function fileChangeEvents(base, item) {
     const changes = item && Array.isArray(item.changes) ? item.changes : [];
     return changes
@@ -169,9 +179,10 @@ function createCodexRuntime(cli) {
     if (typeof text === "string" && text) lastAgentMessage = text;
   }
 
-  function promoteFinalText(ctx, candidate) {
+  function promoteFinalAnswer(ctx, candidate) {
+    if (lastEmittedFinal) return [];
     const text = typeof candidate === "string" && candidate ? candidate : lastAgentMessage;
-    if (!text || text === lastEmittedFinal) return [];
+    if (!text) return [];
     lastEmittedFinal = text;
     return [makeEvent("text.delta", { ...ctx, text })];
   }
@@ -189,7 +200,7 @@ function createCodexRuntime(cli) {
     if (finalOutputPath) fs.rmSync(finalOutputPath, { force: true });
   }
 
-  function commentaryEvents(base, text) {
+  function emitCommentary(base, text) {
     rememberAgentMessage(text);
     return text ? [makeEvent("commentary.delta", { ...base, text })] : [];
   }
@@ -350,7 +361,7 @@ function createCodexRuntime(cli) {
         event.item.type === "agent_message" &&
         typeof event.item.text === "string"
       ) {
-        return commentaryEvents(base, event.item.text);
+        return emitCommentary(base, event.item.text);
       }
 
       if (event.type === "assistant") {
@@ -360,7 +371,7 @@ function createCodexRuntime(cli) {
           .filter((item) => item.type === "text" && typeof item.text === "string")
           .map((item) => item.text)
           .join("");
-        return commentaryEvents(base, text);
+        return emitCommentary(base, text);
       }
 
       if (event.type === "turn.completed") {
@@ -375,13 +386,13 @@ function createCodexRuntime(cli) {
           });
           if (usage) events.push(usage);
         }
-        events.push(...promoteFinalText(base));
+        events.push(...promoteFinalAnswer(base));
         return events;
       }
 
       const content = event.content || (event.properties && event.properties.content);
       if (content && content.type === "text" && typeof content.text === "string") {
-        return commentaryEvents(base, content.text);
+        return emitCommentary(base, content.text);
       }
 
       if (event.type === "item.completed" && event.item && event.item.type === "todo_list") {
@@ -430,11 +441,15 @@ function createCodexRuntime(cli) {
         removeFinalOutput();
         return [];
       }
+      if (lastEmittedFinal) {
+        removeFinalOutput();
+        return [];
+      }
       const fileText = readFinalOutput();
       removeFinalOutput();
-      const promoted = promoteFinalText(ctx, fileText || lastAgentMessage);
+      const promoted = promoteFinalAnswer(ctx, fileText || lastAgentMessage);
       if (promoted.length) return promoted;
-      if (outcome.ok === true && finalOutputPath && !lastEmittedFinal) {
+      if (outcome.ok === true && finalOutputPath) {
         return [
           makeEvent("run.failed", {
             ...ctx,

@@ -1,13 +1,30 @@
-# ADR 002: Recall FTS 使用 trigram tokenizer
+---
+title: "ADR-008: Recall FTS uses trigram tokenizer"
+status: accepted
+decision_id: ADR-008
+created: 2026-07-30
+amended: 2026-09-06
+scope: recall_fts, memory_search_fts, project_passages_fts
+supersedes: []
+related:
+  - ./001-storage-truth-boundary.md
+  - ./003-recall-vector-index.md
+  - ./005-memory-thread-only.md
+---
 
-- 状态：Accepted
-- 日期：2026-07-30
-- 范围：`recall_fts`、`memory_search_fts`、`project_passages_fts`
+# ADR-008：Recall FTS 使用 trigram tokenizer
+
+> 曾用非正式标题「ADR 002」。正式编号是 ADR-008，避免与
+> `002-multi-agent-reliability-contracts.md` 冲突。
+
+## 状态
+
+**Accepted — implemented**
 
 ## 背景
 
 默认 FTS5 `unicode61` 能匹配英文 token，但不会把连续中文句子切成可独立查询的短语。
-在当前语料上，`权威存储` 和 `在线读写` 对 `unicode61` 均为零命中；同一内容使用
+在当时语料上，`权威存储` 和 `在线读写` 对 `unicode61` 均为零命中；同一内容使用
 FTS5 `trigram` 时可以命中。
 
 RecallService 已有受作用域约束的 `contains` 降级，但把常见中文短语全部交给
@@ -24,8 +41,8 @@ tokenize='trigram'
 不增加第二套并行中文索引。少于三个字符、FTS 查询不可用或查询语法不受支持时，
 继续使用现有 scoped-contains 降级。
 
-Memory topic 不依赖 trigram：`memory_search.topic` 使用独立的 thread/project 索引，
-完全匹配返回 `exact-topic` 通道。
+Memory topic 不依赖 trigram：`memory_search.topic` 使用独立的 thread 索引，
+完全匹配返回 `exact-topic` 通道。产品 Memory 只有 thread 作用域（ADR-005）。
 
 ## 安全边界
 

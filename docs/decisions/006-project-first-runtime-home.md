@@ -3,6 +3,7 @@ title: "ADR-006: Project-first sessions and user-level runtime home"
 status: accepted
 decision_id: ADR-006
 created: 2026-08-09
+amended: 2026-09-06
 scope: project lifecycle, thread ownership, retrieval isolation, runtime home migration
 supersedes: []
 related:
@@ -23,9 +24,9 @@ composition root 只接受 `SHIFT_HOME/data` 下的 active clean epoch SQLite；
 
 ## 背景
 
-SHIFT 当前已经在 `threads` 保存 `project_dir` 和 `project_key`，但产品入口仍以全局会话
-列表为中心：新会话默认绑定 SHIFT 源码目录，用户需要进入会话后修改目录，前端只按时间
-组织会话。运行数据库、审计记录和 worktree 状态也位于仓库 `data/runtime`，使平台数据与
+落地前 `threads` 已保存 `project_dir` 和 `project_key`，但产品入口仍以全局会话列表为
+中心：新会话默认绑定 SHIFT 源码目录，用户需要进入会话后修改目录，前端只按时间组织
+会话。运行数据库、审计记录和 worktree 状态也位于仓库 `data/runtime`，使平台数据与
 SHIFT 项目内容耦合。
 
 SHIFT 的目标是编排多个本机 Agent 在多个本机项目中工作。Project 必须先于 Thread 成为
@@ -138,10 +139,10 @@ POST /api/projects/:projectKey/archive
 POST /api/projects/:projectKey/restore
 GET  /api/projects/:projectKey/sessions
 POST /api/sessions { projectKey }
-GET  /api/sessions/:threadId/workspace
+GET  /api/sessions/:threadId/workspace   # 后端 worktree 状态；Web 已无 Workspace 页
 ```
 
-以下旧语义必须在前后端切换完成时删除，而不是作为长期兼容层保留：
+以下旧语义已删除，不得作为兼容层恢复：
 
 ```text
 GET  /api/project

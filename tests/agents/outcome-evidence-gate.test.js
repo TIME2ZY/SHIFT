@@ -97,11 +97,29 @@ test("commit and PR descriptions enforce auditable conventions", () => {
         "相关验证通过，未保留旧接口测试",
         "## 风险与回滚",
         "风险可通过回滚该提交消除",
+        "来自 deepseek-v4-flash",
       ].join("\n\n")
     ).ok,
     true
   );
   assert.equal(validatePullRequestDescription("tiny", "no sections").ok, false);
+  const missingSeat = validatePullRequestDescription(
+    "Verify OpenCode delivery evidence",
+    [
+      "## 意图",
+      "交付经过审查的实现",
+      "## 主链路影响",
+      "不改变 invocation 主链路",
+      "## 路径变化（公开入口 / 双写）",
+      "没有新增公开入口或双写",
+      "## 测试（旧接口测试是否处理）",
+      "相关验证通过，未保留旧接口测试",
+      "## 风险与回滚",
+      "风险可通过回滚该提交消除",
+    ].join("\n\n")
+  );
+  assert.equal(missingSeat.ok, false);
+  assert.deepEqual(missingSeat.reasons, ["missing_model_attribution"]);
 });
 
 test("PR description rejects the retired English section contract", () => {
@@ -116,6 +134,7 @@ test("PR description rejects the retired English section contract", () => {
       "Passed",
       "## Risks",
       "None",
+      "来自 deepseek-v4-flash",
     ].join("\n\n")
   );
 
@@ -186,8 +205,14 @@ test("Duty evidence prompts keep review and final acceptance responsibilities se
   const review = renderOutcomeEvidenceBlock("review", task, { branch: "codex/session-1" });
   assert.match(review, /Review 与交付门禁/);
   assert.match(review, /delivery_receipt/);
+  assert.match(review, /来自 <当前模型 ID>/);
   assert.equal(renderOutcomeEvidenceBlock("implement", task), "");
   for (const block of [acceptance, review]) {
     assert.doesNotMatch(block, /Codex|Grok|OpenCode/);
   }
+  const namedReview = renderOutcomeEvidenceBlock("review", task, {
+    branch: "codex/session-1",
+    modelId: "deepseek-v4-flash",
+  });
+  assert.match(namedReview, /来自 deepseek-v4-flash/);
 });

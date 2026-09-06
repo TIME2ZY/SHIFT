@@ -3,12 +3,13 @@ title: "ADR-001: Storage Truth Boundary"
 status: accepted
 decision_id: ADR-001
 created: 2026-07-26
-amended: 2026-08-12
+amended: 2026-09-06
 scope: sessions, messages, invocations, handoffs, traces, memory, transcripts, project knowledge, and search projections
 supersedes: []
 related:
   - ../memory-data-contract.md
   - 002-multi-agent-reliability-contracts.md
+  - 005-memory-thread-only.md
   - 006-project-first-runtime-home.md
 ---
 
@@ -83,16 +84,16 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 | Project 存在性、目录绑定和归档状态      | SQLite `projects`                | UI 当前选择、最近项目缓存             |
 | Thread 存在性、标题、项目绑定、归档状态 | SQLite `threads`                 | UI cache、导出 JSON                   |
 | 正式用户/Agent 消息                     | SQLite `messages`                | JSONL audit、recall/FTS               |
-| Chat request/Trace 生命周期（0B 目标）  | SQLite trace source tables       | Trace read model、UI runtime          |
+| Chat request/Trace 生命周期             | SQLite trace source tables       | Trace read model、UI runtime          |
 | Invocation 生命周期和终态               | SQLite `invocations`             | JSONL audit、UI runtime               |
-| Handoff 路由、绑定和终态（0B 目标）     | SQLite handoff source tables     | Trace read model、进程内 cache        |
+| Handoff 路由、绑定和终态                | SQLite handoff source tables     | Trace read model、进程内 cache        |
 | 可回放的规范化 durable events           | SQLite invocation event tables   | canonical JSONL                       |
 | Provider 原始事件                       | raw JSONL diagnostic log         | 不得成为 message/memory 真相          |
 | Context window、generation、usage       | SQLite context/window tables     | usage summary                         |
 | Provider resume session 绑定            | SQLite window/session binding    | 脱敏 legacy session-map 测试 fixture  |
-| 未确认 suggestion 和运行期 memory       | SQLite memory tables             | Active Memory Card                    |
-| 已确认但尚未 materialize 的产品记忆     | SQLite `memory_entries`          | recall projection                     |
-| 已 materialize 的项目长期知识           | Git 管理的 Markdown/项目文件     | SQLite passage/index + source pointer |
+| 产品 Memory（decision/constraint/fact） | SQLite `memory_entries`（thread） | Active Memory Card、recall projection |
+| 协作事件（handoff、seal 等）            | 对应协作/invocation 事件表        | 不得借用产品 Memory 表达              |
+| 跨会话项目长期知识                      | Git 管理的 Markdown/项目文件      | SQLite passage/index + source pointer |
 | 记忆生命周期、authority、失效状态       | SQLite memory tables/events      | JSONL audit                           |
 | 项目源码和配置内容                      | Git 工作区文件                   | SQLite evidence index                 |
 | Worktree 实际存在性和内容               | Git                              | SQLite 中的 session 关联信息          |
@@ -210,53 +211,47 @@ SHIFT 优先发现并索引项目已有的 `AGENTS.md`、`README.md`、`CONTRIBU
 
 **Operational Memory**
 
-- 当前/近期 thread 背景；
-- handoff、window seal、会话摘要；
-- 未确认 suggestion；
-- 尚未证明需要跨机器传播的 fact/lesson；
-- 用户或 Agent 的临时工作偏好。
+- 当前 thread 的产品 Memory（decision / constraint / fact）；
+- 尚未证明需要随 Git 项目传播的工作背景。
 
-它们由 SQLite 拥有，不自动进入 Git。
+它们由 SQLite 拥有，作用域仅 thread，不自动进入 Git。handoff、window seal 和会话摘要
+是协作/恢复事件，不是产品 Memory。
 
 **Institutional Knowledge**
 
-- 已拍板并应随项目传播的 decision/constraint；
+- 已拍板并应随项目传播的决策与约束；
 - 经验证、长期有效的项目事实；
-- 跨任务复用的 lesson/method；
 - 正式契约、规范和运行手册。
 
-它们只有经过用户批准的 materialization 后，才由 Git 文件拥有。
+它们写入项目已有的 Git 文档（ADR-005），经 project-doc 索引检索；不经过产品 Memory
+的 project 作用域，也不经过 Human 确认才能落盘。
 
 判断标准：
 
 > 如果删除本机 SHIFT 数据库、换一台电脑或切换开发者后，这条知识仍应随项目存在，
 > 它就应进入 Git 文件。
 
-### 6.3 Materialization 边界
+### 6.3 项目知识边界
 
-项目知识的目标生命周期是：
+跨会话项目知识的权威来源是 Git 管理的项目文件，不是 SQLite 产品 Memory：
 
 ```text
 conversation/evidence
-  → SQLite suggestion
-  → user confirmation
-  → proposed Markdown patch
-  → worktree diff / explicit approval
-  → Git-managed file
-  → SQLite reindex with source path + anchor + hash
+  → 写入项目已有 Git 文档
+  → SQLite project-doc / passage 按 path + hash 重建索引
 ```
 
-Materialization 后：
+索引后：
 
 - 文件内容是该项目知识的权威来源；
-- SQLite 保存 source path、anchor、content hash、provenance 和检索 passage；
+- SQLite 保存 source path、anchor、content hash 和检索 passage；
 - 文件变化触发重新索引；
 - 文件删除使投影失效；
 - 旧投影不得静默重建或覆盖文件；
 - SQLite 中不得保留一个可独立编辑、与文件平级竞争的第二份知识内容。
 
-Materialization 的目录策略、Markdown schema 和审批 UI 由后续 ADR/spec 定义；本 ADR
-只冻结“用户批准后文件成为权威”的边界。
+不得再引入 suggestion → Human 确认 → 落盘 的产品 Memory 工作流，也不得把
+`scope=project` 的 Memory 当作跨会话项目真相（ADR-005）。
 
 ## 7. JSONL 的职责
 
@@ -326,7 +321,7 @@ Trace 不得反向修正业务状态，audit 也不得作为在线 trace/handoff
 - query terms、score、rank 和 quota 结果；
 - digest 和 usage summary；
 - Active Memory Card；
-- embedding/vector index（未来）。
+- embedding/vector index（可选、默认可关闭的派生投影，见 ADR-003）；
 - trace spans、span links 和时间窗口聚合指标。
 
 Trace 投影只能组合已有权威事实和明确标注为 best-effort 的诊断事实。SSE、进程内计数器、
@@ -525,8 +520,8 @@ event 通过 transactional outbox 幂等归档；health、retention、恢复演�
 已有验收证据。
 
 2026-08-09 amendment 只改变正式数据库的物理位置并增加 Project 生命周期边界，不重新
-打开 `files/dual`。其完成状态以 ADR-006 和对应实现 PR 为准；在实现提交落地前，本节随后
-列出的历史关闭结论仍只描述原 storage-mode cutover。
+打开 `files/dual`。ADR-006 已落地。本节关闭结论描述 storage-mode cutover 与随后的
+home 迁移。
 
 兼容代码收尾已完成：
 
@@ -538,8 +533,8 @@ event 通过 transactional outbox 幂等归档；health、retention、恢复演�
 - dual audit、legacy file-format migrate、cleanup tooling 和脱敏 fixture 已完成使命并退役；
   仅保留当前 SQLite 的审计、恢复、clean epoch 与旧安装数据库搬迁能力。
 
-project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决定，不是本次 SQLite
-真相源切换的关闭条件。新增功能不得扩大或重新激活平级双源范围。
+跨会话项目知识由 ADR-005 定为 Git 文档 + project-doc 索引，不是本次 SQLite 真相源切换
+的关闭条件。新增功能不得扩大或重新激活平级双源范围，也不得恢复 project 产品 Memory。
 
 ## 15. 实现顺序
 
@@ -566,8 +561,8 @@ project-memory materialization workflow 由 §6.3 所述的后续 ADR/spec 决�
 2. 正常 API 不通过比较两个存储来决定真相；
 3. 投影可重建且不能反向覆盖 source；
 4. archive/purge 后旧 JSONL 不能复活数据；
-5. suggestions 在用户接受前不是项目事实；
-6. materialized 项目知识以 Git 文件为准；
+5. 产品 Memory 不是跨会话项目事实；项目知识以 Git 文件为准；
+6. project-doc / passage 只是可重建索引，不能反向覆盖文件；
 7. 项目文件修改必须经过明确授权并可查看 diff；
 8. SQLite 权威写入失败必须对调用者可见；
 9. JSONL 归档失败必须可重试、可观测；

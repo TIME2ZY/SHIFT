@@ -145,7 +145,17 @@ function validatePullRequestDescription(title, body) {
   for (const section of REQUIRED_PR_SECTIONS) {
     if (!normalizedBody.includes(section.heading)) reasons.push(`missing_${section.key}`);
   }
+  if (!hasModelAttribution(normalizedBody)) reasons.push("missing_model_attribution");
   return { ok: reasons.length === 0, reasons };
+}
+
+function hasModelAttribution(body) {
+  const lines = String(body || "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (line) return /^来自\s+\S+/.test(line);
+  }
+  return false;
 }
 
 function parseFinalAcceptance(text) {
@@ -303,6 +313,7 @@ function renderSolutionEvidenceBlock(task) {
 
 function renderReviewDeliveryEvidenceBlock(task, context = {}) {
   const review = task?.codeReviewGate;
+  const modelId = clean(context.modelId) || "<当前模型 ID>";
   const lines = [
     "<!-- Review Delivery Gate -->",
     "## Review 与交付门禁（平台强制）",
@@ -311,6 +322,7 @@ function renderReviewDeliveryEvidenceBlock(task, context = {}) {
     "approve 时必须由你在当前 worktree 运行 `npm run verify:pr`，规范 commit、push、创建 ready PR，并等待 GitHub checks 成功。",
     "commit subject 必须使用 Conventional Commit 且不超过 72 字符；commit body 必须说明改动与原因。",
     "PR title 必须为 10–100 个字符；PR body 必须包含 `## 意图`、`## 主链路影响`、`## 路径变化（公开入口 / 双写）`、`## 测试（旧接口测试是否处理）`、`## 风险与回滚` 五节。",
+    `PR body 五节之后，末尾另起一行写：来自 ${modelId}。写模型 ID，不要写厂家或 Seat 名。不要把它做成新的标题章节。`,
     `当前分支：\`${context.branch || "missing"}\`；当前 review gate：${review?.verdict || "pending"}。`,
     "",
     "最终输出必须包含两个 block：",
