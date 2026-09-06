@@ -66,13 +66,6 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
       ) : null}
       {snapshot ? (
         <>
-          <div className="react-task-goal">
-            <small>目标</small>
-            <strong>{snapshot.goalOriginal || "目标尚未记录"}</strong>
-            {snapshot.goalNormalized && snapshot.goalNormalized !== snapshot.goalOriginal ? (
-              <p>{snapshot.goalNormalized}</p>
-            ) : null}
-          </div>
           <dl className="react-task-assignment">
             <div>
               <dt>当前席位</dt>
@@ -93,13 +86,27 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
               <strong>{BLOCKER_LABELS[snapshot.blocker.reason] || snapshot.blocker.reason}</strong>
             </div>
           ) : null}
+          <details className="react-task-goal" key={snapshot.goalOriginal}>
+            <summary>
+              <span className="react-task-goal-label">
+                任务目标 <span>展开 / 收起</span>
+              </span>
+              <span className="react-task-goal-preview">
+                {snapshot.goalNormalized || snapshot.goalOriginal || "目标尚未记录"}
+              </span>
+            </summary>
+            <p>{snapshot.goalOriginal || "目标尚未记录"}</p>
+          </details>
           <div className="react-task-evidence" aria-label="完成证据">
             <Evidence label="脏文件" value={dirtyFilesLabel(snapshot.evidence.dirtyFileCount)} />
             <Evidence label="HEAD" value={shortSha(snapshot.evidence.headSha)} />
             <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
             <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
-          <AcceptanceCardView card={snapshot.acceptance} />
+          <details className="react-task-acceptance-details">
+            <summary>验收：{acceptanceVerdictLabel(snapshot.acceptance.verdict)}</summary>
+            <AcceptanceCardView card={snapshot.acceptance} />
+          </details>
           <p className="react-task-next-action">
             <small>下一步</small>
             {snapshot.nextAction}

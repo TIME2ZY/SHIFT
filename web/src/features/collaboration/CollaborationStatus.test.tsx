@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { CollaborationStatus } from "./CollaborationStatus";
 import type { CollaborationSnapshot } from "./types";
@@ -45,7 +46,7 @@ describe("CollaborationStatus", () => {
     expect(screen.getByText("发送消息后，这里会显示目标与完成证据。")).toBeInTheDocument();
   });
 
-  it("renders a pending plan as the current blocker", () => {
+  it("renders the blocker before a collapsed goal with expandable original text", async () => {
     render(
       <CollaborationStatus
         loading={false}
@@ -75,7 +76,10 @@ describe("CollaborationStatus", () => {
     expect(screen.getByText("实现席")).toBeInTheDocument();
     expect(screen.getByText("实现 · implementation-plan")).toBeInTheDocument();
     expect(screen.getByText("等待讨论席位批准方案")).toBeInTheDocument();
-    expect(screen.getByText("Fix utcOffset clone")).toBeInTheDocument();
+    const originalGoal = screen.getByText("Fix utcOffset clone");
+    expect(originalGoal.closest("details")).not.toHaveAttribute("open");
+    await userEvent.click(screen.getByText("任务目标"));
+    expect(originalGoal.closest("details")).toHaveAttribute("open");
     expect(screen.getByText("Clone first")).toBeInTheDocument();
     expect(screen.getByText("abcdef1")).toBeInTheDocument();
     expect(screen.getByText("请由讨论或验收席位批准方案后继续。")).toBeInTheDocument();
@@ -102,6 +106,7 @@ describe("CollaborationStatus", () => {
       />
     );
 
+    fireEvent.click(screen.getByText(/^验收：/));
     const card = screen.getByRole("region", { name: "验收卡" });
     expect(card).toHaveTextContent("1234567890ab");
     expect(card).toHaveTextContent("当前席位自审");
@@ -153,6 +158,7 @@ describe("CollaborationStatus", () => {
         })}
       />
     );
+    fireEvent.click(screen.getByText(/^验收：/));
     expect(screen.getByRole("region", { name: "验收卡" })).toHaveTextContent("已拒绝");
     expect(screen.getByText("验收席位已拒绝本次交付。")).toBeInTheDocument();
   });
