@@ -29,7 +29,7 @@ export function SessionAuditOverview({
     summary.usage.available
       ? `${compactTokens(billing.totalTokens)} · ${formatCost(billing.costUsd)}`
       : null,
-    latest ? STATE_LABELS[latest.state] : null,
+    latest ? `最近一轮：${STATE_LABELS[latest.state]}` : null,
   ].filter(Boolean) as string[];
 
   return (
@@ -50,11 +50,30 @@ export function SessionAuditOverview({
 }
 
 function memoryEvidenceValue(memory: SessionAuditSummary["memory"]) {
-  if (memory.searches > 0) return `${memory.searchHits}/${memory.searches} 检索命中`;
+  const parts = [writeEvidence(memory), searchEvidence(memory)].filter(Boolean);
+  if (parts.length) return parts.join(" · ");
   if (memory.injections > 0) {
     return `${memory.injectionsDelivered}/${memory.injections} 注入送达`;
   }
   return `${memory.active} 条 Memory`;
+}
+
+function writeEvidence(memory: SessionAuditSummary["memory"]) {
+  if (!memory.writes) return null;
+  const kinds = [
+    memory.writeCreated ? `创建 ${memory.writeCreated}` : null,
+    memory.writeSuperseded ? `替代 ${memory.writeSuperseded}` : null,
+    memory.writeUnchanged ? `未变化 ${memory.writeUnchanged}` : null,
+    memory.writeRejected ? `拒绝 ${memory.writeRejected}` : null,
+  ].filter(Boolean);
+  const onlyCreated = memory.writeCreated === memory.writes && kinds.length === 1;
+  if (!kinds.length || onlyCreated) return `写入 ${memory.writes}`;
+  return `写入 ${memory.writes}（${kinds.join(" · ")}）`;
+}
+
+function searchEvidence(memory: SessionAuditSummary["memory"]) {
+  if (!memory.searches) return null;
+  return `${Number(memory.searchHits || 0)}/${memory.searches} 检索命中`;
 }
 
 function formatDuration(ms: number) {

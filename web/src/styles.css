@@ -57,7 +57,7 @@ body {
 
 .react-project-rail > header > span {
   color: var(--text-tertiary);
-  font: 600 11px/1 var(--font-ui);
+  font: 600 12px/1 var(--font-ui);
   letter-spacing: 0.01em;
 }
 
@@ -145,7 +145,7 @@ body {
 
 .react-project-trigger-copy small {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .react-project-chevron {
@@ -177,7 +177,7 @@ body {
 .react-project-menu-label {
   padding: 5px 7px 4px;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -218,7 +218,7 @@ body {
 
 .react-project-menu-project strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -234,7 +234,7 @@ body {
 
 .react-project-check {
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-project-menu-archive {
@@ -274,7 +274,7 @@ body {
   padding: 0 7px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-align: left;
 }
 
@@ -302,7 +302,7 @@ body {
   align-items: center;
   justify-content: space-between;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -318,7 +318,7 @@ body {
 
 .react-project-open label {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -332,7 +332,7 @@ body {
   outline: 0;
   color: var(--text-primary);
   background: var(--surface-canvas);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 
 .react-project-open input:focus {
@@ -342,7 +342,7 @@ body {
 
 .react-project-open > small {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -359,7 +359,7 @@ body {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   background: transparent;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -408,7 +408,7 @@ body {
 
 .react-project-empty small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-project-archive-list {
@@ -432,7 +432,7 @@ body {
 
 .react-project-archive-list span {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -442,7 +442,7 @@ body {
 .react-project-error {
   padding: 4px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-project-message button {
@@ -506,7 +506,7 @@ body {
 .react-brand small {
   margin-top: 1px;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-app-nav {
@@ -544,10 +544,9 @@ body {
 }
 
 .react-app-nav button[data-active] {
-  color: var(--accent-text);
-  background: var(--accent-gradient);
+  color: var(--accent-nav);
+  background: var(--accent-nav-bg);
   font-weight: 600;
-  box-shadow: 0 2px 8px -1px var(--accent-glow);
 }
 
 .react-app-nav svg {
@@ -565,14 +564,14 @@ body {
   align-items: center;
   margin: var(--space-3) var(--space-1) var(--space-2);
   color: var(--text-tertiary);
-  font: 600 11px/1.2 var(--font-ui);
+  font: 600 12px/1.2 var(--font-ui);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .react-sync-label {
   color: var(--accent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -651,7 +650,7 @@ body {
 .react-session-group h2 {
   padding: var(--space-2) var(--space-2) 4px;
   color: var(--text-tertiary);
-  font: 600 11px/1.3 var(--font-ui);
+  font: 600 12px/1.3 var(--font-ui);
   letter-spacing: 0.03em;
 }
 
@@ -674,16 +673,13 @@ body {
     color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .react-new-session:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent-text);
-  background: var(--accent-gradient);
-  box-shadow: 0 4px 12px -2px var(--accent-glow);
-  transform: translateY(-1px);
+  background: var(--accent);
 }
 
 .react-new-session:disabled {
@@ -830,7 +826,7 @@ body {
 
 .react-session-item small {
   color: var(--text-tertiary);
-  font: 11px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
 }
 
 .react-sidebar-message {
@@ -919,7 +915,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--text-secondary);
-  font: 500 11px/1.3 var(--font-ui);
+  font: 500 12px/1.3 var(--font-ui);
   background: var(--surface-instrument-raised);
 }
 
@@ -1092,13 +1088,11 @@ body {
   text-align: left;
   cursor: pointer;
   transition:
-    transform var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .react-prompt-card:hover:not(:disabled) {
-  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   box-shadow:
     var(--shadow-md),
@@ -1122,7 +1116,7 @@ body {
 }
 
 .react-prompt-card small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tertiary);
   line-height: 1.4;
 }
@@ -1226,7 +1220,7 @@ body {
 .react-message-meta small {
   color: var(--text-tertiary);
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Bubble styling & Horizontal Overflow Prevention */
@@ -1458,7 +1452,7 @@ body {
   padding: var(--space-1) 0;
   cursor: pointer;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   list-style-position: inside;
@@ -1520,7 +1514,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1529,7 +1523,7 @@ body {
 .react-process-summary > summary small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 10px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1571,7 +1565,7 @@ body {
 .react-process-section > h3 {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1688,7 +1682,7 @@ body {
 
 .react-tool-call > summary time {
   color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 
 .react-tool-call > summary strong {
@@ -1703,7 +1697,7 @@ body {
   border-radius: 999px;
   background: var(--surface-inset);
   color: var(--text-tertiary);
-  font: 10px/1.4 var(--font-ui);
+  font: 12px/1.4 var(--font-ui);
   white-space: nowrap;
 }
 
@@ -1714,7 +1708,7 @@ body {
 
 .react-tool-id {
   color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
   opacity: 0.85;
 }
 
@@ -1754,7 +1748,7 @@ body {
 .react-tool-call-body h4 {
   margin: 0 0 var(--space-1);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-tool-call-body pre {
@@ -1808,7 +1802,7 @@ body {
 
 .react-changed-files li span {
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 
 .react-run-notice,
@@ -1862,7 +1856,7 @@ body {
   align-items: center;
   gap: 4px;
   color: var(--text-tertiary);
-  font: 11px/1 var(--font-ui);
+  font: 12px/1 var(--font-ui);
 }
 
 .react-handoff-flow svg {
@@ -1874,7 +1868,7 @@ body {
   border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--warning) 15%, transparent);
   color: var(--warning);
-  font: 10px/1 var(--font-ui);
+  font: 12px/1 var(--font-ui);
 }
 
 .react-run-error {
@@ -1947,7 +1941,7 @@ body {
   color: var(--text-primary);
   background: var(--surface-instrument-raised);
   box-shadow: var(--shadow-md);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -2069,7 +2063,7 @@ body {
   gap: var(--space-3);
   margin-bottom: var(--space-2);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-composer-tools-left {
@@ -2151,7 +2145,7 @@ body {
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   background: var(--surface-inset);
   color: var(--text-tertiary);
@@ -2243,14 +2237,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 38px;
-  padding: 0 18px;
+  min-width: 72px;
+  min-height: 42px;
+  padding: 0 var(--space-4);
   margin: 3px;
   border-radius: var(--radius-md);
   font-weight: 600;
   font-size: 13px;
   transition:
-    transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out),
     opacity var(--duration-fast) var(--ease-out),
     background-color var(--duration-fast) var(--ease-out);
@@ -2258,19 +2252,12 @@ body {
 
 .react-send-button {
   color: var(--accent-text);
-  background: var(--accent-gradient);
+  background: var(--accent);
   border: 0;
-  box-shadow: 0 2px 8px -1px var(--accent-glow);
 }
 
 .react-send-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px -1px var(--accent-glow);
-  opacity: 0.95;
-}
-
-.react-send-button:active:not(:disabled) {
-  transform: translateY(0);
+  background: var(--accent-hover);
 }
 
 .react-send-button:disabled {
@@ -2320,7 +2307,7 @@ body {
 .react-mention-header {
   padding: var(--space-1) var(--space-2) var(--space-2);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -2351,46 +2338,13 @@ body {
 }
 
 .react-mention-info small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 
 .react-mention-menu button small {
   color: var(--text-tertiary);
-  font: 11px/1 var(--font-mono);
-}
-
-.react-send-button,
-.react-stop-button {
-  min-width: 72px;
-  min-height: 42px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-md);
-  font-weight: 650;
-}
-
-.react-send-button {
-  color: var(--accent-text);
-  background: var(--accent);
-}
-
-.react-send-button:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.react-send-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-.react-stop-button {
-  border: 1px solid var(--danger);
-  color: var(--danger);
-}
-
-.react-stop-button:hover {
-  color: var(--danger-text);
-  background: var(--danger);
+  font: 12px/1 var(--font-mono);
 }
 
 .react-right-panel {
@@ -2427,12 +2381,15 @@ body {
 
 .react-panel-title span {
   color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
   text-transform: uppercase;
 }
 
 .trace-explorer {
-  display: grid;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
   gap: var(--space-5);
 }
 
@@ -2442,42 +2399,57 @@ body {
 }
 
 .trace-workbench {
-  display: grid;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
   gap: var(--space-3);
 }
 
 .trace-workbench-split {
   display: grid;
+  flex: 1;
+  min-height: 0;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   gap: var(--space-3);
-  align-items: start;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 @media (max-width: 900px) {
   .trace-workbench-split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 220px) minmax(0, 1fr);
   }
 }
 
 .trace-alert-center {
   display: grid;
+  flex: 0 0 auto;
   gap: var(--space-2);
   padding: var(--space-3);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
-.trace-alert-center > header,
+.trace-alert-center > button,
 .trace-alert-center li {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
 }
-.trace-alert-center > header span,
+.trace-alert-center > button {
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+}
+.trace-alert-center > button span,
 .trace-alert-center code {
   color: var(--text-tertiary);
-  font: 9px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
 }
 .trace-alert-center ol {
   display: grid;
@@ -2504,7 +2476,7 @@ body {
 .trace-alert-center p {
   margin: 2px 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -2526,6 +2498,7 @@ body {
 
 .trace-controls {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
@@ -2571,7 +2544,7 @@ body {
 }
 .trace-metric dt {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 .trace-metric dd {
   margin: 0;
@@ -2589,7 +2562,7 @@ body {
   flex: 1;
   justify-content: space-between;
   color: var(--text-tertiary);
-  font: 10px/1.2 var(--font-mono);
+  font: 12px/1.2 var(--font-mono);
 }
 .trace-trend span[data-state="regressed"] strong {
   color: var(--danger);
@@ -2657,7 +2630,7 @@ body {
 .handoff-funnel li span,
 .handoff-losses {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .handoff-funnel li strong {
@@ -2673,8 +2646,8 @@ body {
   right: -5px;
   width: 9px;
   height: 9px;
-  border-top: 1px solid var(--border-strong);
-  border-right: 1px solid var(--border-strong);
+  border-top: 1px solid var(--border-hard);
+  border-right: 1px solid var(--border-hard);
   background: var(--surface-canvas);
   transform: translateY(-50%) rotate(45deg);
 }
@@ -2714,7 +2687,7 @@ body {
 
 .memory-diagnostics > header small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .memory-diagnostics dl {
@@ -2736,7 +2709,7 @@ body {
 .memory-diagnostics dt {
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2788,7 +2761,7 @@ body {
   padding: var(--space-2);
   background: var(--surface-instrument);
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .trace-write-summary strong {
@@ -2801,7 +2774,7 @@ body {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-3);
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--border-hard);
   border-radius: var(--radius-md);
   background: var(--surface-inset);
 }
@@ -2816,14 +2789,14 @@ body {
 
 .trace-offline-eval header span {
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
   text-transform: uppercase;
 }
 
 .trace-offline-eval header strong,
 .trace-offline-eval small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .trace-offline-eval b {
@@ -2834,9 +2807,14 @@ body {
 
 .trace-ledger {
   display: grid;
+  align-content: start;
   gap: 2px;
+  min-height: 0;
   padding-left: 7px;
-  border-left: 1px solid var(--border-strong);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--border-hard);
+  scrollbar-gutter: stable;
 }
 
 .trace-ledger button {
@@ -2855,7 +2833,7 @@ body {
 }
 
 .trace-ledger-turn strong {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -2868,7 +2846,7 @@ body {
 .trace-ledger-preview b {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2877,7 +2855,7 @@ body {
 .trace-ledger-preview small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2885,7 +2863,7 @@ body {
 .trace-ledger-elapsed {
   justify-self: end;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -2901,7 +2879,7 @@ body {
   border: 2px solid var(--surface-instrument);
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 0 1px var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-hard);
 }
 
 .trace-ledger button[data-state="failed"] .trace-ledger-mark {
@@ -2912,16 +2890,21 @@ body {
 }
 .trace-ledger small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .trace-route {
   display: grid;
+  align-content: start;
   gap: var(--space-3);
+  min-height: 0;
   padding: var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-instrument-raised);
+  scrollbar-gutter: stable;
 }
 
 .trace-route > header {
@@ -2929,7 +2912,7 @@ body {
   justify-content: space-between;
   gap: var(--space-3);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 .trace-route > header > div {
   display: flex;
@@ -2949,7 +2932,7 @@ body {
 }
 .trace-route > header button {
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 .trace-request-evidence {
   display: grid;
@@ -2964,41 +2947,13 @@ body {
 .trace-request-evidence span,
 .trace-request-evidence code {
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 .trace-request-evidence p {
   margin: 0;
   color: var(--text-primary);
   font-size: 12px;
   line-height: 1.45;
-}
-.trace-route-agents {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin: 0;
-  color: var(--text-tertiary);
-  font: 11px/1 var(--font-mono);
-}
-.trace-route-agents span {
-  color: var(--text-tertiary);
-}
-.trace-route-agents em {
-  padding: 3px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--surface-inset);
-  color: var(--text-secondary);
-  font-style: normal;
-}
-.trace-route-agents em[data-state="failed"] {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-subtle));
-  color: var(--danger);
-}
-.trace-route-agents em[data-state="active"] {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border-subtle));
-  color: var(--warning);
 }
 .trace-breakpoint {
   display: grid;
@@ -3012,7 +2967,7 @@ body {
 .trace-breakpoint span {
   grid-row: 1 / 3;
   color: var(--danger);
-  font: 600 11px/1 var(--font-mono);
+  font: 600 12px/1 var(--font-mono);
   writing-mode: vertical-rl;
 }
 .trace-breakpoint small {
@@ -3036,19 +2991,41 @@ body {
 }
 .trace-tool-summary > header strong {
   color: var(--text-primary);
-  font: 600 11px/1 var(--font-mono);
+  font: 600 12px/1 var(--font-mono);
 }
 .trace-tool-summary > header small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 .trace-tool-summary p {
   margin: 0;
   color: var(--text-secondary);
-  font: 11px/1.4 var(--font-mono);
+  font: 12px/1.4 var(--font-mono);
 }
 .trace-tool-summary p[data-anomaly] {
   color: var(--warning);
+}
+.trace-tool-summary > button {
+  justify-self: start;
+  color: var(--accent);
+  font: 12px/1 var(--font-mono);
+}
+.trace-tool-anomalies {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trace-tool-anomalies li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font: 12px/1.3 var(--font-mono);
+}
+.trace-tool-anomalies li[data-state="failed"] {
+  color: var(--danger);
 }
 
 .trace-waterfall {
@@ -3062,11 +3039,16 @@ body {
   gap: var(--space-2);
 }
 .trace-waterfall > header strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 .trace-waterfall > header small {
   color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
+}
+.trace-waterfall-status {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: 12px/1.4 var(--font-mono);
 }
 .trace-waterfall ol {
   display: grid;
@@ -3095,7 +3077,7 @@ body {
 .trace-waterfall-label strong {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3104,7 +3086,7 @@ body {
 .trace-waterfall-label code,
 .trace-waterfall-row > small {
   color: var(--text-tertiary);
-  font: 9px/1.2 var(--font-mono);
+  font: 12px/1.2 var(--font-mono);
 }
 .trace-waterfall-hop .trace-waterfall-label {
   grid-template-columns: auto minmax(0, 1fr);
@@ -3137,12 +3119,69 @@ body {
 .trace-waterfall-track i[data-kind="generation"][data-state="active"] {
   background: color-mix(in srgb, var(--warning) 60%, transparent);
 }
+.trace-waterfall-track i[data-open="true"] {
+  mask-image: linear-gradient(to right, #000 0 68%, transparent);
+}
+.trace-waterfall-track i[data-open="true"]::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: 0;
+  bottom: -2px;
+  width: 2px;
+  background: var(--warning);
+}
 .trace-waterfall-track i[data-kind="recall"] {
   background: color-mix(in srgb, var(--success) 55%, transparent);
 }
+.trace-waterfall-track i[data-kind="handoff"] {
+  background: var(--text-tertiary);
+}
+.trace-waterfall-track i[data-point="true"] {
+  top: 3px;
+  bottom: auto;
+  width: 6px;
+  min-width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+}
+.trace-waterfall-ruler {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
+  align-items: end;
+  padding: 0 0 2px;
+  color: var(--text-tertiary);
+  font: 11px/1 var(--font-mono);
+}
+.trace-waterfall-scale {
+  position: relative;
+  height: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.trace-waterfall-scale span {
+  position: absolute;
+  bottom: 3px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.trace-waterfall-scale span:first-child {
+  transform: none;
+}
+.trace-waterfall-recall-toggle {
+  display: block;
+  padding: 0 0 4px;
+}
+.trace-waterfall-recall-toggle button {
+  color: var(--text-tertiary);
+  font: 12px/1.3 var(--font-mono);
+}
+.trace-waterfall-recall-toggle button[aria-expanded="true"] {
+  color: var(--text-secondary);
+}
 .trace-waterfall-row > b {
   color: var(--danger);
-  font: 9px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 
 .trace-metrics-panel {
@@ -3173,7 +3212,7 @@ body {
 }
 .trace-metrics-panel > summary span {
   color: var(--accent);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
   text-transform: uppercase;
 }
 .trace-metrics-panel > summary strong {
@@ -3195,32 +3234,48 @@ body {
 }
 .audit-memory-card-summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 4px var(--space-2);
+  grid-template-columns: auto minmax(0, 1fr) 16px;
+  gap: var(--space-2);
   width: 100%;
-  align-items: baseline;
-  padding: var(--space-2) var(--space-3);
-  border: 0;
-  background: none;
+  align-items: center;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
   color: inherit;
-  cursor: pointer;
   text-align: left;
 }
-.audit-memory-card-summary span {
-  color: var(--accent);
-  font: 600 10px/1 var(--font-mono);
-  text-transform: uppercase;
+.audit-memory-card-summary:hover {
+  background: var(--surface-raised);
 }
 .audit-memory-card-summary strong {
+  grid-column: 1 / 3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--text-primary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.audit-memory-chevron {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  color: var(--text-secondary);
+}
+.audit-memory-card-summary[aria-expanded="true"] .audit-memory-chevron {
+  transform: rotate(90deg);
+}
+.audit-memory-card-summary span,
+.audit-memory-card-summary small {
+  color: var(--text-secondary);
+  font: 12px/1.5 var(--font-ui);
 }
 .audit-memory-card-summary small {
-  color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  grid-column: 2 / 4;
+  text-align: right;
 }
 .audit-memory-card-detail {
   display: grid;
@@ -3302,47 +3357,79 @@ body {
 
 .react-collab-status header span {
   color: var(--text-tertiary);
-  font: 10px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .react-task-goal {
-  display: grid;
-  gap: 4px;
   padding: var(--space-2) 0;
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.react-task-goal small,
-.react-task-next-action small,
-.react-task-evidence small,
-.react-collab-blocker small {
-  color: var(--text-tertiary);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.react-task-goal summary {
+  cursor: pointer;
+  list-style: none;
 }
 
-.react-task-goal strong {
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.45;
+.react-task-goal summary::-webkit-details-marker {
+  display: none;
+}
+
+.react-task-goal-label {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.react-task-goal-label > span {
+  color: var(--accent);
+}
+
+.react-task-goal-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.react-task-goal[open] .react-task-goal-preview {
+  display: none;
 }
 
 .react-task-goal p {
-  margin: 0;
+  margin: var(--space-2) 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.react-task-next-action small,
+.react-task-evidence small,
+.react-collab-blocker small {
   color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .react-task-assignment {
   display: grid;
   gap: 6px;
   margin: 0;
+}
+
+.react-task-acceptance-details > summary {
+  padding: var(--space-2) 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .react-task-assignment div {
@@ -3354,7 +3441,7 @@ body {
 
 .react-task-assignment dt {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-task-assignment dd {
@@ -3404,7 +3491,7 @@ body {
 .react-task-evidence strong {
   overflow: hidden;
   color: var(--text-secondary);
-  font: 11px/1.2 var(--font-mono);
+  font: 12px/1.2 var(--font-mono);
   text-overflow: ellipsis;
 }
 
@@ -3451,14 +3538,14 @@ body {
 
 .react-acceptance-card dt {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-acceptance-card dd {
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font: 11px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3466,7 +3553,7 @@ body {
 .react-acceptance-reason {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -3475,7 +3562,7 @@ body {
   min-height: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface-panel);
+  background: var(--surface-instrument-raised);
   color: var(--text-primary);
   cursor: pointer;
 }
@@ -3491,7 +3578,7 @@ body {
   display: grid;
   gap: 5px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-acceptance-actions textarea {
@@ -3535,7 +3622,7 @@ body {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface-panel);
+  background: var(--surface-instrument-raised);
   box-shadow: var(--shadow-lg);
 }
 
@@ -3556,7 +3643,7 @@ body {
 .react-handoff-dialog header > span,
 .react-handoff-route small {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3605,7 +3692,7 @@ body {
   display: grid;
   gap: 5px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-handoff-fields textarea {
@@ -3675,13 +3762,11 @@ body {
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition:
-    transform var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .react-agent-card:hover:not([aria-disabled="true"]):not([data-unavailable]) {
-  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border));
   box-shadow: var(--shadow-md);
 }
@@ -3692,7 +3777,7 @@ body {
 }
 
 .react-memory-list article {
-  padding: var(--space-3);
+  padding: 0;
   cursor: default;
 }
 
@@ -3744,13 +3829,13 @@ body {
   border-radius: var(--radius-pill);
   color: var(--agent-color, var(--accent));
   background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, transparent);
-  font: normal 600 10px/1.4 var(--font-ui);
+  font: normal 600 12px/1.4 var(--font-ui);
 }
 
 .react-agent-identity small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 11px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3777,7 +3862,7 @@ body {
   gap: var(--space-2);
   margin-top: var(--space-2);
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-agent-meta code {
@@ -3791,7 +3876,7 @@ body {
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-instrument));
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-memory-inject strong {
@@ -3830,7 +3915,7 @@ body {
 .react-memory-list small,
 .react-memory-list header span {
   color: var(--text-tertiary);
-  font: 10px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
 }
 
 .react-agent-card > p,
@@ -3845,7 +3930,7 @@ body {
 .react-agent-status {
   flex: 0 0 auto;
   color: var(--text-tertiary);
-  font: 11px/1.3 var(--font-ui);
+  font: 12px/1.3 var(--font-ui);
 }
 
 .react-agent-status[data-status="connecting"],
@@ -3862,7 +3947,7 @@ body {
   display: block;
   margin-top: var(--space-2);
   color: var(--text-tertiary);
-  font: 10px/1.4 var(--font-mono);
+  font: 12px/1.4 var(--font-mono);
 }
 
 .react-agent-usage {
@@ -3880,7 +3965,7 @@ body {
   justify-content: space-between;
   gap: var(--space-2);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-agent-usage-total strong,
@@ -3936,7 +4021,7 @@ body {
 
 .react-agent-usage-details {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .react-agent-usage-details summary {
@@ -3968,7 +4053,7 @@ body {
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
   color: var(--text-tertiary) !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 
 .react-memory-list article {
@@ -4013,7 +4098,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .react-project-dir-row button:disabled {
@@ -4035,7 +4120,7 @@ body {
   border-radius: var(--radius-sm);
   outline: none;
   background: var(--surface-instrument);
-  font: 11px/1.4 var(--font-mono);
+  font: 12px/1.4 var(--font-mono);
 }
 
 .react-project-dir-row form input:focus {
@@ -4048,15 +4133,19 @@ body {
 }
 
 .audit-page {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   padding: clamp(var(--space-4), 2.5vw, var(--space-7));
-  overflow: auto;
+  overflow: hidden;
   background: var(--surface-canvas);
 }
 
 .audit-page-header {
   display: flex;
+  flex: 0 0 auto;
+  width: 100%;
   max-width: 1480px;
   flex-wrap: wrap;
   align-items: baseline;
@@ -4089,10 +4178,12 @@ body {
 
 .audit-page-chip-id {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .audit-status {
+  flex: 0 0 auto;
+  width: 100%;
   max-width: 1480px;
   margin: 0 auto var(--space-4);
 }
@@ -4120,7 +4211,7 @@ body {
 }
 
 .audit-status-loading {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 
@@ -4134,13 +4225,13 @@ body {
 
 .audit-column-heading h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 620;
 }
 
 .audit-column-heading small {
   color: var(--text-tertiary);
-  font: 11px/1 var(--font-mono);
+  font: 12px/1 var(--font-mono);
 }
 
 .audit-page-actions {
@@ -4171,27 +4262,98 @@ body {
 
 .audit-layout {
   display: grid;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   max-width: 1480px;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  align-items: start;
+  align-items: stretch;
   gap: var(--space-4);
   margin: 0 auto;
 }
 
 .audit-traces,
 .audit-memory {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: var(--space-4);
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-instrument);
 }
 
-.audit-memory {
-  position: sticky;
-  top: 0;
-  max-height: calc(100dvh - var(--space-7) * 2);
-  overflow: auto;
+.audit-traces {
+  container-type: inline-size;
+}
+
+.audit-layout > * > .audit-column-heading {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.audit-column-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.audit-traces > .audit-column-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The inspector width, rather than viewport width, determines its layout. */
+@container (max-width: 640px) {
+  .trace-workbench-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 220px) minmax(0, 1fr);
+  }
+}
+
+/* A five-stage horizontal funnel cannot fit inside the Memory rail. */
+.audit-memory .handoff-funnel ol {
+  grid-template-columns: minmax(0, 1fr);
+}
+.audit-memory .handoff-funnel li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+}
+.audit-memory .handoff-funnel li + li {
+  margin-top: var(--space-2);
+}
+.audit-memory .handoff-funnel li i {
+  top: auto;
+  right: 50%;
+  bottom: -5px;
+  transform: translateX(50%) rotate(135deg);
+}
+.audit-memory .trace-metrics dl {
+  grid-template-columns: minmax(0, 1fr);
+}
+.audit-memory .trace-offline-eval header,
+.audit-memory .trace-offline-eval > div {
+  flex-wrap: wrap;
+}
+.audit-memory .trace-offline-eval small {
+  flex-basis: 100%;
+}
+.audit-memory .trace-metrics,
+.audit-memory .trace-metrics-panel,
+.audit-memory .handoff-funnel {
+  min-width: 0;
 }
 
 .audit-memory-provenance {
@@ -4213,13 +4375,13 @@ body {
 }
 .audit-memory-provenance dt {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 12px;
 }
 .audit-memory-provenance dd {
   margin: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font: 10px/1.3 var(--font-mono);
+  font: 12px/1.3 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4257,18 +4419,6 @@ body {
 
 .audit-memory .trace-metrics-panel {
   margin-top: var(--space-4);
-}
-
-@media (max-width: 1050px) {
-  .audit-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .audit-memory {
-    position: static;
-
-    max-height: none;
-  }
 }
 
 @media (max-width: 1050px) {
@@ -4533,6 +4683,10 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .audit-traces {
+    min-height: min(72dvh, 720px);
+  }
+
   .audit-memory {
     position: static;
     max-height: none;
@@ -4579,7 +4733,7 @@ body {
 .react-seat-availability-summary small {
   display: block;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .react-agent-card[data-unavailable] {
   cursor: default;
@@ -4597,7 +4751,7 @@ body {
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 .react-agent-availability-row {
   display: flex;

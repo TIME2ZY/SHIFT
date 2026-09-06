@@ -72,6 +72,7 @@ test("span projection derives generation tool recall and links without span writ
     assert.equal(projection.spans[1].attributes.text, undefined);
     assert.equal(projection.spans[2].attributes.query, undefined);
     assert.equal(projection.spans[2].attributes.delivered, 2);
+    assert.equal(projection.spans[2].attributes.source, null);
     assert.equal(
       storage.db.prepare("SELECT name FROM sqlite_master WHERE name = 'trace_spans'").get(),
       undefined
@@ -157,6 +158,98 @@ test("span projection preserves failed tools and treats orphan finishes as incom
           complete: false,
           startedAt: null,
           orphanFinish: true,
+        },
+      ]
+    );
+  } finally {
+    storage.close();
+  }
+});
+
+test("span projection exposes inject source and write outcomes", () => {
+  const storage = fixture();
+  try {
+    storage.memoryEvents.record({
+      eventType: "memory_injected",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "inject:inv-1:a2a",
+      payloadVersion: 1,
+      payload: {
+        source: "a2a",
+        delivered: 2,
+        selected: 3,
+        droppedIds: ["memory-drop"],
+        availability: { state: "available" },
+      },
+      createdAt: "2026-08-13T00:00:03.000Z",
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_searched",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "recall:inv-1:search",
+      payloadVersion: 1,
+      payload: {
+        memoryHits: 1,
+        totalHits: 4,
+        memoryIds: ["memory-1"],
+        requestedLayers: ["memory"],
+      },
+      createdAt: "2026-08-13T00:00:04.000Z",
+    });
+    storage.memoryEvents.record({
+      eventType: "memory_write_completed",
+      threadId: "thread-1",
+      invocationId: "inv-1",
+      agentId: "codex",
+      operationKey: "memory-write:inv-1:op-1",
+      payloadVersion: 1,
+      payload: { outcome: "created", kind: "decision", topic: "storage.authoritative" },
+      createdAt: "2026-08-13T00:00:05.000Z",
+    });
+    const recalls = projectTraceSpans(storage.db, "trace-1").spans.filter(
+      (span) => span.kind === "recall"
+    );
+    assert.deepEqual(
+      recalls.map((span) => ({
+        name: span.name,
+        source: span.attributes.source,
+        delivered: span.attributes.delivered,
+        dropped: span.attributes.dropped,
+        memoryHits: span.attributes.memoryHits,
+        outcome: span.attributes.outcome,
+        topic: span.attributes.topic,
+      })),
+      [
+        {
+          name: "memory_injected",
+          source: "a2a",
+          delivered: 2,
+          dropped: 1,
+          memoryHits: 0,
+          outcome: null,
+          topic: null,
+        },
+        {
+          name: "memory_searched",
+          source: null,
+          delivered: 1,
+          dropped: 0,
+          memoryHits: 1,
+          outcome: null,
+          topic: null,
+        },
+        {
+          name: "memory_write_completed",
+          source: null,
+          delivered: 0,
+          dropped: 0,
+          memoryHits: 0,
+          outcome: "created",
+          topic: "storage.authoritative",
         },
       ]
     );

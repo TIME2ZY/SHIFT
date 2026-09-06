@@ -29,7 +29,9 @@ function projectTraceSpans(db, traceId) {
     const recalls = db
       .prepare(
         `SELECT id, event_type, payload_json, created_at FROM memory_events
-         WHERE invocation_id = ? AND event_type IN ('memory_searched', 'memory_injected')
+         WHERE invocation_id = ? AND event_type IN (
+           'memory_searched', 'memory_injected', 'memory_write_completed'
+         )
          ORDER BY id`
       )
       .all(invocation.id);
@@ -127,6 +129,11 @@ function recallAttributes(payload) {
     memoryIds: Array.isArray(payload?.memoryIds) ? payload.memoryIds : deliveredIds,
     availability: payload?.availability?.state || null,
     requestedLayers: Array.isArray(payload?.requestedLayers) ? payload.requestedLayers : [],
+    source: payload?.source || null,
+    outcome: payload?.outcome || null,
+    topic: typeof payload?.topic === "string" ? payload.topic : null,
+    kind: typeof payload?.kind === "string" ? payload.kind : null,
+    reasonCode: payload?.reasonCode || null,
   };
 }
 

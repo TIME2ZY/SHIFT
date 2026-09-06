@@ -459,7 +459,7 @@ Handoff、Memory telemetry 和 outcome evidence 的 SQLite 聚合；Audit Consol
 
 Web 的独立“审计”页面通过上述只读接口呈现 durable Trace 航线、失败断点以及带分子、分母和
 pending/unknown 分类的 Handoff 与 Memory 指标。Trace 详情以单条 waterfall 时间轴表达因果：每次
-模型 invocation 一条 generation 行，Memory 检索 / 注入为其子行，durable Handoff 渲染为 generation
+模型 invocation 一条 generation 行，Memory 注入 / 检索 / 写入为其子行，durable Handoff 渲染为 generation
 之间的连接行；逐条工具过程只在主会话展示，审计页仅保留工具执行汇总。Memory 卡片展示既有 row 的
 来源 Invocation、Message、创建者与 evidence anchor，并从 `memory_events` 使用证据聚合展示被检索、
 被注入和预算丢弃次数（只读派生，不回写）。卡片上的「检索」只计 MCP `recall_search` 命中的
@@ -494,7 +494,9 @@ Handoff 全局窗口与 outcome evidence 窗口分别由 `handoffs_created_at` �
 
 `trace-span-projection.js` 从 Invocation/context window、规范 tool events、带 Invocation 坐标的
 Memory telemetry 和 durable Handoff 即时派生 generation/tool/recall spans 与 Handoff links。
-详情 API 与 UI 消费该投影；不存在 span 写表，缺失结束事件由 `span_missing_end` health 暴露。
+recall spans 包含 `memory_injected`、`memory_searched` 与 `memory_write_completed`，并保留注入
+`source`（bootstrap / a2a）与写入 `outcome`。详情 API 与 UI 消费该投影；不存在 span 写表，
+缺失结束事件由 `span_missing_end` health 暴露。内部 `searchSession` 仍不进入检索投影。
 
 `observability-evidence-repository.js` 是 labeled recall eval 与 Memory outcome judgment 的唯一导入
 入口，HTTP bridge 为 `POST /api/storage/observability/evidence`。导入只保存结构指标、可信坐标、
