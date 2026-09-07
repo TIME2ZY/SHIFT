@@ -33,11 +33,14 @@ test("agent child environment excludes server-owned storage and harness settings
   assert.equal(env.SHIFT_TEST_CAPACITY, undefined);
 });
 
-test("child stream removes abort and response listeners after exit", async () => {
+test("child stream does not stop on response close", async () => {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  child.kill = () => {};
+  let killed = false;
+  child.kill = () => {
+    killed = true;
+  };
   const res = new EventEmitter();
   res.write = () => {};
   const controller = new AbortController();
@@ -50,7 +53,9 @@ test("child stream removes abort and response listeners after exit", async () =>
     onStdout() {},
     onStderr() {},
   });
-  assert.equal(res.listenerCount("close"), 1);
+  assert.equal(res.listenerCount("close"), 0);
+  res.emit("close");
+  assert.equal(killed, false);
   child.emit("close", 0, null);
 
   const result = await completed;
@@ -58,7 +63,6 @@ test("child stream removes abort and response listeners after exit", async () =>
   assert.equal(result.signal, null);
   assert.ok(result.encoding);
   assert.equal(result.encoding.total, 0);
-  assert.equal(res.listenerCount("close"), 0);
 });
 
 test("stderr filter removes known startup noise only", () => {

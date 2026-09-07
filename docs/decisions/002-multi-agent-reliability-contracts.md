@@ -3,7 +3,7 @@ title: "ADR-002: Multi-Agent Reliability and Trace Contracts"
 status: accepted
 decision_id: ADR-002
 created: 2026-07-28
-amended: 2026-09-06
+amended: 2026-09-07
 scope: trace identity, invocation lifecycle, A2A handoff hops, metric eligibility, memory funnel, and observability boundaries
 supersedes: []
 related:
@@ -48,13 +48,13 @@ Provider diagnostics、Memory telemetry 和一次性 Handoff metrics，但耐久
 
 ### 3.1 Group、Trace 与业务实体
 
-| 标识符           | 语义                                                       | 所有者                          |
-| ---------------- | ---------------------------------------------------------- | ------------------------------- |
-| `thread_id`      | 多轮会话和 Project 绑定；等价于 Trace 系统的 group/session | SQLite Thread                   |
-| `client_turn_id` | 用户提交的幂等意图标识，不代表一次执行尝试                 | SQLite Message                  |
-| `trace_id`       | 服务端接受的一次 chat request attempt                      | SQLite Trace source row         |
-| `invocation_id`  | 一次 Agent/Provider 执行                                   | SQLite Invocation               |
-| `handoff_id`     | 一次跨 Agent 路由尝试                                      | SQLite Handoff source row       |
+| 标识符           | 语义                                                       | 所有者                    |
+| ---------------- | ---------------------------------------------------------- | ------------------------- |
+| `thread_id`      | 多轮会话和 Project 绑定；等价于 Trace 系统的 group/session | SQLite Thread             |
+| `client_turn_id` | 用户提交的幂等意图标识，不代表一次执行尝试                 | SQLite Message            |
+| `trace_id`       | 服务端接受的一次 chat request attempt                      | SQLite Trace source row   |
+| `invocation_id`  | 一次 Agent/Provider 执行                                   | SQLite Invocation         |
+| `handoff_id`     | 一次跨 Agent 路由尝试                                      | SQLite Handoff source row |
 
 规则：
 
@@ -75,8 +75,10 @@ active → completed | failed | aborted
 
 - `completed`：请求的 durable 成功条件满足，且不存在未闭合的必需 Invocation/Handoff。
 - `failed`：请求未达到 durable 成功条件，且失败并非用户主动取消。
-- `aborted`：用户取消、请求被 supersede 或传输断开导致执行被主动终止。
+- `aborted`：仅在显式 Stop、同 session 新提交 supersede、子进程无活动超时或 SHIFT 进程关闭时，执行被主动终止。标签页关闭、刷新或 SSE 短暂断线只表示观察者离线，不得将 Trace / Invocation 收成 `aborted`。
 - 终态 Trace 必须有 `ended_at`；`completed` Trace 不得包含 active Invocation。
+
+控制面（Start / Stop）拥有 invocation 生命周期；SSE 是可断开、可重连的观察面。观察者离线不得调用 `reconcileThreadActive` 收口仍在跑的 invocation。进程关闭必须先 abort 并等待后台运行收口，再关闭 SQLite；不承诺 SHIFT 进程重启后续跑原 Agent 子进程。
 
 同一 `thread_id + client_turn_id` 可以有多个 request attempt。每个 attempt 使用独立
 `trace_id` 和单调 `request_attempt`，不得覆盖前一次 Trace。

@@ -12,6 +12,8 @@ const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 const { buildAssistantFinalMessage } = require("../../src/server/chat-worklist");
 
+const { startAndCollect } = require("../helpers/chat-run-client");
+
 const UI_TOKEN = "failed-assistant-token";
 
 function apiFetch(url, init = {}) {
@@ -19,6 +21,12 @@ function apiFetch(url, init = {}) {
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
   return fetch(url, { ...init, headers });
+}
+
+function startChat(baseUrl, body) {
+  return startAndCollect(baseUrl, body, {
+    headers: { "X-Shift-UI-Token": UI_TOKEN },
+  });
 }
 
 function spawnTextThenSignal(text, signal = "SIGTERM") {
@@ -92,13 +100,10 @@ test("failed provider runs persist streamed assistant text", async () => {
       body: JSON.stringify({ projectKey }),
     }).then((r) => r.json());
 
-    await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "审查当前分支",
-      }),
+    await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "审查当前分支",
     }).then((r) => r.text());
 
     const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>

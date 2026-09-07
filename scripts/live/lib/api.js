@@ -49,8 +49,7 @@ function createApiClient({ baseUrl, token }) {
   }
 
   /**
-   * POST /api/chat and collect the whole SSE stream.
-   * Resolves with collected events once the stream ends (`done` or socket close).
+   * Start a session run and collect the observation SSE until a terminal frame.
    */
   async function chat({
     sessionId,
@@ -65,7 +64,7 @@ function createApiClient({ baseUrl, token }) {
     const timer = setTimeout(() => controller.abort(new Error("chat timeout")), timeoutMs);
     const events = [];
     try {
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const start = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/runs`, {
         method: "POST",
         signal: controller.signal,
         headers: {
@@ -80,9 +79,24 @@ function createApiClient({ baseUrl, token }) {
           ...(useWorktree ? { useWorktree: true } : {}),
         }),
       });
+      const startText = await start.text().catch(() => "");
+      if (!start.ok) {
+        throw new Error(`chat failed (${start.status}): ${startText.slice(0, 500)}`);
+      }
+      const response = await fetch(
+        `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/events`,
+        {
+          method: "GET",
+          signal: controller.signal,
+          headers: {
+            [UI_TOKEN_HEADER]: token,
+            accept: "text/event-stream",
+          },
+        }
+      );
       if (!response.ok || !response.body) {
         const text = await response.text().catch(() => "");
-        throw new Error(`chat failed (${response.status}): ${text.slice(0, 500)}`);
+        throw new Error(`events failed (${response.status}): ${text.slice(0, 500)}`);
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -99,6 +113,19 @@ function createApiClient({ baseUrl, token }) {
           if (event) {
             events.push(event);
             onEvent(event);
+            if (
+              event.name === "done" ||
+              event.name === "run.aborted" ||
+              event.name === "error" ||
+              event.data?.type === "run.failed"
+            ) {
+              try {
+                await reader.cancel();
+              } catch {
+                // observer disconnect
+              }
+              return events;
+            }
           }
           boundary = buffer.indexOf("\n\n");
         }

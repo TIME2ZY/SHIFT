@@ -156,6 +156,11 @@ export function App() {
     setSelectedSessionId(null);
   }, [activeProjectKey]);
 
+  useEffect(() => {
+    if (!activeSessionId || typeof chat.restore !== "function") return undefined;
+    return chat.restore(activeSessionId);
+  }, [activeSessionId, chat.restore]);
+
   function selectAgent(agentId: string) {
     if (!activeSessionId || !routableAgents.some((agent) => agent.id === agentId)) return;
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));

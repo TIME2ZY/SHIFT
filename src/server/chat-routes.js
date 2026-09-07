@@ -14,7 +14,7 @@ const {
 } = require("../agents/duty-routing");
 const { activeSkillNames } = require("../agents/duty-routing");
 
-function createChatRoutes({
+function createChatRunExecutor({
   availability,
   selfGitRoot,
   options,
@@ -32,9 +32,7 @@ function createChatRoutes({
   worktreeManager,
   worktreeManagerModule,
   activeInvocations,
-  sendJson,
-  sendSse,
-  readJsonBody,
+  runtime = null,
   buildChatArgs,
   augmentPrompt,
   prepareSkillDelivery = defaultPrepareSkillDelivery,
@@ -60,19 +58,12 @@ function createChatRoutes({
   const events = eventStore;
   const memories = memoryCapture;
   const log = logger || options?.logger || console;
-  return async function handleChatRoutes(req, res, url) {
-    if (req.method !== "POST" || url.pathname !== "/api/chat") {
-      return false;
-    }
 
-    let body;
-    try {
-      body = await readJsonBody(req);
-    } catch (error) {
-      sendJson(res, 400, { error: error.message });
-      return true;
-    }
+  function fail(status, json) {
+    return { ok: false, status, json };
+  }
 
+  async function startRun({ body = {}, apiUrl: apiUrlInput, host } = {}) {
     const requestedAgent = typeof body.agent === "string" ? body.agent : "codex";
     const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     const useWorktree = body.useWorktree === true;
@@ -80,50 +71,42 @@ function createChatRoutes({
     const sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
 
     if (!AGENTS[requestedAgent]) {
-      sendJson(res, 400, { error: `Unsupported agent "${requestedAgent}".` });
-      return true;
+      return fail(400, { error: `Unsupported agent "${requestedAgent}".` });
     }
     if (!rawPrompt) {
-      sendJson(res, 400, { error: "Prompt is required." });
-      return true;
+      return fail(400, { error: "Prompt is required." });
     }
     if (!sessionId) {
-      sendJson(res, 400, { error: "sessionId is required." });
-      return true;
+      return fail(400, { error: "sessionId is required." });
     }
     if (body.projectDir !== undefined) {
-      sendJson(res, 400, {
+      return fail(400, {
         error: "projectDir is bound by the Session Project and cannot be changed.",
       });
-      return true;
     }
     if (body.clientTurnId !== undefined && body.clientTurnId !== null) {
       try {
         clientTurnId = assertValidOpaqueId(body.clientTurnId, "clientTurnId");
       } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
+        return fail(400, { error: error.message });
       }
     }
 
     try {
       assertValidOpaqueId(sessionId, "sessionId");
     } catch (error) {
-      sendJson(res, 400, { error: error.message });
-      return true;
+      return fail(400, { error: error.message });
     }
     let session = getSession(sessionId);
     if (!session) {
-      sendJson(res, 404, { error: "Session not found or its Project is archived." });
-      return true;
+      return fail(404, { error: "Session not found or its Project is archived." });
     }
     const initialSeat = resolveEnabledSeat(storage?.threadSeats, sessionId, requestedAgent, AGENTS);
     if (!initialSeat) {
-      sendJson(res, 409, {
+      return fail(409, {
         error: `Seat for agent "${requestedAgent}" is not enabled in this Session.`,
         code: "SEAT_NOT_ENABLED",
       });
-      return true;
     }
     const availabilityError = seatAvailabilityError(
       storage.threadSeats.listEnabledForThread(sessionId),
@@ -131,15 +114,13 @@ function createChatRoutes({
       availability
     );
     if (availabilityError) {
-      sendJson(res, 503, availabilityError);
-      return true;
+      return fail(503, availabilityError);
     }
     let requestedDuty;
     try {
       requestedDuty = initialDuty({ requestedDuty: body.duty, useWorktree });
     } catch (error) {
-      sendJson(res, 400, { error: error.message, code: "INVALID_DUTY" });
-      return true;
+      return fail(400, { error: error.message, code: "INVALID_DUTY" });
     }
     const initialDutyBinding = buildDutyBinding({
       seat: initialSeat,
@@ -160,8 +141,7 @@ function createChatRoutes({
         sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
         session = setSessionWorktree(sessionId, sessionWorktree);
       } catch (error) {
-        sendJson(res, 400, { error: error.message });
-        return true;
+        return fail(400, { error: error.message });
       }
     }
 
@@ -174,9 +154,6 @@ function createChatRoutes({
     }
     const invocationController = new AbortController();
     activeInvocations.set(sessionId, invocationController);
-    res.once("close", () => {
-      invocationController.abort();
-    });
     const trace = durable.startTrace({
       threadId: sessionId,
       clientTurnId,
@@ -191,10 +168,12 @@ function createChatRoutes({
       if (activeInvocations.get(sessionId) === invocationController) {
         activeInvocations.delete(sessionId);
       }
-      sendJson(res, 503, { error: "Failed to persist trace start." });
-      return true;
+      return fail(503, { error: "Failed to persist trace start." });
     }
     const traceId = trace?.id || null;
+    if (runtime) {
+      runtime.claim(sessionId, { traceId, controller: invocationController, clientTurnId });
+    }
     const failPreparationTrace = (error, stage) => {
       if (!traceId) return;
       durable.completeTrace({
@@ -255,15 +234,10 @@ function createChatRoutes({
     });
     if (
       invocationController.signal.aborted ||
-      activeInvocations.get(sessionId) !== invocationController ||
-      res.destroyed ||
-      res.writableEnded
+      activeInvocations.get(sessionId) !== invocationController
     ) {
       failPreparationTrace(null, "request");
-      if (!res.destroyed && !res.writableEnded) {
-        sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
-      }
-      return true;
+      return fail(409, { error: "Chat request was superseded by a newer request." });
     }
 
     const isolatedWorkspace =
@@ -297,8 +271,7 @@ function createChatRoutes({
     }
     const { augmentedPrompt, skillNames } = skillDelivery;
     const nativeSkillDelivery = skillDelivery.nativeDelivery === true;
-    const protocol = req.headers["x-forwarded-proto"] || "http";
-    const apiUrl = process.env[ENV.API_URL] || `${protocol}://${req.headers.host}`;
+    const apiUrl = apiUrlInput || process.env[ENV.API_URL] || `http://${host || "127.0.0.1"}`;
     const worklist = [requestedAgent];
     const maxDepth = getMaxA2ADepth();
 
@@ -332,15 +305,10 @@ function createChatRoutes({
 
     if (
       invocationController.signal.aborted ||
-      activeInvocations.get(sessionId) !== invocationController ||
-      res.destroyed ||
-      res.writableEnded
+      activeInvocations.get(sessionId) !== invocationController
     ) {
       failPreparationTrace(null, "request");
-      if (!res.destroyed && !res.writableEnded) {
-        sendJson(res, 409, { error: "Chat request was superseded by a newer request." });
-      }
-      return true;
+      return fail(409, { error: "Chat request was superseded by a newer request." });
     }
 
     const sessionAfterUser = existingUserMessage
@@ -400,22 +368,24 @@ function createChatRoutes({
       });
     }
 
-    res.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-store",
-      connection: "keep-alive",
-    });
-    sendSse(res, "session", { sessionId });
-    sendSse(res, "skills-active", { skills: skillNames });
-
     const a2aHistory = [];
-    let aborted = false;
     const runObs = createRunObservability({ startedAt: Date.now() });
+    const detachedRes = {
+      destroyed: false,
+      writableEnded: false,
+      writable: true,
+      write() {
+        return true;
+      },
+      end() {},
+      once() {},
+      writeHead() {},
+    };
+    const skipPersist = new Set(["agent-event", "message"]);
     const threadCtx = {
       availability,
       sessionId,
       traceId,
-      res,
       worklist,
       controller: invocationController,
       a2aCount: 0,
@@ -441,14 +411,27 @@ function createChatRoutes({
       threadSeats: storage?.threadSeats || null,
       agents: AGENTS,
     };
+    function emitUi(_res, event, data) {
+      if (skipPersist.has(event)) return;
+      const invocationId = threadCtx.currentInvocationId;
+      if (!invocationId) {
+        runtime?.publish(sessionId, { id: null, kind: event, payload: data || {} });
+        return;
+      }
+      events.append({
+        threadId: sessionId,
+        invocationId,
+        kind: event,
+        payload: data || {},
+      });
+    }
+    threadCtx.emit = (event, data) => emitUi(null, event, data);
     callbacks.registerThread(sessionId, threadCtx);
-
-    let ownedInvocationSlotAtCleanup = false;
 
     const workCtx = {
       availability,
-      res,
-      sendSse,
+      res: detachedRes,
+      sendSse: emitUi,
       sessionId,
       traceId,
       session,
@@ -499,121 +482,166 @@ function createChatRoutes({
       isolatedWorkspace,
     };
 
-    let workResult;
-    try {
-      workResult = await runChatWorklist(workCtx);
-    } catch (error) {
-      durable.reconcileThreadActive?.(sessionId, {
-        reason: "request-error-orphan",
-        state: "failed",
-      });
-      durable.reconcileTraceHandoffs?.(traceId);
-      durable.completeTrace({
-        traceId,
-        state: "failed",
-        terminalReason: "request-error",
-        failureStage: error?.name === "DurableWriteError" ? "persistence" : "request",
-        errorCode: error?.code || "chat_request_failed",
-        retryable: error?.retryable === true,
-      });
-      throw error;
+    function publishBackgroundFailure(error) {
+      const message = error?.message || "chat_request_failed";
+      const payload = { error: message, message };
+      try {
+        durable.reconcileThreadActive?.(sessionId, {
+          reason: "request-error-orphan",
+          state: "failed",
+        });
+        durable.reconcileTraceHandoffs?.(traceId);
+        durable.completeTrace({
+          traceId,
+          state: "failed",
+          terminalReason: "request-error",
+          failureStage: error?.name === "DurableWriteError" ? "persistence" : "request",
+          errorCode: error?.code || "chat_request_failed",
+          retryable: error?.retryable === true,
+        });
+      } catch (persistError) {
+        log.error?.(`[chat-runtime] failed to persist background failure: ${persistError.message}`);
+      }
+      let persistId = threadCtx.currentInvocationId || null;
+      if (!persistId) {
+        try {
+          persistId = storage?.invocations?.listForThread(sessionId).at(-1)?.id || null;
+        } catch {
+          persistId = null;
+        }
+      }
+      try {
+        if (persistId) {
+          events.append({
+            threadId: sessionId,
+            invocationId: persistId,
+            kind: "run.failed",
+            payload,
+          });
+          return;
+        }
+      } catch (appendError) {
+        log.error?.(`[chat-runtime] failed to append run.failed: ${appendError.message}`);
+      }
+      try {
+        runtime?.publish(sessionId, { id: null, kind: "run.failed", payload });
+      } catch {
+        // Observer IO is best-effort; SQLite remains the truth.
+      }
     }
-    aborted = workResult.aborted;
-    ownedInvocationSlotAtCleanup = workResult.ownedInvocationSlotAtCleanup;
-    session = workCtx.session;
 
-    // Observability summary (emit-only; does not fail the request).
-    try {
-      const costSummary = runObs.summarize();
-      if (!res.writableEnded && !res.destroyed) {
-        sendSse(res, "run-cost", costSummary);
+    const promise = (async () => {
+      let aborted = false;
+      let ownedInvocationSlotAtCleanup = false;
+      try {
+        const workResult = await runChatWorklist(workCtx);
+        aborted = workResult.aborted;
+        ownedInvocationSlotAtCleanup = workResult.ownedInvocationSlotAtCleanup;
+        session = workCtx.session;
+      } catch (error) {
+        publishBackgroundFailure(error);
+        return;
+      }
+
+      try {
+        const costSummary = runObs.summarize();
+        emitUi(null, "run-cost", costSummary);
         if (costSummary.degraded) {
-          sendSse(res, "run-degraded", {
+          emitUi(null, "run-degraded", {
             reasons: costSummary.degradedReasons,
             durationMs: costSummary.durationMs,
             encodingWarnings: costSummary.encodingWarnings,
           });
         }
-      }
-    } catch (error) {
-      log.warn?.(`[run-obs] summarize failed: ${error.message}`);
-    }
-
-    // Phase 2: no open invocations may survive past stream end (orphan reconcile).
-    // One chat owns the session at a time (activeInvocations), so thread-wide cleanup is safe.
-    if (
-      ownedInvocationSlotAtCleanup &&
-      durable.enabled &&
-      typeof durable.reconcileThreadActive === "function"
-    ) {
-      try {
-        const reconcile = durable.reconcileThreadActive(sessionId, {
-          reason: aborted ? "request-aborted-orphan" : "request-done-orphan",
-          state: aborted ? "aborted" : "failed",
-        });
-        if (reconcile?.forced?.length && !res.writableEnded && !res.destroyed) {
-          sendSse(res, "invocation-reconcile", {
-            threadId: sessionId,
-            reason: reconcile.reason,
-            forced: reconcile.forced,
-            remainingActive: reconcile.remainingActive,
-          });
-        }
       } catch (error) {
-        log.error?.(`[invocation-lifecycle] reconcile failed: ${error.message}`);
+        log.warn?.(`[run-obs] summarize failed: ${error.message}`);
       }
-    }
 
-    threadCtx.currentInvocationId = null;
-    threadCtx.windowId = null;
-    durable.reconcileTraceHandoffs?.(traceId);
-    const traceInvocations =
-      storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) || [];
-    const traceActive = traceInvocations.some((row) => row.state === "active");
-    const traceSucceeded = traceInvocations.some(
-      (row) => row.state === "completed" && row.terminalReason === "assistant-final"
-    );
-    durable.completeTrace({
-      traceId,
-      state: aborted ? "aborted" : traceActive || !traceSucceeded ? "failed" : "completed",
-      terminalReason: aborted
-        ? "request-aborted"
-        : traceActive
-          ? "invocation-orphan-remaining"
-          : !traceSucceeded
-            ? "invocation-failed"
-            : "request-completed",
-      failureStage: traceActive ? "reconcile" : !traceSucceeded ? "provider_run" : null,
-      errorCode: traceActive
-        ? "invocation_orphan_remaining"
-        : !traceSucceeded
-          ? "invocation_failed"
-          : null,
-      retryable: false,
-    });
-    if (!aborted) {
-      // Hard invariant: done implies no open durable invocations for this thread.
-      const stillOpen =
-        durable.enabled && typeof durable.listOpenInvocations === "function"
-          ? durable.listOpenInvocations(sessionId)
-          : [];
-      if (stillOpen.length > 0 && !res.writableEnded && !res.destroyed) {
-        sendSse(res, "error", {
-          error: "Open invocations remained after reconcile.",
-          code: "invocation_orphan_remaining",
-          retryable: false,
-          openInvocationIds: stillOpen.map((row) => row.id),
-        });
+      if (
+        ownedInvocationSlotAtCleanup &&
+        durable.enabled &&
+        typeof durable.reconcileThreadActive === "function"
+      ) {
+        try {
+          const reconcile = durable.reconcileThreadActive(sessionId, {
+            reason: aborted ? "run-aborted-orphan" : "run-done-orphan",
+            state: aborted ? "aborted" : "failed",
+          });
+          if (reconcile?.forced?.length) {
+            emitUi(null, "invocation-reconcile", {
+              threadId: sessionId,
+              reason: reconcile.reason,
+              forced: reconcile.forced,
+              remainingActive: reconcile.remainingActive,
+            });
+          }
+        } catch (error) {
+          log.error?.(`[invocation-lifecycle] reconcile failed: ${error.message}`);
+        }
       }
-      sendSse(res, "done", {});
-    }
-    res.end();
-    return true;
-  };
+
+      const finishInvocationId = threadCtx.currentInvocationId;
+      threadCtx.currentInvocationId = null;
+      threadCtx.windowId = null;
+      durable.reconcileTraceHandoffs?.(traceId);
+      const traceInvocations =
+        storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) ||
+        [];
+      const traceActive = traceInvocations.some((row) => row.state === "active");
+      const traceSucceeded = traceInvocations.some(
+        (row) => row.state === "completed" && row.terminalReason === "assistant-final"
+      );
+      durable.completeTrace({
+        traceId,
+        state: aborted ? "aborted" : traceActive || !traceSucceeded ? "failed" : "completed",
+        terminalReason: aborted
+          ? "request-aborted"
+          : traceActive
+            ? "invocation-orphan-remaining"
+            : !traceSucceeded
+              ? "invocation-failed"
+              : "request-completed",
+        failureStage: traceActive ? "reconcile" : !traceSucceeded ? "provider_run" : null,
+        errorCode: traceActive
+          ? "invocation_orphan_remaining"
+          : !traceSucceeded
+            ? "invocation_failed"
+            : null,
+        retryable: false,
+      });
+      const terminalKind = aborted ? "run.aborted" : "done";
+      const persistId = finishInvocationId || traceInvocations.at(-1)?.id;
+      if (persistId) {
+        events.append({
+          threadId: sessionId,
+          invocationId: persistId,
+          kind: terminalKind,
+          payload: {},
+        });
+      } else {
+        runtime?.publish(sessionId, { id: null, kind: terminalKind, payload: {} });
+      }
+    })();
+
+    runtime?.attachPromise(sessionId, promise);
+    promise.catch((error) => {
+      log.error?.(`[chat-runtime] background run failed: ${error.message}`);
+      publishBackgroundFailure(error);
+    });
+
+    return {
+      ok: true,
+      status: 202,
+      json: { traceId, sessionId },
+      promise,
+    };
+  }
+
+  return { startRun };
 }
 
 module.exports = {
-  createChatRoutes,
+  createChatRunExecutor,
   invocationUsageDelta,
   contextCharsFromEvent,
 };

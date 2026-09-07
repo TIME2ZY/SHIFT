@@ -4,15 +4,25 @@ import { createSessionRunStore } from "./session-run-store";
 describe("session run store", () => {
   it("keeps controllers isolated by session", () => {
     const store = createSessionRunStore();
-    const first = store.startController("s1");
-    const second = store.startController("s2");
+    const first = store.startSubscription("s1");
+    const second = store.startSubscription("s2");
 
-    expect(store.abort("s1")).toBe(true);
+    expect(store.stopSubscription("s1")).toBe(true);
     expect(first.signal.aborted).toBe(true);
     expect(second.signal.aborted).toBe(false);
+    store.abort("s1");
     expect(store.getSnapshot().runs.s1.status).toBe("aborted");
-    expect(store.getSnapshot().runs.s2.status).toBe("connecting");
-    expect(store.isCurrentController("s1", first)).toBe(true);
-    expect(store.releaseController("s1", first)).toBe(true);
+    expect(store.isCurrentSubscription("s2", second)).toBe(true);
+    expect(store.releaseSubscription("s2", second)).toBe(true);
+  });
+
+  it("replaces a live session subscription instead of sharing the controller", () => {
+    const store = createSessionRunStore();
+    const first = store.startSubscription("s1");
+    const second = store.startSubscription("s1");
+    expect(first.signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(false);
+    expect(store.isCurrentSubscription("s1", first)).toBe(false);
+    expect(store.isCurrentSubscription("s1", second)).toBe(true);
   });
 });

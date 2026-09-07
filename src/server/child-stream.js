@@ -30,11 +30,12 @@ function buildAgentChildEnvironment(baseEnv = process.env, overrides = {}) {
 function runChildStream({
   spawnRunner,
   args,
-  res,
+  res = null,
   cwd,
   onStdout,
   onEvent,
   onStderr,
+  onError,
   onHealth,
   onEncodingWarning,
   shouldStop,
@@ -63,6 +64,16 @@ function runChildStream({
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    const emitStreamError = (payload) => {
+      if (typeof onError === "function") {
+        onError(payload);
+        return;
+      }
+      if (res && !res.destroyed && !res.writableEnded) {
+        sendSse(res, "error", payload);
+      }
+    };
 
     let closed = false;
     let stopping = false;
@@ -114,7 +125,7 @@ function runChildStream({
         try {
           event = JSON.parse(line);
         } catch (error) {
-          sendSse(res, "error", { message: `Invalid agent event: ${error.message}` });
+          emitStreamError({ message: `Invalid agent event: ${error.message}` });
           continue;
         }
         // Also scan decoded text fields inside events (replacement may appear after JSON parse).
@@ -149,20 +160,18 @@ function runChildStream({
       const message = error instanceof Error ? error.message : String(error);
       streamFailure = { origin, message };
       console.error(`[child-stream] ${origin} failed: ${message}`);
-      sendSse(res, "error", {
+      emitStreamError({
         message: `Agent stream ${origin} failed: ${message}`,
         retryable: true,
       });
       stopChild(`Stopping agent process after ${origin} failure.`);
     };
     const abortHandler = () => stopChild("Invocation aborted by client or session conflict.");
-    const onResClose = () => stopChild("Client disconnected.");
 
     if (signal) {
       if (signal.aborted) stopChild();
       else signal.addEventListener("abort", abortHandler, { once: true });
     }
-    res.once("close", onResClose);
 
     const activityTimer = setInterval(
       () => {
@@ -205,7 +214,7 @@ function runChildStream({
     child.stdout.on("error", (error) => failStream("stdout stream", error));
     child.stderr.on("error", (error) => failStream("stderr stream", error));
 
-    child.on("error", (error) => sendSse(res, "error", { message: error.message }));
+    child.on("error", (error) => emitStreamError({ message: error.message }));
     child.on("close", (code, closeSignal) => {
       processStdoutText(stdoutDecoder.end());
       if (stdoutBuffer.trim() && typeof onEvent === "function") {
@@ -224,7 +233,6 @@ function runChildStream({
       clearTimeout(killTimer);
       clearInterval(activityTimer);
       if (signal) signal.removeEventListener("abort", abortHandler);
-      res.removeListener("close", onResClose);
       resolve({
         code,
         signal: closeSignal,

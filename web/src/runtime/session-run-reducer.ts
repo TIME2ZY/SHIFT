@@ -68,6 +68,46 @@ function finishOpenLiveMessages(
   );
 }
 
+function sealLiveMessages(liveMessages: SessionRun["liveMessages"]): SessionRun["liveMessages"] {
+  const next: SessionRun["liveMessages"] = {};
+  for (const [invocationId, message] of Object.entries(liveMessages)) {
+    next[invocationId] = {
+      ...message,
+      status: sealLiveMessageStatus(message.status),
+    };
+  }
+  return next;
+}
+
+function isTerminalRunStatus(status: SessionRun["status"]): boolean {
+  return status === "done" || status === "error" || status === "aborted";
+}
+
+function liveStatusForRun(
+  run: SessionRun,
+  openStatus: LiveMessage["status"]
+): LiveMessage["status"] {
+  if (run.status === "error") return "error";
+  if (run.status === "aborted") return "aborted";
+  if (run.status === "done") return "done";
+  return openStatus;
+}
+
+function statusFromSnapshot(
+  runStatus: string | undefined,
+  current: SessionRun["status"]
+): SessionRun["status"] {
+  if (runStatus === "completed" || runStatus === "done") {
+    return current === "error" || current === "aborted" ? current : "done";
+  }
+  if (runStatus === "failed" || runStatus === "error") return "error";
+  if (runStatus === "aborted" || runStatus === "cancelled") return "aborted";
+  if (runStatus === "running" || runStatus === "active") {
+    return current === "idle" ? "running" : current;
+  }
+  return current;
+}
+
 export function sessionRunReducer(
   state: SessionRunState,
   action: SessionRunAction
@@ -76,11 +116,51 @@ export function sessionRunReducer(
 
   switch (action.type) {
     case "run/started":
-      return updateRun(state, action.sessionId, () => ({
+      return updateRun(state, action.sessionId, (run) => ({
         ...emptyRun(action.sessionId, now),
         status: "connecting",
         startedAt: action.startedAt,
+        traceId: action.traceId,
+        optimisticUser: run.optimisticUser,
       }));
+
+    case "run/accepted":
+      return updateRun(state, action.sessionId, (run) => {
+        if (run.status === "aborted" || run.status === "error") return run;
+        return {
+          ...run,
+          traceId: action.traceId,
+          status: run.status === "idle" || run.status === "done" ? "connecting" : run.status,
+          updatedAt: now,
+        };
+      });
+
+    case "run/hydrated":
+      return updateRun(state, action.sessionId, (run) => {
+        const status = statusFromSnapshot(action.runStatus, run.status);
+        const terminal = status === "done" || status === "error" || status === "aborted";
+        return {
+          ...run,
+          traceId: action.traceId || run.traceId,
+          cursor: action.cursor ?? run.cursor,
+          status,
+          doneReceived: status === "done" ? true : run.doneReceived,
+          liveMessages: !terminal
+            ? run.liveMessages
+            : status === "done"
+              ? sealLiveMessages(run.liveMessages)
+              : finishOpenLiveMessages(
+                  run.liveMessages,
+                  status === "aborted" ? "aborted" : "error"
+                ),
+          updatedAt: now,
+        };
+      });
+
+    case "run/cursor":
+      return updateRun(state, action.sessionId, (run) =>
+        action.cursor <= (run.cursor || 0) ? run : { ...run, cursor: action.cursor, updatedAt: now }
+      );
 
     case "user/submitted":
       return updateRun(state, action.sessionId, (run) => ({
@@ -95,16 +175,17 @@ export function sessionRunReducer(
 
     case "agent/started":
       return updateRun(state, action.sessionId, (run) => {
-        const message: LiveMessage = {
+        const existing = run.liveMessages[action.invocationId];
+        const message: LiveMessage = existing || {
           agentId: action.agentId,
           invocationId: action.invocationId,
           text: "",
-          status: "thinking",
+          status: liveStatusForRun(run, "thinking"),
           timeline: [],
         };
         return {
           ...run,
-          status: "running",
+          status: isTerminalRunStatus(run.status) ? run.status : "running",
           updatedAt: now,
           liveMessages: { ...run.liveMessages, [action.invocationId]: message },
           latestInvocationByAgent: {
@@ -134,7 +215,7 @@ export function sessionRunReducer(
               ...current,
               text: current.text + action.text,
               timeline: appendTimelineText(current.timeline, "text", action.text),
-              status: "streaming",
+              status: liveStatusForRun(run, "streaming"),
             },
           },
         };
@@ -179,10 +260,12 @@ export function sessionRunReducer(
               ...current,
               commentary: (current.commentary || "") + action.text,
               timeline: appendTimelineText(current.timeline, "commentary", action.text),
-              status:
+              status: liveStatusForRun(
+                run,
                 current.status === "thinking" || current.status === "streaming"
                   ? "streaming"
-                  : current.status,
+                  : current.status
+              ),
             },
           },
         };

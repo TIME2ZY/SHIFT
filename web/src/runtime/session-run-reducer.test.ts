@@ -66,6 +66,56 @@ describe("sessionRunReducer", () => {
     expect(second.runs.s1.liveMessages.i1.text).toBe("hello world");
   });
 
+  it("keeps connecting until the start response is accepted", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    expect(state.runs.s1.status).toBe("connecting");
+    state = sessionRunReducer(state, {
+      type: "run/accepted",
+      sessionId: "s1",
+      traceId: "trace-1",
+    });
+    expect(state.runs.s1.status).toBe("connecting");
+    expect(state.runs.s1.traceId).toBe("trace-1");
+  });
+
+  it("does not let run/accepted revive an aborted start", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    state = sessionRunReducer(state, { type: "run/aborted", sessionId: "s1" });
+    state = sessionRunReducer(state, {
+      type: "run/accepted",
+      sessionId: "s1",
+      traceId: "trace-late",
+    });
+    expect(state.runs.s1.status).toBe("aborted");
+    expect(state.runs.s1.traceId).toBeUndefined();
+  });
+
+  it("does not let historical agent-start override a terminal snapshot", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/hydrated",
+      sessionId: "s1",
+      traceId: "t-failed",
+      runStatus: "failed",
+    });
+    expect(state.runs.s1.status).toBe("error");
+    state = sessionRunReducer(state, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "grok",
+      invocationId: "inv-1",
+    });
+    expect(state.runs.s1.status).toBe("error");
+    expect(state.runs.s1.liveMessages["inv-1"].status).toBe("error");
+  });
+
   it("keeps a run failed when a later done frame arrives", () => {
     let state = sessionRunReducer(initialSessionRunState, {
       type: "run/started",

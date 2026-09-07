@@ -12,6 +12,8 @@ const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 const { hashUserGoal } = require("../../src/agents/workflow-gates");
 
+const { startAndCollect } = require("../helpers/chat-run-client");
+
 const UI_TOKEN = "collaboration-chat-test-token";
 
 function apiFetch(url, init = {}) {
@@ -21,11 +23,14 @@ function apiFetch(url, init = {}) {
   return fetch(url, { ...init, headers });
 }
 
-async function chat(baseUrl, body) {
-  const response = await apiFetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    body: JSON.stringify(body),
+function startChat(baseUrl, body) {
+  return startAndCollect(baseUrl, body, {
+    headers: { "X-Shift-UI-Token": UI_TOKEN },
   });
+}
+
+async function chat(baseUrl, body) {
+  const response = await startChat(baseUrl, body);
   assert.equal(response.status, 200);
   return response.text();
 }
@@ -149,15 +154,12 @@ test("each Provider persists plan Duty output through the chat API", async () =>
       for (const seat of storage.threadSeats.listForThread(session.id)) {
         storage.threadSeats.configure(seat.seatId, { enabled: seat.providerId === agent });
       }
-      const response = await apiFetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: session.id,
-          agent,
-          prompt: "提交实现方案",
-          duty: "plan",
-          useWorktree: true,
-        }),
+      const response = await startChat(baseUrl, {
+        sessionId: session.id,
+        agent,
+        prompt: "提交实现方案",
+        duty: "plan",
+        useWorktree: true,
       });
       assert.equal(response.status, 200);
       assert.match(await response.text(), /event: implementation-plan-submitted/, agent);
@@ -217,13 +219,10 @@ test("chat hops honor the depth limit and finish every accepted target", async (
       method: "POST",
       body: JSON.stringify({ projectKey }),
     }).then((response) => response.json());
-    const response = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "Compare the options",
-      }),
+    const response = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "Compare the options",
     });
     const stream = await response.text();
     assert.deepEqual(spawned, ["codex", "gemini", "codex"]);

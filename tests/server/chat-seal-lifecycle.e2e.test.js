@@ -17,6 +17,8 @@ const test = require("node:test");
 const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 
+const { startAndCollect } = require("../helpers/chat-run-client");
+
 const UI_TOKEN = "seal-lifecycle-token";
 
 function apiFetch(url, init = {}) {
@@ -24,6 +26,12 @@ function apiFetch(url, init = {}) {
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
   return fetch(url, { ...init, headers });
+}
+
+function startChat(baseUrl, body) {
+  return startAndCollect(baseUrl, body, {
+    headers: { "X-Shift-UI-Token": UI_TOKEN },
+  });
 }
 
 function spawnText(text, opts = {}) {
@@ -108,13 +116,10 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
 
       // Fill open window near capacity so projected (prompt+reserve) cannot fit.
       // Prime a window, inflate usage, then call again to force PRE-seal.
-      await apiFetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: session.id,
-          agent: "codex",
-          prompt: "prime window",
-        }),
+      await startChat(baseUrl, {
+        sessionId: session.id,
+        agent: "codex",
+        prompt: "prime window",
       }).then((r) => r.text());
 
       const open = storage.windows
@@ -138,16 +143,13 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
       prompts.length = 0;
       const genBefore = open.generation;
 
-      const body = await apiFetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: session.id,
-          agent: "codex",
-          prompt: "second turn must pre-rotate then answer fully",
-        }),
+      const body = await startChat(baseUrl, {
+        sessionId: session.id,
+        agent: "codex",
+        prompt: "second turn must pre-rotate then answer fully",
       }).then((r) => r.text());
 
-      assert.match(body, /event: sealed/);
+      assert.match(body, /event: window-sealed|event: sealed/);
       assert.match(body, /pre-call-projected|post-turn/);
       assert.equal(spawnCount, 1, "exactly one provider spawn after pre-rotate");
       assert.match(body, /answer after rotate on fresh window/);
@@ -191,23 +193,19 @@ test("POST soft seal: complete answer then seal, no mid-stream kill required", a
         body: JSON.stringify({ projectKey }),
       }).then((r) => r.json());
 
-      await apiFetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "warm" }),
-      }).then((r) => r.text());
+      await startChat(baseUrl, { sessionId: session.id, agent: "codex", prompt: "warm" }).then(
+        (r) => r.text()
+      );
 
       const open = storage.windows.listForThread(session.id).find((w) => w.state === "active");
       // Leave room for this turn's answer but little remaining after (~ soft seal).
       storage.windows.addUsage(open.id, { inputChars: 12_000, outputChars: 12_000 });
 
       spawnCount = 0;
-      const text = await apiFetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({
-          sessionId: session.id,
-          agent: "codex",
-          prompt: "please give a full reply",
-        }),
+      const text = await startChat(baseUrl, {
+        sessionId: session.id,
+        agent: "codex",
+        prompt: "please give a full reply",
       }).then((r) => r.text());
 
       assert.equal(spawnCount, 1);
@@ -251,9 +249,10 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
       method: "POST",
       body: JSON.stringify({ projectKey }),
     }).then((r) => r.json());
-    const text = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "hi" }),
+    const text = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "hi",
     }).then((r) => r.text());
     assert.ok(spawns >= 1);
     const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>

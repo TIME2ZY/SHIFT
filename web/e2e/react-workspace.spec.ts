@@ -6,6 +6,7 @@ interface MockState {
   chatBody: Record<string, unknown> | null;
   worktreeAttached: boolean;
   traceQueries: string[];
+  runStarted: boolean;
 }
 
 type ChatMode = "success" | "error" | "slow";
@@ -17,6 +18,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     chatBody: null,
     worktreeAttached: false,
     traceQueries: [],
+    runStarted: false,
   };
 
   await page.route("**/favicon.svg", async (route) => {
@@ -440,32 +442,57 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
 
-    if (url.pathname === "/api/chat" && method === "POST") {
-      state.chatBody = request.postDataJSON() as Record<string, unknown>;
+    const runMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/);
+    if (runMatch && method === "POST") {
+      const payload = (request.postDataJSON() as Record<string, unknown>) || {};
+      state.chatBody = { sessionId: runMatch[1], ...payload };
       state.worktreeAttached = state.chatBody.useWorktree === true;
+      state.runStarted = true;
 
+      await route.fulfill({
+        status: 202,
+        json: { sessionId: runMatch[1], traceId: "trace-1" },
+      });
+      return;
+    }
+
+    const stopMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs\/([^/]+)\/stop$/);
+    if (stopMatch && method === "POST") {
+      await route.fulfill({
+        json: { stopped: true, sessionId: stopMatch[1], traceId: stopMatch[2] },
+      });
+      return;
+    }
+
+    const eventsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/);
+    if (eventsMatch && method === "GET") {
       if (chatMode === "error") {
         await route.fulfill({
           status: 200,
           contentType: "text/event-stream",
           body: [
-            'event: session\ndata: {"sessionId":"session-1"}\n\n',
-            'event: error\ndata: {"message":"Provider unavailable"}\n\n',
-            "event: done\ndata: {}\n\n",
+            'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","runStatus":"failed","lastEventId":2}\n\n',
+            'id: 2\nevent: error\ndata: {"message":"Provider unavailable"}\n\n',
           ].join(""),
         });
         return;
       }
 
       if (chatMode === "slow") {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        await route
-          .fulfill({
+        if (!state.runStarted) {
+          await route.fulfill({
             status: 200,
             contentType: "text/event-stream",
-            body: "event: done\ndata: {}\n\n",
-          })
-          .catch(() => {});
+            body: 'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","lastEventId":0}\n\n',
+          });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: 'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","runStatus":"running","traceId":"trace-1","lastEventId":0}\n\n',
+        });
         return;
       }
 
@@ -474,14 +501,14 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         status: 200,
         contentType: "text/event-stream",
         body: [
-          'event: session\ndata: {"sessionId":"session-1"}\n\n',
-          'event: agent-start\ndata: {"agent":"gemini","invocationId":"invocation-1"}\n\n',
-          'event: agent-event\ndata: {"type":"text.delta","agent":"gemini","invocationId":"invocation-1","text":"工作区改动已完成。"}\n\n',
-          'event: memory-inject\ndata: {"sessionId":"session-1","count":1,"items":[{"id":"memory-1","kind":"decision","topic":"React 迁移","content":"工作区流程已经通过浏览器验证。"}]}\n\n',
-          'event: memory\ndata: {"sessionId":"session-1","action":"upsert"}\n\n',
-          'event: memory-metrics\ndata: {"threadId":"session-1","totalWrites":1}\n\n',
-          'event: agent-exit\ndata: {"agent":"gemini","invocationId":"invocation-1","code":0}\n\n',
-          "event: done\ndata: {}\n\n",
+          'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","runStatus":"running","traceId":"trace-1","lastEventId":0}\n\n',
+          'id: 2\nevent: agent-start\ndata: {"agent":"gemini","invocationId":"invocation-1"}\n\n',
+          'id: 3\nevent: agent-event\ndata: {"type":"text.delta","agent":"gemini","invocationId":"invocation-1","text":"工作区改动已完成。"}\n\n',
+          'id: 4\nevent: memory-inject\ndata: {"sessionId":"session-1","count":1,"items":[{"id":"memory-1","kind":"decision","topic":"React 迁移","content":"工作区流程已经通过浏览器验证。"}]}\n\n',
+          'id: 5\nevent: memory\ndata: {"sessionId":"session-1","action":"upsert"}\n\n',
+          'id: 6\nevent: memory-metrics\ndata: {"threadId":"session-1","totalWrites":1}\n\n',
+          'id: 7\nevent: agent-exit\ndata: {"agent":"gemini","invocationId":"invocation-1","code":0}\n\n',
+          "id: 8\nevent: done\ndata: {}\n\n",
         ].join(""),
       });
       return;

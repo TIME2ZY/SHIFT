@@ -20,7 +20,8 @@ const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 // ThreadContext = {
 //   threadId,         // explicit binding (defense against drift, see lesson 08)
 //   sessionId,        // chat session id (same as threadId in current data model)
-//   res,              // active SSE response
+//   emit,             // (event, data) UI sink after SQLite persist
+//   res,              // legacy SSE response; no longer required
 //   worklist,         // shared string[] mutated by A2A loop and callbacks
 //   a2aCauses,        // queue-aligned invocation causality records
 //   controller,       // AbortController for the whole chain
@@ -43,6 +44,14 @@ function sendSse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
   return true;
+}
+
+function emitThread(thread, event, data) {
+  if (thread && typeof thread.emit === "function") {
+    thread.emit(event, data);
+    return true;
+  }
+  return sendSse(thread?.res, event, data);
 }
 
 function registerThread(threadId, ctx) {
@@ -225,7 +234,7 @@ function postMessage(
     });
   }
 
-  sendSse(thread.res, "message", { agent, role: "assistant", text: content });
+  emitThread(thread, "message", { agent, role: "assistant", text: content });
 
   // Wave H2/H3: same finalize path as chat turn-end (policy + capture + enqueue).
   const agentLabels = Object.fromEntries(
@@ -245,7 +254,7 @@ function postMessage(
     branch: thread.runWorkspace?.branch || "",
   });
   for (const workflowEvent of workflowEvidenceEvents) {
-    sendSse(thread.res, workflowEvent.event, {
+    emitThread(thread, workflowEvent.event, {
       agent,
       invocationId: routeInvocationId,
       ...workflowEvent.payload,
@@ -264,7 +273,7 @@ function postMessage(
     memoryCapture,
     eventStore,
     durableRecorder,
-    sendSse: (event, payload) => sendSse(thread.res, event, payload),
+    sendSse: (event, payload) => emitThread(thread, event, payload),
     appendToSession,
     agentLabels,
     source: "callback",
@@ -292,7 +301,7 @@ function postMessage(
     stats: writeStats,
   });
   logMemoryWriteMetrics(writeMetrics, console);
-  sendSse(thread.res, "memory-metrics", writeMetrics);
+  emitThread(thread, "memory-metrics", writeMetrics);
 
   const result = {
     ok: true,
@@ -434,4 +443,5 @@ module.exports = {
   summarizeHandoffOutcome,
   buildCallbackInstructions,
   sendSse,
+  emitThread,
 };

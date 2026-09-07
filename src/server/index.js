@@ -21,6 +21,8 @@ const { createMemoryRoutes } = require("./memory-routes");
 const { createStorageRoutes } = require("./storage-routes");
 const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
+const { createChatRuntime } = require("./chat-runtime");
+const { createRunEventRoutes } = require("./run-event-routes");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
 
 const { initializeCatalogSeats } = require("../agents/duty-routing");
@@ -45,7 +47,7 @@ const {
   buildAugmentedPrompt,
 } = skills;
 const { createCallbackRoutes } = callbackRoutes;
-const { createChatRoutes } = chatRoutes;
+const { createChatRunExecutor } = chatRoutes;
 // Git root of the chat app itself, used to detect self-modification previews.
 const SELF_GIT_ROOT = (() => {
   try {
@@ -142,6 +144,7 @@ function createServer(options = {}) {
     readWorkspace: (threadId) => worktreeManager.getStatus(threadId),
   });
   const activeInvocations = new Map();
+  const chatRuntime = createChatRuntime({ eventStore });
   const runtimeRoot = path.resolve(options.runtimeRoot || process.env[ENV.RUNTIME_ROOT] || ROOT);
   const { createProviderAvailability } = require("../agents/provider-availability");
   const { createProviderProbe } = require("../agents/probe-provider");
@@ -197,6 +200,13 @@ function createServer(options = {}) {
   }
 
   async function cleanupSessionRuntime(sessionId) {
+    const run = chatRuntime.getRun(sessionId);
+    if (run) {
+      run.stopReason = "session-deleted";
+      try {
+        run.controller.abort();
+      } catch {}
+    }
     const controller = activeInvocations.get(sessionId);
     if (controller) {
       controller.abort();
@@ -217,7 +227,7 @@ function createServer(options = {}) {
   }
 
   function archiveProjectDurable(projectKey) {
-    for (const sessionId of activeInvocations.keys()) {
+    for (const sessionId of new Set([...activeInvocations.keys(), ...chatRuntime.runs.keys()])) {
       const thread = storageContext.storage.threads.getIncludingArchived(sessionId);
       if (thread?.projectKey !== projectKey) continue;
       const error = new Error(`Project ${projectKey} has an active runtime invocation.`);
@@ -279,7 +289,7 @@ function createServer(options = {}) {
     storage: storageContext.storage,
     logger,
   });
-  const handleChatRoutes = createChatRoutes({
+  const chatRunExecutor = createChatRunExecutor({
     availability,
     selfGitRoot: SELF_GIT_ROOT,
     options,
@@ -297,9 +307,7 @@ function createServer(options = {}) {
     worktreeManager,
     worktreeManagerModule,
     activeInvocations,
-    sendJson,
-    sendSse,
-    readJsonBody,
+    runtime: chatRuntime,
     buildChatArgs,
     augmentPrompt,
     prepareSkillDelivery,
@@ -317,6 +325,14 @@ function createServer(options = {}) {
     collabTaskRegistry,
     deliveryVerifier,
     logger,
+  });
+  chatRuntime.attachExecutor(chatRunExecutor);
+  const handleRunEventRoutes = createRunEventRoutes({
+    runtime: chatRuntime,
+    storage: storageContext.storage,
+    getSession: getSessionDurable,
+    sendJson,
+    readJsonBody,
   });
 
   async function handleRequest(req, res) {
@@ -386,7 +402,7 @@ function createServer(options = {}) {
       return;
     }
 
-    if (await handleChatRoutes(req, res, url)) {
+    if (await handleRunEventRoutes(req, res, url)) {
       return;
     }
 
@@ -404,6 +420,7 @@ function createServer(options = {}) {
     _previewManagers.delete(worktreeManager);
     storageClosePromise = (async () => {
       try {
+        await chatRuntime.shutdown();
         await storageContext.close();
       } catch (error) {
         logger.error?.(`[server] storage shutdown failed: ${error.message}`);
@@ -416,6 +433,27 @@ function createServer(options = {}) {
   });
   // Expose for tests / orchestrated shutdown that can await flush-before-close.
   server.closeStorageContext = closeStorageContext;
+  let shutdownPromise = null;
+  server.shutdown = async function shutdown() {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      const draining = new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error && error.code !== "ERR_SERVER_NOT_RUNNING") reject(error);
+          else resolve();
+        });
+      });
+      try {
+        await closeStorageContext();
+      } finally {
+        if (typeof server.closeIdleConnections === "function") {
+          server.closeIdleConnections();
+        }
+      }
+      await draining;
+    })();
+    return shutdownPromise;
+  };
   return server;
 }
 
