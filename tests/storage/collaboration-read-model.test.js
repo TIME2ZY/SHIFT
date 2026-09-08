@@ -272,3 +272,117 @@ test("legacy done state and stale Seat decisions cannot project as accepted", ()
   assert.equal(stale.acceptance.verdict, "incomplete");
   assert.equal(stale.acceptance.reason, "final_acceptance_missing");
 });
+
+test("projectCollaboration projects full collaboration chain and pending handoffs", () => {
+  const snapshot = projectCollaboration(
+    {
+      phase: "implement",
+      taskStatus: "active",
+      goalOriginal: "修复会话恢复协作链丢失",
+    },
+    null,
+    {
+      seats,
+      bindings: [
+        {
+          seatId: "seat-codex",
+          duty: "plan",
+          skillName: "planning",
+          enforcementLevel: "enforced",
+          invocationId: "inv-1",
+          createdAt: "2026-09-08T10:00:00.000Z",
+        },
+        {
+          seatId: "seat-gemini",
+          duty: "implement",
+          skillName: "coding",
+          enforcementLevel: "enforced",
+          invocationId: "inv-2",
+          createdAt: "2026-09-08T10:05:00.000Z",
+        },
+      ],
+      invocations: [
+        {
+          id: "inv-1",
+          state: "completed",
+          startedAt: "2026-09-08T10:00:00.000Z",
+          endedAt: "2026-09-08T10:04:00.000Z",
+        },
+        {
+          id: "inv-2",
+          state: "active",
+          startedAt: "2026-09-08T10:05:00.000Z",
+        },
+      ],
+      handoffs: [
+        {
+          id: "h-1",
+          sourceAgent: "codex",
+          targetAgent: "gemini",
+          routeStatus: "accepted",
+          completeStatus: "completed",
+          targetInvocationId: "inv-2",
+          createdAt: "2026-09-08T10:04:30.000Z",
+        },
+        {
+          id: "h-2",
+          sourceAgent: "gemini",
+          targetAgent: "codex",
+          routeStatus: "accepted",
+          completeStatus: "pending",
+          targetInvocationId: null,
+          reason: "review_request",
+          phaseId: "review",
+          createdAt: "2026-09-08T10:10:00.000Z",
+        },
+      ],
+    }
+  );
+
+  assert.equal(snapshot.chain.length, 2);
+  assert.equal(snapshot.chain[0].seatId, "seat-codex");
+  assert.equal(snapshot.chain[0].status, "completed");
+  assert.equal(snapshot.chain[1].seatId, "seat-gemini");
+  assert.equal(snapshot.chain[1].status, "active");
+
+  assert.equal(snapshot.pendingHandoffs.length, 1);
+  assert.equal(snapshot.pendingHandoffs[0].handoffId, "h-2");
+  assert.equal(snapshot.pendingHandoffs[0].sourceAgent, "gemini");
+  assert.equal(snapshot.pendingHandoffs[0].targetAgent, "codex");
+  assert.equal(snapshot.nextAction, "等待席位 codex接手任务。");
+});
+
+test("projectCollaboration reflects execution failure blocker when latest invocation failed", () => {
+  const snapshot = projectCollaboration(
+    {
+      phase: "implement",
+      taskStatus: "active",
+      goalOriginal: "修复失败测试",
+    },
+    null,
+    {
+      seats,
+      bindings: [
+        {
+          seatId: "seat-gemini",
+          duty: "implement",
+          invocationId: "inv-failed",
+        },
+      ],
+      invocations: [
+        {
+          id: "inv-failed",
+          state: "failed",
+          terminalReason: "provider_crash",
+        },
+      ],
+    }
+  );
+
+  assert.deepEqual(snapshot.blocker, {
+    type: "execution_failed",
+    reason: "provider_crash",
+  });
+  assert.equal(snapshot.nextAction, "上一轮执行失败，请排查原因后重试。");
+});
+

@@ -71,12 +71,16 @@ function createSessionRoutes({
       const workspace = acceptanceReadiness
         ? acceptanceReadiness.workspace
         : readWorkspace(sessionId);
+      const handoffs = executionStorage?.handoffs?.listForThread?.(sessionId) || [];
+      const invocations = executionStorage?.invocations?.listForThread?.(sessionId) || [];
       sendJson(res, 200, {
         collaboration: projectCollaboration(task, permission, {
           bindings,
           seats,
           workspace,
           acceptanceReadiness,
+          handoffs,
+          invocations,
         }),
         seats: projectSeats(seats),
       });

@@ -138,3 +138,23 @@ test("restart reconcile closes pending handoffs without inventing success", () =
     storage.close();
   }
 });
+
+test("listForThread returns all handoffs recorded for a thread", () => {
+  const storage = createStorage({ file: ":memory:" });
+  try {
+    seed(storage, "thread-1", "trace-1", "source-1");
+    storage.handoffs.accept({
+      sourceInvocationId: "source-1",
+      targetAgentId: "grok",
+      contentHash: "content-1",
+    });
+    const list = storage.handoffs.listForThread("thread-1");
+    assert.equal(list.length, 1);
+    assert.equal(list[0].sourceAgent, "codex");
+    assert.equal(list[0].targetAgent, "grok");
+    assert.equal(storage.handoffs.listForThread("non-existent").length, 0);
+  } finally {
+    storage.close();
+  }
+});
+

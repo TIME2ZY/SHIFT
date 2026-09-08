@@ -78,6 +78,9 @@ function createHandoffRepository(db) {
   const listByTrace = db.prepare(
     "SELECT * FROM handoffs WHERE trace_id = ? ORDER BY created_at, id"
   );
+  const listByThread = db.prepare(
+    "SELECT * FROM handoffs WHERE thread_id = ? ORDER BY created_at, id"
+  );
 
   const acceptTransaction = db.transaction((input) => {
     const source = findInvocation.get(
@@ -145,6 +148,10 @@ function createHandoffRepository(db) {
     },
     listForTrace(traceId) {
       return listByTrace.all(traceId).map(mapHandoff);
+    },
+    listForThread(threadId) {
+      if (!threadId) return [];
+      return listByThread.all(threadId).map(mapHandoff);
     },
     markEnqueued(id, enqueuedAt = new Date().toISOString()) {
       const changed = markEnqueued.run({

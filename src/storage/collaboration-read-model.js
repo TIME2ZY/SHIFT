@@ -13,6 +13,8 @@ function projectCollaboration(task, permission = null, context = {}) {
   const implPermission = permission && typeof permission === "object" ? permission : {};
   const bindings = Array.isArray(context.bindings) ? context.bindings : [];
   const seats = Array.isArray(context.seats) ? context.seats : [];
+  const invocations = Array.isArray(context.invocations) ? context.invocations : [];
+  const handoffs = Array.isArray(context.handoffs) ? context.handoffs : [];
   const currentBinding = bindings.at(-1) || null;
   const currentSeat = currentBinding
     ? seats.find((seat) => seat.seatId === currentBinding.seatId) || null
@@ -29,7 +31,9 @@ function projectCollaboration(task, permission = null, context = {}) {
     context.workspace,
     reviewMode
   );
-  const blocker = deriveBlocker(task, implementation, acceptance);
+  const chain = projectChain(bindings, seats, invocations);
+  const pendingHandoffs = projectPendingHandoffs(handoffs);
+  const blocker = deriveBlocker(task, implementation, acceptance, { invocations, handoffs });
 
   return {
     status:
@@ -52,7 +56,9 @@ function projectCollaboration(task, permission = null, context = {}) {
     evidence: projectEvidence(deliveryGate, context.workspace),
     reviewMode,
     acceptance,
-    nextAction: deriveNextAction(currentBinding?.duty, task, blocker),
+    chain,
+    pendingHandoffs,
+    nextAction: deriveNextAction(currentBinding?.duty, task, blocker, pendingHandoffs),
   };
 }
 
@@ -159,7 +165,91 @@ function projectEvidence(deliveryGate, workspace) {
   };
 }
 
-function deriveBlocker(task, implementation, acceptance) {
+function projectChain(bindings, seats, invocations) {
+  if (!Array.isArray(bindings)) return [];
+  const invocationsById = new Map(
+    (Array.isArray(invocations) ? invocations : []).map((inv) => [
+      inv.id || inv.invocationId,
+      inv,
+    ])
+  );
+  return bindings.map((binding) => {
+    const inv = binding.invocationId ? invocationsById.get(binding.invocationId) : null;
+    const seat = seats.find((s) => s.seatId === binding.seatId) || null;
+    return {
+      seatId: String(binding.seatId),
+      providerId: nullableString(seat?.providerId),
+      label: nullableString(seat?.label),
+      duty: nullableString(binding.duty),
+      skillName: nullableString(binding.skillName),
+      enforcementLevel: nullableString(binding.enforcementLevel),
+      invocationId: nullableString(binding.invocationId),
+      status: inv?.state || (binding.invocationId ? "completed" : "pending"),
+      startedAt: nullableString(inv?.startedAt || binding.createdAt),
+      endedAt: nullableString(inv?.endedAt),
+      terminalReason: nullableString(inv?.terminalReason),
+    };
+  });
+}
+
+function projectPendingHandoffs(handoffs) {
+  if (!Array.isArray(handoffs)) return [];
+  return handoffs
+    .filter(
+      (h) =>
+        (h.routeStatus === "accepted" || h.route_status === "accepted") &&
+        (h.completeStatus === "pending" || h.complete_status === "pending" || !h.targetInvocationId)
+    )
+    .map((h) => ({
+      handoffId: String(h.handoffId || h.id),
+      sourceAgent: nullableString(h.sourceAgent || h.source_agent_id),
+      targetAgent: nullableString(h.targetAgent || h.target_agent_id),
+      reason: nullableString(h.reason),
+      phaseId: nullableString(h.phaseId || h.phase_id),
+      createdAt: nullableString(h.createdAt || h.created_at),
+    }));
+}
+
+function deriveBlocker(task, implementation, acceptance, context = {}) {
+  if (task.blocker && typeof task.blocker === "object") {
+    return {
+      type: nullableString(task.blocker.type) || "missing_evidence",
+      reason: nullableString(task.blocker.reason) || "task_blocked",
+    };
+  }
+  const invocations = Array.isArray(context.invocations) ? context.invocations : [];
+  const latestInv = invocations.at(-1);
+  if (latestInv?.state === "failed") {
+    return {
+      type: "execution_failed",
+      reason: nullableString(latestInv.terminalReason) || "invocation_failed",
+    };
+  }
+  if (latestInv?.state === "aborted") {
+    return {
+      type: "waiting_human",
+      reason: "invocation_aborted",
+    };
+  }
+  const handoffs = Array.isArray(context.handoffs) ? context.handoffs : [];
+  const rejectedHandoff = [...handoffs]
+    .reverse()
+    .find((h) => h.routeStatus === "rejected" || h.route_status === "rejected");
+  if (
+    rejectedHandoff &&
+    (!latestInv ||
+      new Date(rejectedHandoff.createdAt || rejectedHandoff.created_at || 0) >=
+        new Date(latestInv.startedAt || 0))
+  ) {
+    return {
+      type: "missing_evidence",
+      reason:
+        nullableString(rejectedHandoff.errorCode || rejectedHandoff.error_code) ||
+        nullableString(rejectedHandoff.terminalReason || rejectedHandoff.terminal_reason) ||
+        "handoff_rejected",
+    };
+  }
+
   const phase = String(task.phase || task.state || "");
   if (acceptance?.verdict === "accepted") return null;
   if (acceptance?.verdict === "rejected") {
@@ -217,7 +307,12 @@ function deriveReviewMode(bindings, reviewGate) {
   return implementer.seatId === reviewer.seatId ? "same_seat" : "other_seat";
 }
 
-function deriveNextAction(duty, task, blocker) {
+function deriveNextAction(duty, task, blocker, pendingHandoffs = []) {
+  if (Array.isArray(pendingHandoffs) && pendingHandoffs.length > 0) {
+    const nextHandoff = pendingHandoffs[0];
+    const target = nextHandoff.targetAgent ? `席位 ${nextHandoff.targetAgent}` : "下一席位";
+    return `等待${target}接手任务。`;
+  }
   const blockerActions = {
     implementation_plan_not_approved: "请由讨论或验收席位批准方案后继续。",
     implementation_plan_missing: "请补充可执行的实现方案。",
@@ -232,8 +327,17 @@ function deriveNextAction(duty, task, blocker) {
     acceptance_workspace_unavailable: "请恢复工作区访问后重新核验交付。",
     acceptance_worktree_dirty: "工作区存在未提交改动，请重新核验交付证据。",
     acceptance_head_mismatch: "当前提交已变化，请重新审查并核验交付。",
+    invocation_failed: "上一轮执行失败，请排查原因后重试。",
+    invocation_aborted: "执行已被中断，请继续发送消息推进。",
+    handoff_rejected: "交接请求未满足门禁条件，请修复后重新交接。",
   };
   if (blocker?.reason && blockerActions[blocker.reason]) return blockerActions[blocker.reason];
+  if (blocker?.type === "execution_failed") {
+    return "上一轮执行失败，请排查原因后重试。";
+  }
+  if (blocker?.type === "waiting_human") {
+    return "执行已被中断，请继续发送消息推进。";
+  }
   if (task.phase === "done" || task.taskStatus === "accepted") return "任务已验收。";
   const dutyActions = {
     discuss: "收敛目标并确认解决方向。",
@@ -254,4 +358,9 @@ function nullableString(value) {
   return text || null;
 }
 
-module.exports = { projectCollaboration, projectSeats };
+module.exports = {
+  projectCollaboration,
+  projectSeats,
+  projectChain,
+  projectPendingHandoffs,
+};

@@ -27,6 +27,23 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     }
   }
 
+  function extractParticipantAgentIds(messages) {
+    const participantAgentIds = [];
+    const seenAgents = new Set();
+    for (const message of messages) {
+      const agentId =
+        typeof message.agentId === "string"
+          ? message.agentId.trim()
+          : typeof message.agent === "string"
+            ? message.agent.trim()
+            : "";
+      if (!agentId || message.role === "system" || seenAgents.has(agentId)) continue;
+      seenAgents.add(agentId);
+      participantAgentIds.push(agentId);
+    }
+    return participantAgentIds;
+  }
+
   function toSession(thread) {
     if (!thread) return null;
     const messages = storage.messages.listForThread(thread.id).map(messageFromSqlite);
@@ -40,6 +57,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
       projectDir: thread.projectDir || "",
       projectKey: thread.projectKey || null,
       lastAgent: thread.lastAgentId || "",
+      participantAgentIds: extractParticipantAgentIds(messages),
     };
   }
 
@@ -74,14 +92,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
     return attempt("list sessions", () => {
       storage.projects.requireActive(projectKey);
       return storage.threads.listForProjectWithMessageCounts(projectKey).map((thread) => {
-        const participantAgentIds = [];
-        const seenAgents = new Set();
-        for (const message of storage.messages.listForThread(thread.id)) {
-          const agentId = typeof message.agentId === "string" ? message.agentId.trim() : "";
-          if (!agentId || message.role === "system" || seenAgents.has(agentId)) continue;
-          seenAgents.add(agentId);
-          participantAgentIds.push(agentId);
-        }
+        const rawMessages = storage.messages.listForThread(thread.id);
         return {
           id: thread.id,
           title: thread.title || "",
@@ -91,7 +102,7 @@ function createSqliteSessionService({ storage, logger = console, idFactory = gen
           projectKey: thread.projectKey || null,
           worktree: worktrees.get(thread.id) || null,
           lastAgent: thread.lastAgentId || "",
-          participantAgentIds,
+          participantAgentIds: extractParticipantAgentIds(rawMessages),
         };
       });
     });

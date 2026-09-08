@@ -196,6 +196,11 @@ function createExecutionReadModel(db) {
         : trace.state === "active" || active.length > 0
           ? "running"
           : trace.state;
+      const pendingHandoffRows = trace?.id
+        ? listHandoffs.all(trace.id).filter(
+            (row) => row.route_status === "accepted" && row.complete_status === "pending"
+          )
+        : [];
       return {
         sessionId: threadId,
         traceId: trace?.id || null,
@@ -203,6 +208,7 @@ function createExecutionReadModel(db) {
         runStatus,
         lastEventId,
         activeInvocationIds: active.map((row) => row.id),
+        pendingHandoffs: pendingHandoffRows.map(handoffSummary),
         clientTurnId: trace?.client_turn_id || null,
       };
     },
