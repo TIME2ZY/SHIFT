@@ -1478,6 +1478,35 @@ async function runChatWorklist(ctx) {
         });
       }
 
+      const loopEvidence = workflowEvidenceEvents.find(
+        (e) =>
+          e.payload?.loopDetected ||
+          (typeof e.event === "string" && e.event.endsWith("-loop-detected"))
+      );
+      const hasPlanLoop = Boolean(loopEvidence);
+      if (hasPlanLoop) {
+        const loopCode =
+          loopEvidence.payload?.warning ||
+          loopEvidence.payload?.reason ||
+          "duplicate_plan_loop_detected";
+        log?.warn?.(
+          `[chat-worklist] runaway loop detected (${loopCode}) on thread ${sessionId}, terminating execution`
+        );
+        events.append({
+          threadId: sessionId,
+          invocationId: finalInvocationId,
+          kind: "diagnostic",
+          payload: {
+            code: loopCode,
+            severity: "warning",
+            message:
+              loopEvidence.payload?.message ||
+              "Duplicate plan/review loop detected. Actively terminated runaway execution.",
+            details: loopEvidence.payload,
+          },
+        });
+      }
+
       // Parse structured handoff once per turn (soft — never blocks routing).
       const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
         currentAgentId: agent,
@@ -1499,43 +1528,45 @@ async function runChatWorklist(ctx) {
       // Only client abort ends the chain early here.
 
       // Wave H2/H3: unified finalize (policy + capture + enqueue/repair).
-      const agentLabels = Object.fromEntries(
-        Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
-      );
-      const finalized = finalizeA2ARoutes({
-        text: assistantContent,
-        fromAgent: agent,
-        threadId: sessionId,
-        sessionId,
-        invocationId: finalInvocationId,
-        windowId: durableRun?.window?.id || null,
-        useWorktree: Boolean(useWorktree),
-        worktreeDir: runWorkspace?.worktreeDir || "",
-        worktreeBranch: runWorkspace?.branch || "",
-        startHeadSha: threadCtx.turnStartHeadSha || null,
-        deliveryVerifier,
-        worklist,
-        maxDepth,
-        memoryCapture: memories,
-        eventStore: events,
-        durableRecorder: durable,
-        sendSse: (event, payload) => sendSse(res, event, payload),
-        appendToSession,
-        agentLabels,
-        source: "chat",
-        parseMentions: parseA2AMentions,
-        controller: invocationController,
-        a2aState: threadCtx,
-        logger: log,
-        collabTaskRegistry,
-        threadSeats: storage?.threadSeats || null,
-        agents: AGENTS,
-        availability: ctx.availability,
-        fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
-        fromDuty: threadCtx.currentDutyBinding?.duty || null,
-      });
-      Object.assign(handoffByTarget, finalized.handoffByTarget);
-      Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
+      if (!hasPlanLoop) {
+        const agentLabels = Object.fromEntries(
+          Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
+        );
+        const finalized = finalizeA2ARoutes({
+          text: assistantContent,
+          fromAgent: agent,
+          threadId: sessionId,
+          sessionId,
+          invocationId: finalInvocationId,
+          windowId: durableRun?.window?.id || null,
+          useWorktree: Boolean(useWorktree),
+          worktreeDir: runWorkspace?.worktreeDir || "",
+          worktreeBranch: runWorkspace?.branch || "",
+          startHeadSha: threadCtx.turnStartHeadSha || null,
+          deliveryVerifier,
+          worklist,
+          maxDepth,
+          memoryCapture: memories,
+          eventStore: events,
+          durableRecorder: durable,
+          sendSse: (event, payload) => sendSse(res, event, payload),
+          appendToSession,
+          agentLabels,
+          source: "chat",
+          parseMentions: parseA2AMentions,
+          controller: invocationController,
+          a2aState: threadCtx,
+          logger: log,
+          collabTaskRegistry,
+          threadSeats: storage?.threadSeats || null,
+          agents: AGENTS,
+          availability: ctx.availability,
+          fromSeatId: threadCtx.currentDutyBinding?.seatId || null,
+          fromDuty: threadCtx.currentDutyBinding?.duty || null,
+        });
+        Object.assign(handoffByTarget, finalized.handoffByTarget);
+        Object.assign(handoffQualityByTarget, finalized.handoffQualityByTarget);
+      }
 
       const turnWriteStats = mergeWriteStats(
         emptyWriteStats(),
@@ -1575,6 +1606,10 @@ async function runChatWorklist(ctx) {
         }
       } catch (error) {
         log.error?.(`[memory-digest] turn refresh failed: ${error.message}`);
+      }
+
+      if (hasPlanLoop) {
+        break;
       }
     }
   } finally {

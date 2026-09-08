@@ -261,7 +261,12 @@ function deriveBlocker(task, implementation, acceptance, context = {}) {
   if (implementation.status && implementation.allowed === false && implementation.reason) {
     const reason = implementation.reason;
     return {
-      type: reason === "implementation_plan_not_approved" ? "waiting_approval" : "missing_evidence",
+      type:
+        reason === "implementation_plan_not_approved"
+          ? "waiting_approval"
+          : reason === "duplicate_plan_loop_detected"
+            ? "loop_detected"
+            : "missing_evidence",
       reason,
     };
   }
@@ -314,6 +319,7 @@ function deriveNextAction(duty, task, blocker, pendingHandoffs = []) {
     return `等待${target}接手任务。`;
   }
   const blockerActions = {
+    duplicate_plan_loop_detected: "检测到重复生成相同方案，已主动终止，请调整方案或提示后重试。",
     implementation_plan_not_approved: "请由讨论或验收席位批准方案后继续。",
     implementation_plan_missing: "请补充可执行的实现方案。",
     implementation_plan_artifact_missing: "请补充方案正文。",

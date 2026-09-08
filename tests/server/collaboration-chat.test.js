@@ -369,3 +369,88 @@ test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", asy
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("duplicate plan loop emits plan-warning and terminates runaway worklist", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-loop-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+
+  const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
+    storageMode: "sqlite",
+    storage,
+    spawnRunner: () => spawnText(IMPLEMENTATION_PLAN),
+    worktreeManager: worktreeManager(tmpDir),
+    uiToken: UI_TOKEN,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    }).then((response) => response.json());
+
+    for (const seat of storage.threadSeats.listForThread(session.id)) {
+      storage.threadSeats.configure(seat.seatId, { enabled: seat.providerId === "grok" });
+    }
+
+    // 1st submission -> accepted
+    const stream1 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream1, /event: implementation-plan-submitted/);
+
+    // 2nd submission -> reused
+    const stream2 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream2, /event: implementation-plan-submitted/);
+
+    // 3rd submission -> reused
+    const stream3 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream3, /event: implementation-plan-submitted/);
+
+    // 4th submission -> exceeds maxPlanRepeats (3) -> triggers loop detection
+    const stream4 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream4, /event: implementation-plan-loop-detected/);
+    assert.match(stream4, /event: plan-warning/);
+
+    const task = storage.collaborationTasks.get(session.id);
+    assert.equal(task.implementationGate.loopDetected, true);
+
+    const { collaboration } = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/collaboration`
+    ).then((r) => r.json());
+    assert.equal(collaboration.blocker.type, "loop_detected");
+    assert.equal(collaboration.blocker.reason, "duplicate_plan_loop_detected");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+

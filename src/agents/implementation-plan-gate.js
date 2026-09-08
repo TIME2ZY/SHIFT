@@ -94,6 +94,38 @@ function normalizeListValue(value) {
   return String(value || "").trim();
 }
 
+function normalizeIsomorphicText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s\u4e00-\u9fa5]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function hashIsomorphicPlan(plan) {
+  const validation = validateImplementationPlan(plan);
+  if (!validation.ok) {
+    throw new Error(`Invalid implementation plan; missing: ${validation.missing.join(", ")}`);
+  }
+  const canonical = JSON.stringify({
+    summary: normalizeIsomorphicText(plan.summary),
+    files: [...plan.files].map(normalizeIsomorphicText).sort(),
+    changes: [...plan.changes].map(normalizeIsomorphicText).sort(),
+    tests: [...plan.tests].map(normalizeIsomorphicText).sort(),
+    risks: Array.isArray(plan.risks) ? [...plan.risks].map(normalizeIsomorphicText).sort() : [],
+  });
+  return crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+}
+
+function arePlansIsomorphic(planA, planB) {
+  if (!planA || !planB) return false;
+  try {
+    return hashIsomorphicPlan(planA) === hashIsomorphicPlan(planB);
+  } catch {
+    return false;
+  }
+}
+
 function isImplementationApproved(gate) {
   const planHash = String(gate?.planHash || "");
   return Boolean(
@@ -163,6 +195,8 @@ module.exports = {
   parseImplementationPlanBody,
   validateImplementationPlan,
   hashImplementationPlan,
+  hashIsomorphicPlan,
+  arePlansIsomorphic,
   isImplementationApproved,
   resolveImplementationGateEnv,
   renderImplementationGateBlock,
