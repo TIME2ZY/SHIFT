@@ -21,6 +21,7 @@
 const INVOCATION_STATES = Object.freeze({
   CREATED: "created",
   STARTED: "started",
+  RUNNING: "running",
   STREAMING: "streaming",
   COMPLETED: "completed",
   FAILED: "failed",
@@ -51,6 +52,11 @@ const INVOCATION_TRANSITIONS = Object.freeze({
     INVOCATION_STATES.CANCELLED,
   ],
   [INVOCATION_STATES.STARTED]: [
+    INVOCATION_STATES.RUNNING,
+    INVOCATION_STATES.FAILED,
+    INVOCATION_STATES.CANCELLED,
+  ],
+  [INVOCATION_STATES.RUNNING]: [
     INVOCATION_STATES.STREAMING,
     INVOCATION_STATES.COMPLETED,
     INVOCATION_STATES.FAILED,
@@ -58,6 +64,7 @@ const INVOCATION_TRANSITIONS = Object.freeze({
     INVOCATION_STATES.SEALED,
   ],
   [INVOCATION_STATES.STREAMING]: [
+    INVOCATION_STATES.RUNNING,
     INVOCATION_STATES.COMPLETED,
     INVOCATION_STATES.FAILED,
     INVOCATION_STATES.CANCELLED,
@@ -73,7 +80,7 @@ const INVOCATION_TRANSITIONS = Object.freeze({
  * Map canonical state → current DB column value.
  * sealed → completed (caller should also persist terminalReason: "sealed").
  * cancelled → aborted.
- * created/started/streaming → active.
+ * created/started/running/streaming → active.
  */
 function toDbInvocationState(canonical) {
   const s = String(canonical || "");
@@ -84,6 +91,7 @@ function toDbInvocationState(canonical) {
   if (
     s === INVOCATION_STATES.CREATED ||
     s === INVOCATION_STATES.STARTED ||
+    s === INVOCATION_STATES.RUNNING ||
     s === INVOCATION_STATES.STREAMING ||
     s === "active"
   ) {
@@ -96,7 +104,7 @@ function toDbInvocationState(canonical) {
 /**
  * Map DB state (+ optional terminalReason) → canonical state.
  * @param {string} dbState
- * @param {{ terminalReason?: string|null }} [meta]
+ * @param {{ terminalReason?: string|null, eventCount?: number, phase?: string, canonicalState?: string }} [meta]
  */
 function fromDbInvocationState(dbState, meta = {}) {
   const s = String(dbState || "");
@@ -109,8 +117,19 @@ function fromDbInvocationState(dbState, meta = {}) {
     return INVOCATION_STATES.COMPLETED;
   }
   if (s === "active") {
-    // Sub-states are not stored in DB yet; default to started for readers.
-    return INVOCATION_STATES.STARTED;
+    if (meta.canonicalState && Object.values(INVOCATION_STATES).includes(meta.canonicalState)) {
+      return meta.canonicalState;
+    }
+    if (meta.phase === "streaming") return INVOCATION_STATES.STREAMING;
+    if (meta.phase === "created") return INVOCATION_STATES.CREATED;
+    if (meta.phase === "started") return INVOCATION_STATES.STARTED;
+    if (meta.phase === "running") return INVOCATION_STATES.RUNNING;
+    if (typeof meta.eventCount === "number") {
+      if (meta.eventCount === 0) return INVOCATION_STATES.CREATED;
+      if (meta.eventCount <= 1) return INVOCATION_STATES.STARTED;
+      return INVOCATION_STATES.RUNNING;
+    }
+    return INVOCATION_STATES.RUNNING;
   }
   if (Object.values(INVOCATION_STATES).includes(s)) return s;
   throw new Error(`Unknown DB invocation state: ${dbState}`);
@@ -146,6 +165,33 @@ function assertValidTransition(from, to) {
   }
   if (!allowed.includes(t)) {
     return { ok: false, reason: `transition ${f} → ${t} not allowed` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Validate that a sequence of invocation state transitions is valid and does not skip any required phase.
+ * @param {string[]} sequence
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+function validateTransitionSequence(sequence) {
+  if (!Array.isArray(sequence) || sequence.length === 0) {
+    return { ok: false, reason: "transition sequence must not be empty" };
+  }
+  const first = sequence[0];
+  const initialCheck = assertValidTransition(null, first);
+  if (!initialCheck.ok) return initialCheck;
+
+  for (let i = 0; i < sequence.length - 1; i++) {
+    const from = sequence[i];
+    const to = sequence[i + 1];
+    const check = assertValidTransition(from, to);
+    if (!check.ok) {
+      return {
+        ok: false,
+        reason: `invalid transition at step ${i} (${from} → ${to}): ${check.reason}`,
+      };
+    }
   }
   return { ok: true };
 }
@@ -381,6 +427,7 @@ module.exports = {
   fromDbInvocationState,
   isTerminalInvocationState,
   assertValidTransition,
+  validateTransitionSequence,
   HANDOFF_PARSE_STATUS,
   HANDOFF_ROUTE_STATUS,
   HANDOFF_COMPLETE_STATUS,

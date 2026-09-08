@@ -234,7 +234,10 @@ function mapInvocation(row) {
   const state = row.state;
   let canonicalState;
   try {
-    canonicalState = fromDbInvocationState(state);
+    canonicalState = fromDbInvocationState(state, {
+      terminalReason: row.terminal_reason,
+      eventCount: row.next_event_sequence,
+    });
   } catch {
     canonicalState = state;
   }

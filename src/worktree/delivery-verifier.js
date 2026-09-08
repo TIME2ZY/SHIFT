@@ -129,6 +129,10 @@ function createDeliveryVerifier(options = {}) {
       return { verified: true, skipped: true, reason: "worktree_dir_not_found" };
     }
 
+    if (!fs.existsSync(path.join(cwd, ".git"))) {
+      return { verified: true, skipped: true, reason: "not_a_git_repo" };
+    }
+
     try {
       const status = run("git", ["status", "--porcelain"], cwd);
       if (status) {
