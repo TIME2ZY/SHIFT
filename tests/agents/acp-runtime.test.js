@@ -14,6 +14,7 @@ const {
 const { AGENTS } = require("../../src/agents/catalog");
 const { ENV } = require("../../src/shared/brand");
 const { applyImplementationPermissionGate } = require("../../src/agents/invoke-cli");
+const { createAcpRuntime } = require("../../src/agents/acp-runtime");
 
 const ctx = { agent: "grok", invocationId: "inv-acp" };
 
@@ -679,5 +680,77 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
   // (e) Root spawn tool call must NOT have subagentId
   const spawnTool = events.find((e) => e.type === "tool.finished" && e.toolId === "call-spawn-1");
   assert.equal(spawnTool.subagentId, undefined);
+});
+
+test("unclosed tools in session are closed with interrupted or cancelled status on finish", () => {
+  const runtime = createAcpRuntime({ agent: "grok" });
+  const ctx = { agent: "grok", invocationId: "inv-open-tools" };
+
+  runtime.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "session_info_update",
+      },
+    },
+    ctx
+  );
+
+  runtime.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "call-unfinished-1",
+        name: "run_terminal_command",
+        status: "in_progress",
+        rawInput: { command: "npm test" },
+      },
+    },
+    ctx
+  );
+
+  // Normal exit with unclosed tool -> status: "interrupted"
+  const finishEvents = runtime.finish(ctx, { ok: false, error: "Child exited prematurely" });
+  const finishedTool = finishEvents.find(
+    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-1"
+  );
+  assert.ok(finishedTool, "tool.finished must be synthesized on finish for unclosed tool");
+  assert.equal(finishedTool.status, "interrupted");
+  assert.equal(finishedTool.failureSource, "runtime-interrupted");
+
+  // Second check: cancelled exit
+  const runtime2 = createAcpRuntime({ agent: "grok" });
+  runtime2.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-2",
+      update: {
+        sessionUpdate: "session_info_update",
+      },
+    },
+    ctx
+  );
+  runtime2.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-2",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "call-unfinished-2",
+        name: "fetch_data",
+        status: "in_progress",
+      },
+    },
+    ctx
+  );
+  const cancelEvents = runtime2.finish(ctx, { ok: false, stopReason: "explicit-stop" });
+  const cancelledTool = cancelEvents.find(
+    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-2"
+  );
+  assert.ok(cancelledTool, "tool.finished must be synthesized on cancel");
+  assert.equal(cancelledTool.status, "cancelled");
 });
 

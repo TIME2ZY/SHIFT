@@ -475,3 +475,73 @@ test("user abort intent forces invocation and trace terminal state to aborted", 
     completedInvocations.some((inv) => inv.reason === "aborted" && inv.endPayload?.terminalState === "aborted")
   );
 });
+
+test("interrupted child stream completes unclosed tools with interrupted outcome", async () => {
+  const appendedEvents = [];
+  const executor = chatRoutes.createChatRunExecutor(
+    baseDeps(makeRes(), {
+      eventStore: {
+        append: (event) => {
+          appendedEvents.push(event);
+          return { ok: true, event, sqlite: true };
+        },
+      },
+      durableRecorder: {
+        enabled: true,
+        startTrace: () => ({ id: "trace-tool-int" }),
+        startInvocation: () => ({
+          invocation: { id: "inv-tool-int" },
+          binding: null,
+          window: { id: "win-1", capacityTokens: 1000, reserveRatio: 0.1 },
+        }),
+        completeTrace: () => null,
+        completeInvocation: () => null,
+        ensureWindow: () => null,
+        reconcileTraceHandoffs: () => 0,
+        addWindowUsage: () => true,
+        setWindowUsageSnapshot: () => true,
+        sealAndRotateWindow: () => null,
+      },
+      storage: {
+        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
+        invocations: {
+          listForThread: () => [
+            {
+              id: "inv-tool-int",
+              traceId: "trace-tool-int",
+              state: "failed",
+              terminalReason: "provider-failed",
+            },
+          ],
+        },
+      },
+      sessionBootstrap: {
+        buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
+        buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        buildIdentity: () => "<!-- Session Identity -->\n",
+      },
+      runChildStream: async ({ onEvent }) => {
+        onEvent({
+          type: "tool.started",
+          toolId: "call-open-999",
+          toolName: "run_terminal_command",
+          args: { command: "npm test" },
+        });
+        return { code: 1, signal: null };
+      },
+    })
+  );
+
+  const res = await executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "run tool" },
+  });
+  await res.promise;
+
+  const finishedTool = appendedEvents.find(
+    (e) => e.kind === "tool.finished" && e.payload?.toolId === "call-open-999"
+  );
+  assert.ok(finishedTool, "tool.finished must be appended for unclosed tool on stream exit");
+  assert.equal(finishedTool.payload.status, "interrupted");
+  assert.equal(finishedTool.payload.failureSource, "runtime-interrupted");
+  assert.ok(finishedTool.payload.failureReason.includes("Invocation terminated before tool completed"));
+});

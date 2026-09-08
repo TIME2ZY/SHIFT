@@ -257,3 +257,51 @@ test("span projection exposes inject source and write outcomes", () => {
     storage.close();
   }
 });
+
+test("interrupted and cancelled tools project to failed complete spans", () => {
+  const storage = fixture();
+  try {
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.started",
+      payload: { toolId: "tool-int", toolName: "bash" },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.finished",
+      payload: { toolId: "tool-int", toolName: "bash", status: "interrupted" },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.started",
+      payload: { toolId: "tool-cnc", toolName: "read" },
+    });
+    storage.invocations.appendEvent({
+      invocationId: "inv-1",
+      kind: "tool.finished",
+      payload: { toolId: "tool-cnc", toolName: "read", status: "cancelled" },
+    });
+    storage.invocations.finish("inv-1", { state: "failed", endedAt: "2026-08-13T00:00:04.000Z" });
+    storage.traces.finish("trace-1", { state: "failed" });
+
+    const projection = projectTraceSpans(storage.db, "trace-1");
+    const toolSpans = projection.spans.filter((s) => s.kind === "tool");
+    assert.equal(toolSpans.length, 2);
+    assert.equal(toolSpans[0].state, "failed");
+    assert.equal(toolSpans[0].complete, true);
+    assert.equal(toolSpans[1].state, "failed");
+    assert.equal(toolSpans[1].complete, true);
+
+    const health = storage.observability.health();
+    assert.equal(health.checks.span_missing_end, 0);
+
+    const { createExecutionReadModel } = require("../../src/storage/execution-read-model");
+    const readModel = createExecutionReadModel(storage.db);
+    const summary = readModel.auditSummary("thread-1");
+    assert.equal(summary.tools.incomplete, 0);
+    assert.equal(summary.tools.failed, 2);
+  } finally {
+    storage.close();
+  }
+});
+

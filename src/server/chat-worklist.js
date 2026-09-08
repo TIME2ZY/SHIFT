@@ -912,6 +912,7 @@ async function runChatWorklist(ctx) {
           replayedAfterEmpty = true;
         }
 
+        const openTools = new Map();
         const streamResult = await runChildStream({
           spawnRunner,
           args: buildChatArgs(agent, agentPrompt, promptForAgent),
@@ -942,6 +943,19 @@ async function runChatWorklist(ctx) {
             }
             if (event.type === "tool.started" || event.type === "tool.finished") {
               runObs.noteToolEvent();
+              if (event.type === "tool.started" && event.toolId) {
+                openTools.set(event.toolId, {
+                  toolId: event.toolId,
+                  toolName: event.toolName,
+                  title: event.title,
+                  label: event.label,
+                  toolKind: event.toolKind,
+                  args: event.args,
+                  subagentId: event.subagentId,
+                });
+              } else if (event.type === "tool.finished" && event.toolId) {
+                openTools.delete(event.toolId);
+              }
             }
             if (event.type === "usage.update") {
               sawUsageEvent = true;
@@ -991,6 +1005,54 @@ async function runChatWorklist(ctx) {
         streamStopReason = streamResult.stopReason || null;
         if (streamResult.encoding?.total > 0) {
           runObs.noteDegraded("encoding_in_stream");
+        }
+        if (openTools.size > 0) {
+          const isAbortedRun = Boolean(
+            invocationController.signal.aborted ||
+            streamStopped ||
+            threadCtx?.controller?.signal?.aborted ||
+            runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
+            invocationController.stopReason === "explicit-stop"
+          );
+          const toolStatus = isAbortedRun ? "cancelled" : "interrupted";
+          for (const [toolId, toolInfo] of openTools.entries()) {
+            const toolFinished = {
+              type: "tool.finished",
+              protocolVersion: 2,
+              agent,
+              invocationId: activeInvocationId,
+              toolName: toolInfo.toolName || "tool",
+              toolId,
+              status: toolStatus,
+              state: toolStatus,
+              failureSource: "runtime-interrupted",
+              failureReason: isAbortedRun
+                ? "Invocation was cancelled before tool completed"
+                : "Invocation terminated before tool completed",
+              result: {
+                error: isAbortedRun
+                  ? "Tool execution cancelled by user stop"
+                  : `Tool execution interrupted (exit code: ${code}, signal: ${signal || "none"})`,
+              },
+              error: isAbortedRun
+                ? "Tool execution cancelled by user stop"
+                : `Tool execution interrupted (exit code: ${code}, signal: ${signal || "none"})`,
+              ...(toolInfo.title ? { title: toolInfo.title } : {}),
+              ...(toolInfo.label ? { label: toolInfo.label } : {}),
+              ...(toolInfo.toolKind ? { toolKind: toolInfo.toolKind } : {}),
+              ...(toolInfo.subagentId ? { subagentId: toolInfo.subagentId } : {}),
+            };
+            try {
+              persistDurableEvent("tool.finished", toolFinished);
+              sendSse(res, "agent-event", toolFinished);
+              runObs.noteToolEvent();
+            } catch (err) {
+              log.error?.(
+                `[chat-worklist] failed to emit interrupted tool.finished for ${toolId}: ${err.message}`
+              );
+            }
+          }
+          openTools.clear();
         }
         if (streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.

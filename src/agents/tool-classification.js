@@ -101,7 +101,7 @@ function providerFailureStatus(item) {
     const status = String(value || "")
       .trim()
       .toLowerCase();
-    if (["failed", "error", "errored", "cancelled", "canceled"].includes(status)) {
+    if (["failed", "error", "errored", "cancelled", "canceled", "interrupted"].includes(status)) {
       return status;
     }
   }

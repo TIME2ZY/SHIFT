@@ -183,8 +183,16 @@ function normalizeCanonicalEvent(event) {
     next.state = "running";
   }
   if (next.type === "tool.finished") {
-    const failed = next.status === "error" || next.status === "failed";
-    next.state = failed ? "failed" : "completed";
+    const failed = ["error", "failed", "cancelled", "canceled", "interrupted"].includes(
+      String(next.status || "").toLowerCase()
+    );
+    if (!next.state) {
+      next.state = failed
+        ? next.status === "cancelled" || next.status === "canceled"
+          ? "cancelled"
+          : "failed"
+        : "completed";
+    }
   }
   if (next.type === "usage.update") {
     const numericFields = [
@@ -433,10 +441,15 @@ function createRunLifecycle() {
     },
     closeOpenTools(context = {}, outcome = {}) {
       if (openTools.size === 0) return [];
+      const isCancelled = Boolean(outcome.stopReason || outcome.cancelled || outcome.signal === "SIGINT");
+      const status = isCancelled ? "cancelled" : (outcome.status || "interrupted");
       const error =
-        outcome.ok === false
-          ? "Provider run failed before the tool reported completion."
-          : "Provider run ended before the tool reported completion.";
+        outcome.error ||
+        (isCancelled
+          ? "Tool execution cancelled by invocation stop."
+          : outcome.ok === false
+            ? "Provider run failed before the tool reported completion."
+            : "Provider run ended before the tool reported completion.");
       const events = [...openTools.values()].map((tool) =>
         makeEvent("tool.finished", {
           agent: context.agent,
@@ -447,8 +460,10 @@ function createRunLifecycle() {
           title: tool.title,
           label: tool.label,
           toolKind: tool.toolKind,
-          status: "error",
+          status,
+          state: status,
           error,
+          result: { error },
           failureSource: "lifecycle-terminal",
           failureReason: error,
         })

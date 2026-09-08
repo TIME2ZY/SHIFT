@@ -456,10 +456,36 @@ function createAcpRuntime(config = {}) {
           ];
       }
     },
-    finish(ctx) {
+    finish(ctx, outcome) {
       const out = [];
       for (const session of sessions.values()) {
         out.push(...flushSessionBuffers(session, ctx, true));
+        for (const [toolId, tool] of session.tools.entries()) {
+          if (!tool.finished) {
+            tool.finished = true;
+            const isCancelled = Boolean(outcome?.stopReason);
+            const status = isCancelled ? "cancelled" : "interrupted";
+            const error = outcome?.stopReason
+              ? "Tool execution cancelled"
+              : outcome?.error || "Invocation terminated before tool completed";
+            out.push(
+              makeEvent("tool.finished", {
+                ...base(ctx),
+                toolName: tool.toolName,
+                toolId,
+                status,
+                state: status,
+                failureSource: "runtime-interrupted",
+                failureReason: error,
+                args: tool.args && Object.keys(tool.args).length ? tool.args : undefined,
+                result: { error },
+                error,
+                ...optionalToolDisplayFields(tool),
+                ...sessionMetadata(session),
+              })
+            );
+          }
+        }
       }
       return out;
     },
