@@ -293,7 +293,7 @@ function readLatestWindowSealEvent(storage, threadId) {
     if (!invocationId) continue;
     const events = listEvents.call(storage.invocations, invocationId) || [];
     for (let j = events.length - 1; j >= 0; j -= 1) {
-      if (events[j]?.kind === "window-sealed") return events[j];
+      if (events[j]?.kind === "window-sealed") return { ...events[j], invocationId };
     }
   }
   return null;

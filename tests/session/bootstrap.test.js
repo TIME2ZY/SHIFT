@@ -390,3 +390,120 @@ test(
     assert.match(result.packet, /Generation: 5/);
   })
 );
+
+test("buildDigest truncates pre-seal invocations and only indexes post-seal invocations", async () => {
+  const digest = await buildDigest({
+    threadId: "thread-seal-boundary",
+    sessionId: "thread-seal-boundary",
+    invocationSource: {
+      listInvocationsWithMeta: async () => [
+        {
+          invocationId: "inv-old-1",
+          agent: "codex",
+          startedAt: "2026-08-27T00:00:00.000Z",
+          endedAt: "2026-08-27T00:01:00.000Z",
+          state: "completed",
+          eventCount: 5,
+        },
+        {
+          invocationId: "inv-sealed-2",
+          agent: "codex",
+          startedAt: "2026-08-27T00:02:00.000Z",
+          endedAt: "2026-08-27T00:03:00.000Z",
+          state: "completed",
+          eventCount: 4,
+        },
+        {
+          invocationId: "inv-active-3",
+          agent: "gemini",
+          startedAt: "2026-08-27T00:04:00.000Z",
+          endedAt: "2026-08-27T00:05:00.000Z",
+          state: "completed",
+          eventCount: 3,
+        },
+      ],
+    },
+    windowSealSource: {
+      invocations: {
+        listForThread() {
+          return [{ id: "inv-sealed-2" }];
+        },
+        listEvents() {
+          return [
+            {
+              kind: "window-sealed",
+              createdAt: "2026-08-27T00:03:30.000Z",
+              payload: {
+                sourceInvocationId: "inv-sealed-2",
+                content: "goal: continue migration\nfiles: [src/index.js]",
+                metadata: {
+                  partial: false,
+                },
+              },
+            },
+          ];
+        },
+      },
+    },
+  });
+
+  // Sealed resume is present
+  assert.match(digest, /Window Seal Resume/);
+  assert.match(digest, /goal: continue migration/);
+
+  // Summary counts
+  assert.match(digest, /3 invocations in this session \(2 sealed in previous window, 1 in active window\)/);
+
+  // Pre-seal invocation inv-old-1 should NOT appear in the active index
+  assert.doesNotMatch(digest, /inv-old-1 \| codex/);
+
+  // Post-seal invocation inv-active-3 MUST appear in the active index
+  assert.match(digest, /inv-active-3 \| gemini/);
+});
+
+test("buildDigest surfaces partial seal constraints and missing fields when seal is partial", async () => {
+  const digest = await buildDigest({
+    threadId: "thread-partial-seal",
+    sessionId: "thread-partial-seal",
+    invocationSource: {
+      listInvocationsWithMeta: async () => [
+        {
+          invocationId: "inv-partial",
+          agent: "grok",
+          startedAt: "2026-08-27T00:00:00.000Z",
+          endedAt: "2026-08-27T00:01:00.000Z",
+          state: "completed",
+          eventCount: 2,
+        },
+      ],
+    },
+    windowSealSource: {
+      invocations: {
+        listForThread() {
+          return [{ id: "inv-partial" }];
+        },
+        listEvents() {
+          return [
+            {
+              kind: "window-sealed",
+              payload: {
+                sourceInvocationId: "inv-partial",
+                content: "partial code change in progress",
+                metadata: {
+                  partial: true,
+                  reason: "context overflow",
+                  missingFields: ["test_verification", "commit_sha"],
+                },
+              },
+            },
+          ];
+        },
+      },
+    },
+  });
+
+  assert.match(digest, /Window Seal Resume/);
+  assert.match(digest, /partial seal/);
+  assert.match(digest, /test_verification, commit_sha/);
+});
+

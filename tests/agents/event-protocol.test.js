@@ -272,11 +272,12 @@ test("runtime envelope closes open tools before the invocation terminal event", 
     title: undefined,
     label: undefined,
     toolKind: undefined,
-    status: "error",
+    status: "interrupted",
+    state: "interrupted",
     error: "Provider run ended before the tool reported completion.",
+    result: { error: "Provider run ended before the tool reported completion." },
     failureSource: "lifecycle-terminal",
     failureReason: "Provider run ended before the tool reported completion.",
-    state: "failed",
   });
   assert.equal(lifecycle.openToolCount, 0);
 });

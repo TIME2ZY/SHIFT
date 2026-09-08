@@ -178,9 +178,11 @@ function finalizeA2ARoutes(input = {}) {
     const isCodeDeliveryHandoff =
       useWorktree &&
       Boolean(deliveryVerifier?.verifyWorktreeHandoff) &&
+      quality.intent !== "discuss" &&
+      quality.intent !== "plan" &&
       (
-        ["implement", "fix"].includes(fromDuty) ||
-        ["review", "deliver", "accept"].includes(duty) ||
+        (["implement", "fix"].includes(fromDuty) &&
+          ["review", "deliver", "accept"].includes(duty)) ||
         ["review", "deliver", "accept"].includes(quality.intent)
       );
 

@@ -125,6 +125,15 @@ function createDeliveryVerifier(options = {}) {
     if (!cwd) return { verified: false, reason: "managed_worktree_required" };
 
     try {
+      const isInside = run("git", ["rev-parse", "--is-inside-work-tree"], cwd);
+      if (isInside !== "true") {
+        return { verified: true, skipped: true, reason: "not_a_git_worktree" };
+      }
+    } catch {
+      return { verified: true, skipped: true, reason: "not_a_git_worktree" };
+    }
+
+    try {
       const status = run("git", ["status", "--porcelain"], cwd);
       if (status) {
         return {

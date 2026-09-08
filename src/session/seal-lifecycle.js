@@ -104,6 +104,61 @@ function checkSealRecoveryFacts(input = {}) {
   return { ok: missing.length === 0, missing, present };
 }
 
+function partitionInvocationsBySeal(invocations = [], sealEvent = null) {
+  if (!Array.isArray(invocations) || !sealEvent) {
+    return {
+      preSeal: [],
+      postSeal: Array.isArray(invocations) ? invocations.slice() : [],
+      isSealed: false,
+      sealInvocationId: null,
+    };
+  }
+  const sealInvocationId =
+    sealEvent?.payload?.sourceInvocationId ||
+    sealEvent?.invocationId ||
+    sealEvent?.payload?.invocationId ||
+    null;
+  const sealTime = sealEvent?.createdAt || sealEvent?.payload?.createdAt || null;
+
+  if (sealInvocationId) {
+    const sealIdx = invocations.findIndex(
+      (inv) => (inv.invocationId || inv.id) === sealInvocationId
+    );
+    if (sealIdx >= 0) {
+      return {
+        preSeal: invocations.slice(0, sealIdx + 1),
+        postSeal: invocations.slice(sealIdx + 1),
+        isSealed: true,
+        sealInvocationId,
+      };
+    }
+  }
+
+  if (sealTime) {
+    const sealDate = new Date(sealTime);
+    const pre = [];
+    const post = [];
+    for (const inv of invocations) {
+      const started = new Date(inv.startedAt || 0);
+      if (started <= sealDate) pre.push(inv);
+      else post.push(inv);
+    }
+    return {
+      preSeal: pre,
+      postSeal: post,
+      isSealed: true,
+      sealInvocationId,
+    };
+  }
+
+  return {
+    preSeal: [],
+    postSeal: invocations.slice(),
+    isSealed: false,
+    sealInvocationId: null,
+  };
+}
+
 module.exports = {
   resolveRotateCapacity,
   buildSealMeta,
@@ -111,4 +166,5 @@ module.exports = {
   parseSealReason,
   windowCoordinateKey,
   checkSealRecoveryFacts,
+  partitionInvocationsBySeal,
 };

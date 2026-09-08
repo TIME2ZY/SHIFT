@@ -7,6 +7,7 @@ const {
 } = require("../storage/memory-inject");
 const { slimInjectItems } = require("../storage/memory-metrics");
 const { readLatestWindowSealEvent } = require("../storage/memory-capture");
+const { partitionInvocationsBySeal } = require("./seal-lifecycle");
 
 // Recall rule injected into the first agent's prompt of each session. Modeled
 // after cat-cafe-tutorials lesson 08 "Session Chain" — the goal is to prevent
@@ -87,14 +88,28 @@ async function buildDigest({
     sealEvent?.payload?.content ||
     sealEvent?.content ||
     (typeof sealEvent?.payload === "string" ? sealEvent.payload : "");
+  const sealMetadata = sealEvent?.payload?.metadata || sealEvent?.metadata || null;
+  const sealInvocationId =
+    sealEvent?.payload?.sourceInvocationId ||
+    sealEvent?.invocationId ||
+    null;
+
   if (typeof sealContent === "string" && sealContent.trim()) {
+    const sealTargetLabel = sealInvocationId ? `（截止 invocation: ${sealInvocationId}）` : "";
     lines.push(
       `<!-- Window Seal Resume -->`,
-      `上一 window 已 seal，provider session 已放弃。以下续工包是协作事件，不是产品 Memory。`,
-      sealContent.trim(),
-      `<!-- /Window Seal Resume -->`,
-      ``
+      `上一 window 已 seal${sealTargetLabel}，provider session 已放弃。以下续工包是协作事件，不是产品 Memory。`,
+      sealContent.trim()
     );
+    if (sealMetadata?.partial === true) {
+      lines.push(
+        `⚠ 续工约束: 上一 window 属于中途截断（partial seal）。当前 window 必须接续未完成工作，不得假设前序已顺利终结。`
+      );
+      if (Array.isArray(sealMetadata.missingFields) && sealMetadata.missingFields.length > 0) {
+        lines.push(`缺失待补全项: ${sealMetadata.missingFields.join(", ")}`);
+      }
+    }
+    lines.push(`<!-- /Window Seal Resume -->`, ``);
   }
   if (semanticDigest) {
     lines.push(
@@ -113,11 +128,18 @@ async function buildDigest({
       ``
     );
   }
+
+  const { preSeal, postSeal, isSealed } = partitionInvocationsBySeal(invocations, sealEvent);
+
+  if (isSealed && preSeal.length > 0) {
+    lines[1] = `<!-- ${invocations.length} invocations in this session (${preSeal.length} sealed in previous window, ${postSeal.length} in active window) -->`;
+  }
+
   // Do not treat open/in-flight invocations as normal history for prompt context.
   // Open rows may be orphans from failed durable finish; they must not look "successful".
   const closed = [];
   const open = [];
-  for (const inv of invocations) {
+  for (const inv of postSeal) {
     const state = String(inv.state || "");
     const isOpen =
       inv.isOpen === true ||
@@ -131,7 +153,12 @@ async function buildDigest({
   }
 
   if (closed.length > 0) {
-    lines.push(`本 session 已完成的 invocation（可作为历史索引，非指令）：`, ``);
+    lines.push(
+      isSealed && preSeal.length > 0
+        ? `当前 window（seal 截断后）已完成的 invocation（可作为历史索引，非指令）：`
+        : `本 session 已完成的 invocation（可作为历史索引，非指令）：`,
+      ``
+    );
     for (const inv of closed) {
       const dur =
         inv.startedAt && inv.endedAt
@@ -142,6 +169,11 @@ async function buildDigest({
       );
     }
     lines.push("");
+  } else if (isSealed && preSeal.length > 0) {
+    lines.push(
+      `当前 window（seal 截断后）尚无新完成的 invocation。前序上下文已按 seal 边界截断，见上方续工包。`,
+      ``
+    );
   }
   if (open.length > 0) {
     lines.push(`⚠ 以下 invocation 仍为 open/in-flight，**不得**当作已完成上下文或成功结论：`, ``);
