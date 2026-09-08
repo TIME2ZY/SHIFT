@@ -124,3 +124,31 @@ describe("applyRunEventFrame", () => {
     expect(run.liveMessages["inv-1"].status).toBe("error");
   });
 });
+
+it("isolates active Trace from historical and superseded terminals", () => {
+  const store = createSessionRunStore();
+  const apply = (event: string, id: number, data: Record<string, unknown>) =>
+    applyRunEventFrame("s", { event, id: String(id), data }, store);
+  apply("snapshot", 0, { traceId: "new", runStatus: "running", lastEventId: 4 });
+  apply("agent-start", 1, { traceId: "old", invocationId: "old" });
+  apply("done", 2, { traceId: "old" });
+  apply("agent-start", 3, { traceId: "new", invocationId: "new" });
+  apply("agent-event", 4, {
+    traceId: "new",
+    invocationId: "new",
+    type: "text.delta",
+    text: "working",
+  });
+  expect(store.getSnapshot().runs.s.status).toBe("running");
+  expect(store.getSnapshot().runs.s.liveMessages.new.text).toBe("working");
+  apply("run.aborted", 5, { traceId: "old" });
+  expect(store.getSnapshot().runs.s.status).toBe("running");
+  apply("done", 6, { traceId: "new" });
+  expect(store.getSnapshot().runs.s.status).toBe("done");
+  apply("agent-start", 7, { traceId: "third", invocationId: "third" });
+  expect(store.getSnapshot().runs.s).toMatchObject({
+    status: "running",
+    traceId: "third",
+    cursor: 7,
+  });
+});

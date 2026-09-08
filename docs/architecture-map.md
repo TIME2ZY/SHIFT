@@ -569,3 +569,5 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 
 最后核对日期：2026-09-06。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。
+
+运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。

@@ -48,6 +48,7 @@ export function useChatActions() {
         startedAt: Date.now(),
       });
 
+      let accepted = false;
       try {
         const started = await startRun({
           sessionId,
@@ -55,21 +56,24 @@ export function useChatActions() {
           prompt: content,
           useWorktree,
           clientTurnId,
-          signal: startController.signal,
         });
+        accepted = true;
+        if (startControllersRef.current.get(sessionId) === startController) {
+          store.dispatch({ type: "run/accepted", sessionId, traceId: started.traceId });
+        }
         if (startController.signal.aborted) {
-          await stopRun(sessionId, started.traceId).catch(() => {});
+          const outcome = await stopRun(sessionId, started.traceId);
+          if (startControllersRef.current.get(sessionId) === startController && outcome.stopped) {
+            store.abort(sessionId);
+            toast.show("已停止当前运行。");
+          }
           return;
         }
-        store.dispatch({
-          type: "run/accepted",
-          sessionId,
-          traceId: started.traceId,
-        });
       } catch (error) {
-        if (startController.signal.aborted || isAbortError(error)) return;
+        if (startControllersRef.current.get(sessionId) !== startController) return;
+        if (isAbortError(error)) return;
         const message = error instanceof Error ? error.message : "启动运行失败。";
-        store.dispatch({ type: "run/failed", sessionId, error: message });
+        if (!accepted) store.dispatch({ type: "run/failed", sessionId, error: message });
         toast.show(message, { variant: "error", ttl: 7000 });
       } finally {
         if (startControllersRef.current.get(sessionId) === startController) {
@@ -95,13 +99,15 @@ export function useChatActions() {
 
   const stop = useCallback(
     (sessionId: string) => {
-      startControllersRef.current.get(sessionId)?.abort();
-      startControllersRef.current.delete(sessionId);
+      const pendingStart = startControllersRef.current.get(sessionId);
+      if (pendingStart) {
+        pendingStart.abort();
+        return true;
+      }
       const traceId = store.getSnapshot().runs[sessionId]?.traceId;
       if (!traceId) {
-        store.abort(sessionId);
-        toast.show("已停止当前运行。");
-        return true;
+        toast.show("尚未取得运行标识，无法确认停止。", { variant: "error" });
+        return false;
       }
       void stopRun(sessionId, traceId)
         .then((outcome) => {

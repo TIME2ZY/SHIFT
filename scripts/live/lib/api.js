@@ -83,6 +83,7 @@ function createApiClient({ baseUrl, token }) {
       if (!start.ok) {
         throw new Error(`chat failed (${start.status}): ${startText.slice(0, 500)}`);
       }
+      const { traceId } = JSON.parse(startText);
       const response = await fetch(
         `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/events`,
         {
@@ -110,7 +111,7 @@ function createApiClient({ baseUrl, token }) {
           const frame = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
           const event = parseSseFrame(frame);
-          if (event) {
+          if (event && event.data?.traceId === traceId) {
             events.push(event);
             onEvent(event);
             if (

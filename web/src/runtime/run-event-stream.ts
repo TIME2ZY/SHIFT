@@ -69,6 +69,17 @@ export function applyRunEventFrame(
   }
 
   const payload = objectData(frame.data);
+  const run = store.getSnapshot().runs[sessionId];
+  const traceId = typeof payload.traceId === "string" ? payload.traceId : undefined;
+  if (frame.event !== "snapshot" && traceId && traceId !== run?.traceId) {
+    // Only a live start may select a new Trace. Replay and late superseded
+    // terminals still advance the cursor, but cannot mutate the current run.
+    if (frame.event === "agent-start" && cursor != null && cursor > (run?.replayThrough ?? 0)) {
+      store.dispatch({ type: "run/started", sessionId, traceId, startedAt: Date.now() });
+    } else {
+      return cursor;
+    }
+  }
 
   switch (frame.event) {
     case "snapshot": {
@@ -79,6 +90,7 @@ export function applyRunEventFrame(
         sessionId,
         traceId,
         runStatus,
+        replayThrough: Number(payload.lastEventId) || 0,
       });
       break;
     }

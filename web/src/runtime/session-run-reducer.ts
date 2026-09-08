@@ -98,12 +98,12 @@ function statusFromSnapshot(
   current: SessionRun["status"]
 ): SessionRun["status"] {
   if (runStatus === "completed" || runStatus === "done") {
-    return current === "error" || current === "aborted" ? current : "done";
+    return "done";
   }
   if (runStatus === "failed" || runStatus === "error") return "error";
   if (runStatus === "aborted" || runStatus === "cancelled") return "aborted";
   if (runStatus === "running" || runStatus === "active") {
-    return current === "idle" ? "running" : current;
+    return "running";
   }
   return current;
 }
@@ -122,6 +122,8 @@ export function sessionRunReducer(
         startedAt: action.startedAt,
         traceId: action.traceId,
         optimisticUser: run.optimisticUser,
+        cursor: run.cursor,
+        replayThrough: run.replayThrough,
       }));
 
     case "run/accepted":
@@ -130,7 +132,7 @@ export function sessionRunReducer(
         return {
           ...run,
           traceId: action.traceId,
-          status: run.status === "idle" || run.status === "done" ? "connecting" : run.status,
+          status: run.status === "idle" ? "connecting" : run.status,
           updatedAt: now,
         };
       });
@@ -143,6 +145,7 @@ export function sessionRunReducer(
           ...run,
           traceId: action.traceId || run.traceId,
           cursor: action.cursor ?? run.cursor,
+          replayThrough: action.replayThrough ?? run.replayThrough,
           status,
           doneReceived: status === "done" ? true : run.doneReceived,
           liveMessages: !terminal

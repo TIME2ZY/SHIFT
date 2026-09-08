@@ -20,13 +20,18 @@ function toSseFrame(event) {
     return {
       id: event.id ?? null,
       event: "agent-event",
-      data: { ...(event.payload || {}), type: event.kind, invocationId },
+      data: {
+        ...(event.payload || {}),
+        type: event.kind,
+        invocationId,
+        traceId: event.traceId || null,
+      },
     };
   }
   return {
     id: event.id ?? null,
     event: event.kind,
-    data: { ...(event.payload || {}), invocationId },
+    data: { ...(event.payload || {}), invocationId, traceId: event.traceId || null },
   };
 }
 

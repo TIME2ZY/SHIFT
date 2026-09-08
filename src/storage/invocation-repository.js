@@ -63,7 +63,7 @@ function createInvocationRepository(db) {
     LIMIT ? OFFSET ?
   `);
   const listEventsAfterCursor = db.prepare(`
-    SELECT e.*
+    SELECT e.*, i.trace_id
     FROM invocation_events e
     JOIN invocations i ON i.id = e.invocation_id
     WHERE i.thread_id = ? AND e.id > ?
@@ -268,6 +268,7 @@ function mapEvent(row) {
   return {
     id: row.id,
     invocationId: row.invocation_id,
+    ...(row.trace_id !== undefined ? { traceId: row.trace_id } : {}),
     sequenceNo: row.sequence_no,
     kind: row.kind,
     payload: JSON.parse(row.payload_json),

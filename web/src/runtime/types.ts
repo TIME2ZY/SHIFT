@@ -71,6 +71,7 @@ export interface SessionRun {
   updatedAt: number;
   doneReceived: boolean;
   traceId?: string;
+  replayThrough?: number;
   cursor?: number;
   /** Live execution state, keyed by invocationId. */
   liveMessages: Record<string, LiveMessage>;
@@ -98,6 +99,7 @@ export type SessionRunAction =
       type: "run/hydrated";
       sessionId: string;
       traceId?: string;
+      replayThrough?: number;
       cursor?: number;
       runStatus?: string;
     }

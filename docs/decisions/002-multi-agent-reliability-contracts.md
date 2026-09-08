@@ -80,6 +80,8 @@ active → completed | failed | aborted
 
 控制面（Start / Stop）拥有 invocation 生命周期；SSE 是可断开、可重连的观察面。观察者离线不得调用 `reconcileThreadActive` 收口仍在跑的 invocation。进程关闭必须先 abort 并等待后台运行收口，再关闭 SQLite；不承诺 SHIFT 进程重启后续跑原 Agent 子进程。
 
+事件观察帧的 traceId 从 SQLite Invocation 关联派生；历史 Trace 事件不得改变当前 Trace 的状态。snapshot.lastEventId 划定回放边界，不代表已消费 cursor。启动中的 Stop 保留启动响应，取得 traceId 后调用既有 Stop API；后端确认前不得显示已停止。定时 delta 写入失败必须保留失败并经既有 stream-handler / post-stream 失败路径收口，禁止吞错后写成功终态。
+
 同一 `thread_id + client_turn_id` 可以有多个 request attempt。每个 attempt 使用独立
 `trace_id` 和单调 `request_attempt`，不得覆盖前一次 Trace。
 

@@ -415,7 +415,7 @@ function createChatRunExecutor({
       if (skipPersist.has(event)) return;
       const invocationId = threadCtx.currentInvocationId;
       if (!invocationId) {
-        runtime?.publish(sessionId, { id: null, kind: event, payload: data || {} });
+        runtime?.publish(sessionId, { id: null, traceId, kind: event, payload: data || {} });
         return;
       }
       events.append({
@@ -524,7 +524,7 @@ function createChatRunExecutor({
         log.error?.(`[chat-runtime] failed to append run.failed: ${appendError.message}`);
       }
       try {
-        runtime?.publish(sessionId, { id: null, kind: "run.failed", payload });
+        runtime?.publish(sessionId, { id: null, traceId, kind: "run.failed", payload });
       } catch {
         // Observer IO is best-effort; SQLite remains the truth.
       }
@@ -619,7 +619,7 @@ function createChatRunExecutor({
           payload: {},
         });
       } else {
-        runtime?.publish(sessionId, { id: null, kind: terminalKind, payload: {} });
+        runtime?.publish(sessionId, { id: null, traceId, kind: terminalKind, payload: {} });
       }
     })();
 

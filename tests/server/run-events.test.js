@@ -159,6 +159,9 @@ test("closing the event stream does not abort the backend run", async () => {
       const invocations = storage.invocations.listForThread(sessionId);
       assert.ok(invocations.some((row) => row.state === "completed"));
       assert.ok(traceId);
+      const replay = storage.invocations.listEventsAfter(sessionId, 0);
+      assert.ok(replay.length > 0);
+      assert.ok(replay.every((event) => event.traceId === traceId));
     }
   );
 });
@@ -303,4 +306,56 @@ test("runtime shutdown closes subscribers and rejects new runs", async () => {
   assert.equal(closed, 1);
   const rejected = await runtime.startRun({ body: {} });
   assert.equal(rejected.status, 503);
+});
+
+test("timer write failure closes the invocation as failed instead of silently succeeding", async () => {
+  await withRunServer(
+    () => {
+      const child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = () => {
+        child.emit("close", null, "SIGTERM");
+        return true;
+      };
+      setTimeout(
+        () => child.stdout.write(JSON.stringify({ type: "text.delta", text: "retained" }) + "\n"),
+        10
+      );
+      setTimeout(() => {
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", 0, null);
+      }, 250);
+      return child;
+    },
+    async ({ baseUrl, sessionId, storage }) => {
+      const append = storage.invocations.appendEvent.bind(storage.invocations);
+      let injected = false;
+      storage.invocations.appendEvent = (input) => {
+        if (input.kind === "text.delta" && !injected) {
+          injected = true;
+          throw new Error("timer persistence fault");
+        }
+        return append(input);
+      };
+      const response = await startSessionRun(
+        baseUrl,
+        { sessionId, agent: "codex", prompt: "timer fault" },
+        { headers: { "X-Shift-UI-Token": UI_TOKEN }, fetch }
+      );
+      assert.equal(response.status, 202);
+      const { traceId } = await response.json();
+      await collectSessionEvents(baseUrl, sessionId, {
+        traceId,
+        headers: { "X-Shift-UI-Token": UI_TOKEN },
+        fetch,
+      });
+      assert.equal(injected, true);
+      const rows = storage.invocations.listForThread(sessionId);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].state, "failed");
+      assert.equal(rows[0].terminalReason, "stream-handler-failed");
+    }
+  );
 });

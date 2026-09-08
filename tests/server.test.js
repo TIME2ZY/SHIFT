@@ -2225,16 +2225,29 @@ test("chat endpoint aborts previous invocation on same session", async () => {
         headers: { "X-Shift-UI-Token": TEST_UI_TOKEN },
         traceId: secondJson.traceId,
       });
-      const startMatch = text.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)","seatId":"[^"]+","duty":"discuss"\}/
+      const startedFrame = text
+        .split("\n\n")
+        .find(
+          (frame) =>
+            frame.includes("event: agent-start\n") &&
+            frame.includes(`"traceId":"${secondJson.traceId}"`)
+        );
+      assert.ok(startedFrame, "agent-start must expose the current Trace");
+      const startData = JSON.parse(
+        startedFrame
+          .split("\n")
+          .find((line) => line.startsWith("data: "))
+          .slice(6)
       );
-      assert.ok(startMatch, "agent-start must expose invocation, Seat, and Duty");
+      assert.equal(startData.agent, "opencode");
+      assert.equal(startData.duty, "discuss");
+      assert.ok(startData.invocationId && startData.seatId);
       const windowMeta = text
         .split("\n\n")
         .find(
           (frame) =>
             frame.includes("event: window-meta\n") &&
-            frame.includes(`"invocationId":"${startMatch[1]}"`)
+            frame.includes(`"invocationId":"${startData.invocationId}"`)
         );
       assert.ok(windowMeta, "window-meta must correlate by invocationId");
       assert.match(windowMeta, /"parentInvocationId":null/);

@@ -66,6 +66,7 @@ function createStreamDeltaCoalescer(options = {}) {
   }
 
   const write = options.write;
+  let timerFailure = null;
   const maxChars = Number.isFinite(options.maxChars)
     ? Math.max(0, options.maxChars)
     : DEFAULT_MAX_CHARS;
@@ -111,13 +112,13 @@ function createStreamDeltaCoalescer(options = {}) {
     const buf = buffers.get(kind);
     if (!buf) return;
     clearTimers(buf);
+    if (buf.text) write(kind, { ...buf.payload, text: buf.text });
     buffers.delete(kind);
     removeOpen(kind);
-    if (!buf.text) return;
-    write(kind, { ...buf.payload, text: buf.text });
   }
 
   function flushAll() {
+    if (timerFailure) throw timerFailure;
     while (openOrder.length > 0) {
       flushKind(openOrder[0]);
     }
@@ -157,8 +158,8 @@ function createStreamDeltaCoalescer(options = {}) {
       current.idleTimer = null;
       try {
         flushKind(scheduledKind);
-      } catch {
-        // Timer flush is best-effort; stream-end flushAll remains authoritative.
+      } catch (error) {
+        timerFailure = error;
       }
     }, ms);
     if (buf.maxTimer == null) {
@@ -168,14 +169,15 @@ function createStreamDeltaCoalescer(options = {}) {
         current.maxTimer = null;
         try {
           flushKind(scheduledKind);
-        } catch {
-          // Timer flush is best-effort; stream-end flushAll remains authoritative.
+        } catch (error) {
+          timerFailure = error;
         }
       }, ms);
     }
   }
 
   function accept(event) {
+    if (timerFailure) throw timerFailure;
     if (!event || typeof event !== "object") return;
     const kind = typeof event.type === "string" ? event.type : "";
     if (!kind) return;

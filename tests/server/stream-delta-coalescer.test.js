@@ -349,3 +349,32 @@ test("resolveCoalesceOptionsFromEnv honors disable and numeric overrides", () =>
   assert.equal(DEFAULT_MAX_CHARS, 8_000);
   assert.equal(DEFAULT_MAX_MS, 80);
 });
+
+test("timer persistence failure retains the segment and rejects success-path flush", () => {
+  const timers = new Map();
+  const failure = new Error("SQLite write failed");
+  const coalescer = createStreamDeltaCoalescer({
+    write() {
+      throw failure;
+    },
+    schedule(fn) {
+      const id = {};
+      timers.set(id, fn);
+      return id;
+    },
+    cancel(id) {
+      timers.delete(id);
+    },
+  });
+  coalescer.accept({ type: "text.delta", text: "must not disappear" });
+  [...timers.values()][0]();
+  assert.equal(coalescer.pendingChars(), "must not disappear".length);
+  assert.throws(
+    () => coalescer.flushAll(),
+    (error) => error === failure
+  );
+  assert.throws(
+    () => coalescer.accept({ type: "usage.update" }),
+    (error) => error === failure
+  );
+});

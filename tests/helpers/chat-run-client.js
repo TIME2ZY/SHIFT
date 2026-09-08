@@ -1,15 +1,22 @@
 "use strict";
 
 function hasTerminal(text, traceId, until = "done") {
-  const haystack = traceId ? text.slice(text.lastIndexOf(traceId)) : text;
-  if (traceId && !text.includes(traceId)) return false;
-  return (
-    haystack.includes(`event: ${until}`) ||
-    haystack.includes("event: run.aborted") ||
-    haystack.includes("event: done") ||
-    haystack.includes("event: error") ||
-    haystack.includes('"type":"run.failed"')
-  );
+  return text
+    .split("\n\n")
+    .slice(0, -1)
+    .some((frame) => {
+      const name = frame.match(/^event: (.+)$/m)?.[1];
+      const raw = frame.match(/^data: (.+)$/m)?.[1];
+      if (!raw) return false;
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        return false;
+      }
+      if (traceId && data.traceId !== traceId) return false;
+      return [until, "run.aborted", "done", "error"].includes(name) || data.type === "run.failed";
+    });
 }
 
 function mergeHeaders(base, extra) {

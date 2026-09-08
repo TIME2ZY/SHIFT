@@ -27,6 +27,7 @@ export async function startRun(request: StartRunRequest): Promise<StartRunRespon
         clientTurnId: request.clientTurnId,
       }),
       signal: request.signal,
+      timeoutMs: 0,
     }
   );
   const body = (await response.json().catch(() => ({}))) as {
