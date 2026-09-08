@@ -27,6 +27,27 @@ test("attachPromise does not emit unhandledRejection after the original promise 
   }
 });
 
+test("closeSession ends only that session's subscribers", () => {
+  const runtime = createChatRuntime();
+  let closed = 0;
+  runtime.subscribe("s1", {
+    onEvent() {},
+    close() {
+      closed += 1;
+    },
+  });
+  runtime.subscribe("s2", {
+    onEvent() {},
+    close() {
+      closed += 10;
+    },
+  });
+  runtime.closeSession("s1");
+  assert.equal(closed, 1);
+  runtime.closeSession("s1");
+  assert.equal(closed, 1);
+});
+
 test("shutdown waits for attached promises even when they reject", async () => {
   const runtime = createChatRuntime();
   runtime.claim("s1", { traceId: "t1", controller: new AbortController() });

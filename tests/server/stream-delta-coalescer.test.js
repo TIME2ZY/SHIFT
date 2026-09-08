@@ -237,6 +237,29 @@ test("optional idle debounce still works when maxMs > 0", () => {
   assert.equal(writes[0].payload.text, "tick tock");
 });
 
+test("cancelAll drops pending deltas and armed timers without writing", () => {
+  const timers = [];
+  const { writes, coalescer } = collectWrites({
+    maxChars: 10_000,
+    maxMs: 80,
+    schedule: (fn, ms) => {
+      const id = { fn, ms, cancelled: false };
+      timers.push(id);
+      return id;
+    },
+    cancel: (handle) => {
+      handle.cancelled = true;
+    },
+  });
+  coalescer.accept({ type: "text.delta", agent: "a", text: "partial" });
+  assert.equal(writes.length, 0);
+  coalescer.cancelAll();
+  for (const timer of timers) timer.fn();
+  assert.equal(writes.length, 0);
+  coalescer.flushAll();
+  assert.equal(writes.length, 0);
+});
+
 test("continuous sub-idle deltas still flush within the max-wait bound", () => {
   let now = 0;
   const timers = [];

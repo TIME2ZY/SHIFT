@@ -984,6 +984,7 @@ async function runChatWorklist(ctx) {
         }
         if (streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.
+          durableCoalescer.cancelAll();
           break;
         }
         try {

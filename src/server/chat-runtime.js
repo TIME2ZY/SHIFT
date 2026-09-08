@@ -134,17 +134,28 @@ function createChatRuntime({ eventStore } = {}) {
     return { stopped: true, traceId };
   }
 
-  function closeSubscribers() {
-    const pending = [];
-    for (const set of subscribers.values()) pending.push(...set);
-    subscribers.clear();
-    for (const subscriber of pending) {
+  function closeSubscriberSet(set) {
+    for (const subscriber of set) {
       try {
         subscriber.close?.();
       } catch {
         // Observer IO is best-effort; SQLite remains the truth.
       }
     }
+  }
+
+  function closeSession(sessionId) {
+    const set = subscribers.get(sessionId);
+    if (!set) return;
+    subscribers.delete(sessionId);
+    closeSubscriberSet(set);
+  }
+
+  function closeSubscribers() {
+    const pending = [];
+    for (const set of subscribers.values()) pending.push(...set);
+    subscribers.clear();
+    closeSubscriberSet(pending);
   }
 
   async function shutdown() {
@@ -184,6 +195,7 @@ function createChatRuntime({ eventStore } = {}) {
     stopRun,
     subscribe,
     publish,
+    closeSession,
     shutdown,
     attachExecutor,
     startRun,

@@ -123,6 +123,16 @@ function createStreamDeltaCoalescer(options = {}) {
     }
   }
 
+  function cancelAll() {
+    while (openOrder.length > 0) {
+      const kind = openOrder[0];
+      const buf = buffers.get(kind);
+      if (buf) clearTimers(buf);
+      buffers.delete(kind);
+      removeOpen(kind);
+    }
+  }
+
   function ensureBuf(kind, basePayload) {
     let buf = buffers.get(kind);
     if (!buf) {
@@ -145,14 +155,22 @@ function createStreamDeltaCoalescer(options = {}) {
       const current = buffers.get(scheduledKind);
       if (!current || current.idleTimer == null) return;
       current.idleTimer = null;
-      flushKind(scheduledKind);
+      try {
+        flushKind(scheduledKind);
+      } catch {
+        // Timer flush is best-effort; stream-end flushAll remains authoritative.
+      }
     }, ms);
     if (buf.maxTimer == null) {
       buf.maxTimer = schedule(() => {
         const current = buffers.get(scheduledKind);
         if (!current || current.maxTimer == null) return;
         current.maxTimer = null;
-        flushKind(scheduledKind);
+        try {
+          flushKind(scheduledKind);
+        } catch {
+          // Timer flush is best-effort; stream-end flushAll remains authoritative.
+        }
       }, ms);
     }
   }
@@ -213,6 +231,7 @@ function createStreamDeltaCoalescer(options = {}) {
   return {
     accept,
     flushAll,
+    cancelAll,
     flushKind,
     pendingChars,
     idleMsFor,

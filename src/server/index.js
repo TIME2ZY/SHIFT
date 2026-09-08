@@ -224,6 +224,8 @@ function createServer(options = {}) {
     try {
       worktreeManager.discardWorktree(sessionId);
     } catch {}
+
+    chatRuntime.closeSession(sessionId);
   }
 
   function archiveProjectDurable(projectKey) {
