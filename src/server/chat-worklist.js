@@ -1104,6 +1104,7 @@ async function runChatWorklist(ctx) {
               retryable: true,
             },
           });
+          callbacks.retireInvocation?.(sessionId, activeInvocationId);
           if (!contextSealHandled) {
             sealContextWindow(ratio, "physical-ceiling-empty");
           }
@@ -1169,6 +1170,7 @@ async function runChatWorklist(ctx) {
           windowId: durableRun?.window?.id || null,
           message: failedMessage || undefined,
         });
+        callbacks.retireInvocation?.(sessionId, failedInvocationId);
         sendSse(res, "error", {
           message: "Agent stream failed while handling events; invocation closed as failed.",
           retryable: true,
@@ -1225,6 +1227,7 @@ async function runChatWorklist(ctx) {
           windowId: durableRun?.window?.id || null,
           message: abortMessage || undefined,
         });
+        callbacks.retireInvocation?.(sessionId, abortInvId);
         aborted = true;
         previousInvocationId = abortInvId;
         break;
@@ -1251,6 +1254,7 @@ async function runChatWorklist(ctx) {
             retryable: true,
           },
         });
+        callbacks.retireInvocation?.(sessionId, finalInvocationId);
         sendSse(res, "error", {
           message: "Assistant produced no content after context pressure; request not completed.",
           retryable: true,
@@ -1293,6 +1297,7 @@ async function runChatWorklist(ctx) {
           windowId: durableRun?.window?.id || null,
           message: failedMessage || undefined,
         });
+        callbacks.retireInvocation?.(sessionId, finalInvocationId);
         sendSse(res, "error", {
           message: "Agent process exited without a successful durable result.",
           retryable: false,
@@ -1334,6 +1339,7 @@ async function runChatWorklist(ctx) {
               message: assistantMessage,
             })
           : null;
+      callbacks.retireInvocation?.(sessionId, finalInvocationId);
 
       if (completed?.message?.id) assistantMessage.id = completed.message.id;
 

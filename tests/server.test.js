@@ -2815,6 +2815,41 @@ test("validateToken rejects tokens without a valid expiry", () => {
   callbacks.unregisterThread(sessionId);
 });
 
+test("active invocation token does not expire on wall-clock TTL and remains valid for long tasks", () => {
+  const sessionId = "session-long-task";
+  const invocationId = "inv-long-1";
+  const callbackToken = "tok-long-1";
+  const threadCtx = {
+    currentInvocationId: invocationId,
+    tokens: new Map([
+      [
+        invocationId,
+        {
+          agentId: "grok",
+          callbackToken,
+          createdAt: Date.now() - 3600_000,
+          expiresAt: Date.now() - 1000, // wall-clock expired
+          retired: false,
+        },
+      ],
+    ]),
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  // While the invocation is actively running, validateToken must succeed
+  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), true);
+  assert.equal(threadCtx.tokens.has(invocationId), true);
+  const record = threadCtx.tokens.get(invocationId);
+  assert.ok(record.expiresAt > Date.now(), "expiresAt should be extended while active");
+
+  // When the invocation finishes, retireInvocation reclaims the token
+  assert.equal(callbacks.retireInvocation(sessionId, invocationId), true);
+  assert.equal(threadCtx.tokens.has(invocationId), false);
+  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), false);
+
+  callbacks.unregisterThread(sessionId);
+});
+
 test("postMessage rejects cross-thread callbacks (Thread Affinity guard)", () => {
   const sseEvents = [];
   const fakeRes = {
