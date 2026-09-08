@@ -127,16 +127,22 @@ function createChatRuntime({ eventStore } = {}) {
 
   function stopRun(sessionId, traceId) {
     const record = runs.get(sessionId);
-    if (!record || !traceId || record.traceId !== traceId) {
+    if (!record) {
+      return { stopped: false, reason: "trace_not_active" };
+    }
+    if (traceId && record.traceId && record.traceId !== traceId) {
       return { stopped: false, reason: "trace_not_active" };
     }
     record.stopReason = "explicit-stop";
     try {
-      record.controller.abort();
+      if (record.controller) {
+        record.controller.stopReason = "explicit-stop";
+        record.controller.abort("explicit-stop");
+      }
     } catch {
       // already aborted
     }
-    return { stopped: true, traceId };
+    return { stopped: true, traceId: record.traceId || traceId };
   }
 
   function closeSubscriberSet(set) {

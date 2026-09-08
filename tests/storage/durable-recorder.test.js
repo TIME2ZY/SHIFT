@@ -233,6 +233,27 @@ test("completeInvocation covers abort, final, atomic rollback, and rejects missi
 
     recorder.startInvocation({
       session,
+      invocationId: "inv-user-abort",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+    });
+    const abortedExit = recorder.completeInvocation({
+      invocationId: "inv-user-abort",
+      code: 1,
+      signal: null,
+      reason: "aborted",
+    });
+    assert.equal(abortedExit.invocation.state, "aborted");
+    assert.equal(abortedExit.invocation.terminalReason, "aborted");
+    assert.equal(abortedExit.invocation.failureStage, "request");
+    assert.equal(abortedExit.invocation.errorCode, "invocation_aborted");
+    assert.equal(abortedExit.invocation.retryable, false);
+
+    recorder.startInvocation({
+      session,
       invocationId: "inv-atomic-fail",
       threadId: session.id,
       agentId: "codex",

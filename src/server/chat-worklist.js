@@ -130,6 +130,7 @@ async function runChatWorklist(ctx) {
     prepareSkillDelivery,
     sessionProjectDir,
     isolatedWorkspace,
+    runtime,
   } = ctx;
 
   let session = ctx.session;
@@ -827,6 +828,8 @@ async function runChatWorklist(ctx) {
       let code = 0;
       let signal = null;
       let streamFailure = null;
+      let streamStopped = false;
+      let streamStopReason = null;
       let replayedAfterEmpty = false;
       let sawUsageEvent = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -984,6 +987,8 @@ async function runChatWorklist(ctx) {
         code = streamResult.code;
         signal = streamResult.signal;
         streamFailure = streamResult.streamError || null;
+        streamStopped = Boolean(streamResult.stopped);
+        streamStopReason = streamResult.stopReason || null;
         if (streamResult.encoding?.total > 0) {
           runObs.noteDegraded("encoding_in_stream");
         }
@@ -1116,11 +1121,19 @@ async function runChatWorklist(ctx) {
           usage: invocationUsage,
         });
         previousInvocationId = failedInvocationId;
-        aborted = true;
+        aborted = false;
         break;
       }
 
-      if (invocationController.signal.aborted) {
+      const isAborted = Boolean(
+        invocationController.signal.aborted ||
+        streamStopped ||
+        threadCtx?.controller?.signal?.aborted ||
+        runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
+        invocationController.stopReason === "explicit-stop"
+      );
+
+      if (isAborted) {
         const abortInvId = threadCtx.currentInvocationId || invocationId;
         const abortMessage = buildAssistantFinalMessage({
           agent,
@@ -1139,6 +1152,11 @@ async function runChatWorklist(ctx) {
           endPayload: {
             ...endPayload,
             terminalState: "aborted",
+            terminalReason: "aborted",
+            errorCode: "invocation_aborted",
+            failureStage: "request",
+            retryable: false,
+            stopReason: streamStopReason || invocationController.stopReason || null,
             supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
           },
           session,

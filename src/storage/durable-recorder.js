@@ -458,7 +458,12 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             events.markInvocationUnavailable(invocationId);
             return null;
           }
-          const state = resolveFinishDbState(code, signal, endPayload);
+          const state = resolveFinishDbState(
+            code,
+            signal,
+            endPayload,
+            endPayload?.terminalReason || endPayload?.reason
+          );
           const outcome = resolveInvocationOutcome({
             state,
             code,
@@ -512,7 +517,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
         }
         const code = input.code;
         const signal = input.signal;
-        const state = resolveFinishDbState(code, signal, input.endPayload);
+        const state = resolveFinishDbState(code, signal, input.endPayload, input.reason);
         const outcome = resolveInvocationOutcome({
           state,
           code,
@@ -796,13 +801,17 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
 }
 
 /** Map provider exit to DB terminal state (CHECK: completed|failed|aborted). */
-function resolveFinishDbState(code, signal, endPayload) {
+function resolveFinishDbState(code, signal, endPayload, reason = null) {
   if (endPayload && typeof endPayload === "object") {
     const explicit = endPayload.terminalState || endPayload.dbState;
     if (explicit === "completed" || explicit === "failed" || explicit === "aborted") {
       return explicit;
     }
+    if (endPayload.terminalReason === "aborted" || endPayload.reason === "aborted") {
+      return "aborted";
+    }
   }
+  if (reason === "aborted") return "aborted";
   if (code === 0) return "completed";
   if (signal) return "aborted";
   return "failed";
@@ -810,10 +819,16 @@ function resolveFinishDbState(code, signal, endPayload) {
 
 function resolveInvocationOutcome({ state, code, signal, reason, endPayload } = {}) {
   const payload = endPayload && typeof endPayload === "object" ? endPayload : {};
+  const isAborted =
+    state === "aborted" ||
+    payload.terminalState === "aborted" ||
+    payload.terminalReason === "aborted" ||
+    payload.reason === "aborted" ||
+    reason === "aborted";
   const terminalReason = String(
     payload.terminalReason ||
       reason ||
-      (state === "completed" ? "assistant-final" : "provider-exit")
+      (state === "completed" ? "assistant-final" : isAborted ? "aborted" : "provider-exit")
   ).slice(0, 200);
   if (state === "completed") {
     return {
@@ -824,11 +839,11 @@ function resolveInvocationOutcome({ state, code, signal, reason, endPayload } = 
     };
   }
   const failureStage = String(
-    payload.failureStage || (state === "aborted" ? "request" : "provider_run")
+    payload.failureStage || (isAborted ? "request" : "provider_run")
   ).slice(0, 80);
   const errorCode = String(
     payload.errorCode ||
-      (state === "aborted"
+      (isAborted
         ? "invocation_aborted"
         : signal
           ? "provider_signalled"

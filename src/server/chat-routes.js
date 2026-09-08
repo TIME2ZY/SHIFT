@@ -480,6 +480,7 @@ function createChatRunExecutor({
       prepareSkillDelivery,
       sessionProjectDir,
       isolatedWorkspace,
+      runtime,
     };
 
     function publishBackgroundFailure(error) {
@@ -588,28 +589,42 @@ function createChatRunExecutor({
         storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) ||
         [];
       const traceActive = traceInvocations.some((row) => row.state === "active");
-      const traceSucceeded = traceInvocations.some(
-        (row) => row.state === "completed" && row.terminalReason === "assistant-final"
+      const lastInvocation = traceInvocations.at(-1) || null;
+      const isAbortedRun = Boolean(
+        aborted ||
+        invocationController.signal.aborted ||
+        lastInvocation?.state === "aborted"
       );
+      const isFailedRun =
+        traceActive ||
+        !lastInvocation ||
+        lastInvocation.state === "failed" ||
+        lastInvocation.state !== "completed" ||
+        lastInvocation.terminalReason !== "assistant-final";
+
       durable.completeTrace({
         traceId,
-        state: aborted ? "aborted" : traceActive || !traceSucceeded ? "failed" : "completed",
-        terminalReason: aborted
+        state: isAbortedRun ? "aborted" : isFailedRun ? "failed" : "completed",
+        terminalReason: isAbortedRun
           ? "request-aborted"
           : traceActive
             ? "invocation-orphan-remaining"
-            : !traceSucceeded
-              ? "invocation-failed"
-              : "request-completed",
-        failureStage: traceActive ? "reconcile" : !traceSucceeded ? "provider_run" : null,
-        errorCode: traceActive
-          ? "invocation_orphan_remaining"
-          : !traceSucceeded
-            ? "invocation_failed"
-            : null,
+            : !lastInvocation
+              ? "invocation-missing"
+              : lastInvocation.terminalReason || "invocation-failed",
+        failureStage: isAbortedRun
+          ? "request"
+          : traceActive
+            ? "reconcile"
+            : lastInvocation?.failureStage || "provider_run",
+        errorCode: isAbortedRun
+          ? "invocation_aborted"
+          : traceActive
+            ? "invocation_orphan_remaining"
+            : lastInvocation?.errorCode || "invocation_failed",
         retryable: false,
       });
-      const terminalKind = aborted ? "run.aborted" : "done";
+      const terminalKind = isAbortedRun ? "run.aborted" : isFailedRun ? "run.failed" : "done";
       const persistId = finishInvocationId || traceInvocations.at(-1)?.id;
       if (persistId) {
         events.append({

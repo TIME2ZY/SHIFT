@@ -116,7 +116,20 @@ function baseDeps(res, overrides = {}) {
       flush: async () => {},
     },
     contextHealth: {
-      makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
+      makeTracker: () => ({
+        addInput() {},
+        addOutput() {},
+        getFillRatio: () => 0,
+        getPhysicalFillRatio: () => 0,
+        getUsedTokens: () => 0,
+        snapshot: () => ({ billing: {} }),
+        markBillingIncomplete() {},
+      }),
+      getAgentReserveRatio: () => 0.1,
+      getAgentCapacity: () => 1000,
+      getAgentSealThresholds: () => ({
+        usable: { sealer: { warn: 0.8, action: 0.85, recovery: 0.9 } },
+      }),
     },
     sessionSealer: {
       makeSealer: () => ({
@@ -172,6 +185,7 @@ function baseDeps(res, overrides = {}) {
       startTrace: () => null,
       completeTrace() {},
       reconcileTraceHandoffs: () => 0,
+      sealAndRotateWindow: () => null,
     },
     eventStore: {
       append: () => ({ ok: false, event: null, sqlite: false }),
@@ -258,10 +272,6 @@ test("a slower older chat request cannot abort the newer request", async () => {
       buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
-    contextHealth: {
-      getAgentCapacity: () => 1000,
-      makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
-    },
     appendToSession: (...args) => appended.push(args),
   });
   const executor = chatRoutes.createChatRunExecutor(deps);
@@ -328,4 +338,140 @@ test("chat preparation failure closes the durable trace", async () => {
       retryable: false,
     },
   ]);
+});
+
+test("trace terminal state reflects final invocation outcome rather than earlier successes", async () => {
+  const completedTraces = [];
+  const invocations = [
+    {
+      id: "inv-1",
+      traceId: "trace-multi",
+      state: "completed",
+      terminalReason: "assistant-final",
+      errorCode: null,
+      failureStage: null,
+    },
+    {
+      id: "inv-2",
+      traceId: "trace-multi",
+      state: "failed",
+      terminalReason: "provider-failed",
+      errorCode: "provider_exit_1",
+      failureStage: "provider_run",
+    },
+  ];
+  const executor = chatRoutes.createChatRunExecutor(
+    baseDeps(makeRes(), {
+      durableRecorder: {
+        enabled: true,
+        startTrace: () => ({ id: "trace-multi" }),
+        startInvocation: () => ({
+          invocation: { id: "inv-2" },
+          binding: null,
+          window: { id: "win-1", capacityTokens: 1000, reserveRatio: 0.1 },
+        }),
+        completeTrace: (outcome) => completedTraces.push(outcome),
+        completeInvocation: () => null,
+        ensureWindow: () => null,
+        reconcileTraceHandoffs: () => 0,
+        addWindowUsage: () => true,
+        setWindowUsageSnapshot: () => true,
+        sealAndRotateWindow: () => null,
+      },
+      storage: {
+        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
+        invocations: {
+          listForThread: () => invocations,
+        },
+      },
+      sessionBootstrap: {
+        buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
+        buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        buildIdentity: () => "<!-- Session Identity -->\n",
+      },
+      runChildStream: async () => ({ code: 1, signal: null }),
+    })
+  );
+
+  const res = await executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "run multi" },
+  });
+  await res.promise;
+  assert.equal(completedTraces.length, 1);
+  assert.equal(completedTraces[0].state, "failed");
+  assert.equal(completedTraces[0].terminalReason, "provider-failed");
+  assert.equal(completedTraces[0].errorCode, "provider_exit_1");
+  assert.equal(completedTraces[0].failureStage, "provider_run");
+});
+
+test("user abort intent forces invocation and trace terminal state to aborted", async () => {
+  const completedTraces = [];
+  const completedInvocations = [];
+  const invocations = [
+    {
+      id: "inv-1",
+      traceId: "trace-abort",
+      state: "completed",
+      terminalReason: "assistant-final",
+    },
+    {
+      id: "inv-2",
+      traceId: "trace-abort",
+      state: "aborted",
+      terminalReason: "aborted",
+      errorCode: "invocation_aborted",
+      failureStage: "request",
+    },
+  ];
+  const executor = chatRoutes.createChatRunExecutor(
+    baseDeps(makeRes(), {
+      durableRecorder: {
+        enabled: true,
+        startTrace: () => ({ id: "trace-abort" }),
+        startInvocation: () => ({
+          invocation: { id: "inv-2" },
+          binding: null,
+          window: { id: "win-1", capacityTokens: 1000, reserveRatio: 0.1 },
+        }),
+        completeTrace: (outcome) => completedTraces.push(outcome),
+        completeInvocation: (input) => {
+          completedInvocations.push(input);
+          return { invocation: { id: input.invocationId, state: "aborted" } };
+        },
+        ensureWindow: () => null,
+        reconcileTraceHandoffs: () => 0,
+        addWindowUsage: () => true,
+        setWindowUsageSnapshot: () => true,
+        sealAndRotateWindow: () => null,
+      },
+      storage: {
+        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
+        invocations: {
+          listForThread: () => invocations,
+        },
+      },
+      sessionBootstrap: {
+        buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
+        buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        buildIdentity: () => "<!-- Session Identity -->\n",
+      },
+      runChildStream: async () => {
+        return { code: 1, signal: null, stopped: true, stopReason: "explicit-stop" };
+      },
+    })
+  );
+
+  const res = await executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "run abort" },
+  });
+  await res.promise;
+
+  assert.equal(completedTraces.length, 1);
+  assert.equal(completedTraces[0].state, "aborted");
+  assert.equal(completedTraces[0].terminalReason, "request-aborted");
+  assert.equal(completedTraces[0].errorCode, "invocation_aborted");
+  assert.equal(completedTraces[0].failureStage, "request");
+  assert.ok(
+    completedInvocations.some((inv) => inv.reason === "aborted" && inv.endPayload?.terminalState === "aborted")
+  );
 });
