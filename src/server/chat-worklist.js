@@ -698,11 +698,13 @@ async function runChatWorklist(ctx) {
       // does not). usage.update is passthrough and does not end an open streak.
       const persistDurableEvent = (kind, payload) => {
         try {
+          const createdAt = payload?.createdAt || payload?.ts || new Date().toISOString();
           events.append({
             threadId: sessionId,
             invocationId: activeInvocationId,
             kind,
             payload: { ...payload, agent, invocationId: activeInvocationId },
+            createdAt,
           });
         } catch (error) {
           log.error?.(`[event-store] durable event failed: ${error.message}`);
@@ -930,8 +932,10 @@ async function runChatWorklist(ctx) {
             sendSse(res, "error", payload);
           },
           onEvent(event) {
+            const eventTime = event.createdAt || event.ts || new Date().toISOString();
+            event.createdAt = eventTime;
+            event.ts = eventTime;
             observeAvailabilityEvent(ctx.availability, agent, event);
-            sendSse(res, "agent-event", event);
             if (
               typeof event.sessionId === "string" &&
               event.sessionId &&
@@ -957,11 +961,22 @@ async function runChatWorklist(ctx) {
                   toolKind: event.toolKind,
                   args: event.args,
                   subagentId: event.subagentId,
+                  startedAt: eventTime,
                 });
               } else if (event.type === "tool.finished" && event.toolId) {
+                const open = openTools.get(event.toolId);
+                if (open?.startedAt) {
+                  const s = Date.parse(open.startedAt);
+                  const f = Date.parse(eventTime);
+                  if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
+                    event.createdAt = open.startedAt;
+                    event.ts = open.startedAt;
+                  }
+                }
                 openTools.delete(event.toolId);
               }
             }
+            sendSse(res, "agent-event", event);
             if (event.type === "usage.update") {
               sawUsageEvent = true;
               healthTracker.applyUsage(event);
@@ -1021,6 +1036,14 @@ async function runChatWorklist(ctx) {
           );
           const toolStatus = isAbortedRun ? "cancelled" : "interrupted";
           for (const [toolId, toolInfo] of openTools.entries()) {
+            let finishedTime = new Date().toISOString();
+            if (toolInfo?.startedAt) {
+              const s = Date.parse(toolInfo.startedAt);
+              const f = Date.parse(finishedTime);
+              if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
+                finishedTime = toolInfo.startedAt;
+              }
+            }
             const toolFinished = {
               type: "tool.finished",
               protocolVersion: 2,
@@ -1042,6 +1065,8 @@ async function runChatWorklist(ctx) {
               error: isAbortedRun
                 ? "Tool execution cancelled by user stop"
                 : `Tool execution interrupted (exit code: ${code}, signal: ${signal || "none"})`,
+              ts: finishedTime,
+              createdAt: finishedTime,
               ...(toolInfo.title ? { title: toolInfo.title } : {}),
               ...(toolInfo.label ? { label: toolInfo.label } : {}),
               ...(toolInfo.toolKind ? { toolKind: toolInfo.toolKind } : {}),

@@ -89,6 +89,10 @@ const FIELD_TYPES = {
   originalOutputChars: "number",
   originalResultBytes: "number",
   originalResultChars: "number",
+  ts: "string",
+  createdAt: "string",
+  startedAt: "string",
+  finishedAt: "string",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));
@@ -121,6 +125,10 @@ const STRING_COERCE_FIELDS = [
   "visibility",
   "scope",
   "mode",
+  "ts",
+  "createdAt",
+  "startedAt",
+  "finishedAt",
 ];
 
 function normalizeProgressItem(item, index) {
@@ -434,6 +442,7 @@ function createRunLifecycle() {
           title: event.title,
           label: event.label,
           toolKind: event.toolKind,
+          startedAt: event.ts || event.createdAt || new Date().toISOString(),
         });
       } else if (event.type === "tool.finished") {
         openTools.delete(event.toolId);
@@ -450,8 +459,17 @@ function createRunLifecycle() {
           : outcome.ok === false
             ? "Provider run failed before the tool reported completion."
             : "Provider run ended before the tool reported completion.");
-      const events = [...openTools.values()].map((tool) =>
-        makeEvent("tool.finished", {
+      const now = new Date().toISOString();
+      const events = [...openTools.values()].map((tool) => {
+        let finishedTime = now;
+        if (tool.startedAt) {
+          const s = Date.parse(tool.startedAt);
+          const f = Date.parse(finishedTime);
+          if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
+            finishedTime = tool.startedAt;
+          }
+        }
+        return makeEvent("tool.finished", {
           agent: context.agent,
           invocationId: context.invocationId,
           toolName: tool.toolName,
@@ -466,8 +484,10 @@ function createRunLifecycle() {
           result: { error },
           failureSource: "lifecycle-terminal",
           failureReason: error,
-        })
-      );
+          ts: finishedTime,
+          createdAt: finishedTime,
+        });
+      });
       openTools.clear();
       return events;
     },

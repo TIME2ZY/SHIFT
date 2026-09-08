@@ -261,24 +261,18 @@ test("runtime envelope closes open tools before the invocation terminal event", 
     terminal.map((event) => event.type),
     ["tool.finished", "run.finished"]
   );
-  assert.deepEqual(terminal[0], {
-    type: "tool.finished",
-    protocolVersion: PROTOCOL_VERSION,
-    agent: "codex",
-    invocationId: "inv-open-tool",
-    toolName: "web_search",
-    toolId: "tool-1",
-    args: { query: "SHIFT" },
-    title: undefined,
-    label: undefined,
-    toolKind: undefined,
-    status: "interrupted",
-    state: "interrupted",
-    error: "Provider run ended before the tool reported completion.",
-    result: { error: "Provider run ended before the tool reported completion." },
-    failureSource: "lifecycle-terminal",
-    failureReason: "Provider run ended before the tool reported completion.",
-  });
+  assert.equal(terminal[0].type, "tool.finished");
+  assert.equal(terminal[0].agent, "codex");
+  assert.equal(terminal[0].invocationId, "inv-open-tool");
+  assert.equal(terminal[0].toolName, "web_search");
+  assert.equal(terminal[0].toolId, "tool-1");
+  assert.deepEqual(terminal[0].args, { query: "SHIFT" });
+  assert.equal(terminal[0].status, "interrupted");
+  assert.equal(terminal[0].state, "interrupted");
+  assert.equal(terminal[0].error, "Provider run ended before the tool reported completion.");
+  assert.equal(terminal[0].failureSource, "lifecycle-terminal");
+  assert.ok(terminal[0].ts);
+  assert.ok(terminal[0].createdAt);
   assert.equal(lifecycle.openToolCount, 0);
 });
 

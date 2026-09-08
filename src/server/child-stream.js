@@ -131,6 +131,9 @@ function runChildStream({
         }
         // Also scan decoded text fields inside events (replacement may appear after JSON parse).
         if (event && typeof event === "object") {
+          const serverNow = new Date().toISOString();
+          event.ts = serverNow;
+          event.createdAt = serverNow;
           if (typeof event.text === "string") noteEncoding(event.text, "event.text");
           if (typeof event.data === "string") noteEncoding(event.data, "event.data");
         }

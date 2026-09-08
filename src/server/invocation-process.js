@@ -53,7 +53,14 @@ function limitedText(value) {
 }
 
 function eventTime(event) {
-  return typeof event?.ts === "string" || typeof event?.ts === "number" ? event.ts : undefined;
+  const t =
+    event?.createdAt ||
+    event?.created_at ||
+    event?.ts ||
+    event?.payload?.createdAt ||
+    event?.payload?.created_at ||
+    event?.payload?.ts;
+  return typeof t === "string" || typeof t === "number" ? t : undefined;
 }
 
 function toolKey(payload, eventNo) {
@@ -197,9 +204,13 @@ function projectInvocationProcess(invocationId, events = [], options = {}) {
       }
 
       if (current.startedAt && current.finishedAt) {
-        const started = Date.parse(String(current.startedAt));
-        const finished = Date.parse(String(current.finishedAt));
-        if (Number.isFinite(started) && Number.isFinite(finished) && finished >= started) {
+        let started = Date.parse(String(current.startedAt));
+        let finished = Date.parse(String(current.finishedAt));
+        if (Number.isFinite(started) && Number.isFinite(finished)) {
+          if (finished < started) {
+            finished = started;
+            current.finishedAt = current.startedAt;
+          }
           current.durationMs = finished - started;
         }
       }

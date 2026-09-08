@@ -16,6 +16,12 @@ const AGENT_EVENT_KINDS = new Set([
 function toSseFrame(event) {
   if (!event || typeof event !== "object") return null;
   const invocationId = event.invocationId || event.payload?.invocationId || null;
+  const serverTime =
+    event.createdAt ||
+    event.payload?.createdAt ||
+    event.ts ||
+    event.payload?.ts ||
+    new Date().toISOString();
   if (AGENT_EVENT_KINDS.has(event.kind)) {
     return {
       id: event.id ?? null,
@@ -25,13 +31,21 @@ function toSseFrame(event) {
         type: event.kind,
         invocationId,
         traceId: event.traceId || null,
+        ts: serverTime,
+        createdAt: serverTime,
       },
     };
   }
   return {
     id: event.id ?? null,
     event: event.kind,
-    data: { ...(event.payload || {}), invocationId, traceId: event.traceId || null },
+    data: {
+      ...(event.payload || {}),
+      invocationId,
+      traceId: event.traceId || null,
+      ts: serverTime,
+      createdAt: serverTime,
+    },
   };
 }
 

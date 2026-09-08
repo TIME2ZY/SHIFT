@@ -107,7 +107,10 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
     name: payload.toolName || payload.tool_name || "tool",
     state: orphanFinish ? "orphaned" : finished ? (failed ? "failed" : "completed") : "active",
     startedAt: started?.created_at || null,
-    endedAt: finished?.created_at || null,
+    endedAt:
+      started?.created_at && finished?.created_at && Date.parse(finished.created_at) < Date.parse(started.created_at)
+        ? started.created_at
+        : finished?.created_at || null,
     complete: Boolean(finished && started),
     attributes: {
       toolId,

@@ -105,7 +105,11 @@ test("child stream preserves UTF-8 split across stdout and stderr chunks", async
   child.emit("close", 0, null);
 
   await completed;
-  assert.deepEqual(events, [{ type: "text.delta", text: "中文回调" }]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "中文回调");
+  assert.ok(events[0].ts);
+  assert.ok(events[0].createdAt);
   assert.equal(stderr, "错误信息");
   assert.doesNotMatch(`${events[0].text}${stderr}`, /�/);
 });
@@ -131,7 +135,11 @@ test("child stream parses the final event without a trailing newline", async () 
   child.emit("close", 0, null);
 
   await completed;
-  assert.deepEqual(events, [{ type: "text.delta", text: "完成" }]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "完成");
+  assert.ok(events[0].ts);
+  assert.ok(events[0].createdAt);
 });
 
 function createRecordingRes() {
@@ -172,7 +180,11 @@ test("onEvent failures are isolated instead of crashing the process", async () =
   child.emit("close", null, "SIGTERM");
 
   const result = await completed;
-  assert.deepEqual(events, [{ type: "text.delta", text: "ok" }]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "text.delta");
+  assert.equal(events[0].text, "ok");
+  assert.ok(events[0].ts);
+  assert.ok(events[0].createdAt);
   assert.ok(result.streamError, "expected streamError on the result");
   assert.equal(result.streamError.origin, "event handler");
   assert.match(result.streamError.message, /durable write failed/);
