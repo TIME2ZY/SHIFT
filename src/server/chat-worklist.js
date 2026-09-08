@@ -558,6 +558,11 @@ async function runChatWorklist(ctx) {
         branch: runWorkspace.branch || "",
       });
       runObs.noteInvocationStart({ agent, invocationId });
+      const turnStartHeadSha =
+        useWorktree && runWorkspace?.worktreeDir && deliveryVerifier?.getHeadSha
+          ? deliveryVerifier.getHeadSha(runWorkspace.worktreeDir)
+          : null;
+      threadCtx.turnStartHeadSha = turnStartHeadSha;
       if (preCallRotated && preCallSealedWindowId) {
         const capture = memories.captureWindowSeal({
           threadId: sessionId,
@@ -1480,6 +1485,10 @@ async function runChatWorklist(ctx) {
         invocationId: finalInvocationId,
         windowId: durableRun?.window?.id || null,
         useWorktree: Boolean(useWorktree),
+        worktreeDir: runWorkspace?.worktreeDir || "",
+        worktreeBranch: runWorkspace?.branch || "",
+        startHeadSha: threadCtx.turnStartHeadSha || null,
+        deliveryVerifier,
         worklist,
         maxDepth,
         memoryCapture: memories,

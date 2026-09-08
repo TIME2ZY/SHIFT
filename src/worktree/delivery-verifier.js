@@ -112,7 +112,69 @@ function createDeliveryVerifier(options = {}) {
     }
   }
 
-  return { verify };
+  function getHeadSha(cwd) {
+    try {
+      return run("git", ["rev-parse", "HEAD"], cwd);
+    } catch {
+      return null;
+    }
+  }
+
+  function verifyWorktreeHandoff(input = {}) {
+    const cwd = path.resolve(String(input.cwd || ""));
+    if (!cwd) return { verified: false, reason: "managed_worktree_required" };
+
+    try {
+      const status = run("git", ["status", "--porcelain"], cwd);
+      if (status) {
+        return {
+          verified: false,
+          reason: "worktree_dirty",
+          message: "工作区存在未提交改动，未落库禁止下游消费。",
+          status,
+        };
+      }
+
+      const currentHead = run("git", ["rev-parse", "HEAD"], cwd);
+      const startHead = input.startHeadSha ? String(input.startHeadSha).trim() : null;
+      if (startHead && currentHead === startHead && input.requireNewCommit) {
+        return {
+          verified: false,
+          reason: "worktree_no_new_commit",
+          message: "工作区未产生新的 commit，未落库禁止下游消费。",
+          headSha: currentHead,
+        };
+      }
+
+      if (input.commitSha) {
+        const commitSha = String(input.commitSha).trim();
+        try {
+          run("git", ["cat-file", "-e", `${commitSha}^{commit}`], cwd);
+        } catch {
+          return {
+            verified: false,
+            reason: "commit_not_found",
+            message: `引用的 commit ${commitSha} 在 git 中不存在。`,
+            commitSha,
+          };
+        }
+      }
+
+      return {
+        verified: true,
+        headSha: currentHead,
+        clean: true,
+      };
+    } catch (error) {
+      return {
+        verified: false,
+        reason: "worktree_verification_failed",
+        error: error.message,
+      };
+    }
+  }
+
+  return { verify, verifyWorktreeHandoff, getHeadSha };
 }
 
 function resolveCiStatus(rollup) {
