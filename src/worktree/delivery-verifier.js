@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const {
   validateDeliveryReceipt,
@@ -124,13 +125,8 @@ function createDeliveryVerifier(options = {}) {
     const cwd = path.resolve(String(input.cwd || ""));
     if (!cwd) return { verified: false, reason: "managed_worktree_required" };
 
-    try {
-      const isInside = run("git", ["rev-parse", "--is-inside-work-tree"], cwd);
-      if (isInside !== "true") {
-        return { verified: true, skipped: true, reason: "not_a_git_worktree" };
-      }
-    } catch {
-      return { verified: true, skipped: true, reason: "not_a_git_worktree" };
+    if (!fs.existsSync(cwd)) {
+      return { verified: true, skipped: true, reason: "worktree_dir_not_found" };
     }
 
     try {

@@ -148,21 +148,183 @@ function createWorktreeManager(opts = {}) {
     writeState(stateFile, state);
   }
 
-  function ensureWorktree({ baseDir, sessionId }) {
+  function checkHealth(sessionId) {
+    let safeSessionId;
+    try {
+      safeSessionId = sanitizeId(sessionId);
+    } catch (e) {
+      return { ok: false, reason: "invalid_id", error: e.message };
+    }
+    const state = load();
+    const meta = state.worktrees[safeSessionId];
+    if (!meta) {
+      return {
+        ok: false,
+        reason: "not_found",
+        message: `No managed worktree for session ${safeSessionId}.`,
+      };
+    }
+
+    let trustedBaseDir;
+    try {
+      trustedBaseDir = ensureGitRoot(meta.baseDir);
+    } catch (err) {
+      return { ok: false, reason: "invalid_base_repo", meta, error: err.message };
+    }
+
+    const resolvedDir = meta.worktreeDir ? normalizeFsPath(meta.worktreeDir) : null;
+    if (!resolvedDir || !fs.existsSync(resolvedDir)) {
+      return {
+        ok: false,
+        reason: "directory_missing",
+        meta,
+        error: `Directory missing: ${meta.worktreeDir}`,
+      };
+    }
+
+    try {
+      const isInside = runGit(["rev-parse", "--is-inside-work-tree"], resolvedDir);
+      if (isInside !== "true") {
+        return {
+          ok: false,
+          reason: "git_worktree_invalid",
+          meta,
+          error: `Not a git worktree: ${resolvedDir}`,
+        };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        reason: "git_worktree_invalid",
+        meta,
+        error: err.message,
+      };
+    }
+
+    try {
+      if (!registeredWorktreePaths(trustedBaseDir).has(resolvedDir)) {
+        return {
+          ok: false,
+          reason: "unregistered",
+          meta,
+          error: `Worktree not registered in git worktree list: ${resolvedDir}`,
+        };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        reason: "unregistered",
+        meta,
+        error: err.message,
+      };
+    }
+
+    if (meta.branch) {
+      try {
+        runGit(["rev-parse", "--verify", `refs/heads/${meta.branch}`], trustedBaseDir);
+      } catch (err) {
+        return {
+          ok: false,
+          reason: "branch_missing",
+          meta,
+          error: `Branch missing: ${meta.branch}`,
+        };
+      }
+    }
+
+    return { ok: true, meta, trustedBaseDir };
+  }
+
+  function reconcileWorktree(sessionId) {
+    let safeSessionId;
+    try {
+      safeSessionId = sanitizeId(sessionId);
+    } catch {
+      return { reconciled: false, reason: "invalid_id" };
+    }
+    try {
+      stopPreview(safeSessionId);
+    } catch {}
+
+    const state = load();
+    const meta = state.worktrees[safeSessionId];
+    if (!meta) {
+      return { reconciled: false, reason: "not_found" };
+    }
+
+    let trustedBaseDir = null;
+    try {
+      trustedBaseDir = ensureGitRoot(meta.baseDir);
+    } catch {}
+
+    const resolvedDir = meta.worktreeDir ? normalizeFsPath(meta.worktreeDir) : null;
+    if (trustedBaseDir && resolvedDir) {
+      const worktreesRoot = normalizeFsPath(opts.worktreesRoot || `${trustedBaseDir}.worktrees`);
+      if (isInside(worktreesRoot, resolvedDir)) {
+        if (fs.existsSync(resolvedDir)) {
+          try {
+            runGit(["worktree", "remove", "--force", resolvedDir], trustedBaseDir);
+          } catch {
+            try {
+              fs.rmSync(resolvedDir, { recursive: true, force: true });
+            } catch {}
+          }
+        }
+      }
+      try {
+        runGit(["worktree", "prune"], trustedBaseDir);
+      } catch {}
+    }
+
+    delete state.worktrees[safeSessionId];
+    save(state);
+    return { reconciled: true, sessionId: safeSessionId, removed: meta };
+  }
+
+  function reconcileAllWorktrees() {
+    const state = load();
+    const results = [];
+    for (const sessionId of Object.keys(state.worktrees || {})) {
+      const health = checkHealth(sessionId);
+      if (!health.ok) {
+        const res = reconcileWorktree(sessionId);
+        results.push({ sessionId, health, result: res });
+      }
+    }
+    return results;
+  }
+
+  function ensureWorktree({ baseDir, sessionId, forceRecreate = false }) {
     const safeSessionId = sanitizeId(sessionId);
     const gitRoot = ensureGitRoot(baseDir || rootDir);
     const state = load();
     const existing = state.worktrees[safeSessionId];
-    if (existing && fs.existsSync(existing.worktreeDir)) return existing;
+
+    if (existing && !forceRecreate) {
+      const health = checkHealth(safeSessionId);
+      if (health.ok) return existing;
+      reconcileWorktree(safeSessionId);
+    } else if (existing && forceRecreate) {
+      reconcileWorktree(safeSessionId);
+    }
 
     const worktreesRoot = path.resolve(opts.worktreesRoot || `${gitRoot}.worktrees`);
     const worktreeDir = resolveInside(worktreesRoot, safeSessionId);
     const branch = `codex/session-${safeSessionId}`;
 
     fs.mkdirSync(worktreesRoot, { recursive: true });
-    if (!fs.existsSync(worktreeDir)) {
-      runGit(["worktree", "add", "-B", branch, worktreeDir, "HEAD"], gitRoot);
+    try {
+      runGit(["worktree", "prune"], gitRoot);
+    } catch {}
+
+    if (fs.existsSync(worktreeDir)) {
+      try {
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+        runGit(["worktree", "prune"], gitRoot);
+      } catch {}
     }
+
+    runGit(["worktree", "add", "-B", branch, worktreeDir, "HEAD"], gitRoot);
 
     const meta = {
       sessionId: safeSessionId,
@@ -182,8 +344,14 @@ function createWorktreeManager(opts = {}) {
 
   function getWorktree(sessionId) {
     const safeSessionId = sanitizeId(sessionId);
-    const meta = load().worktrees[safeSessionId];
-    if (!meta || !fs.existsSync(meta.worktreeDir)) {
+    const state = load();
+    const meta = state.worktrees[safeSessionId];
+    if (!meta) {
+      throw new Error(`No managed worktree for session ${safeSessionId}.`);
+    }
+    const health = checkHealth(safeSessionId);
+    if (!health.ok) {
+      reconcileWorktree(safeSessionId);
       throw new Error(`No managed worktree for session ${safeSessionId}.`);
     }
     return meta;
@@ -231,9 +399,15 @@ function createWorktreeManager(opts = {}) {
     const meta = state.worktrees[safeSessionId];
     if (!meta) throw new Error(`No managed worktree for session ${safeSessionId}.`);
 
-    // Treat the persisted state as untrusted input. Re-validate the repository
-    // and require Git to recognize the exact target before any recursive fallback.
-    const trustedBaseDir = ensureGitRoot(meta.baseDir);
+    let trustedBaseDir;
+    try {
+      trustedBaseDir = ensureGitRoot(meta.baseDir);
+    } catch {
+      delete state.worktrees[safeSessionId];
+      save(state);
+      return { ok: true, sessionId: safeSessionId, worktreeDir: meta.worktreeDir, reconciled: true };
+    }
+
     if (trustedBaseDir !== normalizeFsPath(meta.baseDir)) {
       throw new Error(`Refusing worktree with invalid base repository: ${meta.baseDir}`);
     }
@@ -242,7 +416,7 @@ function createWorktreeManager(opts = {}) {
     if (!isInside(worktreesRoot, resolvedDir)) {
       throw new Error(`Refusing to remove unmanaged path: ${resolvedDir}`);
     }
-    if (!registeredWorktreePaths(trustedBaseDir).has(resolvedDir)) {
+    if (fs.existsSync(resolvedDir) && !registeredWorktreePaths(trustedBaseDir).has(resolvedDir)) {
       throw new Error(`Refusing to remove unregistered worktree: ${resolvedDir}`);
     }
 
@@ -255,6 +429,10 @@ function createWorktreeManager(opts = {}) {
           runGit(["worktree", "prune"], trustedBaseDir);
         } catch {}
       }
+    } else {
+      try {
+        runGit(["worktree", "prune"], trustedBaseDir);
+      } catch {}
     }
 
     delete state.worktrees[safeSessionId];
@@ -350,6 +528,9 @@ function createWorktreeManager(opts = {}) {
     startPreview,
     stopPreview,
     stopAllPreviews,
+    checkHealth,
+    reconcileWorktree,
+    reconcileAllWorktrees,
   };
 }
 

@@ -323,6 +323,9 @@ function createSessionRoutes({
           return true;
         }
       } catch (error) {
+        if (/^No managed worktree/.test(error.message)) {
+          setSessionWorktree(sessionId, null);
+        }
         sendJson(res, 400, { error: error.message });
         return true;
       }
@@ -344,6 +347,7 @@ function createSessionRoutes({
           sendJson(res, 400, { error: error.message });
           return true;
         }
+        setSessionWorktree(sessionId, null);
       }
       sendJson(res, 200, {
         sessionId,

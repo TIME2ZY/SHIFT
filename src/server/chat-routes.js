@@ -136,12 +136,50 @@ function createChatRunExecutor({
     const turnPrompt = existingUserMessage?.content || rawPrompt;
 
     let sessionWorktree = session.worktree;
-    if (useWorktree && !sessionWorktree) {
-      try {
-        sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
-        session = setSessionWorktree(sessionId, sessionWorktree);
-      } catch (error) {
-        return fail(400, { error: error.message });
+    if (useWorktree) {
+      if (!sessionWorktree) {
+        try {
+          sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
+          session = setSessionWorktree(sessionId, sessionWorktree);
+        } catch (error) {
+          return fail(400, { error: error.message });
+        }
+      } else {
+        const health =
+          typeof worktreeManager.checkHealth === "function"
+            ? worktreeManager.checkHealth(sessionId)
+            : { ok: true };
+        if (!health.ok) {
+          try {
+            sessionWorktree = worktreeManager.ensureWorktree({
+              baseDir: sessionProjectDir,
+              sessionId,
+              forceRecreate: true,
+            });
+            session = setSessionWorktree(sessionId, sessionWorktree);
+          } catch (rebuildError) {
+            console.warn(
+              `[worktree] Failed to auto-rebuild unhealthy worktree for session ${sessionId}, falling back to safe project workspace:`,
+              rebuildError.message
+            );
+            if (typeof worktreeManager.reconcileWorktree === "function") {
+              worktreeManager.reconcileWorktree(sessionId);
+            }
+            sessionWorktree = null;
+            session = setSessionWorktree(sessionId, null);
+          }
+        }
+      }
+    } else if (sessionWorktree) {
+      if (typeof worktreeManager.checkHealth === "function") {
+        const health = worktreeManager.checkHealth(sessionId);
+        if (!health.ok) {
+          if (typeof worktreeManager.reconcileWorktree === "function") {
+            worktreeManager.reconcileWorktree(sessionId);
+          }
+          sessionWorktree = null;
+          session = setSessionWorktree(sessionId, null);
+        }
       }
     }
 
