@@ -129,6 +129,20 @@ function createExecutionReadModel(db) {
     SELECT COUNT(*) AS count FROM memory_entries
     WHERE status = 'active' AND (owner_thread_id = ? OR origin_thread_id = ?)
   `);
+  const lastEventIdForThread = db.prepare(`
+    SELECT MAX(e.id) AS last_id
+    FROM invocation_events e
+    JOIN invocations i ON i.id = e.invocation_id
+    WHERE i.thread_id = ?
+  `);
+  const latestTraceForThread = db.prepare(`
+    SELECT * FROM trace_runs WHERE thread_id = ? ORDER BY started_at DESC, id DESC LIMIT 1
+  `);
+  const activeInvocationsForThread = db.prepare(`
+    SELECT id, agent_id, state, trace_id FROM invocations
+    WHERE thread_id = ? AND state = 'active'
+    ORDER BY started_at ASC
+  `);
 
   function traceSummary(row) {
     const invocationRows = listInvocations.all(row.id);
@@ -172,6 +186,26 @@ function createExecutionReadModel(db) {
   }
 
   return {
+    runSnapshot(threadId) {
+      if (!threadId) return null;
+      const trace = latestTraceForThread.get(threadId);
+      const active = activeInvocationsForThread.all(threadId);
+      const lastEventId = Number(lastEventIdForThread.get(threadId)?.last_id || 0);
+      const runStatus = !trace
+        ? "idle"
+        : trace.state === "active" || active.length > 0
+          ? "running"
+          : trace.state;
+      return {
+        sessionId: threadId,
+        traceId: trace?.id || null,
+        traceState: trace?.state || null,
+        runStatus,
+        lastEventId,
+        activeInvocationIds: active.map((row) => row.id),
+        clientTurnId: trace?.client_turn_id || null,
+      };
+    },
     auditSummary(threadId) {
       if (!threadId) return null;
       const thread = findAuditThread.get(threadId);

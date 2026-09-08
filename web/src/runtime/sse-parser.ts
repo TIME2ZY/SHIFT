@@ -1,6 +1,7 @@
 export interface SseFrame {
   event: string;
   data: unknown;
+  id?: string;
 }
 
 export interface SseParseResult {
@@ -18,6 +19,7 @@ export function parseSseChunk(buffer: string, onFrame: (frame: SseFrame) => void
     rest = rest.slice(boundary + 2);
     const lines = frame.split("\n");
     const eventLine = lines.find((line) => line.startsWith("event:"));
+    const idLine = lines.find((line) => line.startsWith("id:"));
     const dataLines = lines
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trimStart());
@@ -33,7 +35,11 @@ export function parseSseChunk(buffer: string, onFrame: (frame: SseFrame) => void
       }
       // Parsing errors are recoverable malformed frames. Contract/handler
       // errors must propagate so the stream cannot report a false success.
-      onFrame({ event: eventLine.slice(6).trim(), data });
+      onFrame({
+        event: eventLine.slice(6).trim(),
+        data,
+        id: idLine ? idLine.slice(3).trim() : undefined,
+      });
     }
 
     boundary = rest.indexOf("\n\n");

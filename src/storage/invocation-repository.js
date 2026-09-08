@@ -62,6 +62,20 @@ function createInvocationRepository(db) {
     ORDER BY sequence_no ASC
     LIMIT ? OFFSET ?
   `);
+  const listEventsAfterCursor = db.prepare(`
+    SELECT e.*, i.trace_id
+    FROM invocation_events e
+    JOIN invocations i ON i.id = e.invocation_id
+    WHERE i.thread_id = ? AND e.id > ?
+    ORDER BY e.id ASC
+    LIMIT ?
+  `);
+  const lastEventIdForThread = db.prepare(`
+    SELECT MAX(e.id) AS last_id
+    FROM invocation_events e
+    JOIN invocations i ON i.id = e.invocation_id
+    WHERE i.thread_id = ?
+  `);
   const listWithMeta = db.prepare(`
     SELECT i.*, COUNT(e.id) AS event_count
     FROM invocations i
@@ -178,6 +192,18 @@ function createInvocationRepository(db) {
       };
     },
 
+    lastEventIdForThread(threadId) {
+      if (!threadId) return 0;
+      return Number(lastEventIdForThread.get(threadId)?.last_id || 0);
+    },
+
+    listEventsAfter(threadId, afterId = 0, limit = 500) {
+      if (!threadId) return [];
+      const cursor = Math.max(0, Number(afterId) || 0);
+      const size = Math.max(1, Math.min(Number(limit) || 500, 5000));
+      return listEventsAfterCursor.all(threadId, cursor, size).map(mapEvent);
+    },
+
     finish(id, outcome) {
       const state = normalizeTerminalState(outcome.state);
       return withTransaction(db, () => {
@@ -242,6 +268,7 @@ function mapEvent(row) {
   return {
     id: row.id,
     invocationId: row.invocation_id,
+    ...(row.trace_id !== undefined ? { traceId: row.trace_id } : {}),
     sequenceNo: row.sequence_no,
     kind: row.kind,
     payload: JSON.parse(row.payload_json),

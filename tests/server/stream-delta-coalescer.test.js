@@ -130,11 +130,10 @@ test("adjacent same-kind still merges across many micro deltas", () => {
   assert.equal(writes[1].payload.text, "x");
 });
 
-test("A1: default maxMs is 0 — no idle timer on thinking monologue", () => {
+test("default maxMs schedules a bounded idle flush on thinking monologue", () => {
   const timers = [];
   const { writes, coalescer } = collectWrites({
     maxChars: 10_000,
-    // omit maxMs → DEFAULT_MAX_MS = 0
     schedule: (fn, ms) => {
       const id = { fn, ms, cancelled: false };
       timers.push(id);
@@ -144,13 +143,14 @@ test("A1: default maxMs is 0 — no idle timer on thinking monologue", () => {
       handle.cancelled = true;
     },
   });
-  assert.equal(coalescer.maxMs, 0);
-  assert.equal(coalescer.idleMsFor("thinking.delta"), 0);
-  assert.equal(coalescer.idleMsFor("text.delta"), 0);
+  assert.equal(coalescer.maxMs, 80);
+  assert.equal(coalescer.idleMsFor("thinking.delta"), 80);
+  assert.equal(coalescer.idleMsFor("text.delta"), 80);
 
   coalescer.accept({ type: "thinking.delta", agent: "a", text: "chunk1 " });
   coalescer.accept({ type: "thinking.delta", agent: "a", text: "chunk2" });
-  assert.equal(timers.length, 0, "idle disabled — no schedule calls");
+  assert.ok(timers.length >= 1);
+  assert.equal(timers.at(-1).ms, 80);
   assert.equal(writes.length, 0);
   coalescer.flushAll();
   assert.equal(writes.length, 1);
@@ -223,20 +223,73 @@ test("optional idle debounce still works when maxMs > 0", () => {
   });
 
   coalescer.accept({ type: "text.delta", agent: "a", text: "tick" });
-  assert.equal(timers.length, 1);
-  const first = timers[0];
+  assert.equal(timers.length, 2, "idle plus max-wait");
+  const maxWait = timers[1];
 
-  // More text before idle fires — timer should be re-armed (debounce).
   now = 40;
   coalescer.accept({ type: "text.delta", agent: "a", text: " tock" });
-  assert.equal(first.cancelled, true);
-  assert.equal(timers.length, 1);
+  assert.equal(maxWait.cancelled, false, "max-wait is not reset by later tokens");
   assert.equal(writes.length, 0);
 
-  now = 90;
-  timers[0].fn();
+  now = 50;
+  maxWait.fn();
   assert.equal(writes.length, 1);
   assert.equal(writes[0].payload.text, "tick tock");
+});
+
+test("cancelAll drops pending deltas and armed timers without writing", () => {
+  const timers = [];
+  const { writes, coalescer } = collectWrites({
+    maxChars: 10_000,
+    maxMs: 80,
+    schedule: (fn, ms) => {
+      const id = { fn, ms, cancelled: false };
+      timers.push(id);
+      return id;
+    },
+    cancel: (handle) => {
+      handle.cancelled = true;
+    },
+  });
+  coalescer.accept({ type: "text.delta", agent: "a", text: "partial" });
+  assert.equal(writes.length, 0);
+  coalescer.cancelAll();
+  for (const timer of timers) timer.fn();
+  assert.equal(writes.length, 0);
+  coalescer.flushAll();
+  assert.equal(writes.length, 0);
+});
+
+test("continuous sub-idle deltas still flush within the max-wait bound", () => {
+  let now = 0;
+  const timers = [];
+  const { writes, coalescer } = collectWrites({
+    maxChars: 10_000,
+    maxMs: 80,
+    now: () => now,
+    schedule: (fn, ms) => {
+      const id = { fn, fireAt: now + ms, cancelled: false };
+      timers.push(id);
+      return id;
+    },
+    cancel: (handle) => {
+      handle.cancelled = true;
+      const idx = timers.indexOf(handle);
+      if (idx >= 0) timers.splice(idx, 1);
+    },
+  });
+
+  for (let i = 0; i < 100; i += 1) {
+    now = i * 40;
+    coalescer.accept({ type: "text.delta", agent: "a", text: "x" });
+  }
+  assert.equal(writes.length, 0, "idle debounce has not fired");
+  const maxWait = timers.find((timer) => !timer.cancelled && timer.fireAt === 80);
+  assert.ok(maxWait, "first-token max-wait remains armed");
+  now = 80;
+  maxWait.fn();
+  assert.ok(writes.length >= 1);
+  assert.match(writes[0].payload.text, /^x+/);
 });
 
 test("maxMsByKind overrides global maxMs per stream kind", () => {
@@ -260,8 +313,9 @@ test("maxMsByKind overrides global maxMs per stream kind", () => {
   coalescer.flushAll();
 
   coalescer.accept({ type: "text.delta", agent: "a", text: "x" });
-  assert.equal(timers.length, 1);
+  assert.equal(timers.length, 2);
   assert.equal(timers[0].ms, 25);
+  assert.equal(timers[1].ms, 25);
   coalescer.flushAll();
 });
 
@@ -288,10 +342,39 @@ test("resolveCoalesceOptionsFromEnv honors disable and numeric overrides", () =>
       maxMsByKind: { "thinking.delta": 0, "text.delta": 1500 },
     }
   );
-  // Unset env → only enabled; runtime uses DEFAULT_MAX_MS = 0 (A1).
+  // Unset env → only enabled; runtime uses DEFAULT_MAX_MS bounded flush.
   assert.deepEqual(resolveCoalesceOptionsFromEnv({ DURABLE_DELTA_COALESCE: "1" }), {
     enabled: true,
   });
   assert.equal(DEFAULT_MAX_CHARS, 8_000);
-  assert.equal(DEFAULT_MAX_MS, 0);
+  assert.equal(DEFAULT_MAX_MS, 80);
+});
+
+test("timer persistence failure retains the segment and rejects success-path flush", () => {
+  const timers = new Map();
+  const failure = new Error("SQLite write failed");
+  const coalescer = createStreamDeltaCoalescer({
+    write() {
+      throw failure;
+    },
+    schedule(fn) {
+      const id = {};
+      timers.set(id, fn);
+      return id;
+    },
+    cancel(id) {
+      timers.delete(id);
+    },
+  });
+  coalescer.accept({ type: "text.delta", text: "must not disappear" });
+  [...timers.values()][0]();
+  assert.equal(coalescer.pendingChars(), "must not disappear".length);
+  assert.throws(
+    () => coalescer.flushAll(),
+    (error) => error === failure
+  );
+  assert.throws(
+    () => coalescer.accept({ type: "usage.update" }),
+    (error) => error === failure
+  );
 });

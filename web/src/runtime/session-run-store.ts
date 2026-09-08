@@ -5,9 +5,10 @@ export interface SessionRunStore {
   getSnapshot(): SessionRunState;
   subscribe(listener: () => void): () => void;
   dispatch(action: SessionRunAction): void;
-  startController(sessionId: string): AbortController;
-  isCurrentController(sessionId: string, controller: AbortController): boolean;
-  releaseController(sessionId: string, controller: AbortController): boolean;
+  startSubscription(sessionId: string): AbortController;
+  isCurrentSubscription(sessionId: string, controller: AbortController): boolean;
+  releaseSubscription(sessionId: string, controller: AbortController): boolean;
+  stopSubscription(sessionId: string): boolean;
   abort(sessionId: string): boolean;
   dispose(sessionId: string): void;
 }
@@ -33,25 +34,29 @@ export function createSessionRunStore(
       return () => listeners.delete(listener);
     },
     dispatch,
-    startController(sessionId) {
-      controllers.get(sessionId)?.abort();
+    startSubscription(sessionId) {
+      const existing = controllers.get(sessionId);
+      if (existing && !existing.signal.aborted) existing.abort();
       const controller = new AbortController();
       controllers.set(sessionId, controller);
-      dispatch({ type: "run/started", sessionId, startedAt: Date.now() });
       return controller;
     },
-    isCurrentController(sessionId, controller) {
+    isCurrentSubscription(sessionId, controller) {
       return controllers.get(sessionId) === controller;
     },
-    releaseController(sessionId, controller) {
+    releaseSubscription(sessionId, controller) {
       if (controllers.get(sessionId) !== controller) return false;
       controllers.delete(sessionId);
       return true;
     },
-    abort(sessionId) {
+    stopSubscription(sessionId) {
       const controller = controllers.get(sessionId);
       if (!controller) return false;
       controller.abort();
+      controllers.delete(sessionId);
+      return true;
+    },
+    abort(sessionId) {
       dispatch({ type: "run/aborted", sessionId });
       return true;
     },

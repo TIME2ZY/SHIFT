@@ -79,7 +79,7 @@ async function verifyRestoredSqliteApi({ restoredFile }) {
       };
     }
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await server.shutdown();
   }
 
   return {

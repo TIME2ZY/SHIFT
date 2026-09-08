@@ -66,10 +66,6 @@ test("contextCharsFromEvent counts thinking and tool content without duplicates"
   assert.equal(chatRoutes.contextCharsFromEvent({ type: "usage.update", outputTokens: 5 }), 0);
 });
 
-function makeReq(method, headers = {}) {
-  return { method, headers, once() {} };
-}
-
 function makeRes() {
   return {
     statusCode: 0,
@@ -197,58 +193,41 @@ function baseDeps(res, overrides = {}) {
   };
 }
 
-test("createChatRoutes requires authoritative persistence dependencies", () => {
+test("createChatRunExecutor requires authoritative persistence dependencies", () => {
   const res = makeRes();
   const deps = baseDeps(res);
   assert.throws(
-    () => chatRoutes.createChatRoutes({ ...deps, durableRecorder: null }),
+    () => chatRoutes.createChatRunExecutor({ ...deps, durableRecorder: null }),
     /durableRecorder is required/
   );
   assert.throws(
-    () => chatRoutes.createChatRoutes({ ...deps, eventStore: null }),
+    () => chatRoutes.createChatRunExecutor({ ...deps, eventStore: null }),
     /eventStore is required/
   );
   assert.throws(
-    () => chatRoutes.createChatRoutes({ ...deps, memoryCapture: null }),
+    () => chatRoutes.createChatRunExecutor({ ...deps, memoryCapture: null }),
     /memoryCapture is required/
   );
 });
 
-test("handleChatRoutes rejects unsupported agents before starting chat", async () => {
-  const res = makeRes();
-  const handle = chatRoutes.createChatRoutes(
-    baseDeps(res, {
-      readJsonBody: async () => ({ agent: "unknown", prompt: "hi" }),
-    })
-  );
-
-  const handled = await handle(
-    makeReq("POST", { host: "127.0.0.1:8787" }),
-    res,
-    new URL("http://127.0.0.1/api/chat")
-  );
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 400);
-  assert.deepEqual(res.body, { error: 'Unsupported agent "unknown".' });
+test("startRun rejects unsupported agents before starting chat", async () => {
+  const executor = chatRoutes.createChatRunExecutor(baseDeps(makeRes()));
+  const result = await executor.startRun({ body: { agent: "unknown", prompt: "hi" } });
+  assert.equal(result.status, 400);
+  assert.deepEqual(result.json, { error: 'Unsupported agent "unknown".' });
 });
 
-test("handleChatRoutes rejects a supported agent whose Seat is disabled", async () => {
-  const res = makeRes();
-  const handle = chatRoutes.createChatRoutes(
-    baseDeps(res, {
+test("startRun rejects a supported agent whose Seat is disabled", async () => {
+  const executor = chatRoutes.createChatRunExecutor(
+    baseDeps(makeRes(), {
       storage: { threadSeats: { listEnabledForThread: () => [] } },
-      readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "hi" }),
     })
   );
-
-  const handled = await handle(
-    makeReq("POST", { host: "127.0.0.1:8787" }),
-    res,
-    new URL("http://127.0.0.1/api/chat")
-  );
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 409);
-  assert.deepEqual(res.body, {
+  const result = await executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "hi" },
+  });
+  assert.equal(result.status, 409);
+  assert.deepEqual(result.json, {
     error: 'Seat for agent "codex" is not enabled in this Session.',
     code: "SEAT_NOT_ENABLED",
   });
@@ -271,46 +250,38 @@ test("a slower older chat request cannot abort the newer request", async () => {
       getAgentCapacity: () => 1000,
       makeTracker: () => ({ addInput() {}, addOutput() {}, getFillRatio: () => 0 }),
     },
-    readJsonBody: async (req) => req.body,
     appendToSession: (...args) => appended.push(args),
-    sendSse(response, event) {
-      // This test covers request preparation; disconnect once the newer request starts SSE.
-      if (event === "session") response.destroyed = true;
-    },
   });
-  const handler = chatRoutes.createChatRoutes(deps);
-  const req1 = makeReq("POST");
-  req1.body = { sessionId: "s1", agent: "codex", prompt: "older" };
-  const first = handler(req1, res1, { pathname: "/api/chat" });
+  const executor = chatRoutes.createChatRunExecutor(deps);
+  const first = executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "older" },
+  });
   await Promise.resolve();
 
-  const res2 = makeRes();
-  deps.sendJson = makeSendJson(res2);
-  const handler2 = chatRoutes.createChatRoutes(deps);
-  const req2 = makeReq("POST");
-  req2.body = { sessionId: "s1", agent: "codex", prompt: "newer" };
-  const second = handler2(req2, res2, { pathname: "/api/chat" });
+  const second = executor.startRun({
+    body: { sessionId: "s1", agent: "codex", prompt: "newer" },
+  });
   await Promise.resolve();
 
   assert.equal(pendingBootstraps.length, 2);
   const newerController = activeInvocations.get("s1");
   pendingBootstraps[1]();
-  await second;
+  const newer = await second;
   pendingBootstraps[0]();
-  await first;
+  const older = await first;
 
-  assert.equal(res1.statusCode, 409);
-  assert.match(res1.body.error, /superseded/);
+  assert.equal(older.status, 409);
+  assert.match(older.json.error, /superseded/);
+  assert.equal(newer.status, 202);
   assert.equal(appended.length, 1);
   assert.equal(appended[0][1].content, "newer");
   assert.equal(newerController.signal.aborted, false);
 });
 
 test("chat preparation failure closes the durable trace", async () => {
-  const res = makeRes();
   const completed = [];
-  const handle = chatRoutes.createChatRoutes(
-    baseDeps(res, {
+  const executor = chatRoutes.createChatRunExecutor(
+    baseDeps(makeRes(), {
       durableRecorder: {
         enabled: true,
         startTrace: () => ({ id: "trace-1" }),
@@ -328,12 +299,11 @@ test("chat preparation failure closes the durable trace", async () => {
         buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
         buildIdentity: () => "<!-- Session Identity -->\n",
       },
-      readJsonBody: async () => ({ sessionId: "s1", agent: "codex", prompt: "go" }),
     })
   );
 
   await assert.rejects(
-    handle(makeReq("POST"), res, { pathname: "/api/chat" }),
+    executor.startRun({ body: { sessionId: "s1", agent: "codex", prompt: "go" } }),
     /recall unavailable/
   );
   assert.deepEqual(completed, [

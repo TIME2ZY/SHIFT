@@ -70,6 +70,9 @@ export interface SessionRun {
   startedAt?: number;
   updatedAt: number;
   doneReceived: boolean;
+  traceId?: string;
+  replayThrough?: number;
+  cursor?: number;
   /** Live execution state, keyed by invocationId. */
   liveMessages: Record<string, LiveMessage>;
   /** Most recently started invocation for each agent. */
@@ -90,7 +93,17 @@ export interface SessionRunState {
 }
 
 export type SessionRunAction =
-  | { type: "run/started"; sessionId: string; startedAt: number }
+  | { type: "run/started"; sessionId: string; startedAt: number; traceId?: string }
+  | { type: "run/accepted"; sessionId: string; traceId: string }
+  | {
+      type: "run/hydrated";
+      sessionId: string;
+      traceId?: string;
+      replayThrough?: number;
+      cursor?: number;
+      runStatus?: string;
+    }
+  | { type: "run/cursor"; sessionId: string; cursor: number }
   | {
       type: "user/submitted";
       sessionId: string;

@@ -146,7 +146,7 @@ async function runChatWorklist(ctx) {
 
   try {
     for (let i = 0; i < worklist.length; i++) {
-      if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
+      if (invocationController.signal.aborted) {
         aborted = true;
         break;
       }
@@ -520,6 +520,8 @@ async function runChatWorklist(ctx) {
       });
       sealer.update(healthTracker.getFillRatio());
       threadCtx.sealer = sealer;
+      threadCtx.currentInvocationId = invocationId;
+      threadCtx.windowId = durableRun?.window?.id || null;
       // Surface invocation identity together with its immutable Seat/Duty contract.
       // A2A causality remains on window-meta and is joined by invocationId.
       sendSse(res, "agent-start", {
@@ -684,18 +686,17 @@ async function runChatWorklist(ctx) {
         INVOKE_WORKSPACE_KEY: workspaceKey,
       };
 
-      // Live SSE stays fine-grained; durable SQLite+recall writes go through
-      // the coalescer. Strategy A + A1: merge adjacent
-      // same-kind deltas, flush on kind switch / hard boundary / maxChars /
-      // explicit end; idle off by default so long monologues are not chopped;
-      // usage.update is passthrough and does not end an open streak.
+      // Observers see SQLite appends only. Coalesce adjacent same-kind deltas;
+      // flush on kind switch / hard boundary / maxChars / explicit end, and
+      // within maxMs of the first token in a streak (idle may reset, max-wait
+      // does not). usage.update is passthrough and does not end an open streak.
       const persistDurableEvent = (kind, payload) => {
         try {
           events.append({
             threadId: sessionId,
             invocationId: activeInvocationId,
             kind,
-            payload,
+            payload: { ...payload, agent, invocationId: activeInvocationId },
           });
         } catch (error) {
           log.error?.(`[event-store] durable event failed: ${error.message}`);
@@ -911,12 +912,14 @@ async function runChatWorklist(ctx) {
         const streamResult = await runChildStream({
           spawnRunner,
           args: buildChatArgs(agent, agentPrompt, promptForAgent),
-          res,
           cwd: runWorkspace.worktreeDir,
           killGraceMs: options.killGraceMs,
           timeoutMs: options.timeoutMs,
           signal: invocationController.signal,
           env: invocationEnv,
+          onError(payload) {
+            sendSse(res, "error", payload);
+          },
           onEvent(event) {
             observeAvailabilityEvent(ctx.availability, agent, event);
             sendSse(res, "agent-event", event);
@@ -947,9 +950,11 @@ async function runChatWorklist(ctx) {
           onStderr(text) {
             ctx.availability?.observeFailure(agent, text);
             durableCoalescer.flushAll();
-            persistDurableEvent("stderr", { agent, text });
             const visible = filterBenignStderr(text);
-            if (visible) sendSse(res, "stderr", { agent, text: visible });
+            if (visible) {
+              persistDurableEvent("stderr", { agent, text: visible });
+              sendSse(res, "stderr", { agent, text: visible });
+            }
           },
           onEncodingWarning(payload) {
             runObs.noteEncoding(payload.count || 1);
@@ -979,6 +984,7 @@ async function runChatWorklist(ctx) {
         }
         if (streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.
+          durableCoalescer.cancelAll();
           break;
         }
         try {
@@ -1109,7 +1115,7 @@ async function runChatWorklist(ctx) {
         break;
       }
 
-      if (invocationController.signal.aborted || res.destroyed || res.writableEnded) {
+      if (invocationController.signal.aborted) {
         const abortInvId = threadCtx.currentInvocationId || invocationId;
         const abortMessage = buildAssistantFinalMessage({
           agent,
@@ -1289,7 +1295,7 @@ async function runChatWorklist(ctx) {
       });
 
       const hop = storage?.handoffs?.getByTargetInvocation?.(finalInvocationId);
-      if (hop && !res.writableEnded && !res.destroyed) {
+      if (hop) {
         sendSse(res, "a2a-hop-complete", {
           handoffId: hop.handoffId,
           sourceInvocationId: hop.sourceInvocationId,

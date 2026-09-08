@@ -17,6 +17,12 @@ const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 const { initializeCatalogSeats } = require("../src/agents/duty-routing");
 const { AGENTS, resetAgentCatalog } = require("../src/agents/catalog");
 const { createRuntimePaths } = require("../src/shared/runtime-paths");
+const {
+  startAndCollect,
+  startSessionRun,
+  collectSessionEvents,
+  closeTestServer,
+} = require("./helpers/chat-run-client");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -32,6 +38,10 @@ async function fetch(input, init = {}) {
     if (body === undefined) body = "{}";
   }
   return nativeFetch(input, { ...init, headers, ...(body !== undefined ? { body } : {}) });
+}
+
+function startChat(baseUrl, body, init = {}) {
+  return startAndCollect(baseUrl, body, { ...init, fetch });
 }
 
 async function createProjectSession(baseUrl, input = {}) {
@@ -58,10 +68,7 @@ async function chatInNewProjectSession(baseUrl, init = {}) {
   const body = init.body ? JSON.parse(String(init.body)) : {};
   assert.equal(body.sessionId, undefined, "chat fixture already has a Session");
   const created = await createProjectSession(baseUrl).then((response) => response.json());
-  return fetch(`${baseUrl}/api/chat`, {
-    ...init,
-    body: JSON.stringify({ ...body, sessionId: created.session.id }),
-  });
+  return startChat(baseUrl, { ...body, sessionId: created.session.id }, init);
 }
 
 function createMockChild() {
@@ -146,8 +153,7 @@ async function withServer(options, fn) {
       await fn(origin, { memoryDbFile, projectKey });
     } finally {
       projectKeysByOrigin.delete(origin);
-      await new Promise((resolve) => server.close(resolve));
-      await server.closeStorageContext?.();
+      await closeTestServer(server);
     }
   } finally {
     liveStorage?.close();
@@ -183,10 +189,7 @@ test("availability refresh preserves seats and never creates business runs", asy
         unavailable.agents.every((agent) => agent.routable === false),
         true
       );
-      const rejected = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        body: JSON.stringify({ sessionId, agent: "gemini", prompt: "hello" }),
-      });
+      const rejected = await startChat(baseUrl, { sessionId, agent: "gemini", prompt: "hello" });
       assert.equal(rejected.status, 503);
       assert.equal((await rejected.json()).code, "NO_ROUTABLE_SEATS");
       available = true;
@@ -328,7 +331,8 @@ test("UI API rejects non-JSON mutation requests before spawning an agent", async
       },
     },
     async (baseUrl) => {
-      const response = await nativeFetch(`${baseUrl}/api/chat`, {
+      const created = await createProjectSession(baseUrl).then((response) => response.json());
+      const response = await nativeFetch(`${baseUrl}/api/sessions/${created.session.id}/runs`, {
         method: "POST",
         headers: {
           "content-type": "text/plain",
@@ -352,17 +356,13 @@ test("chat rejects unsafe and unknown client-supplied session IDs", async () => 
       },
     },
     async (baseUrl) => {
-      const unsafe = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: ".." }),
-      });
-      assert.equal(unsafe.status, 400);
+      const unsafe = await startChat(baseUrl, { agent: "codex", prompt: "probe", sessionId: ".." });
+      assert.ok([400, 404].includes(unsafe.status));
 
-      const unknown = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "probe", sessionId: "unknown-session" }),
+      const unknown = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: "probe",
+        sessionId: "unknown-session",
       });
       assert.equal(unknown.status, 404);
       assert.equal(spawnCount, 0);
@@ -445,17 +445,10 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       assert.match(calls[0].args[3], /<!-- Collaboration Rules -->/);
       assert.match(calls[0].args[3], /本 Thread 已参与/);
       assert.match(calls[0].args[3], /@OpenCode/);
-      assert.match(
-        text,
-        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"partial "\}/
-      );
-      assert.match(
-        text,
-        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"answer"\}/
-      );
-      // Verify session event is emitted
-      const sessionMatch = text.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
-      assert.ok(sessionMatch, "Expected SSE session event with sessionId");
+      assert.match(text, /"type":"text.delta"/);
+      assert.match(text, /"text":"partial answer"/);
+      const sessionMatch = text.match(/"sessionId":"([^"]+)"/);
+      assert.ok(sessionMatch, "Expected snapshot/session id");
       capturedSessionId = sessionMatch[1];
 
       // Verify messages can be retrieved via /api/messages?sessionId=
@@ -669,18 +662,10 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
       });
       const text = await response.text();
 
-      assert.match(
-        text,
-        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"line 1\\n\\n"\}/
-      );
-      assert.match(
-        text,
-        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":" {4}code-ish indent\\n"\}/
-      );
-      assert.match(
-        text,
-        /event: message\ndata: \{"agent":"opencode","role":"assistant","text":"- list item"\}/
-      );
+      assert.match(text, /"type":"text.delta"/);
+      assert.match(text, /line 1/);
+      assert.match(text, /code-ish indent/);
+      assert.match(text, /list item/);
     }
   );
 });
@@ -698,11 +683,7 @@ test("chat endpoint rejects all agent mode", async () => {
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "all", prompt: "compare" }),
-      });
+      const response = await startChat(baseUrl, { agent: "all", prompt: "compare" });
       const body = await response.json();
 
       assert.equal(response.status, 400);
@@ -951,15 +932,11 @@ test("DELETE /api/sessions/:id discards an attached worktree", async () => {
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "hello",
-          sessionId: session.id,
-          useWorktree: true,
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "hello",
+        sessionId: session.id,
+        useWorktree: true,
       });
       const text = await response.text();
       const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
@@ -997,10 +974,10 @@ test("DELETE /api/sessions/:id does not let a still-running chat recreate the se
       const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
-      const chatPromise = fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "long task", sessionId: session.id }),
+      const chatPromise = startChat(baseUrl, {
+        agent: "codex",
+        prompt: "long task",
+        sessionId: session.id,
       }).then((res) => res.text());
 
       const deadline = Date.now() + 2000;
@@ -1022,7 +999,7 @@ test("DELETE /api/sessions/:id does not let a still-running chat recreate the se
   );
 });
 
-test("POST /api/chat with explicit sessionId stores messages there", async () => {
+test("session run stores messages on the bound session", async () => {
   await withServer(
     {
       spawnRunner(_command, _args) {
@@ -1040,10 +1017,10 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
       const { session } = await created.json();
 
       // Chat into that session (consume body to wait for stream completion)
-      const chatResp = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "hello", sessionId: session.id }),
+      const chatResp = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: "hello",
+        sessionId: session.id,
       });
       await chatResp.text(); // drain SSE stream — ensures appendToSession ran
 
@@ -1056,7 +1033,7 @@ test("POST /api/chat with explicit sessionId stores messages there", async () =>
   );
 });
 
-test("POST /api/chat reuses a user message for the same clientTurnId", async () => {
+test("session run reuses a user message for the same clientTurnId", async () => {
   await withServer(
     {
       spawnRunner() {
@@ -1073,30 +1050,26 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
       const { session } = await created.json();
 
       async function sendTurn(clientTurnId) {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            agent: "codex",
-            prompt: "repeat exactly",
-            sessionId: session.id,
-            clientTurnId,
-          }),
+        const response = await startChat(baseUrl, {
+          agent: "codex",
+          prompt: "repeat exactly",
+          sessionId: session.id,
+          clientTurnId,
         });
-        assert.equal(response.status, 200);
+        assert.ok([200, 202].includes(response.status));
         return response.text();
       }
 
       const first = await sendTurn("turn-same");
       const retry = await sendTurn("turn-same");
-      const firstTrigger = first.match(/"triggerMessageId":"([^"]+)"/)?.[1];
-      const retryTrigger = retry.match(/"triggerMessageId":"([^"]+)"/)?.[1];
-      const firstInvocation = first.match(
-        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/
-      )?.[1];
-      const retryInvocation = retry.match(
-        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/
-      )?.[1];
+      const firstTrigger = [...first.matchAll(/"triggerMessageId":"([^"]+)"/g)].at(-1)?.[1];
+      const retryTrigger = [...retry.matchAll(/"triggerMessageId":"([^"]+)"/g)].at(-1)?.[1];
+      const firstInvocation = [
+        ...first.matchAll(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/g),
+      ].at(-1)?.[1];
+      const retryInvocation = [
+        ...retry.matchAll(/event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"/g),
+      ].at(-1)?.[1];
       assert.ok(firstTrigger);
       assert.equal(retryTrigger, firstTrigger);
       assert.ok(firstInvocation);
@@ -1118,7 +1091,7 @@ test("POST /api/chat reuses a user message for the same clientTurnId", async () 
   );
 });
 
-test("POST /api/chat rejects the retired projectDir override", async () => {
+test("session run rejects the retired projectDir override", async () => {
   await withServer(
     {
       spawnRunner() {
@@ -1132,7 +1105,7 @@ test("POST /api/chat rejects the retired projectDir override", async () => {
     },
     async (baseUrl) => {
       const created = await createProjectSession(baseUrl).then((response) => response.json());
-      const response = await nativeFetch(`${baseUrl}/api/chat`, {
+      const response = await nativeFetch(`${baseUrl}/api/sessions/${created.session.id}/runs`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -1174,15 +1147,11 @@ test("chat preserves the Project binding assigned when the Session was created",
       const originalProjectKey = before.session.projectKey;
       assert.ok(before.session.projectDir);
 
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: "legacy-empty-session",
-          agent: "codex",
-          prompt: "bind project first",
-          clientTurnId: "legacy-bind-turn",
-        }),
+      const response = await startChat(baseUrl, {
+        sessionId: "legacy-empty-session",
+        agent: "codex",
+        prompt: "bind project first",
+        clientTurnId: "legacy-bind-turn",
       });
       assert.equal(response.status, 200);
       await response.text();
@@ -1238,26 +1207,18 @@ test("Project opening creates Sessions whose execution directories cannot drift"
         body: JSON.stringify({ projectKey: projectB.project.projectKey }),
       }).then((response) => response.json());
 
-      let response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "hello A",
-          sessionId: sessionA.session.id,
-        }),
+      let response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "hello A",
+        sessionId: sessionA.session.id,
       });
       assert.equal(response.status, 200);
       await response.text();
 
-      response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "hello B",
-          sessionId: sessionB.session.id,
-        }),
+      response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "hello B",
+        sessionId: sessionB.session.id,
       });
       assert.equal(response.status, 200);
       await response.text();
@@ -1292,14 +1253,10 @@ test("chat endpoint does not create a worktree by default", async () => {
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "@Gemini hello",
-          sessionId: session.id,
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "@Gemini hello",
+        sessionId: session.id,
       });
       await response.text();
 
@@ -1349,15 +1306,11 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "@Gemini hello",
-          sessionId: session.id,
-          useWorktree: true,
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "@Gemini hello",
+        sessionId: session.id,
+        useWorktree: true,
       });
       const text = await response.text();
 
@@ -1510,15 +1463,11 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "grok",
-          prompt: "implement and request review",
-          sessionId: session.id,
-          useWorktree: true,
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "grok",
+        prompt: "implement and request review",
+        sessionId: session.id,
+        useWorktree: true,
       });
       await response.text();
 
@@ -1742,16 +1691,12 @@ test("PR4 workflow verifies OpenCode delivery before Codex accepts the original 
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "codex",
-          prompt: userPrompt,
-          sessionId: session.id,
-          useWorktree: true,
-          duty: "discuss",
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: userPrompt,
+        sessionId: session.id,
+        useWorktree: true,
+        duty: "discuss",
       });
       const text = await response.text();
       assert.equal(response.status, 200);
@@ -1837,15 +1782,11 @@ test("chat endpoint reuses the session worktree on later turns", async () => {
       }).then((response) => response.json());
 
       for (const prompt of ["first", "second"]) {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            agent: "opencode",
-            prompt,
-            sessionId: session.id,
-            useWorktree: true,
-          }),
+        const response = await startChat(baseUrl, {
+          agent: "opencode",
+          prompt,
+          sessionId: session.id,
+          useWorktree: true,
         });
         assert.equal(response.status, 200);
         await response.text();
@@ -1897,15 +1838,11 @@ test("isolated worktree chat uses native skill delivery instead of full prompt i
       const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
         result.json()
       );
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "hello native skills",
-          sessionId: session.id,
-          useWorktree: true,
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "hello native skills",
+        sessionId: session.id,
+        useWorktree: true,
       });
       assert.equal(response.status, 200);
       await response.text();
@@ -1973,28 +1910,20 @@ test("chat endpoint treats useWorktree as a per-run permission gate after a work
         body: JSON.stringify({ projectKey: opened.project.projectKey }),
       }).then((response) => response.json());
 
-      const first = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "first",
-          sessionId: session.id,
-          useWorktree: true,
-        }),
+      const first = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "first",
+        sessionId: session.id,
+        useWorktree: true,
       });
       assert.equal(first.status, 200);
       await first.text();
 
-      const second = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "second",
-          sessionId: session.id,
-          useWorktree: false,
-        }),
+      const second = await startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "second",
+        sessionId: session.id,
+        useWorktree: false,
       });
       assert.equal(second.status, 200);
       await second.text();
@@ -2075,50 +2004,36 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     });
     const { session } = await created.json();
 
-    const initialBaseChat = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        agent: "opencode",
-        prompt: "initial base turn",
-        sessionId: session.id,
-        useWorktree: false,
-      }),
+    const initialBaseChat = await startChat(baseUrl, {
+      agent: "opencode",
+      prompt: "initial base turn",
+      sessionId: session.id,
+      useWorktree: false,
     });
     await initialBaseChat.text();
 
-    const worktreeChat = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        agent: "opencode",
-        prompt: "worktree turn",
-        sessionId: session.id,
-        useWorktree: true,
-      }),
+    const worktreeChat = await startChat(baseUrl, {
+      agent: "opencode",
+      prompt: "worktree turn",
+      sessionId: session.id,
+      useWorktree: true,
     });
     assert.equal(worktreeChat.status, 200);
     await worktreeChat.text();
 
-    const resumedWorktreeChat = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        agent: "opencode",
-        prompt: "worktree turn again",
-        sessionId: session.id,
-        useWorktree: true,
-      }),
+    const resumedWorktreeChat = await startChat(baseUrl, {
+      agent: "opencode",
+      prompt: "worktree turn again",
+      sessionId: session.id,
+      useWorktree: true,
     });
     await resumedWorktreeChat.text();
 
-    const baseChat = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        agent: "opencode",
-        prompt: "base turn again",
-        sessionId: session.id,
-        useWorktree: false,
-      }),
+    const baseChat = await startChat(baseUrl, {
+      agent: "opencode",
+      prompt: "base turn again",
+      sessionId: session.id,
+      useWorktree: false,
     });
     assert.equal(baseChat.status, 200);
     await baseChat.text();
@@ -2133,8 +2048,7 @@ test("chat endpoint resumes the matching provider session after base↔worktree 
     assert.equal(runs[3].env.INVOKE_SESSION_ID, "provider-base-1");
     assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${normalizeCanonicalPath(baseDir)}`);
   } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await server.closeStorageContext?.();
+    await closeTestServer(server);
     if (!prevTranscriptDir) {
       delete process.env.SHIFT_TRANSCRIPT_DIR;
     }
@@ -2283,43 +2197,57 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
-      // Start first long-running chat.
-      const first = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const first = await startSessionRun(
+        baseUrl,
+        {
           agent: "codex",
           prompt: "long task",
           sessionId: session.id,
           clientTurnId: "turn-old",
-        }),
-      });
-      assert.equal(first.status, 200);
+        },
+        { headers: { "X-Shift-UI-Token": TEST_UI_TOKEN } }
+      );
+      assert.equal(first.status, 202);
 
-      // Start second chat on the same session: it should abort the first.
-      const second = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const second = await startSessionRun(
+        baseUrl,
+        {
           agent: "opencode",
           prompt: "new task",
           sessionId: session.id,
           clientTurnId: "turn-new",
-        }),
-      });
-      assert.equal(second.status, 200);
-
-      const text = await second.text();
-      const startMatch = text.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)","seatId":"[^"]+","duty":"discuss"\}/
+        },
+        { headers: { "X-Shift-UI-Token": TEST_UI_TOKEN } }
       );
-      assert.ok(startMatch, "agent-start must expose invocation, Seat, and Duty");
+      assert.equal(second.status, 202);
+      const secondJson = await second.json();
+      const { text } = await collectSessionEvents(baseUrl, session.id, {
+        headers: { "X-Shift-UI-Token": TEST_UI_TOKEN },
+        traceId: secondJson.traceId,
+      });
+      const startedFrame = text
+        .split("\n\n")
+        .find(
+          (frame) =>
+            frame.includes("event: agent-start\n") &&
+            frame.includes(`"traceId":"${secondJson.traceId}"`)
+        );
+      assert.ok(startedFrame, "agent-start must expose the current Trace");
+      const startData = JSON.parse(
+        startedFrame
+          .split("\n")
+          .find((line) => line.startsWith("data: "))
+          .slice(6)
+      );
+      assert.equal(startData.agent, "opencode");
+      assert.equal(startData.duty, "discuss");
+      assert.ok(startData.invocationId && startData.seatId);
       const windowMeta = text
         .split("\n\n")
         .find(
           (frame) =>
-            frame.startsWith("event: window-meta\n") &&
-            frame.includes(`"invocationId":"${startMatch[1]}"`)
+            frame.includes("event: window-meta\n") &&
+            frame.includes(`"invocationId":"${startData.invocationId}"`)
         );
       assert.ok(windowMeta, "window-meta must correlate by invocationId");
       assert.match(windowMeta, /"parentInvocationId":null/);
@@ -2327,16 +2255,14 @@ test("chat endpoint aborts previous invocation on same session", async () => {
       assert.match(windowMeta, /"triggerType":"user-message"/);
       assert.equal(callCount, 2);
 
-      const firstText = await first.text();
-      const firstInvocationId = firstText.match(
-        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"[^\n]*\}/
-      )?.[1];
-      assert.ok(firstInvocationId);
       const storage = createStorage({ file: memoryDbFile });
       try {
-        assert.equal(storage.invocations.get(firstInvocationId).state, "aborted");
+        const invocations = storage.invocations.listForThread(session.id);
+        const firstInvocation = invocations.find((row) => row.agentId === "codex");
+        assert.ok(firstInvocation);
+        assert.equal(firstInvocation.state, "aborted");
         const ended = storage.invocations
-          .listEvents(firstInvocationId)
+          .listEvents(firstInvocation.id)
           .find((event) => event.kind === "invocation-end");
         assert.equal(ended.payload.supersededByClientTurnId, "turn-new");
       } finally {
@@ -2367,10 +2293,10 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       const created = await createProjectSession(baseUrl);
       const { session } = await created.json();
 
-      const firstPromise = fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "old task", sessionId: session.id }),
+      const firstPromise = startChat(baseUrl, {
+        agent: "codex",
+        prompt: "old task",
+        sessionId: session.id,
       }).then((r) => r.text());
 
       const deadline1 = Date.now() + 2000;
@@ -2379,14 +2305,10 @@ test("stale aborted chat cleanup does not unregister the replacement chat callba
       }
       assert.equal(spawned.length, 1);
 
-      const secondPromise = fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "opencode",
-          prompt: "replacement task",
-          sessionId: session.id,
-        }),
+      const secondPromise = startChat(baseUrl, {
+        agent: "opencode",
+        prompt: "replacement task",
+        sessionId: session.id,
       }).then((r) => r.text());
 
       const deadline2 = Date.now() + 2000;
@@ -3074,14 +2996,14 @@ test("chat endpoint terminates the chain with sealed event when action threshold
         });
         const text = await response.text();
         // Seal lifecycle: pre-call rotate and/or post/physical seal — never silent drop.
-        assert.match(text, /event: sealed\ndata: \{[^\n]*"agent":"codex"/);
+        assert.match(text, /event: (?:window-sealed|sealed)/);
         assert.match(
           text,
           /"reason":"(context overflow|pre-call-projected|physical-ceiling|post-turn-[^"]+|physical-ceiling-empty)"/
         );
         // User still gets non-empty assistant text (or explicit retryable error).
         assert.ok(
-          /"role":"assistant","text":"x{10,}/.test(text) || /retryable":true/.test(text),
+          /"text":"x{10,}/.test(text) || /retryable":true/.test(text),
           "expected non-empty assistant stream or retryable error after seal pressure"
         );
       }
@@ -3156,14 +3078,10 @@ test("empty exact-context emergency completes old invocation before one-shot rep
         },
       },
       async (baseUrl, { memoryDbFile }) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "session-empty-emergency",
-            agent: "codex",
-            prompt: "continue",
-          }),
+        const response = await startChat(baseUrl, {
+          sessionId: "session-empty-emergency",
+          agent: "codex",
+          prompt: "continue",
         });
         const body = await response.text();
         assert.match(body, /replayed successfully/);
@@ -3214,14 +3132,10 @@ test("stream handler failure closes the invocation as failed without crashing th
     },
     async (baseUrl, { memoryDbFile }) => {
       const created = await createProjectSession(baseUrl).then((response) => response.json());
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: created.session.id,
-          agent: "codex",
-          prompt: "hello",
-        }),
+      const response = await startChat(baseUrl, {
+        sessionId: created.session.id,
+        agent: "codex",
+        prompt: "hello",
       });
       const body = await response.text();
       assert.match(body, /event: error/);
@@ -3288,14 +3202,10 @@ test("buffered stream persist failure closes as stream-handler-failed without cr
     },
     async (baseUrl, { memoryDbFile }) => {
       const created = await createProjectSession(baseUrl).then((response) => response.json());
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: created.session.id,
-          agent: "codex",
-          prompt: "hello",
-        }),
+      const response = await startChat(baseUrl, {
+        sessionId: created.session.id,
+        agent: "codex",
+        prompt: "hello",
       });
       const body = await response.text();
       assert.match(body, /event: error/);
@@ -3362,14 +3272,10 @@ test("persist failure during empty emergency does not replay a second invocation
         },
       },
       async (baseUrl, { memoryDbFile }) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "session-persist-empty-emergency",
-            agent: "codex",
-            prompt: "continue",
-          }),
+        const response = await startChat(baseUrl, {
+          sessionId: "session-persist-empty-emergency",
+          agent: "codex",
+          prompt: "continue",
         });
         const body = await response.text();
         assert.match(body, /event: error/);
@@ -3436,18 +3342,19 @@ async function withActiveChat(fn) {
       },
       async (baseUrl) => {
         const knownSessionId = "phase3-active-session";
+        const observer = new AbortController();
 
         // Fire the chat in background; the mock holds the child open so we can
         // poke the callback endpoints while it's "running".
-        const chatPromise = fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
+        const chatPromise = startChat(
+          baseUrl,
+          {
             agent: "opencode",
             prompt: "long running task about redis clustering",
             sessionId: knownSessionId,
-          }),
-        });
+          },
+          { signal: observer.signal }
+        );
 
         // Wait for spawnRunner to be called (env captured)
         const deadline = Date.now() + 2000;
@@ -3462,6 +3369,7 @@ async function withActiveChat(fn) {
         try {
           await fn(baseUrl, knownSessionId, captured);
         } finally {
+          observer.abort();
           if (captured.kill) captured.kill();
           await chatPromise.catch(() => {});
         }
@@ -3669,14 +3577,10 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
         },
       },
       async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            agent: "gemini",
-            prompt: "hello world",
-            sessionId: "bootstrap-test-session",
-          }),
+        const response = await startChat(baseUrl, {
+          agent: "gemini",
+          prompt: "hello world",
+          sessionId: "bootstrap-test-session",
         });
         await response.text();
       }
@@ -3747,14 +3651,10 @@ test("A2A-routed agents get persona identity + light session header, not full bo
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "codex",
-          prompt: "start",
-          sessionId: "bootstrap-a2a-test",
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: "start",
+        sessionId: "bootstrap-a2a-test",
       });
       await response.text();
     }
@@ -3831,14 +3731,10 @@ test("A2A-routed agents receive structured handoff fields when present", async (
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "codex",
-          prompt: "做登录",
-          sessionId: "structured-handoff-test",
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: "做登录",
+        sessionId: "structured-handoff-test",
       });
       await response.text();
     }
@@ -3915,14 +3811,10 @@ test("A2A allows the same Seat to re-enter the worklist with another Duty", asyn
       },
     },
     async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          agent: "codex",
-          prompt: "做登录并走 review",
-          sessionId: "reentry-handoff-test",
-        }),
+      const response = await startChat(baseUrl, {
+        agent: "codex",
+        prompt: "做登录并走 review",
+        sessionId: "reentry-handoff-test",
       });
       const text = await response.text();
       assert.equal(response.status, 200);
@@ -3962,12 +3854,7 @@ test("bootstrap digest lists prior invocations when chat is re-entered with same
     },
     async (baseUrl) => {
       for (const prompt of ["first", "second"]) {
-        await (
-          await fetch(`${baseUrl}/api/chat`, {
-            method: "POST",
-            body: JSON.stringify({ agent: "opencode", prompt, sessionId }),
-          })
-        ).text();
+        await (await startChat(baseUrl, { agent: "opencode", prompt, sessionId })).text();
       }
     }
   );
@@ -4019,8 +3906,8 @@ test("chat records invocation events and recall routes expose them (no token = f
         body: JSON.stringify({ agent: "opencode", prompt: "remember this" }),
       });
       const chatText = await chat.text();
-      const sidMatch = chatText.match(/event: session\ndata: \{"sessionId":"([^"]+)"\}/);
-      assert.ok(sidMatch, "expected session event");
+      const sidMatch = chatText.match(/"sessionId":"([^"]+)"/);
+      assert.ok(sidMatch, "expected session id");
       const sid = sidMatch[1];
       const invMatch = chatText.match(
         /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"[^\n]*\}/

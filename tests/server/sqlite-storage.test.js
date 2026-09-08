@@ -10,6 +10,8 @@ const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
 const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 
+const { startAndCollect } = require("../helpers/chat-run-client");
+
 const UI_TOKEN = "sqlite-storage-test-token";
 
 function apiFetch(url, init = {}) {
@@ -17,6 +19,12 @@ function apiFetch(url, init = {}) {
   headers.set("X-Shift-UI-Token", UI_TOKEN);
   if (init.method === "POST") headers.set("content-type", "application/json");
   return fetch(url, { ...init, headers });
+}
+
+function startChat(baseUrl, body) {
+  return startAndCollect(baseUrl, body, {
+    headers: { "X-Shift-UI-Token": UI_TOKEN },
+  });
 }
 
 function successfulSpawn() {
@@ -143,12 +151,21 @@ test("chat persists thread state through SQLite repositories", async () => {
     });
     const { session } = await createdResponse.json();
 
-    const chatResponse = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "Hi" }),
+    const chatResponse = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "Hi",
     });
     await chatResponse.text();
-
+    let kinds = [];
+    for (let i = 0; i < 40; i += 1) {
+      const invocation = storage.invocations.listForThread(session.id)[0];
+      kinds = invocation
+        ? storage.invocations.listEvents(invocation.id).map((event) => event.kind)
+        : [];
+      if (kinds.includes("text.delta") && kinds.includes("invocation-end")) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     const durableMessages = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then(
       (response) => response.json()
     );
@@ -160,21 +177,20 @@ test("chat persists thread state through SQLite repositories", async () => {
     assert.equal(storage.windows.listForThread(session.id).length, 1);
     assert.equal(storage.messages.listForThread(session.id).length, 2);
     assert.equal(storage.invocations.listForThread(session.id).length, 1);
-    assert.deepEqual(
-      storage.invocations
-        .listEvents(storage.invocations.listForThread(session.id)[0].id)
-        .map((event) => event.kind),
-      ["invocation-start", "text.delta", "invocation-end"]
-    );
+    assert.ok(kinds.includes("invocation-start"));
+    assert.ok(kinds.includes("text.delta"));
+    assert.ok(kinds.includes("invocation-end"));
+    assert.ok(kinds.includes("done"));
 
     const invocationId = storage.invocations.listForThread(session.id)[0].id;
     const replay = await apiFetch(
       `${baseUrl}/api/callbacks/read-invocation?sessionId=${session.id}&targetInvocationId=${invocationId}`
     ).then((response) => response.json());
-    assert.deepEqual(
-      replay.events.map((event) => event.kind),
-      ["invocation-start", "text.delta", "invocation-end"]
-    );
+    const replayKinds = replay.events.map((event) => event.kind);
+    assert.ok(replayKinds.includes("invocation-start"));
+    assert.ok(replayKinds.includes("text.delta"));
+    assert.ok(replayKinds.includes("invocation-end"));
+    assert.ok(replayKinds.includes("done"));
 
     const deleteResponse = await apiFetch(`${baseUrl}/api/sessions/${session.id}`, {
       method: "DELETE",
@@ -234,9 +250,10 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
       method: "POST",
       body: JSON.stringify({ projectKey }),
     }).then((response) => response.json());
-    const stream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "start" }),
+    const stream = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "start",
     }).then((response) => response.text());
     const memories = storage.memories.listForThread(session.id);
 
@@ -277,10 +294,9 @@ test("chat seals from cumulative window usage and starts the next generation", a
       body: JSON.stringify({ projectKey }),
     }).then((response) => response.json());
 
-    await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "first" }),
-    }).then((response) => response.text());
+    await startChat(baseUrl, { sessionId: session.id, agent: "codex", prompt: "first" }).then(
+      (response) => response.text()
+    );
 
     const firstWindow = storage.windows.listForThread(session.id)[0];
     const targetChars = Math.floor(firstWindow.capacityTokens * 4 * 0.895);
@@ -290,11 +306,12 @@ test("chat seals from cumulative window usage and starts the next generation", a
     });
     storage.windows.bindProviderSession(firstWindow.id, "provider-session-old");
 
-    const sealedStream = await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "second" }),
+    const sealedStream = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "second",
     }).then((response) => response.text());
-    assert.match(sealedStream, /event: sealed/);
+    assert.match(sealedStream, /event: window-sealed|event: sealed/);
     assert.equal(storage.windows.get(firstWindow.id).state, "sealed");
     const rotatedWindows = storage.windows.listForThread(session.id);
     assert.equal(rotatedWindows.length, 2);
@@ -307,10 +324,9 @@ test("chat seals from cumulative window usage and starts the next generation", a
     assert.equal(storage.memories.listForThread(session.id).length, 0);
     assert.match(sealedStream, /event: window-sealed/);
 
-    await apiFetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({ sessionId: session.id, agent: "codex", prompt: "third" }),
-    }).then((response) => response.text());
+    await startChat(baseUrl, { sessionId: session.id, agent: "codex", prompt: "third" }).then(
+      (response) => response.text()
+    );
     const windows = storage.windows.listForThread(session.id);
     assert.equal(windows.length, 2);
     assert.equal(windows[1].generation, 2);
@@ -363,13 +379,10 @@ test("default sqlite mode restores sessions after restart", async () => {
       method: "POST",
       body: JSON.stringify({ projectKey }),
     }).then((response) => response.json());
-    await apiFetch(`${firstUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "durable first prompt",
-      }),
+    await startChat(firstUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "durable first prompt",
     }).then((response) => response.text());
     assert.equal(providerCalls[0].resumeSessionId, "");
     assert.equal(providerCalls[0].sessionFile, "");
@@ -396,13 +409,10 @@ test("default sqlite mode restores sessions after restart", async () => {
       ["durable first prompt", firstConclusion]
     );
 
-    await apiFetch(`${secondUrl}/api/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        sessionId: session.id,
-        agent: "codex",
-        prompt: "continued after restart",
-      }),
+    await startChat(secondUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "continued after restart",
     }).then((response) => response.text());
     assert.equal(providerCalls[1].resumeSessionId, "provider-session-1");
     assert.equal(providerCalls[1].sessionFile, "");

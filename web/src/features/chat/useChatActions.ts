@@ -1,15 +1,24 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { queryKeys } from "../../shared/api/queryKeys";
 import type { MemoryInjectEvent } from "../memory/queries";
 import { useToast } from "../notifications/ToastProvider";
-import { runChatStream } from "../../runtime/chat-stream";
+import { startRun, stopRun } from "../../runtime/run-api";
+import { subscribeRunEvents } from "../../runtime/run-event-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
 
 export function useChatActions() {
   const queryClient = useQueryClient();
   const store = useSessionRunStore();
   const toast = useToast();
+  const startControllersRef = useRef(new Map<string, AbortController>());
 
   const send = useCallback(
     async (
@@ -22,7 +31,6 @@ export function useChatActions() {
       const content = prompt.trim();
       if (!content) return;
 
-      const controller = store.startController(sessionId);
       store.dispatch({
         type: "user/submitted",
         sessionId,
@@ -31,100 +39,59 @@ export function useChatActions() {
         clientTurnId,
       });
 
-      let memoryDirty = false;
+      const startController = new AbortController();
+      startControllersRef.current.get(sessionId)?.abort();
+      startControllersRef.current.set(sessionId, startController);
+      store.dispatch({
+        type: "run/started",
+        sessionId,
+        startedAt: Date.now(),
+      });
+
+      let accepted = false;
       try {
-        const result = await runChatStream(
-          { sessionId, agentId, prompt: content, useWorktree, clientTurnId },
-          store,
-          controller,
-          {
-            onMemory(payload) {
-              memoryDirty = true;
-              toast.show(
-                payload.action === "invalidate" ? "Agent 已否定一条记忆" : "Agent 已写入记忆",
-                { variant: "ok" }
-              );
-            },
-            onMemoryInject(payload, eventSessionId) {
-              const memoryInject = payload as MemoryInjectEvent;
-              queryClient.setQueryData(
-                queryKeys.sessions.memoryInject(eventSessionId),
-                memoryInject
-              );
-              const count = Number(memoryInject.count || memoryInject.items?.length || 0);
-              if (count > 0) {
-                toast.show(`本回合注入 ${count} 条记忆`, { variant: "ok" });
-              }
-            },
-            onMemoryMetrics(payload) {
-              if (Number(payload.totalWrites || 0) > 0) {
-                memoryDirty = true;
-              }
-            },
-            onRunError(message) {
-              toast.show(message, { variant: "error", ttl: 7000 });
-            },
-            onAgentExit(eventSessionId, invocationId) {
-              void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.messages(eventSessionId),
-              });
-              void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.usage(eventSessionId),
-              });
-              void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.collaboration(eventSessionId),
-              });
-              void queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.invocationProcess(eventSessionId, invocationId),
-              });
-            },
+        const started = await startRun({
+          sessionId,
+          agentId,
+          prompt: content,
+          useWorktree,
+          clientTurnId,
+        });
+        accepted = true;
+        if (startControllersRef.current.get(sessionId) === startController) {
+          store.dispatch({ type: "run/accepted", sessionId, traceId: started.traceId });
+        }
+        if (startController.signal.aborted) {
+          const outcome = await stopRun(sessionId, started.traceId);
+          if (startControllersRef.current.get(sessionId) === startController && outcome.stopped) {
+            store.abort(sessionId);
+            toast.show("已停止当前运行。");
           }
-        );
-        if (result.malformedFrames > 0) {
-          store.dispatch({
-            type: "notice/received",
-            sessionId,
-            message: `消息流中有 ${result.malformedFrames} 个事件无法解析。`,
-          });
-          toast.show(`消息流中有 ${result.malformedFrames} 个事件无法解析。`, {
-            variant: "error",
-          });
+          return;
         }
       } catch (error) {
-        if (!controller.signal.aborted && store.isCurrentController(sessionId, controller)) {
-          const message = error instanceof Error ? error.message : "连接中断。";
-          store.dispatch({
-            type: "run/failed",
-            sessionId,
-            error: message,
-          });
-          toast.show(message, { variant: "error", ttl: 7000 });
-        }
+        if (startControllersRef.current.get(sessionId) !== startController) return;
+        if (isAbortError(error)) return;
+        const message = error instanceof Error ? error.message : "启动运行失败。";
+        if (!accepted) store.dispatch({ type: "run/failed", sessionId, error: message });
+        toast.show(message, { variant: "error", ttl: 7000 });
       } finally {
-        const owned = store.releaseController(sessionId, controller);
-        if (owned) {
-          const syncs = [
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.sessions.messages(sessionId),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.sessions.usage(sessionId),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.sessions.collaboration(sessionId),
-            }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
-          ];
-          if (memoryDirty) {
-            syncs.push(
-              queryClient.invalidateQueries({
-                queryKey: queryKeys.sessions.memories(sessionId),
-              })
-            );
-          }
-          await Promise.all(syncs);
-          store.dispatch({ type: "run/synced", sessionId });
+        if (startControllersRef.current.get(sessionId) === startController) {
+          startControllersRef.current.delete(sessionId);
         }
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.messages(sessionId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.usage(sessionId),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.collaboration(sessionId),
+          }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all }),
+        ]);
+        store.dispatch({ type: "run/synced", sessionId });
       }
     },
     [queryClient, store, toast]
@@ -132,12 +99,87 @@ export function useChatActions() {
 
   const stop = useCallback(
     (sessionId: string) => {
-      const stopped = store.abort(sessionId);
-      if (stopped) toast.show("已停止当前运行。");
-      return stopped;
+      const pendingStart = startControllersRef.current.get(sessionId);
+      if (pendingStart) {
+        pendingStart.abort();
+        return true;
+      }
+      const traceId = store.getSnapshot().runs[sessionId]?.traceId;
+      if (!traceId) {
+        toast.show("尚未取得运行标识，无法确认停止。", { variant: "error" });
+        return false;
+      }
+      void stopRun(sessionId, traceId)
+        .then((outcome) => {
+          if (outcome.stopped) {
+            store.abort(sessionId);
+            toast.show("已停止当前运行。");
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "停止失败。";
+          toast.show(message, { variant: "error", ttl: 7000 });
+        });
+      return true;
     },
     [store, toast]
   );
 
-  return { send, stop };
+  const restore = useCallback(
+    (sessionId: string) => {
+      const controller = store.startSubscription(sessionId);
+      void subscribeRunEvents(sessionId, store, controller, {
+        onMemory(payload) {
+          toast.show(
+            payload.action === "invalidate" ? "Agent 已否定一条记忆" : "Agent 已写入记忆",
+            { variant: "ok" }
+          );
+        },
+        onMemoryInject(payload, eventSessionId) {
+          queryClient.setQueryData(
+            queryKeys.sessions.memoryInject(eventSessionId),
+            payload as MemoryInjectEvent
+          );
+          const memoryInject = payload as MemoryInjectEvent;
+          const count = Number(memoryInject.count || memoryInject.items?.length || 0);
+          if (count > 0) {
+            toast.show(`本回合注入 ${count} 条记忆`, { variant: "ok" });
+          }
+        },
+        onMemoryMetrics(payload) {
+          if (Number(payload.totalWrites || 0) > 0) {
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.sessions.memories(sessionId),
+            });
+          }
+        },
+        onRunError(message) {
+          toast.show(message, { variant: "error", ttl: 7000 });
+        },
+        onAgentExit(eventSessionId, invocationId) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.messages(eventSessionId),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.usage(eventSessionId),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.invocationProcess(eventSessionId, invocationId),
+          });
+        },
+      }).catch((error) => {
+        if (controller.signal.aborted) return;
+        const message = error instanceof Error ? error.message : "观察流中断。";
+        toast.show(message, { variant: "error", ttl: 7000 });
+      });
+      return () => {
+        if (store.isCurrentSubscription(sessionId, controller)) {
+          store.stopSubscription(sessionId);
+        }
+      };
+    },
+    [queryClient, store, toast]
+  );
+
+  return { send, stop, restore };
 }

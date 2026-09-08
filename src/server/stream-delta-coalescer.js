@@ -10,21 +10,21 @@
  *   - Kind switch → flush the old buffer, then open a new one
  *   - Long monologue still splits at maxChars
  *
- * A1 defaults: idle flush is OFF for both thinking and text. Segment boundaries
- * are content kind switches, hard-boundary events, maxChars, and explicit
- * flushAll (stream end / seal / stderr). Metadata such as usage.update is
- * written through without flushing an open delta streak (avoids chopping a
- * long monologue into many thinking.delta rows).
+ * Segment boundaries are content kind switches, hard-boundary events, maxChars,
+ * idle debounce, first-token max-wait, and explicit flushAll (stream end / seal / stderr).
+ * Metadata such as usage.update is written through without flushing an open
+ * delta streak (avoids chopping a long monologue into many thinking.delta rows).
  *
  * Flush when:
  *   - kind switches (strategy A)
  *   - a buffer reaches maxChars
  *   - a hard-boundary non-delta event arrives
  *   - flushAll() is called (stream end, seal, stderr, …)
- *   - optional idle maxMs / maxMsByKind when explicitly enabled (> 0)
+ *   - idle maxMs after the last token, and a max-wait bound from the first
+ *     token of the streak (default 80ms). Idle may reset; max-wait does not.
  *
  * Does not flush when:
- *   - idle timeout under A1 defaults (maxMs = 0)
+ *   - idle timeout is explicitly disabled (maxMs = 0)
  *   - passthrough metadata (usage.update)
  */
 
@@ -42,10 +42,11 @@ const PASSTHROUGH_NO_FLUSH = new Set(["usage.update"]);
  */
 const DEFAULT_MAX_CHARS = 8_000;
 /**
- * A1: idle flush disabled by default. Set maxMs or maxMsByKind > 0 to re-enable
- * debounce for mid-turn visibility of open buffers.
+ * Idle debounce and max-wait bound so reconnectable SSE observes in-progress
+ * deltas without waiting for stream end. Continuous tokens still flush at
+ * least once per maxMs from the first token of the streak.
  */
-const DEFAULT_MAX_MS = 0;
+const DEFAULT_MAX_MS = 80;
 
 /**
  * @param {object} options
@@ -53,7 +54,7 @@ const DEFAULT_MAX_MS = 0;
  *   Called for each durable event (coalesced or pass-through).
  * @param {boolean} [options.enabled=true]
  * @param {number} [options.maxChars]
- * @param {number} [options.maxMs] Global idle ms (0 = off). Per-kind overrides win.
+ * @param {number} [options.maxMs] Idle and max-wait ms (0 = off). Per-kind overrides win.
  * @param {Record<string, number>} [options.maxMsByKind]
  * @param {() => number} [options.now]
  * @param {(fn: () => void, ms: number) => unknown} [options.schedule]
@@ -65,6 +66,7 @@ function createStreamDeltaCoalescer(options = {}) {
   }
 
   const write = options.write;
+  let timerFailure = null;
   const maxChars = Number.isFinite(options.maxChars)
     ? Math.max(0, options.maxChars)
     : DEFAULT_MAX_CHARS;
@@ -77,7 +79,7 @@ function createStreamDeltaCoalescer(options = {}) {
   const cancel =
     typeof options.cancel === "function" ? options.cancel : (handle) => clearTimeout(handle);
 
-  /** @type {Map<string, { text: string, payload: object, timer: unknown }>} */
+  /** @type {Map<string, { text: string, payload: object, idleTimer: unknown, maxTimer: unknown }>} */
   const buffers = new Map();
   /** Open buffer kinds in first-seen order (at most one for strategy A). */
   const openOrder = [];
@@ -90,10 +92,14 @@ function createStreamDeltaCoalescer(options = {}) {
     return maxMs;
   }
 
-  function clearTimer(buf) {
-    if (buf.timer != null) {
-      cancel(buf.timer);
-      buf.timer = null;
+  function clearTimers(buf) {
+    if (buf.idleTimer != null) {
+      cancel(buf.idleTimer);
+      buf.idleTimer = null;
+    }
+    if (buf.maxTimer != null) {
+      cancel(buf.maxTimer);
+      buf.maxTimer = null;
     }
   }
 
@@ -105,43 +111,73 @@ function createStreamDeltaCoalescer(options = {}) {
   function flushKind(kind) {
     const buf = buffers.get(kind);
     if (!buf) return;
-    clearTimer(buf);
+    clearTimers(buf);
+    if (buf.text) write(kind, { ...buf.payload, text: buf.text });
     buffers.delete(kind);
     removeOpen(kind);
-    if (!buf.text) return;
-    write(kind, { ...buf.payload, text: buf.text });
   }
 
   function flushAll() {
+    if (timerFailure) throw timerFailure;
     while (openOrder.length > 0) {
       flushKind(openOrder[0]);
+    }
+  }
+
+  function cancelAll() {
+    while (openOrder.length > 0) {
+      const kind = openOrder[0];
+      const buf = buffers.get(kind);
+      if (buf) clearTimers(buf);
+      buffers.delete(kind);
+      removeOpen(kind);
     }
   }
 
   function ensureBuf(kind, basePayload) {
     let buf = buffers.get(kind);
     if (!buf) {
-      buf = { text: "", payload: basePayload, timer: null };
+      buf = { text: "", payload: basePayload, idleTimer: null, maxTimer: null };
       buffers.set(kind, buf);
       openOrder.push(kind);
     }
     return buf;
   }
 
-  function armIdleTimer(kind, buf) {
+  function armTimers(kind, buf) {
     const ms = idleMsFor(kind);
     if (ms <= 0) return;
-    clearTimer(buf);
     const scheduledKind = kind;
-    buf.timer = schedule(() => {
+    if (buf.idleTimer != null) {
+      cancel(buf.idleTimer);
+      buf.idleTimer = null;
+    }
+    buf.idleTimer = schedule(() => {
       const current = buffers.get(scheduledKind);
-      if (!current || current.timer == null) return;
-      current.timer = null;
-      flushKind(scheduledKind);
+      if (!current || current.idleTimer == null) return;
+      current.idleTimer = null;
+      try {
+        flushKind(scheduledKind);
+      } catch (error) {
+        timerFailure = error;
+      }
     }, ms);
+    if (buf.maxTimer == null) {
+      buf.maxTimer = schedule(() => {
+        const current = buffers.get(scheduledKind);
+        if (!current || current.maxTimer == null) return;
+        current.maxTimer = null;
+        try {
+          flushKind(scheduledKind);
+        } catch (error) {
+          timerFailure = error;
+        }
+      }, ms);
+    }
   }
 
   function accept(event) {
+    if (timerFailure) throw timerFailure;
     if (!event || typeof event !== "object") return;
     const kind = typeof event.type === "string" ? event.type : "";
     if (!kind) return;
@@ -169,7 +205,7 @@ function createStreamDeltaCoalescer(options = {}) {
         return;
       }
 
-      armIdleTimer(kind, buf);
+      armTimers(kind, buf);
       return;
     }
 
@@ -197,6 +233,7 @@ function createStreamDeltaCoalescer(options = {}) {
   return {
     accept,
     flushAll,
+    cancelAll,
     flushKind,
     pendingChars,
     idleMsFor,
@@ -219,7 +256,7 @@ function createStreamDeltaCoalescer(options = {}) {
  * Resolve coalesce options from env.
  *   DURABLE_DELTA_COALESCE=0|false → disable
  *   DURABLE_DELTA_COALESCE_CHARS → maxChars
- *   DURABLE_DELTA_COALESCE_MS → global maxMs (A1 default 0 when unset)
+ *   DURABLE_DELTA_COALESCE_MS → idle and max-wait ms (default 80 when unset)
  *   DURABLE_DELTA_COALESCE_MS_THINKING / _TEXT → per-kind idle overrides
  */
 function resolveCoalesceOptionsFromEnv(env = process.env) {

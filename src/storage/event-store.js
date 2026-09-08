@@ -144,7 +144,7 @@ function createEventStore({ storage, auditTranscript = true, logger = console } 
               createdAt: event.createdAt,
             })
           : null;
-      return { event, outboxId };
+      return { event: { ...event, traceId: invocation.traceId }, outboxId };
     };
 
     // Nested transactions are savepoints; SQLITE_BUSY is retried, then rethrown.
