@@ -923,11 +923,16 @@ async function runChatWorklist(ctx) {
           onEvent(event) {
             observeAvailabilityEvent(ctx.availability, agent, event);
             sendSse(res, "agent-event", event);
-            if (typeof event.sessionId === "string" && event.sessionId && durableRun?.window?.id) {
+            if (
+              typeof event.sessionId === "string" &&
+              event.sessionId &&
+              !event.subagentId &&
+              durableRun?.window?.id
+            ) {
               observedProviderSessionId = event.sessionId;
               durable.bindProviderSession(durableRun.window.id, event.sessionId);
             }
-            if (event.type === "text.delta") {
+            if (event.type === "text.delta" && !event.subagentId) {
               const text = typeof event.text === "string" ? event.text : "";
               assistantContent += text;
               sendSse(res, "message", { agent, role: "assistant", text });

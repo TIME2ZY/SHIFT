@@ -501,3 +501,183 @@ test("ACP new and load requests carry the same current MCP descriptors", () => {
     mcpServers,
   });
 });
+
+test("ACP isolates child subagent session events, text buffers, tools, and recovery identity", () => {
+  const runtime = createProviderRuntime(AGENTS.grok, { transport: "acp" });
+  const events = [];
+
+  // 1. Root session starts
+  events.push(
+    ...runtime.transform({ type: "acp.session_started", sessionId: "root-session-1", loaded: false }, ctx)
+  );
+  assert.equal(
+    runtime.extractSessionId({ type: "acp.session_started", sessionId: "root-session-1" }),
+    "root-session-1"
+  );
+
+  // 2. Root session message and spawn_subagent tool call
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "root-session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Root agent working. " },
+        },
+      },
+      ctx
+    )
+  );
+
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "root-session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "call-spawn-1",
+          title: "spawn_subagent",
+          rawInput: { description: "Explore repo", subagent_type: "explore" },
+          _meta: { "x.ai/tool": { name: "spawn_subagent", kind: "task", label: "Subagent" } },
+        },
+      },
+      ctx
+    )
+  );
+
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "root-session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-spawn-1",
+          status: "completed",
+          rawOutput: { type: "Text", text: "Subagent started in background.\nsubagent_id: child-sub-1" },
+        },
+      },
+      ctx
+    )
+  );
+
+  // 3. Child subagent session sends text, thoughts, and tool calls
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "child-sub-1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Child agent thinking..." },
+        },
+      },
+      ctx
+    )
+  );
+
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "child-sub-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Child agent text output with @codex suggestion" },
+        },
+      },
+      ctx
+    )
+  );
+
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "child-sub-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "call-child-read",
+          name: "read_file",
+          rawInput: { target_file: "package.json" },
+        },
+      },
+      ctx
+    )
+  );
+
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "child-sub-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-child-read",
+          status: "completed",
+          rawOutput: { content: "child read result" },
+        },
+      },
+      ctx
+    )
+  );
+
+  // 4. Root session adds more text
+  events.push(
+    ...runtime.transform(
+      {
+        type: "acp.session_update",
+        sessionId: "root-session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Root agent finished." },
+        },
+      },
+      ctx
+    )
+  );
+
+  // 5. Finish runtime
+  events.push(...runtime.finish(ctx));
+
+  // Verifications:
+  // (a) Recovery identity: extractSessionId must return root session, NEVER child session
+  assert.equal(
+    runtime.extractSessionId({ type: "acp.session_update", sessionId: "child-sub-1" }),
+    "root-session-1"
+  );
+
+  // (b) Text isolation: text.delta must ONLY contain root text, NEVER child text
+  const textDeltas = events.filter((e) => e.type === "text.delta");
+  const fullRootText = textDeltas.map((e) => e.text).join("");
+  assert.ok(fullRootText.includes("Root agent working."));
+  assert.ok(fullRootText.includes("Root agent finished."));
+  assert.ok(!fullRootText.includes("Child agent text output"), "Child text must NOT be in text.delta");
+  assert.ok(!fullRootText.includes("@codex"), "Child @codex must NOT be in root text.delta");
+
+  // (c) Child text must be emitted as commentary.delta with subagentId and parentToolId
+  const commentaryDeltas = events.filter((e) => e.type === "commentary.delta");
+  assert.ok(commentaryDeltas.length > 0, "Child text must be emitted as commentary.delta");
+  const childCommentary = commentaryDeltas.find((e) => e.text.includes("Child agent text output"));
+  assert.ok(childCommentary, "Child commentary must be found");
+  assert.equal(childCommentary.subagentId, "child-sub-1");
+  assert.equal(childCommentary.parentToolId, "call-spawn-1");
+
+  // (d) Child tool calls must carry subagentId and parentToolId
+  const childToolStarted = events.find((e) => e.type === "tool.started" && e.toolId === "call-child-read");
+  assert.ok(childToolStarted, "Child tool.started must be emitted");
+  assert.equal(childToolStarted.subagentId, "child-sub-1");
+  assert.equal(childToolStarted.parentToolId, "call-spawn-1");
+
+  const childToolFinished = events.find((e) => e.type === "tool.finished" && e.toolId === "call-child-read");
+  assert.ok(childToolFinished, "Child tool.finished must be emitted");
+  assert.equal(childToolFinished.subagentId, "child-sub-1");
+  assert.equal(childToolFinished.parentToolId, "call-spawn-1");
+
+  // (e) Root spawn tool call must NOT have subagentId
+  const spawnTool = events.find((e) => e.type === "tool.finished" && e.toolId === "call-spawn-1");
+  assert.equal(spawnTool.subagentId, undefined);
+});
+

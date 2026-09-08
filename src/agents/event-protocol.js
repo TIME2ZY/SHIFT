@@ -53,6 +53,8 @@ const FIELD_TYPES = {
   signal: "stringOrNull",
   // Optional documented fields
   sessionId: "string",
+  subagentId: "string",
+  parentToolId: "string",
   status: "string",
   failureSource: "stringOrNull",
   failureReason: "stringOrNull",
@@ -104,6 +106,8 @@ const STRING_COERCE_FIELDS = [
   "label",
   "toolKind",
   "sessionId",
+  "subagentId",
+  "parentToolId",
   "status",
   "failureSource",
   "failureReason",

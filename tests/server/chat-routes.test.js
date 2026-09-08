@@ -64,6 +64,18 @@ test("contextCharsFromEvent counts thinking and tool content without duplicates"
     0
   );
   assert.equal(chatRoutes.contextCharsFromEvent({ type: "usage.update", outputTokens: 5 }), 0);
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({ type: "tool.finished", subagentId: "sub-1", output: "child tool" }),
+    0
+  );
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({ type: "thinking.delta", subagentId: "sub-1", text: "child thought" }),
+    0
+  );
+  assert.equal(
+    chatRoutes.contextCharsFromEvent({ type: "commentary.delta", subagentId: "sub-1", text: "child commentary" }),
+    0
+  );
 });
 
 function makeRes() {
