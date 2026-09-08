@@ -36,7 +36,7 @@ test("soft mode never requests repair for missing handoff", () => {
   );
 });
 
-test("balanced mode repairs worktree empty packet but allows discussion", () => {
+test("balanced mode strictly repairs empty packet, incomplete fields, and semantic drift", () => {
   assert.equal(
     decidePolicy({
       mode: "balanced",
@@ -49,9 +49,17 @@ test("balanced mode repairs worktree empty packet but allows discussion", () => 
     decidePolicy({
       mode: "balanced",
       useWorktree: false,
-      quality: { hasBlock: false, emptyPacket: true, ok: false },
+      quality: { hasBlock: false, emptyPacket: true, ok: false, intent: "discuss" },
     }),
     DECISIONS.ALLOW_DEGRADED
+  );
+  assert.equal(
+    decidePolicy({
+      mode: "balanced",
+      useWorktree: false,
+      quality: { hasBlock: false, emptyPacket: true, ok: false, intent: "implement" },
+    }),
+    DECISIONS.REQUEST_REPAIR
   );
   assert.equal(
     decidePolicy({
@@ -59,7 +67,29 @@ test("balanced mode repairs worktree empty packet but allows discussion", () => 
       useWorktree: true,
       quality: { hasBlock: true, ok: false },
     }),
-    DECISIONS.ALLOW_DEGRADED
+    DECISIONS.REQUEST_REPAIR
+  );
+  assert.equal(
+    decidePolicy({
+      mode: "balanced",
+      useWorktree: false,
+      quality: { hasBlock: true, ok: false },
+    }),
+    DECISIONS.REQUEST_REPAIR
+  );
+  assert.equal(
+    decidePolicy({
+      mode: "balanced",
+      quality: { hasBlock: true, ok: true, toMismatch: true },
+    }),
+    DECISIONS.REQUEST_REPAIR
+  );
+  assert.equal(
+    decidePolicy({
+      mode: "balanced",
+      quality: { hasBlock: true, ok: true, invalidIntent: true },
+    }),
+    DECISIONS.REQUEST_REPAIR
   );
   assert.equal(
     decidePolicy({
