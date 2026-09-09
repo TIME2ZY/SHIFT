@@ -14,7 +14,6 @@ const { createMemoryEventRepository } = require("./memory-event-repository");
 const { createMemoryRepository } = require("./memory-repository");
 const { createMemoryService } = require("./memory-service");
 const { createMessageRepository } = require("./message-repository");
-const { createOutboxRepository } = require("./outbox-repository");
 const { createProjectEvidenceRepository, reindexThreadProject } = require("./project-evidence");
 const { createProjectRepository } = require("./project-repository");
 const { createRecallRepository } = require("./recall-repository");
@@ -60,7 +59,6 @@ function createStorage(options = {}) {
       },
     }),
     memoryEvents,
-    outbox: createOutboxRepository(db),
     embeddings,
     recall,
     metadata: createStorageMetadataRepository(db),

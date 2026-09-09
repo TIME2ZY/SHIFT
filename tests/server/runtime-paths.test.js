@@ -17,9 +17,9 @@ test("runtime paths derive every online artifact from SHIFT_HOME/data", () => {
   assert.equal(paths.agentsConfigFile, path.join(shiftHome, "agents.json"));
   assert.equal(paths.dataDir, dataDir);
   assert.equal(paths.databaseFile, path.join(dataDir, "shift.sqlite"));
-  assert.equal(paths.auditTranscriptDir, path.join(dataDir, "audit-transcripts"));
   assert.equal(paths.rawEventsDir, path.join(dataDir, "raw-events"));
-  assert.equal(paths.transcriptDir, path.join(dataDir, "transcripts"));
+  assert.equal("transcriptDir" in paths, false);
+  assert.equal("auditTranscriptDir" in paths, false);
   assert.equal(paths.worktreeStateFile, path.join(dataDir, "worktrees.json"));
   assert.equal(paths.migrationDir, path.join(dataDir, "migration"));
   assert.equal(paths.backupDir, path.join(dataDir, "backups"));

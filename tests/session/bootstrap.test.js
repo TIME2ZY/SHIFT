@@ -1,25 +1,12 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
 const test = require("node:test");
 const sessionBootstrap = require("../../src/session/bootstrap");
-const transcript = require("../../src/session/transcript");
 
 const { buildIdentity, buildDigest, buildActiveMemoryCard, buildBootstrapPacket, RECALL_RULE } =
   sessionBootstrap;
 
-function withTempDir(fn) {
-  return async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-test-"));
-    transcript.setTranscriptDir(tmpDir);
-    try {
-      await fn(tmpDir);
-    } finally {
-      transcript.setTranscriptDir("");
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  };
+function withInvocationSource(fn) {
+  return () => fn({ listInvocationsWithMeta: async () => [] });
 }
 
 // ── buildIdentity ──────────────────────────────────────────────
@@ -159,11 +146,11 @@ test("buildDigest injects the latest window-seal resume packet before invocation
 
 test(
   "buildDigest says 'first invocation' for empty session",
-  withTempDir(async () => {
+  withInvocationSource(async (invocationSource) => {
     const digest = await buildDigest({
       threadId: "t",
       sessionId: "empty-session",
-      invocationSource: transcript,
+      invocationSource,
     });
     assert.match(digest, /<!-- Digest -->/);
     assert.match(digest, /第一个 invocation/);
@@ -173,18 +160,22 @@ test(
 
 test(
   "buildDigest lists existing invocations with metadata",
-  withTempDir(async () => {
-    transcript.appendEvent("s1", "i1", "invocation-start", { agent: "codex" });
-    await new Promise((r) => setTimeout(r, 5));
-    transcript.appendEvent("s1", "i1", "stdout", { text: "thinking" });
-    await new Promise((r) => setTimeout(r, 5));
-    transcript.appendEvent("s1", "i1", "invocation-end", { code: 0, sealerState: "active" });
-    await transcript.flush();
+  withInvocationSource(async (invocationSource) => {
+    invocationSource.listInvocationsWithMeta = async () => [
+      {
+        invocationId: "i1",
+        agent: "codex",
+        state: "completed",
+        eventCount: 3,
+        startedAt: "2026-09-09T00:00:00.000Z",
+        endedAt: "2026-09-09T00:00:01.000Z",
+      },
+    ];
 
     const digest = await buildDigest({
       threadId: "s1",
       sessionId: "s1",
-      invocationSource: transcript,
+      invocationSource,
     });
     assert.match(digest, /1 invocations in this session/);
     assert.match(digest, /i1/);
@@ -197,14 +188,22 @@ test(
 
 test(
   "buildDigest handles in-flight invocation (no end event)",
-  withTempDir(async () => {
-    transcript.appendEvent("s1", "i1", "invocation-start", { agent: "sage" });
-    await transcript.flush();
+  withInvocationSource(async (invocationSource) => {
+    invocationSource.listInvocationsWithMeta = async () => [
+      {
+        invocationId: "i1",
+        agent: "sage",
+        state: "active",
+        eventCount: 1,
+        startedAt: "2026-09-09T00:00:00.000Z",
+        endedAt: null,
+      },
+    ];
 
     const digest = await buildDigest({
       threadId: "s1",
       sessionId: "s1",
-      invocationSource: transcript,
+      invocationSource,
     });
     assert.match(digest, /i1/);
     assert.match(digest, /in-flight/);
@@ -309,12 +308,12 @@ test("buildActiveMemoryCard prefers retrieveForTurn when available", async () =>
 
 test(
   "buildBootstrapPacket composes identity + digest + recall rule",
-  withTempDir(async () => {
+  withInvocationSource(async (invocationSource) => {
     const result = await buildBootstrapPacket({
       threadId: "t1",
       sessionId: "s1",
       agent: { id: "sage", label: "小智" },
-      invocationSource: transcript,
+      invocationSource,
       digestSource: {
         get() {
           return {
@@ -379,13 +378,13 @@ test("buildBootstrapPacket rejects missing agent", async () => {
 
 test(
   "buildBootstrapPacket supports custom generation",
-  withTempDir(async () => {
+  withInvocationSource(async (invocationSource) => {
     const result = await buildBootstrapPacket({
       threadId: "t1",
       sessionId: "s1",
       agent: "sage",
       generation: 5,
-      invocationSource: transcript,
+      invocationSource,
     });
     assert.match(result.packet, /Generation: 5/);
   })

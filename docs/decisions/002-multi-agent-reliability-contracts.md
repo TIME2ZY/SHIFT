@@ -15,6 +15,17 @@ related:
 
 # ADR-002：多 Agent 可靠性与 Trace 契约
 
+## 2026-09-09：JSON 归档退役修订
+
+本修订取代下文关于持续 Canonical JSONL / transactional outbox 的旧交付要求。
+SQLite 事务是规范事件的唯一写入路径；不再生成审计文件副本、归档 outbox 或归档健康状态。
+迁移 31 删除 storage_outbox 及已有归档记录，不删除 invocation_events 或其他执行事实。
+已有 audit-transcripts 在停止旧版本写入并备份数据库后显式清理，不作为恢复源。
+旧 transcript API 与 INVOKE_SESSION_FILE provider session 文件写入退役；resume 绑定由
+SQLite context window 保存。保留按需结构化导出、默认关闭的 raw provider 排障日志、
+外部 MCP 配置与 worktree 本机绑定。Health 不再返回 outbox 积压告警。
+本次不改变 invocation 启动、SSE、终态、handoff 或 Memory 的权威写入口。
+
 ## 1. 状态
 
 **Accepted — Trace / Invocation / durable Handoff 已落地**
@@ -255,7 +266,7 @@ retrieved → ranked → selected → rendered → delivered → used → correc
 | Trace spans、links、聚合指标 | 可重建读模型                                 |
 | Memory telemetry             | best-effort 诊断事实，除非与业务事务原子写入 |
 | SSE runtime                  | 临时展示状态                                 |
-| Canonical JSONL              | outbox 驱动的审计归档                        |
+| Canonical JSONL              | 已退役；规范事件由 SQLite 保存               |
 | Raw provider log             | 可选短期诊断材料                             |
 
 Trace read model 不得反向修改 source tables。Canonical JSONL 和 raw log 不参与正常在线恢复，
@@ -304,11 +315,10 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
   它只证明 sink 完整性，不补造 Memory 业务事实，也不参与恢复或成功率仲裁。
 - `memory_events.recordSafe` 是该状态的唯一写入口。telemetry 失败不打断主链路，但 health
   必须暴露累计失败和最后失败时间，并派生本地告警；数据库整体不可读时 health 直接不可用。
-- 默认告警阈值为最后一次 telemetry 失败尚未被后续成功覆盖、权威完整性违规，或 outbox
-  pending age 超过 300 秒。累计与窗口失败仍保留用于审计；告警是 health 的派生输出，不建立
+- 默认告警阈值为最后一次 telemetry 失败尚未被后续成功覆盖、权威完整性违规。累计与窗口失败仍保留用于审计；告警是 health 的派生输出，不建立
   新的状态机。
-- 自动或手工保留清理只允许删除超过期限的 best-effort `memory_events` 和已投递 outbox。
-  Trace、Invocation、Handoff、Message、产品 Memory 和 pending outbox 不在此策略内；Thread
+- 自动或手工保留清理只允许删除超过期限的 best-effort `memory_events`。
+  Trace、Invocation、Handoff、Message、产品 Memory 不在此策略内；Thread
   purge 仍由既有权威生命周期负责。
 
 ### 8.2 Phase 1C 标注评估契约
@@ -385,7 +395,7 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
 
 ## 运行修复约束（2026-09-09）
 
-- ACP 子 session 的事件保留 subagentId；子工具 ID 按 session 限定，正文、usage 和进度不得覆盖父 invocation。原始事件继续通过既有 canonical event/outbox 路径审计。
+- ACP 子 session 的事件保留 subagentId；子工具 ID 按 session 限定，正文、usage 和进度不得覆盖父 invocation。原始事件继续通过既有 canonical event 路径审计。
 - 用户取消落为 aborted；超时和内部故障落为 failed，成功 trace 不带失败字段。未结束工具记录 cancelled 或 interrupted，实时和恢复显示一致。
 - 新 provider session 必须获得本 Agent、workspace 的 seal 恢复信息及权威任务状态。封存表示上下文边界，不表示任务验收完成。
 - 同一 invocation 的方案、审查证据仅接受一次；callback 与 final 的重复呈现不得覆盖原证据或增加循环计数。跨 invocation 的无进展重复可触发失败终态，不能显示完成。

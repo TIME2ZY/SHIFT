@@ -7,7 +7,6 @@ async function verifyRestoredSqliteApi({ restoredFile }) {
   const server = createServer({
     storageMode: "sqlite",
     memoryDbFile: restoredFile,
-    auditTranscript: false,
     uiToken: token,
     logger: { log() {}, error() {}, warn() {} },
     worktreeManager: inertWorktreeManager(),

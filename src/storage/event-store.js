@@ -4,15 +4,13 @@ const { withSqliteBusyRetry } = require("./sqlite-retry");
 /**
  * Authoritative invocation event sink.
  *
- * SQLite is the only online write target. Canonical JSONL audit output is
- * produced asynchronously from the transactional outbox.
+ * SQLite is the only write target for canonical events.
  */
-function createEventStore({ storage, auditTranscript = true, logger = console } = {}) {
+function createEventStore({ storage, logger = console } = {}) {
   if (!storage?.invocations || typeof storage.transaction !== "function") {
     throw new Error("SQLite event store requires durable storage.");
   }
 
-  const archiveCanonical = auditTranscript === true;
   const unavailableInvocations = new Set();
   const invocationThreads = new Map();
   const deletedThreads = new Set();
@@ -133,18 +131,7 @@ function createEventStore({ storage, auditTranscript = true, logger = console } 
         agentId: invocation.agentId,
         createdAt: event.createdAt,
       });
-      const outboxId =
-        archiveCanonical && storage.outbox
-          ? storage.outbox.enqueue({
-              threadId: invocation.threadId,
-              invocationId,
-              sequenceNo: event.sequenceNo,
-              kind,
-              payload,
-              createdAt: event.createdAt,
-            })
-          : null;
-      return { event: { ...event, traceId: invocation.traceId }, outboxId };
+      return { event: { ...event, traceId: invocation.traceId } };
     };
 
     // Nested transactions are savepoints; SQLITE_BUSY is retried, then rethrown.
@@ -157,8 +144,6 @@ function createEventStore({ storage, auditTranscript = true, logger = console } 
       ok: true,
       event: stored.event,
       sqlite: true,
-      outbox: Boolean(stored.outboxId),
-      outboxId: stored.outboxId,
     };
   }
 
@@ -171,7 +156,6 @@ function createEventStore({ storage, auditTranscript = true, logger = console } 
   return {
     mode: "sqlite",
     enabled: true,
-    archiveCanonical,
     append,
     registerInvocation,
     markInvocationUnavailable,

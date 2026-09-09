@@ -3,7 +3,7 @@ title: "ADR-001: Storage Truth Boundary"
 status: accepted
 decision_id: ADR-001
 created: 2026-07-26
-amended: 2026-09-06
+amended: 2026-09-09
 scope: sessions, messages, invocations, handoffs, traces, memory, transcripts, project knowledge, and search projections
 supersedes: []
 related:
@@ -14,6 +14,17 @@ related:
 ---
 
 # ADR-001：存储真相边界
+
+## 2026-09-09：JSON 归档退役修订
+
+本修订取代下文关于持续 Canonical JSONL / transactional outbox 的旧交付要求。
+SQLite 事务是规范事件的唯一写入路径；不再生成审计文件副本、归档 outbox 或归档健康状态。
+迁移 31 删除 storage_outbox 及已有归档记录，不删除 invocation_events 或其他执行事实。
+已有 audit-transcripts 在停止旧版本写入并备份数据库后显式清理，不作为恢复源。
+旧 transcript API 与 INVOKE_SESSION_FILE provider session 文件写入退役；resume 绑定由
+SQLite context window 保存。保留按需结构化导出、默认关闭的 raw provider 排障日志、
+外部 MCP 配置与 worktree 本机绑定。Health 不再返回 outbox 积压告警。
+本次不改变 invocation 启动、SSE、终态、handoff 或 Memory 的权威写入口。
 
 ## 1. 状态
 
@@ -79,30 +90,30 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 
 ## 4. 真相源矩阵
 
-| 概念                                    | 权威来源                         | 非权威表示                            |
-| --------------------------------------- | -------------------------------- | ------------------------------------- |
-| Project 存在性、目录绑定和归档状态      | SQLite `projects`                | UI 当前选择、最近项目缓存             |
-| Thread 存在性、标题、项目绑定、归档状态 | SQLite `threads`                 | UI cache、导出 JSON                   |
-| 正式用户/Agent 消息                     | SQLite `messages`                | JSONL audit、recall/FTS               |
-| Chat request/Trace 生命周期             | SQLite trace source tables       | Trace read model、UI runtime          |
-| Invocation 生命周期和终态               | SQLite `invocations`             | JSONL audit、UI runtime               |
-| Handoff 路由、绑定和终态                | SQLite handoff source tables     | Trace read model、进程内 cache        |
-| 可回放的规范化 durable events           | SQLite invocation event tables   | canonical JSONL                       |
-| Provider 原始事件                       | raw JSONL diagnostic log         | 不得成为 message/memory 真相          |
-| Context window、generation、usage       | SQLite context/window tables     | usage summary                         |
-| Provider resume session 绑定            | SQLite window/session binding    | 脱敏 legacy session-map 测试 fixture  |
+| 概念                                    | 权威来源                          | 非权威表示                            |
+| --------------------------------------- | --------------------------------- | ------------------------------------- |
+| Project 存在性、目录绑定和归档状态      | SQLite `projects`                 | UI 当前选择、最近项目缓存             |
+| Thread 存在性、标题、项目绑定、归档状态 | SQLite `threads`                  | UI cache、导出 JSON                   |
+| 正式用户/Agent 消息                     | SQLite `messages`                 | recall/FTS                            |
+| Chat request/Trace 生命周期             | SQLite trace source tables        | Trace read model、UI runtime          |
+| Invocation 生命周期和终态               | SQLite `invocations`              | UI runtime                            |
+| Handoff 路由、绑定和终态                | SQLite handoff source tables      | Trace read model、进程内 cache        |
+| 可回放的规范化 durable events           | SQLite invocation event tables    | 按需结构化导出                        |
+| Provider 原始事件                       | raw JSONL diagnostic log          | 不得成为 message/memory 真相          |
+| Context window、generation、usage       | SQLite context/window tables      | usage summary                         |
+| Provider resume session 绑定            | SQLite window/session binding     | 脱敏 legacy session-map 测试 fixture  |
 | 产品 Memory（decision/constraint/fact） | SQLite `memory_entries`（thread） | Active Memory Card、recall projection |
 | 协作事件（handoff、seal 等）            | 对应协作/invocation 事件表        | 不得借用产品 Memory 表达              |
 | 跨会话项目长期知识                      | Git 管理的 Markdown/项目文件      | SQLite passage/index + source pointer |
-| 记忆生命周期、authority、失效状态       | SQLite memory tables/events      | JSONL audit                           |
-| 项目源码和配置内容                      | Git 工作区文件                   | SQLite evidence index                 |
-| Worktree 实际存在性和内容               | Git                              | SQLite 中的 session 关联信息          |
-| Agent identity                          | `src/agents/identities/*.md`     | 解析后的内存/API 数据                 |
-| Skill 定义                              | `skills/*/SKILL.md`              | 解析后的内存/API 数据                 |
-| Recall/FTS/passages                     | SQLite 派生投影                  | 可重建，不可反向成为真相              |
-| Trace spans、links、聚合指标            | SQLite 派生投影                  | 可重建，不可反向成为业务状态          |
-| Digest/summary/injection card           | SQLite 派生投影或运行时结果      | 导航信息，不是原始证据                |
-| 环境配置                                | 进程环境、`.env`、明确的配置文件 | 进程内解析对象                        |
+| 记忆生命周期、authority、失效状态       | SQLite memory tables/events       | 按需结构化导出                        |
+| 项目源码和配置内容                      | Git 工作区文件                    | SQLite evidence index                 |
+| Worktree 实际存在性和内容               | Git                               | SQLite 中的 session 关联信息          |
+| Agent identity                          | `src/agents/identities/*.md`      | 解析后的内存/API 数据                 |
+| Skill 定义                              | `skills/*/SKILL.md`               | 解析后的内存/API 数据                 |
+| Recall/FTS/passages                     | SQLite 派生投影                   | 可重建，不可反向成为真相              |
+| Trace spans、links、聚合指标            | SQLite 派生投影                   | 可重建，不可反向成为业务状态          |
+| Digest/summary/injection card           | SQLite 派生投影或运行时结果       | 导航信息，不是原始证据                |
+| 环境配置                                | 进程环境、`.env`、明确的配置文件  | 进程内解析对象                        |
 
 隔离 worktree 上的 `.agents/skills/<name>/SKILL.md` 只是平台 Skill 的可重建投递副本，
 不得回读覆盖 `skills/*/SKILL.md`。
@@ -141,7 +152,7 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 3. 插入 `assistant-final` message；
 4. 更新 thread 时间；
 5. 更新必要的 source projection；
-6. 插入待归档的 outbox 记录。
+6. 提交 SQLite 事务；不再写入文件归档队列。
 
 任何关键步骤失败时，整个事务回滚。不能留下“invocation 已完成但没有最终消息”或
 “最终消息存在但 invocation 仍在运行”的半状态。
@@ -154,7 +165,7 @@ Agent identity。SQLite 只保存这些外部真相源的引用、hash、索引�
 - 权威写入失败时，请求失败；
 - 权威读取失败时返回 `degraded/unavailable`，不能把旧 JSON 文件伪装成当前结果；
 - 派生投影失败可以在 source transaction 之外重试，但必须暴露健康状态；
-- 非关键归档失败不能回滚已提交业务事务，但必须保留 outbox 并告警。
+- 规范事件写入失败必须显式失败；不存在文件归档重试链路。
 
 ### 5.4 用户级运行目录
 
@@ -255,37 +266,11 @@ conversation/evidence
 
 ## 7. JSONL 的职责
 
-### 7.1 Canonical audit transcript
+Canonical audit transcript 已退役，不再持续生成规范事件文件副本。规范事件查询、
+审计和恢复均读取 SQLite，用户仍可按需导出脱敏结构化 Trace。
 
-Canonical JSONL 保存带协议版本、稳定 event ID 和因果坐标的追加式事件，用于：
-
-- 人工审计；
-- invocation 过程下钻；
-- 导出；
-- SQLite backup 恢复后的审计核对和诊断；
-- 离线协议回放和兼容性测试；
-- 跨版本诊断。
-
-它不得用于正常 session/message/recall API 的在线回退或合并读取。
-
-### 7.2 Raw provider log
-
-Raw JSONL 保存 Codex、Grok、OpenCode、Antigravity 等 provider 的原始协议输出：
-
-- 只用于 adapter 调试和故障证据；
-- 不保证跨 provider 或跨版本兼容；
-- 必须有尺寸上限、敏感信息策略和保留期限；
-- 不得直接产生正式 message 或 memory，必须先通过 canonical adapter；
-- 默认可关闭，不能成为恢复正式业务状态的唯一材料。
-
-### 7.3 审计不是在线真相
-
-JSONL 证明“曾经发生过什么”，SQLite 表示“系统当前相信什么”。例如 JSONL 中存在旧
-`memory-captured` 事件，不表示一个已经在 SQLite 中 `invalidated` 的 memory 仍然有效。
-
-Trace 与审计也不是同一概念：Trace 是面向定位和分析的可查询因果投影，可以重建、采样或
-按保留策略删除 payload；canonical audit 是从权威事务 outbox 生成的追加式历史记录。
-Trace 不得反向修正业务状态，audit 也不得作为在线 trace/handoff 恢复来源。
+Raw provider log 是默认关闭的短期诊断材料，用于保存规范化之前的原始协议输出。
+它不参与在线恢复、消息持久化、Memory 或成功率仲裁，不能替代 SQLite 备份。
 
 ## 8. 普通 JSON 的职责
 
@@ -337,35 +322,11 @@ raw provider log 或写入完整度未知的 telemetry 不得单独作为成功�
 5. 搜索结果能下钻到原始 message、event、memory 或文件 anchor；
 6. 投影不可用时返回显式 availability，不把“不可用”伪装成“没有结果”。
 
-## 10. SQLite 与 JSONL 的交付模型
+## 10. 规范事件交付模型
 
-SQLite 与文件系统不能共享真正的原子事务。终态使用 transactional outbox：
-
-```text
-SQLite transaction
-  ├─ write authoritative business rows
-  ├─ write authoritative durable event
-  └─ insert outbox row
-        ↓ COMMIT
-outbox flusher
-  ├─ append canonical JSONL to an epoch-safe audit directory
-  └─ mark delivered / record retry
-```
-
-要求：
-
-- outbox row 与业务状态同事务；
-- JSONL append 具备稳定 event ID，可幂等重试；
-- 进程重启后继续 flush；
-- 归档失败不回滚已提交业务事务；
-- 归档积压和最后错误必须可观测；
-- 超过容量/时长阈值时向用户显示 degraded 状态；
-- 禁止“先写两边，再用 try/catch 假装原子成功”。
-
-Outbox 的 SQLite 入队、幂等 JSONL flusher、重试、产品 API/UI health 和 delivered row
-保留清理已实现。SQLite canonical archive 使用独立的
-`audit-transcripts/<epoch-id>/`，不得与 legacy `transcripts/` 共用清理边界。现有
-`dual` 写入只存在于待移除的兼容分支，不属于受支持的产品写入路径。
+规范事件与关联业务状态由既有 SQLite 事务提交。提交成功后唤醒 SSE 订阅者，
+客户端按 durable event cursor 重放；不再通过 transactional outbox 复制到 JSONL。
+迁移 31 删除归档表及索引，归档重试、健康字段和清理 API 同时退役。
 
 ## 11. 读取、恢复和重建
 
@@ -409,7 +370,7 @@ thread/message/invocation。任何 JSONL 工具都不得反向覆盖 SQLite 或�
 - replay 遇到 tombstone 不得复活旧数据；
 - thread-owned memory 按 ownership 规则处理；
 - project-owned institutional memory 不因 origin thread 归档而消失；
-- 永久删除必须显式清理 SQLite、对应 transcript/raw-log 分区、outbox 和派生投影；
+- 永久删除必须显式清理 SQLite、对应历史归档/raw-log 分区和派生投影；
 - JSONL 应按 thread/session/invocation 分区，以支持有边界的导出与永久删除；
 - 删除工具必须输出删除范围和可恢复性。
 
@@ -425,7 +386,7 @@ version 和 cutover time）；epoch 之前的数据不承诺在线查询和恢�
 2. 进程重启后 source tables 保持完整；
 3. recall、FTS、digest 和 memory search 可从新 epoch 的 source 重建；
 4. SQLite 备份、空目录恢复、投影重建和完整性检查完成一次演练；
-5. canonical JSONL outbox 可重试，失败状态可观测；
+5. 规范事件仅写 SQLite，失败状态可观测；
 6. CI 和本机验证所需的 legacy 场景已转换为最小化、脱敏 fixture；
 7. 已生成清理清单，列出路径、数据范围、cutover time 和不可恢复性。
 
@@ -473,12 +434,10 @@ Canonical audit 是否开启是独立维度，不由 storage mode 隐式决定�
 ```text
 SHIFT_HOME=<user-home>/.shift
 SHIFT_STORAGE_MODE=sqlite
-SHIFT_AUDIT_TRANSCRIPT=on
 SHIFT_RAW_EVENT_LOG=off
 ```
 
-`SHIFT_AUDIT_TRANSCRIPT` 控制 SQLite canonical 审计归档。关闭时权威 SQLite 事务不创建
-outbox row，health 显示 `disabled`，不会形成无法投递的假积压。离线 migrate/audit
+`SHIFT_AUDIT_TRANSCRIPT` 已删除，不再存在归档开关。离线 migrate/audit
 工具链退役前的测试曾读取 fixture transcript；当前不再保留该 fixture 或旧格式读取测试。
 canonical archive 固定从 `SHIFT_HOME/data/audit-transcripts` 派生；raw provider log 固定
 从 `SHIFT_HOME/data/raw-events` 派生。旧 `SHIFT_AUDIT_TRANSCRIPT_DIR`、

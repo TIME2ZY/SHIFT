@@ -266,7 +266,6 @@ function backupLegacyRuntime({ sourceFile, legacyRuntimeDir, backupRoot }) {
 
 function copyOnlineRuntimeArtifacts({ legacyRuntimeDir, runtimePaths }) {
   const mappings = [
-    ["audit-transcripts", runtimePaths.auditTranscriptDir],
     ["raw-events", runtimePaths.rawEventsDir],
     ["worktrees.json", runtimePaths.worktreeStateFile],
   ];
@@ -373,7 +372,6 @@ function requireRuntimePaths(value) {
     "shiftHome",
     "dataDir",
     "databaseFile",
-    "auditTranscriptDir",
     "rawEventsDir",
     "worktreeStateFile",
     "migrationDir",

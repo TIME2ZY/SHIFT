@@ -1,5 +1,5 @@
 const SAMPLE_CLASSES = Object.freeze(["eligible", "pending", "censored", "unknown", "excluded"]);
-const { projectTraceSpans } = require("./trace-span-projection");
+const { countIncompleteTraceSpans } = require("./trace-span-projection");
 
 function createObservabilityRepository(db, dependencies = {}) {
   const scalar = (sql, params = {}) => Number(db.prepare(sql).get(params)?.count || 0);
@@ -35,13 +35,9 @@ function createObservabilityRepository(db, dependencies = {}) {
 
     health(options = {}) {
       const now = validDate(options.now) || new Date();
-      const outboxPendingAlertSeconds = positiveNumber(options.outboxPendingAlertSeconds, 300);
       const traceContractAppliedAt = db
         .prepare("SELECT applied_at FROM schema_migrations WHERE version = 24")
         .get()?.applied_at;
-      const oldestPending = db
-        .prepare("SELECT MIN(created_at) AS value FROM storage_outbox WHERE status = 'pending'")
-        .get()?.value;
       const checks = {
         missing_trace_id: scalar(
           `SELECT COUNT(*) AS count FROM invocations
@@ -72,17 +68,9 @@ function createObservabilityRepository(db, dependencies = {}) {
           )
         `),
       };
-      const spanMissingEnd = db
-        .prepare("SELECT id FROM trace_runs WHERE state <> 'active' AND started_at >= @cutoff")
-        .all({ cutoff: traceContractAppliedAt })
-        .reduce(
-          (sum, row) =>
-            sum + projectTraceSpans(db, row.id).spans.filter((span) => !span.complete).length,
-          0
-        );
+      const spanMissingEnd = countIncompleteTraceSpans(db, traceContractAppliedAt);
       const authoritativeViolations = Object.values(checks).reduce((sum, value) => sum + value, 0);
       const telemetry = telemetryHealth(db);
-      const outboxPendingAge = ageSeconds(oldestPending, now);
       const alerts = [];
       if (authoritativeViolations > 0) {
         alerts.push(
@@ -108,16 +96,6 @@ function createObservabilityRepository(db, dependencies = {}) {
           diagnosticAlert({ code: "span_missing_end", severity: "warning", count: spanMissingEnd })
         );
       }
-      if (outboxPendingAge != null && outboxPendingAge > outboxPendingAlertSeconds) {
-        alerts.push(
-          diagnosticAlert({
-            code: "outbox_pending_age",
-            severity: "warning",
-            value: outboxPendingAge,
-            threshold: outboxPendingAlertSeconds,
-          })
-        );
-      }
       return {
         state: alerts.length > 0 ? "degraded" : "available",
         checkedAt: now.toISOString(),
@@ -137,7 +115,6 @@ function createObservabilityRepository(db, dependencies = {}) {
           span_missing_end: spanMissingEnd,
           telemetry_write_failure: telemetry.unresolvedFailures,
           metric_projection_lag: 0,
-          outbox_pending_age: outboxPendingAge,
         },
         capabilities: {
           span_missing_end: "derived_from_canonical_events",
@@ -176,10 +153,6 @@ const ALERT_DIAGNOSTICS = Object.freeze({
   span_missing_end: {
     title: "执行区段缺少结束事件",
     action: "按 Trace 的 incomplete span 定位 tool 或 generation，并核对 Provider 终止路径。",
-  },
-  outbox_pending_age: {
-    title: "审计 Outbox 积压",
-    action: "检查审计 sink 与 outbox flusher；不得删除仍为 pending 的事件。",
   },
 });
 
@@ -579,11 +552,6 @@ function validDate(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isFinite(date.getTime()) ? date : null;
-}
-
-function ageSeconds(value, now) {
-  const date = validDate(value);
-  return date ? Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000)) : null;
 }
 
 function positiveNumber(value, fallback) {

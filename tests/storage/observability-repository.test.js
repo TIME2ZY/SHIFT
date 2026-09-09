@@ -93,31 +93,6 @@ test("observability health excludes pre-contract invocations without inventing t
   }
 });
 
-test("observability health alerts when pending outbox exceeds threshold", () => {
-  const storage = createStorage({ file: ":memory:" });
-  try {
-    seed(storage);
-    storage.outbox.enqueue({
-      id: "outbox-1",
-      threadId: "thread-1",
-      invocationId: "source-1",
-      sequenceNo: 0,
-      kind: "text",
-      payload: {},
-      createdAt: "2026-08-01T00:00:00.000Z",
-    });
-    const health = storage.observability.health({ now: "2026-08-01T00:10:00.000Z" });
-    assert.ok(health.alerts.some((alert) => alert.code === "outbox_pending_age"));
-    assert.match(
-      health.alerts.find((alert) => alert.code === "outbox_pending_age").diagnostic.action,
-      /outbox flusher/
-    );
-    assert.equal(health.state, "degraded");
-  } finally {
-    storage.close();
-  }
-});
-
 test("observability health degrades on terminal invocation without durable end event", () => {
   const storage = createStorage({ file: ":memory:" });
   try {

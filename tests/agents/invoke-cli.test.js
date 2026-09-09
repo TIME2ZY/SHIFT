@@ -276,14 +276,14 @@ test("invoke-cli writes normalized NDJSON events instead of plain assistant text
   assert.equal(lines[2].type, "text.delta");
 });
 
-test("invoke-cli persists provider session IDs while emitting NDJSON", () => {
+test("invoke-cli emits provider session IDs without writing a session file", () => {
   const result = runScript(["--agent", "opencode", "hello"]);
 
   assert.equal(result.status, 0);
   const events = parseOutputEvents(result.stdout);
   assert.ok(events.some((event) => event.type === "text.delta"));
-  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.opencode.sessionId, "opencode-session-1");
+  assert.ok(events.some((event) => event.sessionId === "opencode-session-1"));
+  assert.equal(fs.existsSync(result.sessionPath), false);
 });
 
 test("rejects unknown agent", () => {
@@ -1257,56 +1257,6 @@ test("resumes remembered opencode session", () => {
     )
   );
   assert.equal(result.stderr, "");
-});
-
-test("remembers sessions from stream events", () => {
-  const result = runScript(["hello"]);
-
-  assert.equal(result.status, 0);
-  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.codex.sessionId, "codex-session-1");
-});
-
-test("remembers opencode sessions from stream events", () => {
-  const result = runScript(["--agent", "opencode", "hello"]);
-
-  assert.equal(result.status, 0);
-  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.opencode.sessionId, "opencode-session-1");
-});
-
-test("remembers workspace key from stream events when provided", () => {
-  const result = runScriptWithEnv(["hello"], {
-    INVOKE_WORKSPACE_KEY: "base:test-workspace",
-  });
-
-  assert.equal(result.status, 0);
-  const sessionFile = JSON.parse(fs.readFileSync(result.sessionPath, "utf8"));
-  assert.equal(sessionFile.codex.sessionId, "codex-session-1");
-  assert.equal(sessionFile.codex.workspaceKey, "base:test-workspace");
-  assert.equal(sessionFile.codex.byWorkspace["base:test-workspace"].sessionId, "codex-session-1");
-});
-
-test("persists provider sessions per workspace without overwriting the other", () => {
-  const first = runScriptWithEnv(["hello"], {
-    INVOKE_WORKSPACE_KEY: "base:C:\\proj",
-  });
-  assert.equal(first.status, 0);
-
-  // Second run reuses the same session file and writes a worktree slot.
-  const second = runScriptWithEnv(["hello again"], {
-    INVOKE_WORKSPACE_KEY: "worktree:C:\\proj.worktrees\\s1",
-    INVOKE_SESSION_FILE: first.sessionPath,
-  });
-  assert.equal(second.status, 0);
-
-  const sessionFile = JSON.parse(fs.readFileSync(first.sessionPath, "utf8"));
-  assert.equal(sessionFile.codex.byWorkspace["base:C:\\proj"].sessionId, "codex-session-1");
-  assert.equal(
-    sessionFile.codex.byWorkspace["worktree:C:\\proj.worktrees\\s1"].sessionId,
-    "codex-session-1"
-  );
-  assert.equal(sessionFile.codex.workspaceKey, "worktree:C:\\proj.worktrees\\s1");
 });
 
 test("cold starts when no saved session", () => {

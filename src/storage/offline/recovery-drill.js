@@ -23,7 +23,6 @@ const SOURCE_TABLES = Object.freeze([
   "purged_threads",
   "collaboration_tasks",
   "collaboration_task_events",
-  "storage_outbox",
 ]);
 
 const PROJECTION_TABLES = Object.freeze([
@@ -285,14 +284,6 @@ function inspectCausality(db) {
       JOIN invocations i ON i.id = memory.source_invocation_id
       WHERE COALESCE(memory.owner_thread_id, memory.origin_thread_id) IS NOT NULL
         AND COALESCE(memory.owner_thread_id, memory.origin_thread_id) <> i.thread_id
-    `,
-    ],
-    [
-      "outbox-invocation-thread",
-      `
-      SELECT COUNT(*) AS count FROM storage_outbox o
-      JOIN invocations i ON i.id = o.invocation_id
-      WHERE o.thread_id <> i.thread_id
     `,
     ],
     [

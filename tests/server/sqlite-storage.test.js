@@ -112,7 +112,6 @@ test("sqlite server ignores the retired online transcript path override", async 
       availabilityProbe: async () => ({ status: "unknown", reason: null }),
       storageMode: "sqlite",
       memoryDbFile: databaseFile,
-      auditTranscriptDir: transcriptDir,
 
       worktreeManager: worktreeManager(),
       uiToken: UI_TOKEN,

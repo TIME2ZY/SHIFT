@@ -1210,6 +1210,7 @@ const MIGRATIONS = Object.freeze([
           duty = intent;
     `,
   },
+  { version: 31, name: "retire_canonical_audit", sql: `DROP TABLE storage_outbox;` },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

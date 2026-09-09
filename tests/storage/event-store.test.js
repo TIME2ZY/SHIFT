@@ -228,12 +228,11 @@ test("event store surfaces non-busy append failures after the retry policy", () 
   }
 });
 
-test("sqlite audit transcript can be disabled without disabling authoritative events", () => {
+test("canonical events persist exclusively in SQLite", () => {
   const storage = createStorage({ file: ":memory:" });
   seedInvocation(storage);
   const eventStore = createEventStore({
     storage,
-    auditTranscript: false,
   });
 
   try {
@@ -244,10 +243,12 @@ test("sqlite audit transcript can be disabled without disabling authoritative ev
       payload: { text: "SQLite remains authoritative" },
     });
     assert.equal(result.sqlite, true);
-    assert.equal(result.outbox, false);
-    assert.equal(eventStore.archiveCanonical, false);
+    assert.equal("outbox" in result, false);
     assert.equal(storage.invocations.listEvents("inv-1").length, 1);
-    assert.equal(storage.outbox.listPending().length, 0);
+    assert.equal(
+      storage.db.prepare("SELECT name FROM sqlite_master WHERE name = 'storage_outbox'").get(),
+      undefined
+    );
   } finally {
     eventStore.close();
     storage.close();
