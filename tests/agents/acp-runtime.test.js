@@ -509,7 +509,10 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
 
   // 1. Root session starts
   events.push(
-    ...runtime.transform({ type: "acp.session_started", sessionId: "root-session-1", loaded: false }, ctx)
+    ...runtime.transform(
+      { type: "acp.session_started", sessionId: "root-session-1", loaded: false },
+      ctx
+    )
   );
   assert.equal(
     runtime.extractSessionId({ type: "acp.session_started", sessionId: "root-session-1" }),
@@ -557,7 +560,10 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
           sessionUpdate: "tool_call_update",
           toolCallId: "call-spawn-1",
           status: "completed",
-          rawOutput: { type: "Text", text: "Subagent started in background.\nsubagent_id: child-sub-1" },
+          rawOutput: {
+            type: "Text",
+            text: "Subagent started in background.\nsubagent_id: child-sub-1",
+          },
         },
       },
       ctx
@@ -655,7 +661,10 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
   const fullRootText = textDeltas.map((e) => e.text).join("");
   assert.ok(fullRootText.includes("Root agent working."));
   assert.ok(fullRootText.includes("Root agent finished."));
-  assert.ok(!fullRootText.includes("Child agent text output"), "Child text must NOT be in text.delta");
+  assert.ok(
+    !fullRootText.includes("Child agent text output"),
+    "Child text must NOT be in text.delta"
+  );
   assert.ok(!fullRootText.includes("@codex"), "Child @codex must NOT be in root text.delta");
 
   // (c) Child text must be emitted as commentary.delta with subagentId and parentToolId
@@ -667,12 +676,16 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
   assert.equal(childCommentary.parentToolId, "call-spawn-1");
 
   // (d) Child tool calls must carry subagentId and parentToolId
-  const childToolStarted = events.find((e) => e.type === "tool.started" && e.toolId === "call-child-read");
+  const childToolStarted = events.find(
+    (e) => e.type === "tool.started" && e.toolId === "child-sub-1:call-child-read"
+  );
   assert.ok(childToolStarted, "Child tool.started must be emitted");
   assert.equal(childToolStarted.subagentId, "child-sub-1");
   assert.equal(childToolStarted.parentToolId, "call-spawn-1");
 
-  const childToolFinished = events.find((e) => e.type === "tool.finished" && e.toolId === "call-child-read");
+  const childToolFinished = events.find(
+    (e) => e.type === "tool.finished" && e.toolId === "child-sub-1:call-child-read"
+  );
   assert.ok(childToolFinished, "Child tool.finished must be emitted");
   assert.equal(childToolFinished.subagentId, "child-sub-1");
   assert.equal(childToolFinished.parentToolId, "call-spawn-1");
@@ -682,75 +695,31 @@ test("ACP isolates child subagent session events, text buffers, tools, and recov
   assert.equal(spawnTool.subagentId, undefined);
 });
 
-test("unclosed tools in session are closed with interrupted or cancelled status on finish", () => {
-  const runtime = createAcpRuntime({ agent: "grok" });
-  const ctx = { agent: "grok", invocationId: "inv-open-tools" };
-
-  runtime.transform(
+test("ACP keeps readable Bash output and classifies nonzero exit", () => {
+  const runtime = createAcpRuntime();
+  const ctx = { agent: "grok", invocationId: "outcome" };
+  const events = runtime.transform(
     {
       type: "acp.session_update",
-      sessionId: "sess-1",
-      update: {
-        sessionUpdate: "session_info_update",
-      },
-    },
-    ctx
-  );
-
-  runtime.transform(
-    {
-      type: "acp.session_update",
-      sessionId: "sess-1",
+      sessionId: "root",
       update: {
         sessionUpdate: "tool_call",
-        toolCallId: "call-unfinished-1",
-        name: "run_terminal_command",
-        status: "in_progress",
+        toolCallId: "test",
+        status: "completed",
         rawInput: { command: "npm test" },
+        rawOutput: {
+          type: "Bash",
+          output: [102, 97, 105, 108],
+          output_for_prompt: "test failed",
+          exit_code: 1,
+        },
       },
     },
     ctx
   );
-
-  // Normal exit with unclosed tool -> status: "interrupted"
-  const finishEvents = runtime.finish(ctx, { ok: false, error: "Child exited prematurely" });
-  const finishedTool = finishEvents.find(
-    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-1"
-  );
-  assert.ok(finishedTool, "tool.finished must be synthesized on finish for unclosed tool");
-  assert.equal(finishedTool.status, "interrupted");
-  assert.equal(finishedTool.failureSource, "runtime-interrupted");
-
-  // Second check: cancelled exit
-  const runtime2 = createAcpRuntime({ agent: "grok" });
-  runtime2.transform(
-    {
-      type: "acp.session_update",
-      sessionId: "sess-2",
-      update: {
-        sessionUpdate: "session_info_update",
-      },
-    },
-    ctx
-  );
-  runtime2.transform(
-    {
-      type: "acp.session_update",
-      sessionId: "sess-2",
-      update: {
-        sessionUpdate: "tool_call",
-        toolCallId: "call-unfinished-2",
-        name: "fetch_data",
-        status: "in_progress",
-      },
-    },
-    ctx
-  );
-  const cancelEvents = runtime2.finish(ctx, { ok: false, stopReason: "explicit-stop" });
-  const cancelledTool = cancelEvents.find(
-    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-2"
-  );
-  assert.ok(cancelledTool, "tool.finished must be synthesized on cancel");
-  assert.equal(cancelledTool.status, "cancelled");
+  const result = events.find((e) => e.type === "tool.finished");
+  assert.equal(result.status, "error");
+  assert.equal(result.output, "test failed");
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(result.result.output, [102, 97, 105, 108]);
 });
-

@@ -57,11 +57,26 @@ async function buildDigest({
   invocationSource,
   digestSource = null,
   windowSealSource = null,
+  agentId = null,
+  workspaceKey = null,
+  agent = null,
+  generation = null,
   logger = console,
 }) {
   if (!invocationSource || typeof invocationSource.listInvocationsWithMeta !== "function") {
     throw new TypeError("invocationSource is required");
   }
+  const identity =
+    generation == null
+      ? []
+      : [
+          buildIdentity({
+            threadId: threadId || sessionId,
+            sessionId,
+            agent: agent || agentId,
+            generation,
+          }),
+        ];
   let semanticDigest = null;
   if (digestSource && typeof digestSource.get === "function") {
     try {
@@ -73,6 +88,7 @@ async function buildDigest({
   const invocations = await invocationSource.listInvocationsWithMeta(sessionId);
   if (invocations.length === 0 && !semanticDigest) {
     return [
+      ...identity,
       `<!-- Digest -->`,
       `这是这个 thread 的第一个 invocation。尚无历史记录可回忆。`,
       `如果需要之前 chat 的信息，问用户，或建议开新 thread。`,
@@ -80,19 +96,21 @@ async function buildDigest({
     ].join("\n");
   }
   const lines = [
+    ...identity,
     `<!-- Digest -->`,
     `<!-- ${invocations.length} invocations in this session so far -->`,
   ];
-  const sealEvent = readLatestWindowSealEvent(windowSealSource, threadId || sessionId);
+  const sealEvent = readLatestWindowSealEvent(windowSealSource, threadId || sessionId, {
+    agentId,
+    workspaceKey,
+  });
   const sealContent =
     sealEvent?.payload?.content ||
     sealEvent?.content ||
     (typeof sealEvent?.payload === "string" ? sealEvent.payload : "");
   const sealMetadata = sealEvent?.payload?.metadata || sealEvent?.metadata || null;
   const sealInvocationId =
-    sealEvent?.payload?.sourceInvocationId ||
-    sealEvent?.invocationId ||
-    null;
+    sealEvent?.payload?.sourceInvocationId || sealEvent?.invocationId || null;
 
   if (typeof sealContent === "string" && sealContent.trim()) {
     const sealTargetLabel = sealInvocationId ? `（截止 invocation: ${sealInvocationId}）` : "";
@@ -132,7 +150,8 @@ async function buildDigest({
   const { preSeal, postSeal, isSealed } = partitionInvocationsBySeal(invocations, sealEvent);
 
   if (isSealed && preSeal.length > 0) {
-    lines[1] = `<!-- ${invocations.length} invocations in this session (${preSeal.length} sealed in previous window, ${postSeal.length} in active window) -->`;
+    lines[identity.length + 1] =
+      `<!-- ${invocations.length} invocations in this session (${preSeal.length} sealed in previous window, ${postSeal.length} in active window) -->`;
   }
 
   // Do not treat open/in-flight invocations as normal history for prompt context.
@@ -344,6 +363,8 @@ async function buildBootstrapPacket(opts) {
     invocationSource,
     digestSource,
     windowSealSource,
+    agentId: agent.id || agent.agentId,
+    workspaceKey: opts.workspaceKey,
     logger,
   });
   const packet = [identity, memoryPack.rendered, digest, RECALL_RULE, ""].join("\n");

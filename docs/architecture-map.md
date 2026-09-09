@@ -123,7 +123,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   同样收口为该终态，不落入 `request-error-orphan`，也不再开一轮 invocation。
   `eventStore.append` 与 durable-recorder 使用同一 `withSqliteBusyRetry` 锁竞争重试策略；
   重试耗尽仍显式上抛。
-- Invocation 状态机包含显式 `running` 阶段（`INVOCATION_STATES`），防止直接从 `started` 跃迁到 `completed`。流式事件服务端时间戳与工具时间戳单调递增。
+- Invocation 的 SQLite active 行表示已 durable started，读模型不再按事件数量猜测阶段；无输出调用允许直接收口终态，终态不可覆写由 repository/recorder 保证。工具结束时间不得早于开始时间。
 - 用户主动停止（abort）意图贯穿子进程取消链，权威终态统一记为 `aborted`；非零退出码不能覆盖已知停止原因，Trace 终态按最终链路结果判定，不因前序成功误报 completed。
 - 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`），禁止残留悬挂的 started 工具。
 - ACP 子 Agent 事件、文本缓冲与恢复身份按 provider session 隔离；子输出作为带 subagent 标记的 commentary.delta 路由，不进入父 Agent 正文及交接解析；extractSessionId 锁定 rootSessionId。
@@ -580,3 +580,18 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
+
+### 运行修复补充（2026-09-09）
+
+- ACP 的 session 缓冲和子工具标识位于 acp-runtime；chat-worklist 只将父 usage 应用到窗口。invocation-process 与前端 run-event-stream 标注子 Agent 来源。
+- child-stream 区分超时与用户取消，chat-worklist 收口工具和 invocation，chat-routes 汇总 trace；成功 trace 清空 failure 字段。
+- A2A 新 provider session 及调用前轮换通过 bootstrap.buildDigest 注入匹配 Agent/workspace 的 seal，任务目标和最新审查来自 registry。
+- workflow-evidence 将 invocationId 传入 registry 实现同轮幂等；重复循环失败通过既有后台失败路径收口。
+- MessageList 保留 callback、交接和 final 的顺序；useChatActions 根据运行/协作事件刷新会话及 trace 查询。
+- worktree manager 的自动 reconcile 仅清理已不存在目录的绑定；现存目录保留，已有分支用于恢复，创建失败不切换执行位置。
+
+### 本轮按用例收口计划
+
+- chat-worklist：删除独立工具 Map/补终态构造，复用 event-protocol lifecycle；四处恢复参数组装收口到 bootstrap 的恢复上下文绑定，调度分支只选择是否恢复及 generation。保留跨进程故障兜底，持久化仍走 durable recorder。
+- collab-task-registry：本轮只收窄方案/审查证据身份，删除无 invocation 身份的重复计数路径；后续修改这两个用例时，将证据去重判定移入既有 workflow-evidence/plan gate，registry 保留权威保存，禁止新增平行写入口。本轮不做全 registry 拆迁。
+- 删除 test-only transition 校验及 arePlansIsomorphic 包装；旧循环测试改为跨 invocation 无进展行为。前端工具状态从共享展示契约导入。

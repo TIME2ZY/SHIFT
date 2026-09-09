@@ -236,3 +236,44 @@ test("reconcileAllWorktrees cleans up all orphaned worktrees", () => {
   assert.equal(manager.checkHealth("s2").ok, true);
 });
 
+test("automatic reconciliation preserves files when Git metadata is damaged", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "preserve-draft" });
+  const draft = path.join(meta.worktreeDir, "draft.txt");
+  fs.writeFileSync(draft, "uncommitted work");
+  fs.renameSync(path.join(meta.worktreeDir, ".git"), path.join(meta.worktreeDir, ".git.saved"));
+  assert.equal(manager.checkHealth("preserve-draft").ok, false);
+  fs.writeFileSync(path.join(meta.worktreeDir, ".git"), "gitdir: missing-metadata\n");
+  assert.equal(manager.checkHealth("preserve-draft").ok, false);
+  manager.reconcileAllWorktrees();
+  assert.throws(
+    () => manager.ensureWorktree({ baseDir, sessionId: "preserve-draft" }),
+    /preserved/
+  );
+  assert.equal(fs.readFileSync(draft, "utf8"), "uncommitted work");
+});
+
+test("recreating a missing worktree retains its committed session history", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "preserve-commit" });
+  fs.writeFileSync(path.join(meta.worktreeDir, "result.txt"), "session result");
+  for (const args of [
+    ["add", "result.txt"],
+    ["commit", "-m", "session result"],
+  ]) {
+    assert.equal(spawnSync("git", args, { cwd: meta.worktreeDir }).status, 0);
+  }
+  const head = manager.getStatus("preserve-commit").headSha;
+  assert.equal(
+    spawnSync("git", ["worktree", "remove", meta.worktreeDir], { cwd: baseDir }).status,
+    0
+  );
+  manager.ensureWorktree({ baseDir, sessionId: "preserve-commit" });
+  assert.equal(manager.getStatus("preserve-commit").headSha, head);
+  assert.equal(
+    fs.readFileSync(path.join(meta.worktreeDir, "result.txt"), "utf8"),
+    "session result"
+  );
+});

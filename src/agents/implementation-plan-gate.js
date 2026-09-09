@@ -117,15 +117,6 @@ function hashIsomorphicPlan(plan) {
   return crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }
 
-function arePlansIsomorphic(planA, planB) {
-  if (!planA || !planB) return false;
-  try {
-    return hashIsomorphicPlan(planA) === hashIsomorphicPlan(planB);
-  } catch {
-    return false;
-  }
-}
-
 function isImplementationApproved(gate) {
   const planHash = String(gate?.planHash || "");
   return Boolean(
@@ -196,7 +187,6 @@ module.exports = {
   validateImplementationPlan,
   hashImplementationPlan,
   hashIsomorphicPlan,
-  arePlansIsomorphic,
   isImplementationApproved,
   resolveImplementationGateEnv,
   renderImplementationGateBlock,

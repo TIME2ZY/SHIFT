@@ -453,4 +453,3 @@ test("duplicate plan loop emits plan-warning and terminates runaway worklist", a
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-

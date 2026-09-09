@@ -385,4 +385,3 @@ test("projectCollaboration reflects execution failure blocker when latest invoca
   });
   assert.equal(snapshot.nextAction, "上一轮执行失败，请排查原因后重试。");
 });
-

@@ -3,10 +3,7 @@
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
-const {
-  validateDeliveryReceipt,
-  validateVerifiedDelivery,
-} = require("../agents/workflow-gates");
+const { validateDeliveryReceipt, validateVerifiedDelivery } = require("../agents/workflow-gates");
 
 const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
@@ -23,7 +20,9 @@ function createDeliveryVerifier(options = {}) {
     });
     const status = Number.isInteger(result?.status) ? result.status : result?.error ? -1 : 0;
     if (!allowStatus.includes(status)) {
-      const message = String(result?.stderr || result?.stdout || result?.error?.message || "").trim();
+      const message = String(
+        result?.stderr || result?.stdout || result?.error?.message || ""
+      ).trim();
       throw new Error(message || `${command} ${args.join(" ")} failed`);
     }
     return String(result?.stdout || "").trim();
@@ -50,11 +49,10 @@ function createDeliveryVerifier(options = {}) {
       const commitSha = run("git", ["rev-parse", "HEAD"], cwd);
       const commitMessage = run("git", ["log", "-1", "--format=%s%x00%b"], cwd);
       const separator = commitMessage.indexOf("\0");
-      const commitSubject = separator >= 0 ? commitMessage.slice(0, separator).trim() : commitMessage;
+      const commitSubject =
+        separator >= 0 ? commitMessage.slice(0, separator).trim() : commitMessage;
       const commitBody = separator >= 0 ? commitMessage.slice(separator + 1).trim() : "";
-      const repository = JSON.parse(
-        run("gh", ["repo", "view", "--json", "defaultBranchRef"], cwd)
-      );
+      const repository = JSON.parse(run("gh", ["repo", "view", "--json", "defaultBranchRef"], cwd));
       const defaultBranch = String(repository?.defaultBranchRef?.name || "");
       if (!defaultBranch || defaultBranch !== String(receipt.base_branch)) {
         return {
@@ -96,7 +94,8 @@ function createDeliveryVerifier(options = {}) {
         verifiedAt: new Date().toISOString(),
       };
 
-      if (evidence.prState !== "OPEN") return { ...evidence, verified: false, reason: "pr_not_open" };
+      if (evidence.prState !== "OPEN")
+        return { ...evidence, verified: false, reason: "pr_not_open" };
       if (evidence.prDraft) return { ...evidence, verified: false, reason: "pr_is_draft" };
       if (evidence.prHeadBranch !== branch) {
         return { ...evidence, verified: false, reason: "pr_head_branch_mismatch" };
@@ -122,15 +121,17 @@ function createDeliveryVerifier(options = {}) {
   }
 
   function verifyWorktreeHandoff(input = {}) {
-    const cwd = path.resolve(String(input.cwd || ""));
+    if (!String(input.cwd || "").trim())
+      return { verified: false, reason: "managed_worktree_required" };
+    const cwd = path.resolve(String(input.cwd));
     if (!cwd) return { verified: false, reason: "managed_worktree_required" };
 
     if (!fs.existsSync(cwd)) {
-      return { verified: true, skipped: true, reason: "worktree_dir_not_found" };
+      return { verified: false, reason: "worktree_dir_not_found" };
     }
 
     if (!fs.existsSync(path.join(cwd, ".git"))) {
-      return { verified: true, skipped: true, reason: "not_a_git_repo" };
+      return { verified: false, reason: "not_a_git_repo" };
     }
 
     try {
@@ -210,7 +211,9 @@ function resolveCiStatus(rollup) {
 }
 
 function normalizeUrl(value) {
-  return String(value || "").trim().replace(/\/$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/$/, "");
 }
 
 module.exports = {

@@ -1,3 +1,4 @@
+const { classifyShellOutcome } = require("./tool-classification");
 const { makeEvent } = require("./event-protocol");
 const { makeUsageEvent } = require("./usage");
 
@@ -162,9 +163,7 @@ function createAcpRuntime(config = {}) {
 
   function getOrCreateSession(sessionId) {
     const id =
-      typeof sessionId === "string" && sessionId.trim()
-        ? sessionId.trim()
-        : rootSessionId || "";
+      typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : rootSessionId || "";
     let session = sessions.get(id);
     if (!session) {
       const isRoot = !rootSessionId || id === rootSessionId;
@@ -236,7 +235,8 @@ function createAcpRuntime(config = {}) {
 
   function mapTool(session, update, ctx) {
     const out = flushSessionBuffers(session, ctx, true);
-    const toolId = String(update.toolCallId || "");
+    const rawToolId = String(update.toolCallId || "");
+    const toolId = rawToolId && !session.isRoot ? `${session.sessionId}:${rawToolId}` : rawToolId;
     if (!toolId) return out;
 
     const previous = session.tools.get(toolId);
@@ -288,12 +288,28 @@ function createAcpRuntime(config = {}) {
           }
         }
       }
+      const outcome = classifyShellOutcome(
+        {
+          status: current.status,
+          result,
+          ...(result && typeof result === "object"
+            ? { exitCode: result.exit_code ?? result.exitCode }
+            : {}),
+        },
+        { toolName: current.toolName, args: current.args }
+      );
       out.push(
         makeEvent("tool.finished", {
           ...base(ctx),
           toolName: current.toolName,
           toolId,
-          status: current.status === "failed" ? "error" : "ok",
+          status: outcome.failed ? "error" : "ok",
+          exitCode: outcome.exitCode,
+          failureSource: outcome.failureSource,
+          failureReason: outcome.failureReason,
+          ...(typeof result?.output_for_prompt === "string"
+            ? { output: result.output_for_prompt }
+            : {}),
           // Final merged args (ACP often completes rawInput only on tool_call_update).
           args: current.args && Object.keys(current.args).length ? current.args : undefined,
           result,
@@ -456,36 +472,10 @@ function createAcpRuntime(config = {}) {
           ];
       }
     },
-    finish(ctx, outcome) {
+    finish(ctx) {
       const out = [];
       for (const session of sessions.values()) {
         out.push(...flushSessionBuffers(session, ctx, true));
-        for (const [toolId, tool] of session.tools.entries()) {
-          if (!tool.finished) {
-            tool.finished = true;
-            const isCancelled = Boolean(outcome?.stopReason);
-            const status = isCancelled ? "cancelled" : "interrupted";
-            const error = outcome?.stopReason
-              ? "Tool execution cancelled"
-              : outcome?.error || "Invocation terminated before tool completed";
-            out.push(
-              makeEvent("tool.finished", {
-                ...base(ctx),
-                toolName: tool.toolName,
-                toolId,
-                status,
-                state: status,
-                failureSource: "runtime-interrupted",
-                failureReason: error,
-                args: tool.args && Object.keys(tool.args).length ? tool.args : undefined,
-                result: { error },
-                error,
-                ...optionalToolDisplayFields(tool),
-                ...sessionMetadata(session),
-              })
-            );
-          }
-        }
       }
       return out;
     },

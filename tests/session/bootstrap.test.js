@@ -452,7 +452,10 @@ test("buildDigest truncates pre-seal invocations and only indexes post-seal invo
   assert.match(digest, /goal: continue migration/);
 
   // Summary counts
-  assert.match(digest, /3 invocations in this session \(2 sealed in previous window, 1 in active window\)/);
+  assert.match(
+    digest,
+    /3 invocations in this session \(2 sealed in previous window, 1 in active window\)/
+  );
 
   // Pre-seal invocation inv-old-1 should NOT appear in the active index
   assert.doesNotMatch(digest, /inv-old-1 \| codex/);
@@ -463,6 +466,8 @@ test("buildDigest truncates pre-seal invocations and only indexes post-seal invo
 
 test("buildDigest surfaces partial seal constraints and missing fields when seal is partial", async () => {
   const digest = await buildDigest({
+    generation: 3,
+    agentId: "grok",
     threadId: "thread-partial-seal",
     sessionId: "thread-partial-seal",
     invocationSource: {
@@ -480,7 +485,7 @@ test("buildDigest surfaces partial seal constraints and missing fields when seal
     windowSealSource: {
       invocations: {
         listForThread() {
-          return [{ id: "inv-partial" }];
+          return [{ id: "inv-partial", agentId: "grok" }];
         },
         listEvents() {
           return [
@@ -503,7 +508,29 @@ test("buildDigest surfaces partial seal constraints and missing fields when seal
   });
 
   assert.match(digest, /Window Seal Resume/);
+  assert.match(digest, /Generation: 3/);
+  assert.match(digest, /Agent: grok/);
   assert.match(digest, /partial seal/);
   assert.match(digest, /test_verification, commit_sha/);
 });
 
+test("seal recovery selects the target agent and workspace", () => {
+  const { readLatestWindowSealEvent } = require("../../src/storage/memory-capture");
+  const rows = [
+    { id: "wanted", agentId: "grok", windowId: "w1" },
+    { id: "other-agent", agentId: "codex", windowId: "w1" },
+    { id: "other-workspace", agentId: "grok", windowId: "w2" },
+  ];
+  const storage = {
+    windows: { get: (id) => ({ workspaceKey: id === "w1" ? "project" : "elsewhere" }) },
+    invocations: {
+      listForThread: () => rows,
+      listEvents: (id) => [{ kind: "window-sealed", payload: { content: id } }],
+    },
+  };
+  assert.equal(
+    readLatestWindowSealEvent(storage, "t", { agentId: "grok", workspaceKey: "project" }).payload
+      .content,
+    "wanted"
+  );
+});

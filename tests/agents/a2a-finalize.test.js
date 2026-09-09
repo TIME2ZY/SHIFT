@@ -305,6 +305,8 @@ test("finalize binds Codex approval to Grok's submitted plan before enqueue", ()
   establishBaseline(threadId);
   collabTaskRegistry.ensureImplementationPlanRequired(threadId, { requestedBy: "codex" });
   const submitted = collabTaskRegistry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-1",
+    progressKey: "head-unchanged",
     actorAgentId: "grok",
     actorDuty: "plan",
     plan: {
@@ -564,7 +566,11 @@ test("finalize rejects worktree implementation handoff if worktree is dirty", ()
     worktreeDir: "/tmp/fake-worktree",
     deliveryVerifier: {
       verifyWorktreeHandoff() {
-        return { verified: false, reason: "worktree_dirty", message: "工作区存在未提交改动，未落库禁止下游消费。" };
+        return {
+          verified: false,
+          reason: "worktree_dirty",
+          message: "工作区存在未提交改动，未落库禁止下游消费。",
+        };
       },
     },
     sendSse: (kind, payload) => sseEvents.push({ kind, payload }),
@@ -575,7 +581,9 @@ test("finalize rejects worktree implementation handoff if worktree is dirty", ()
   assert.equal(result.skipped.length, 1);
   assert.equal(result.skipped[0].reason, "worktree_dirty");
   assert.deepEqual(worklist, ["grok"]);
-  assert.ok(sseEvents.some((e) => e.kind === "a2a-skipped" && e.payload.reason === "worktree_dirty"));
+  assert.ok(
+    sseEvents.some((e) => e.kind === "a2a-skipped" && e.payload.reason === "worktree_dirty")
+  );
 });
 
 test("finalize enqueues worktree implementation handoff when worktree is verified", () => {
@@ -619,4 +627,3 @@ test("finalize enqueues worktree implementation handoff when worktree is verifie
   assert.equal(result.skipped.length, 0);
   assert.deepEqual(worklist, ["grok", "codex"]);
 });
-

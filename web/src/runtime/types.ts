@@ -1,3 +1,4 @@
+import type { ToolStatus } from "../shared/contracts/tool-status";
 import type { UiLiveMessageStatus, UiRunStatus } from "../shared/contracts/run-status";
 
 /** UI run status — see shared/contracts/run-status.ts for server mapping. */
@@ -19,7 +20,7 @@ export interface LiveMessage {
 export interface RunTool {
   id: string;
   name: string;
-  status: "running" | "done" | "error";
+  status: ToolStatus;
   input?: Record<string, unknown>;
   output?: string;
   error?: string;
@@ -158,6 +159,7 @@ export type SessionRunAction =
       toolId: string;
       toolName?: string;
       failed?: boolean;
+      status?: RunTool["status"];
       input?: Record<string, unknown>;
       output?: string;
       error?: string;

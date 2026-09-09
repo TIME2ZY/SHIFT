@@ -139,7 +139,10 @@ function createChatRunExecutor({
     if (useWorktree) {
       if (!sessionWorktree) {
         try {
-          sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
+          sessionWorktree = worktreeManager.ensureWorktree({
+            baseDir: sessionProjectDir,
+            sessionId,
+          });
           session = setSessionWorktree(sessionId, sessionWorktree);
         } catch (error) {
           return fail(400, { error: error.message });
@@ -154,33 +157,19 @@ function createChatRunExecutor({
             sessionWorktree = worktreeManager.ensureWorktree({
               baseDir: sessionProjectDir,
               sessionId,
-              forceRecreate: true,
             });
             session = setSessionWorktree(sessionId, sessionWorktree);
           } catch (rebuildError) {
-            console.warn(
-              `[worktree] Failed to auto-rebuild unhealthy worktree for session ${sessionId}, falling back to safe project workspace:`,
-              rebuildError.message
-            );
-            if (typeof worktreeManager.reconcileWorktree === "function") {
-              worktreeManager.reconcileWorktree(sessionId);
-            }
-            sessionWorktree = null;
-            session = setSessionWorktree(sessionId, null);
+            return fail(409, { error: rebuildError.message });
           }
         }
       }
-    } else if (sessionWorktree) {
-      if (typeof worktreeManager.checkHealth === "function") {
-        const health = worktreeManager.checkHealth(sessionId);
-        if (!health.ok) {
-          if (typeof worktreeManager.reconcileWorktree === "function") {
-            worktreeManager.reconcileWorktree(sessionId);
-          }
-          sessionWorktree = null;
-          session = setSessionWorktree(sessionId, null);
-        }
-      }
+    } else if (sessionWorktree && typeof worktreeManager.checkHealth === "function") {
+      const health = worktreeManager.checkHealth(sessionId);
+      if (!health.ok)
+        return fail(409, {
+          error: "Bound worktree is unhealthy; project execution was not started.",
+        });
     }
 
     // Claim ownership before the first asynchronous preparation step. Otherwise
@@ -324,6 +313,7 @@ function createChatRunExecutor({
         sessionId,
         agent: AGENTS[requestedAgent],
         generation: initialWindow?.generation || 1,
+        workspaceKey,
         prompt: turnPrompt,
         invocationSource: recallService,
         digestSource: storage?.digests || null,
@@ -629,9 +619,7 @@ function createChatRunExecutor({
       const traceActive = traceInvocations.some((row) => row.state === "active");
       const lastInvocation = traceInvocations.at(-1) || null;
       const isAbortedRun = Boolean(
-        aborted ||
-        invocationController.signal.aborted ||
-        lastInvocation?.state === "aborted"
+        aborted || invocationController.signal.aborted || lastInvocation?.state === "aborted"
       );
       const isFailedRun =
         traceActive ||
@@ -654,12 +642,16 @@ function createChatRunExecutor({
           ? "request"
           : traceActive
             ? "reconcile"
-            : lastInvocation?.failureStage || "provider_run",
+            : isFailedRun
+              ? lastInvocation?.failureStage || "provider_run"
+              : null,
         errorCode: isAbortedRun
           ? "invocation_aborted"
           : traceActive
             ? "invocation_orphan_remaining"
-            : lastInvocation?.errorCode || "invocation_failed",
+            : isFailedRun
+              ? lastInvocation?.errorCode || "invocation_failed"
+              : null,
         retryable: false,
       });
       const terminalKind = isAbortedRun ? "run.aborted" : isFailedRun ? "run.failed" : "done";

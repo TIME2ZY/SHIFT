@@ -65,15 +65,27 @@ test("contextCharsFromEvent counts thinking and tool content without duplicates"
   );
   assert.equal(chatRoutes.contextCharsFromEvent({ type: "usage.update", outputTokens: 5 }), 0);
   assert.equal(
-    chatRoutes.contextCharsFromEvent({ type: "tool.finished", subagentId: "sub-1", output: "child tool" }),
+    chatRoutes.contextCharsFromEvent({
+      type: "tool.finished",
+      subagentId: "sub-1",
+      output: "child tool",
+    }),
     0
   );
   assert.equal(
-    chatRoutes.contextCharsFromEvent({ type: "thinking.delta", subagentId: "sub-1", text: "child thought" }),
+    chatRoutes.contextCharsFromEvent({
+      type: "thinking.delta",
+      subagentId: "sub-1",
+      text: "child thought",
+    }),
     0
   );
   assert.equal(
-    chatRoutes.contextCharsFromEvent({ type: "commentary.delta", subagentId: "sub-1", text: "child commentary" }),
+    chatRoutes.contextCharsFromEvent({
+      type: "commentary.delta",
+      subagentId: "sub-1",
+      text: "child commentary",
+    }),
     0
   );
 });
@@ -379,7 +391,9 @@ test("trace terminal state reflects final invocation outcome rather than earlier
         sealAndRotateWindow: () => null,
       },
       storage: {
-        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
+        threadSeats: {
+          listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }],
+        },
         invocations: {
           listForThread: () => invocations,
         },
@@ -445,7 +459,9 @@ test("user abort intent forces invocation and trace terminal state to aborted", 
         sealAndRotateWindow: () => null,
       },
       storage: {
-        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
+        threadSeats: {
+          listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }],
+        },
         invocations: {
           listForThread: () => invocations,
         },
@@ -472,76 +488,117 @@ test("user abort intent forces invocation and trace terminal state to aborted", 
   assert.equal(completedTraces[0].errorCode, "invocation_aborted");
   assert.equal(completedTraces[0].failureStage, "request");
   assert.ok(
-    completedInvocations.some((inv) => inv.reason === "aborted" && inv.endPayload?.terminalState === "aborted")
+    completedInvocations.some(
+      (inv) => inv.reason === "aborted" && inv.endPayload?.terminalState === "aborted"
+    )
   );
 });
 
-test("interrupted child stream completes unclosed tools with interrupted outcome", async () => {
-  const appendedEvents = [];
-  const executor = chatRoutes.createChatRunExecutor(
-    baseDeps(makeRes(), {
-      eventStore: {
-        append: (event) => {
-          appendedEvents.push(event);
-          return { ok: true, event, sqlite: true };
+for (const failToolWrite of [false, true]) {
+  test(`interrupted child stream ${failToolWrite ? "fails explicitly when tool closure cannot persist" : "closes tools once"}`, async () => {
+    const appendedEvents = [];
+    const outcomes = [];
+    const executor = chatRoutes.createChatRunExecutor(
+      baseDeps(makeRes(), {
+        eventStore: {
+          append: (event) => {
+            if (failToolWrite && event.kind === "tool.finished")
+              throw new Error("tool terminal write failed");
+            appendedEvents.push(event);
+            return { ok: true, event, sqlite: true };
+          },
         },
-      },
-      durableRecorder: {
-        enabled: true,
-        startTrace: () => ({ id: "trace-tool-int" }),
-        startInvocation: () => ({
-          invocation: { id: "inv-tool-int" },
-          binding: null,
-          window: { id: "win-1", capacityTokens: 1000, reserveRatio: 0.1 },
-        }),
-        completeTrace: () => null,
-        completeInvocation: () => null,
-        ensureWindow: () => null,
-        reconcileTraceHandoffs: () => 0,
-        addWindowUsage: () => true,
-        setWindowUsageSnapshot: () => true,
-        sealAndRotateWindow: () => null,
-      },
-      storage: {
-        threadSeats: { listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }] },
-        invocations: {
-          listForThread: () => [
-            {
-              id: "inv-tool-int",
-              traceId: "trace-tool-int",
-              state: "failed",
-              terminalReason: "provider-failed",
-            },
-          ],
+        durableRecorder: {
+          enabled: true,
+          startTrace: () => ({ id: "trace-tool-int" }),
+          startInvocation: () => ({
+            invocation: { id: "inv-tool-int" },
+            binding: null,
+            window: { id: "win-1", capacityTokens: 1000, reserveRatio: 0.1 },
+          }),
+          completeTrace: () => null,
+          completeInvocation: (outcome) => {
+            outcomes.push(outcome);
+            return null;
+          },
+          ensureWindow: () => null,
+          reconcileTraceHandoffs: () => 0,
+          addWindowUsage: () => true,
+          setWindowUsageSnapshot: () => true,
+          sealAndRotateWindow: () => null,
         },
-      },
-      sessionBootstrap: {
-        buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
-        buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
-        buildIdentity: () => "<!-- Session Identity -->\n",
-      },
-      runChildStream: async ({ onEvent }) => {
-        onEvent({
-          type: "tool.started",
-          toolId: "call-open-999",
-          toolName: "run_terminal_command",
-          args: { command: "npm test" },
-        });
-        return { code: 1, signal: null };
-      },
-    })
-  );
+        storage: {
+          threadSeats: {
+            listEnabledForThread: () => [{ seatId: "seat-codex", providerId: "codex" }],
+          },
+          invocations: {
+            listForThread: () => [
+              {
+                id: "inv-tool-int",
+                traceId: "trace-tool-int",
+                state: "failed",
+                terminalReason: "provider-failed",
+              },
+            ],
+          },
+        },
+        sessionBootstrap: {
+          buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
+          buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+          buildIdentity: () => "<!-- Session Identity -->\n",
+        },
+        runChildStream: async ({ onEvent }) => {
+          onEvent({
+            type: "tool.started",
+            toolId: "call-open-999",
+            toolName: "run_terminal_command",
+            args: { command: "npm test" },
+          });
+          return { code: 1, signal: null };
+        },
+      })
+    );
 
-  const res = await executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "run tool" },
+    const res = await executor.startRun({
+      body: { sessionId: "s1", agent: "codex", prompt: "run tool" },
+    });
+    await res.promise;
+
+    if (failToolWrite) {
+      assert.ok(outcomes.some((outcome) => outcome.reason === "stream-handler-failed"));
+      assert.equal(
+        outcomes.some((outcome) => outcome.reason === "assistant-final"),
+        false
+      );
+      return;
+    }
+    const finishedTool = appendedEvents.find(
+      (e) => e.kind === "tool.finished" && e.payload?.toolId === "call-open-999"
+    );
+    assert.ok(finishedTool, "tool.finished must be appended for unclosed tool on stream exit");
+    assert.equal(finishedTool.payload.status, "interrupted");
+    assert.equal(
+      appendedEvents.filter(
+        (e) => e.kind === "tool.finished" && e.payload?.toolId === "call-open-999"
+      ).length,
+      1
+    );
+    assert.ok(finishedTool.payload.error);
+    assert.equal(finishedTool.payload.failureReason, finishedTool.payload.error);
   });
-  await res.promise;
+}
 
-  const finishedTool = appendedEvents.find(
-    (e) => e.kind === "tool.finished" && e.payload?.toolId === "call-open-999"
+test("Grok context counts readable output, not byte serialization or child usage text", () => {
+  const { contextCharsFromEvent } = require("../../src/server/chat-usage");
+  assert.equal(
+    contextCharsFromEvent({
+      type: "tool.finished",
+      result: { output: [65, 66, 67], output_for_prompt: "ABC" },
+    }),
+    3
   );
-  assert.ok(finishedTool, "tool.finished must be appended for unclosed tool on stream exit");
-  assert.equal(finishedTool.payload.status, "interrupted");
-  assert.equal(finishedTool.payload.failureSource, "runtime-interrupted");
-  assert.ok(finishedTool.payload.failureReason.includes("Invocation terminated before tool completed"));
+  assert.equal(
+    contextCharsFromEvent({ type: "commentary.delta", subagentId: "child", text: "ABC" }),
+    0
+  );
 });

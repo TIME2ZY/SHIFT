@@ -44,38 +44,6 @@ const TERMINAL_INVOCATION_STATES = Object.freeze([
  */
 const LEGACY_DB_INVOCATION_STATES = Object.freeze(["active", "completed", "failed", "aborted"]);
 
-/** Allowed canonical transitions (from → to[]). Missing from = any create. */
-const INVOCATION_TRANSITIONS = Object.freeze({
-  [INVOCATION_STATES.CREATED]: [
-    INVOCATION_STATES.STARTED,
-    INVOCATION_STATES.FAILED,
-    INVOCATION_STATES.CANCELLED,
-  ],
-  [INVOCATION_STATES.STARTED]: [
-    INVOCATION_STATES.RUNNING,
-    INVOCATION_STATES.FAILED,
-    INVOCATION_STATES.CANCELLED,
-  ],
-  [INVOCATION_STATES.RUNNING]: [
-    INVOCATION_STATES.STREAMING,
-    INVOCATION_STATES.COMPLETED,
-    INVOCATION_STATES.FAILED,
-    INVOCATION_STATES.CANCELLED,
-    INVOCATION_STATES.SEALED,
-  ],
-  [INVOCATION_STATES.STREAMING]: [
-    INVOCATION_STATES.RUNNING,
-    INVOCATION_STATES.COMPLETED,
-    INVOCATION_STATES.FAILED,
-    INVOCATION_STATES.CANCELLED,
-    INVOCATION_STATES.SEALED,
-  ],
-  [INVOCATION_STATES.COMPLETED]: [],
-  [INVOCATION_STATES.FAILED]: [],
-  [INVOCATION_STATES.CANCELLED]: [],
-  [INVOCATION_STATES.SEALED]: [],
-});
-
 /**
  * Map canonical state → current DB column value.
  * sealed → completed (caller should also persist terminalReason: "sealed").
@@ -104,7 +72,7 @@ function toDbInvocationState(canonical) {
 /**
  * Map DB state (+ optional terminalReason) → canonical state.
  * @param {string} dbState
- * @param {{ terminalReason?: string|null, eventCount?: number, phase?: string, canonicalState?: string }} [meta]
+ * @param {{ terminalReason?: string|null}} [meta]
  */
 function fromDbInvocationState(dbState, meta = {}) {
   const s = String(dbState || "");
@@ -116,21 +84,7 @@ function fromDbInvocationState(dbState, meta = {}) {
     }
     return INVOCATION_STATES.COMPLETED;
   }
-  if (s === "active") {
-    if (meta.canonicalState && Object.values(INVOCATION_STATES).includes(meta.canonicalState)) {
-      return meta.canonicalState;
-    }
-    if (meta.phase === "streaming") return INVOCATION_STATES.STREAMING;
-    if (meta.phase === "created") return INVOCATION_STATES.CREATED;
-    if (meta.phase === "started") return INVOCATION_STATES.STARTED;
-    if (meta.phase === "running") return INVOCATION_STATES.RUNNING;
-    if (typeof meta.eventCount === "number") {
-      if (meta.eventCount === 0) return INVOCATION_STATES.CREATED;
-      if (meta.eventCount <= 1) return INVOCATION_STATES.STARTED;
-      return INVOCATION_STATES.RUNNING;
-    }
-    return INVOCATION_STATES.RUNNING;
-  }
+  if (s === "active") return INVOCATION_STATES.STARTED;
   if (Object.values(INVOCATION_STATES).includes(s)) return s;
   throw new Error(`Unknown DB invocation state: ${dbState}`);
 }
@@ -140,60 +94,6 @@ function isTerminalInvocationState(state) {
   if (TERMINAL_INVOCATION_STATES.includes(s)) return true;
   if (s === "aborted" || s === "completed" || s === "failed") return true;
   return false;
-}
-
-/**
- * @param {string} from
- * @param {string} to
- * @returns {{ ok: boolean, reason?: string }}
- */
-function assertValidTransition(from, to) {
-  const f = String(from || "");
-  const t = String(to || "");
-  if (!f) {
-    const ok = t === INVOCATION_STATES.CREATED || t === INVOCATION_STATES.STARTED;
-    return ok
-      ? { ok: true }
-      : { ok: false, reason: `initial state must be created|started, got ${t}` };
-  }
-  if (isTerminalInvocationState(f)) {
-    return { ok: false, reason: `cannot leave terminal state ${f}` };
-  }
-  const allowed = INVOCATION_TRANSITIONS[f];
-  if (!allowed) {
-    return { ok: false, reason: `unknown from state ${f}` };
-  }
-  if (!allowed.includes(t)) {
-    return { ok: false, reason: `transition ${f} → ${t} not allowed` };
-  }
-  return { ok: true };
-}
-
-/**
- * Validate that a sequence of invocation state transitions is valid and does not skip any required phase.
- * @param {string[]} sequence
- * @returns {{ ok: boolean, reason?: string }}
- */
-function validateTransitionSequence(sequence) {
-  if (!Array.isArray(sequence) || sequence.length === 0) {
-    return { ok: false, reason: "transition sequence must not be empty" };
-  }
-  const first = sequence[0];
-  const initialCheck = assertValidTransition(null, first);
-  if (!initialCheck.ok) return initialCheck;
-
-  for (let i = 0; i < sequence.length - 1; i++) {
-    const from = sequence[i];
-    const to = sequence[i + 1];
-    const check = assertValidTransition(from, to);
-    if (!check.ok) {
-      return {
-        ok: false,
-        reason: `invalid transition at step ${i} (${from} → ${to}): ${check.reason}`,
-      };
-    }
-  }
-  return { ok: true };
 }
 
 // ── A2A handoff closed-loop ─────────────────────────────────────────────────
@@ -422,12 +322,9 @@ module.exports = {
   INVOCATION_STATES,
   TERMINAL_INVOCATION_STATES,
   LEGACY_DB_INVOCATION_STATES,
-  INVOCATION_TRANSITIONS,
   toDbInvocationState,
   fromDbInvocationState,
   isTerminalInvocationState,
-  assertValidTransition,
-  validateTransitionSequence,
   HANDOFF_PARSE_STATUS,
   HANDOFF_ROUTE_STATUS,
   HANDOFF_COMPLETE_STATUS,

@@ -184,7 +184,10 @@ function createWorktreeManager(opts = {}) {
 
     try {
       const isInside = runGit(["rev-parse", "--is-inside-work-tree"], resolvedDir);
-      if (isInside !== "true") {
+      if (
+        isInside !== "true" ||
+        normalizeFsPath(runGit(["rev-parse", "--show-toplevel"], resolvedDir)) !== resolvedDir
+      ) {
         return {
           ok: false,
           reason: "git_worktree_invalid",
@@ -252,30 +255,14 @@ function createWorktreeManager(opts = {}) {
       return { reconciled: false, reason: "not_found" };
     }
 
-    let trustedBaseDir = null;
-    try {
-      trustedBaseDir = ensureGitRoot(meta.baseDir);
-    } catch {}
-
-    const resolvedDir = meta.worktreeDir ? normalizeFsPath(meta.worktreeDir) : null;
-    if (trustedBaseDir && resolvedDir) {
-      const worktreesRoot = normalizeFsPath(opts.worktreesRoot || `${trustedBaseDir}.worktrees`);
-      if (isInside(worktreesRoot, resolvedDir)) {
-        if (fs.existsSync(resolvedDir)) {
-          try {
-            runGit(["worktree", "remove", "--force", resolvedDir], trustedBaseDir);
-          } catch {
-            try {
-              fs.rmSync(resolvedDir, { recursive: true, force: true });
-            } catch {}
-          }
-        }
-      }
-      try {
-        runGit(["worktree", "prune"], trustedBaseDir);
-      } catch {}
+    // Recovery must never destroy project files, even if Git metadata is broken.
+    if (meta.worktreeDir && fs.existsSync(meta.worktreeDir)) {
+      return {
+        reconciled: false,
+        reason: "existing_directory_preserved",
+        sessionId: safeSessionId,
+      };
     }
-
     delete state.worktrees[safeSessionId];
     save(state);
     return { reconciled: true, sessionId: safeSessionId, removed: meta };
@@ -294,17 +281,18 @@ function createWorktreeManager(opts = {}) {
     return results;
   }
 
-  function ensureWorktree({ baseDir, sessionId, forceRecreate = false }) {
+  function ensureWorktree({ baseDir, sessionId }) {
     const safeSessionId = sanitizeId(sessionId);
     const gitRoot = ensureGitRoot(baseDir || rootDir);
     const state = load();
     const existing = state.worktrees[safeSessionId];
 
-    if (existing && !forceRecreate) {
+    if (existing) {
       const health = checkHealth(safeSessionId);
       if (health.ok) return existing;
-      reconcileWorktree(safeSessionId);
-    } else if (existing && forceRecreate) {
+      if (fs.existsSync(existing.worktreeDir)) {
+        throw new Error("Unhealthy worktree preserved; repair Git metadata before continuing.");
+      }
       reconcileWorktree(safeSessionId);
     }
 
@@ -318,13 +306,21 @@ function createWorktreeManager(opts = {}) {
     } catch {}
 
     if (fs.existsSync(worktreeDir)) {
-      try {
-        fs.rmSync(worktreeDir, { recursive: true, force: true });
-        runGit(["worktree", "prune"], gitRoot);
-      } catch {}
+      throw new Error("Existing worktree directory preserved; refusing to overwrite it.");
     }
-
-    runGit(["worktree", "add", "-B", branch, worktreeDir, "HEAD"], gitRoot);
+    let existingBranch = false;
+    try {
+      runGit(["rev-parse", "--verify", "refs/heads/" + branch], gitRoot);
+      existingBranch = true;
+    } catch {
+      /* A new session has no branch yet. */
+    }
+    runGit(
+      existingBranch
+        ? ["worktree", "add", worktreeDir, branch]
+        : ["worktree", "add", "-b", branch, worktreeDir, "HEAD"],
+      gitRoot
+    );
 
     const meta = {
       sessionId: safeSessionId,
@@ -351,6 +347,8 @@ function createWorktreeManager(opts = {}) {
     }
     const health = checkHealth(safeSessionId);
     if (!health.ok) {
+      if (meta.worktreeDir && fs.existsSync(meta.worktreeDir))
+        throw new Error("Unhealthy worktree preserved; repair Git metadata before continuing.");
       reconcileWorktree(safeSessionId);
       throw new Error(`No managed worktree for session ${safeSessionId}.`);
     }
@@ -405,7 +403,12 @@ function createWorktreeManager(opts = {}) {
     } catch {
       delete state.worktrees[safeSessionId];
       save(state);
-      return { ok: true, sessionId: safeSessionId, worktreeDir: meta.worktreeDir, reconciled: true };
+      return {
+        ok: true,
+        sessionId: safeSessionId,
+        worktreeDir: meta.worktreeDir,
+        reconciled: true,
+      };
     }
 
     if (trustedBaseDir !== normalizeFsPath(meta.baseDir)) {

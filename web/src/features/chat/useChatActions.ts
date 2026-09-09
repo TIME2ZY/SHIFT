@@ -156,6 +156,14 @@ export function useChatActions() {
         onRunError(message) {
           toast.show(message, { variant: "error", ttl: 7000 });
         },
+        onStateChange(eventSessionId) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.sessions.detail(eventSessionId),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["observability", "trace", eventSessionId],
+          });
+        },
         onAgentExit(eventSessionId, invocationId) {
           void queryClient.invalidateQueries({
             queryKey: queryKeys.sessions.messages(eventSessionId),

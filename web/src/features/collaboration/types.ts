@@ -85,4 +85,3 @@ export interface CollaborationResponse {
   collaboration: CollaborationSnapshot | null;
   seats: CollaborationSeat[];
 }
-

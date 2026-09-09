@@ -80,7 +80,10 @@ test("durable recorder writes thread, window, message, and invocation data", () 
         enforcementLevel: "advisory",
       },
     });
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "started");
+    assert.ok(storage.invocations.get("invocation-1").startedAt);
     recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "Stored" });
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "started");
     // Assistant-final goes only through completeInvocation (not mirror + finish*).
     const finished = recorder.completeInvocation({
       invocationId: "invocation-1",
@@ -98,6 +101,7 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       },
     });
 
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "completed");
     assert.equal(finished.message.id, "message-assistant");
     assert.equal(storage.invocations.get("invocation-1").triggerMessageId, "message-user");
     assert.equal(storage.invocations.get("invocation-1").triggerType, "user-message");

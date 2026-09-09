@@ -1,3 +1,4 @@
+import type { ToolStatus } from "../../shared/contracts/tool-status";
 export interface InvocationThinkingSegment {
   eventNo: number;
   text: string;
@@ -16,7 +17,7 @@ export interface InvocationChangedFile {
 export interface InvocationTool {
   toolId: string;
   toolName: string;
-  status: "running" | "done" | "error";
+  status: ToolStatus;
   input?: Record<string, unknown>;
   output?: string;
   error?: string;
@@ -68,7 +69,7 @@ export type InvocationTimelineItem =
 export interface InvocationProcess {
   version: 1;
   invocationId: string;
-  status: "running" | "done" | "error";
+  status: ToolStatus;
   thinking: {
     text: string;
     segments: InvocationThinkingSegment[];

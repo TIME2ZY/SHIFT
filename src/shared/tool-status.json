@@ -1,0 +1,7 @@
+{
+  "running": ["running", "in_progress", "pending"],
+  "done": ["done", "completed", "success"],
+  "error": ["error", "failed"],
+  "cancelled": ["cancelled", "canceled"],
+  "interrupted": ["interrupted"]
+}

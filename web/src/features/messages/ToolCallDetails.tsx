@@ -16,6 +16,8 @@ function durationLabel(durationMs?: number): string {
 
 function statusLabel(status: InvocationTool["status"]): string {
   if (status === "running") return "运行中";
+  if (status === "cancelled") return "已取消";
+  if (status === "interrupted") return "已中断";
   if (status === "error") return "失败";
   return "完成";
 }

@@ -108,12 +108,16 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
     state: orphanFinish ? "orphaned" : finished ? (failed ? "failed" : "completed") : "active",
     startedAt: started?.created_at || null,
     endedAt:
-      started?.created_at && finished?.created_at && Date.parse(finished.created_at) < Date.parse(started.created_at)
+      started?.created_at &&
+      finished?.created_at &&
+      Date.parse(finished.created_at) < Date.parse(started.created_at)
         ? started.created_at
         : finished?.created_at || null,
     complete: Boolean(finished && started),
     attributes: {
       toolId,
+      subagentId: payload.subagentId || null,
+      parentToolId: payload.parentToolId || null,
       toolKind: payload.toolKind || null,
       status: payload.status || null,
       orphanFinish,

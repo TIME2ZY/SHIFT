@@ -3,10 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const {
-  createDeliveryVerifier,
-  resolveCiStatus,
-} = require("../../src/worktree/delivery-verifier");
+const { createDeliveryVerifier, resolveCiStatus } = require("../../src/worktree/delivery-verifier");
 
 const SHA = "a".repeat(40);
 const PR_URL = "https://github.com/acme/repo/pull/7";
@@ -53,9 +50,7 @@ function commandRunner(_command, args) {
           "风险可通过回滚该提交消除",
           "来自 deepseek-v4-flash",
         ].join("\n\n"),
-        statusCheckRollup: [
-          { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" },
-        ],
+        statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" }],
       }),
     };
   }
@@ -204,4 +199,3 @@ test("verifyWorktreeHandoff fails closed if referenced commit does not exist", (
   assert.equal(result.reason, "commit_not_found");
   assert.match(result.message, /在 git 中不存在/);
 });
-

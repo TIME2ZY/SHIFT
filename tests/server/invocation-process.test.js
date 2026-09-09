@@ -330,4 +330,3 @@ test("projectInvocationProcess enforces monotonic tool timestamps when finished 
   assert.equal(tool.finishedAt, "2026-07-31T00:00:01.032Z");
   assert.equal(tool.durationMs, 0);
 });
-

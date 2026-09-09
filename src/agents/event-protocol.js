@@ -442,16 +442,28 @@ function createRunLifecycle() {
           title: event.title,
           label: event.label,
           toolKind: event.toolKind,
+          sessionId: event.sessionId,
+          subagentId: event.subagentId,
+          parentToolCallId: event.parentToolCallId,
           startedAt: event.ts || event.createdAt || new Date().toISOString(),
         });
       } else if (event.type === "tool.finished") {
+        const tool = openTools.get(event.toolId);
+        if (tool && Date.parse(event.ts || event.createdAt) < Date.parse(tool.startedAt)) {
+          event.ts = tool.startedAt;
+          event.createdAt = tool.startedAt;
+        }
         openTools.delete(event.toolId);
       }
     },
     closeOpenTools(context = {}, outcome = {}) {
       if (openTools.size === 0) return [];
-      const isCancelled = Boolean(outcome.stopReason || outcome.cancelled || outcome.signal === "SIGINT");
-      const status = isCancelled ? "cancelled" : (outcome.status || "interrupted");
+      const isCancelled = Boolean(
+        outcome.cancelled ||
+        ["explicit-stop", "cancelled"].includes(outcome.stopReason) ||
+        outcome.signal === "SIGINT"
+      );
+      const status = isCancelled ? "cancelled" : "interrupted";
       const error =
         outcome.error ||
         (isCancelled
@@ -478,6 +490,9 @@ function createRunLifecycle() {
           title: tool.title,
           label: tool.label,
           toolKind: tool.toolKind,
+          sessionId: tool.sessionId,
+          subagentId: tool.subagentId,
+          parentToolCallId: tool.parentToolCallId,
           status,
           state: status,
           error,

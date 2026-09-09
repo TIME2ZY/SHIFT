@@ -211,6 +211,7 @@ function createProviderRuntime(config, options = {}) {
           : runtime.finish(context, outcome);
       const events = validateEvents(rawEvents, context);
       if (outcome.terminal === true && !lifecycle.terminal) {
+        events.push(...validateEvents(lifecycle.closeOpenTools(context, outcome), context));
         const terminalEvent = outcome.ok
           ? makeEvent("run.finished", {
               agent: context.agent,

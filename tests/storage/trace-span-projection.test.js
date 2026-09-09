@@ -304,4 +304,3 @@ test("interrupted and cancelled tools project to failed complete spans", () => {
     storage.close();
   }
 });
-

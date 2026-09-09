@@ -36,6 +36,7 @@ function contextCharsFromEvent(event) {
   // can be orders of magnitude larger than what the provider kept.
   const value = event.output !== undefined ? event.output : event.result;
   if (typeof value === "string") return value.length;
+  if (typeof value?.output_for_prompt === "string") return value.output_for_prompt.length;
   if (value && typeof value === "object") {
     try {
       return JSON.stringify(value).length;

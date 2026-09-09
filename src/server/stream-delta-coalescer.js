@@ -196,6 +196,14 @@ function createStreamDeltaCoalescer(options = {}) {
         flushKind(openOrder[0]);
       }
 
+      const previous = buffers.get(kind)?.payload;
+      if (
+        previous &&
+        ["subagentId", "sessionId", "invocationId", "parentToolId"].some(
+          (key) => previous[key] !== event[key]
+        )
+      )
+        flushKind(kind);
       const buf = ensureBuf(kind, event);
       buf.payload = event;
       buf.text += text;

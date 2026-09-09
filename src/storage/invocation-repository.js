@@ -232,15 +232,7 @@ function createInvocationRepository(db) {
 function mapInvocation(row) {
   if (!row) return null;
   const state = row.state;
-  let canonicalState;
-  try {
-    canonicalState = fromDbInvocationState(state, {
-      terminalReason: row.terminal_reason,
-      eventCount: row.next_event_sequence,
-    });
-  } catch {
-    canonicalState = state;
-  }
+  const canonicalState = fromDbInvocationState(state, { terminalReason: row.terminal_reason });
   return {
     id: row.id,
     threadId: row.thread_id,

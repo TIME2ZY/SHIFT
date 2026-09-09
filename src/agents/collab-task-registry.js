@@ -210,6 +210,8 @@ function createCollabTaskRegistry(options = {}) {
   }
 
   function recordCodeReview(threadId, input = {}) {
+    if (typeof input.invocationId !== "string" || !input.invocationId.trim())
+      return { accepted: false, reason: "missing_invocation" };
     if (!threadId) return { accepted: false, reason: "missing_thread" };
     const actorAgentId = String(input.actorAgentId || "").toLowerCase();
     const actorDuty = String(input.actorDuty || "").toLowerCase();
@@ -221,11 +223,22 @@ function createCollabTaskRegistry(options = {}) {
     const task = getTask(threadId);
     if (!task) return { accepted: false, reason: "collaboration_task_missing" };
 
+    if (task.codeReviewGate?.sourceInvocationId === input.invocationId) {
+      return {
+        accepted: !task.codeReviewGate.loopDetected,
+        loopDetected: Boolean(task.codeReviewGate.loopDetected),
+        reused: true,
+        verdict: task.codeReviewGate.verdict,
+        reviewEvidenceHash: task.codeReviewGate.evidenceHash,
+        task,
+      };
+    }
     const reviewEvidenceHash = hashCodeReview(review);
     const maxRepeats = Number(input.maxReviewRepeats || process.env[ENV.MAX_IDENTICAL_PLANS] || 3);
     const isSameReview = Boolean(
       task.codeReviewGate?.evidenceHash === reviewEvidenceHash &&
-      task.codeReviewGate?.verdict === review.verdict
+      task.codeReviewGate?.verdict === review.verdict &&
+      (!input.progressKey || task.codeReviewGate?.progressKey === input.progressKey)
     );
     const consecutiveRepeats = isSameReview
       ? (Number(task.codeReviewGate?.consecutiveRepeats) || 1) + 1
@@ -236,6 +249,8 @@ function createCollabTaskRegistry(options = {}) {
         ...(task.codeReviewGate || {}),
         evidenceHash: reviewEvidenceHash,
         verdict: review.verdict,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
         consecutiveRepeats,
         loopDetected: true,
         loopDetectedAt: new Date().toISOString(),
@@ -264,6 +279,8 @@ function createCollabTaskRegistry(options = {}) {
     if (isSameReview) {
       task.codeReviewGate = {
         ...task.codeReviewGate,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
         consecutiveRepeats,
       };
       const saved = persist(task);
@@ -299,6 +316,8 @@ function createCollabTaskRegistry(options = {}) {
     task.codeReviewGate = {
       verdict: review.verdict,
       evidenceHash: reviewEvidenceHash,
+      sourceInvocationId: input.invocationId,
+      progressKey: input.progressKey || null,
       consecutiveRepeats: 1,
       loopDetected: false,
       reviewedBy: actorAgentId,
@@ -386,6 +405,8 @@ function createCollabTaskRegistry(options = {}) {
     delete task.artifacts.acceptanceDecision;
     task.taskStatus = "active";
     task.codeReviewGate = {
+      ...task.codeReviewGate,
+      sourceInvocationId: input.invocationId || task.codeReviewGate?.sourceInvocationId || null,
       verdict: "approve",
       evidenceHash: reviewEvidenceHash,
       commitSha: verification.commitSha,
@@ -657,6 +678,8 @@ function createCollabTaskRegistry(options = {}) {
   }
 
   function submitImplementationPlan(threadId, input = {}) {
+    if (typeof input.invocationId !== "string" || !input.invocationId.trim())
+      return { accepted: false, reason: "missing_invocation" };
     if (!threadId) return { accepted: false, reason: "missing_thread" };
     const actorAgentId = String(input.actorAgentId || "").toLowerCase();
     if (!isImplementationDuty(input.actorDuty)) {
@@ -669,15 +692,26 @@ function createCollabTaskRegistry(options = {}) {
 
     const task = getOrCreateTask(threadId);
     if (!task.implementationGate) requireImplementationPlan(task, { requestedBy: actorAgentId });
+    if (task.implementationGate?.sourceInvocationId === input.invocationId) {
+      return {
+        accepted: !task.implementationGate.loopDetected,
+        loopDetected: Boolean(task.implementationGate.loopDetected),
+        reused: true,
+        planHash: task.implementationGate.planHash,
+        task,
+      };
+    }
     const planHash = hashImplementationPlan(plan);
     const isomorphicHash = hashIsomorphicPlan(plan);
 
     const prevPlanHash = task.implementationGate?.planHash || null;
     const prevIsoHash = task.implementationGate?.isomorphicHash || null;
-    const isSamePlan = Boolean(
-      (prevPlanHash && prevPlanHash === planHash) ||
-      (prevIsoHash && prevIsoHash === isomorphicHash)
-    );
+    const isSamePlan =
+      (!input.progressKey || task.implementationGate?.progressKey === input.progressKey) &&
+      Boolean(
+        (prevPlanHash && prevPlanHash === planHash) ||
+        (prevIsoHash && prevIsoHash === isomorphicHash)
+      );
 
     const maxRepeats = Number(input.maxPlanRepeats || process.env[ENV.MAX_IDENTICAL_PLANS] || 3);
     const currentRepeats = isSamePlan
@@ -689,6 +723,8 @@ function createCollabTaskRegistry(options = {}) {
         ...(task.implementationGate || {}),
         planHash,
         isomorphicHash,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
         consecutiveRepeats: currentRepeats,
         loopDetected: true,
         loopDetectedAt: new Date().toISOString(),
@@ -720,6 +756,8 @@ function createCollabTaskRegistry(options = {}) {
     ) {
       task.implementationGate = {
         ...task.implementationGate,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
         isomorphicHash,
         consecutiveRepeats: currentRepeats,
       };
@@ -756,6 +794,8 @@ function createCollabTaskRegistry(options = {}) {
       status: IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL,
       planHash,
       isomorphicHash,
+      sourceInvocationId: input.invocationId,
+      progressKey: input.progressKey || null,
       consecutiveRepeats: currentRepeats,
       loopDetected: false,
       approvedPlanHash: null,

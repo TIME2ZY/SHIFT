@@ -157,4 +157,3 @@ test("listForThread returns all handoffs recorded for a thread", () => {
     storage.close();
   }
 });
-

@@ -52,6 +52,8 @@ function processWorkflowEvidenceOutput(input = {}) {
         actorAgentId: agent,
         actorDuty: duty,
         plan,
+        invocationId: input.invocationId,
+        progressKey: input.progressKey,
         maxPlanRepeats: input.maxPlanRepeats,
       });
       events.push({
@@ -84,15 +86,19 @@ function processWorkflowEvidenceOutput(input = {}) {
   }
 
   if (["review", "deliver"].includes(duty)) {
-    const review = parseCodeReview(content);
+    let review = parseCodeReview(content);
     const receipt = parseDeliveryReceipt(content);
     if (review) {
       const recorded = registry.recordCodeReview(threadId, {
         actorAgentId: agent,
         actorDuty: duty,
         review,
+        invocationId: input.invocationId,
+        progressKey: input.progressKey,
         maxReviewRepeats: input.maxReviewRepeats,
       });
+      if (recorded.reused && recorded.task?.artifacts?.codeReview)
+        review = recorded.task.artifacts.codeReview;
       events.push({
         event: recorded.accepted
           ? review.verdict === "approve"
@@ -135,6 +141,7 @@ function processWorkflowEvidenceOutput(input = {}) {
           receipt,
         });
         const result = registry.recordDeliveryEvidence(threadId, {
+          invocationId: input.invocationId,
           actorAgentId: agent,
           actorDuty: duty,
           review,

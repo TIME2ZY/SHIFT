@@ -149,11 +149,10 @@ function runChildStream({
       }
     };
 
-
     const stopChild = (reason) => {
       if (closed || stopping) return;
       stopping = true;
-      stopReason = reason || null;
+      stopReason = reason ? String(reason.message || reason) : null;
       if (reason) console.error(reason);
       killProcessTree(child, "SIGTERM");
       killTimer = setTimeout(() => {
@@ -176,7 +175,8 @@ function runChildStream({
       stopChild(signal?.reason || "Invocation aborted by client or session conflict.");
 
     if (signal) {
-      if (signal.aborted) stopChild(signal?.reason || "Invocation aborted by client or session conflict.");
+      if (signal.aborted)
+        stopChild(signal?.reason || "Invocation aborted by client or session conflict.");
       else signal.addEventListener("abort", abortHandler, { once: true });
     }
 
@@ -246,8 +246,9 @@ function runChildStream({
         encoding: encodingTracker.snapshot(),
         cwd: workDir,
         streamError: streamFailure,
-        stopped: stopping || Boolean(signal?.aborted),
-        stopReason: stopReason || (signal?.aborted ? (signal?.reason || "aborted") : null),
+        stopped: Boolean(signal?.aborted),
+        timedOut: Boolean(stopReason?.startsWith("Server timeout:")),
+        stopReason: stopReason || (signal?.aborted ? signal?.reason || "aborted" : null),
       });
     });
   });

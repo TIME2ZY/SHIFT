@@ -246,3 +246,22 @@ test("pipe stream errors are captured instead of crashing the process", async ()
   assert.equal(result.streamError.origin, "stdout stream");
   assert.match(result.streamError.message, /EMFILE/);
 });
+
+test("server inactivity timeout is not a user cancellation", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => setImmediate(() => child.emit("close", 1, null));
+  const controller = new AbortController();
+  const result = await runChildStream({
+    spawnRunner: () => child,
+    args: [],
+    timeoutMs: 10,
+    signal: controller.signal,
+    onStdout() {},
+    onStderr() {},
+  });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.stopped, false);
+  assert.equal(controller.signal.aborted, false);
+});

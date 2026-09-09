@@ -503,7 +503,7 @@ describe("MessageList", () => {
     expect(screen.getByText("Gemini 正在继续分析")).toBeInTheDocument();
   });
 
-  it("replaces a callback with the final at its pre-handoff transcript position", async () => {
+  it("preserves callback evidence, handoff and final in chronological order", async () => {
     const user = userEvent.setup();
     const finalText =
       "我查一下这次 handoff 有没有被平台接受，以及 Gemini 是否真的产生了 invocation。";
@@ -602,14 +602,13 @@ describe("MessageList", () => {
     );
 
     expect(screen.getAllByText(finalText)).toHaveLength(1);
-    expect(screen.queryByText("@Gemini", { exact: false })).not.toBeInTheDocument();
-    const transcriptItems = Array.from(
-      container.querySelector(".react-messages")?.children || []
-    );
+    expect(screen.getByText("@Gemini", { exact: false })).toBeInTheDocument();
+    const transcriptItems = Array.from(container.querySelector(".react-messages")?.children || []);
     expect(transcriptItems.map((item) => item.className)).toEqual([
       "react-message",
       "react-message",
       "react-handoff-divider",
+      "react-message",
     ]);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("shell")).not.toBeInTheDocument();

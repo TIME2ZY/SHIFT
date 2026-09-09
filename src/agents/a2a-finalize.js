@@ -180,11 +180,9 @@ function finalizeA2ARoutes(input = {}) {
       Boolean(deliveryVerifier?.verifyWorktreeHandoff) &&
       quality.intent !== "discuss" &&
       quality.intent !== "plan" &&
-      (
-        (["implement", "fix"].includes(fromDuty) &&
-          ["review", "deliver", "accept"].includes(duty)) ||
-        ["review", "deliver", "accept"].includes(quality.intent)
-      );
+      ((["implement", "fix"].includes(fromDuty) &&
+        ["review", "deliver", "accept"].includes(duty)) ||
+        ["review", "deliver", "accept"].includes(quality.intent));
 
     if (isCodeDeliveryHandoff && worktreeDir) {
       const commitShaCandidate =
@@ -197,8 +195,7 @@ function finalizeA2ARoutes(input = {}) {
         branch: worktreeBranch,
         startHeadSha,
         requireNewCommit:
-          ["implement", "fix"].includes(fromDuty) &&
-          ["review", "deliver", "accept"].includes(duty),
+          ["implement", "fix"].includes(fromDuty) && ["review", "deliver", "accept"].includes(duty),
         commitSha: commitShaCandidate,
       });
       if (!worktreeCheck.verified) {

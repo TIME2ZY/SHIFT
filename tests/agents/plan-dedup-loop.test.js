@@ -6,7 +6,6 @@ const {
   parseImplementationPlan,
   hashImplementationPlan,
   hashIsomorphicPlan,
-  arePlansIsomorphic,
   parseCodeReview,
 } = require("../../src/agents/workflow-gates");
 const { createCollabTaskRegistry } = require("../../src/agents/collab-task-registry");
@@ -64,11 +63,11 @@ test("hashIsomorphicPlan matches structurally equivalent plans with reordered fi
 
   // Isomorphic hash matches
   assert.equal(hashIsomorphicPlan(planA), hashIsomorphicPlan(planAReordered));
-  assert.equal(arePlansIsomorphic(planA, planAReordered), true);
+  assert.equal(hashIsomorphicPlan(planA), hashIsomorphicPlan(planAReordered));
 
   // Different plan does not match
   assert.notEqual(hashIsomorphicPlan(planA), hashIsomorphicPlan(planB));
-  assert.equal(arePlansIsomorphic(planA, planB), false);
+  assert.notEqual(hashIsomorphicPlan(planA), hashIsomorphicPlan(planB));
 });
 
 test("collabTaskRegistry tracks plan repeats and terminates loop after exceeding threshold", () => {
@@ -78,6 +77,8 @@ test("collabTaskRegistry tracks plan repeats and terminates loop after exceeding
 
   // 1st submission
   const first = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-1",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan,
@@ -90,6 +91,8 @@ test("collabTaskRegistry tracks plan repeats and terminates loop after exceeding
 
   // 2nd submission (exact same plan)
   const second = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-2",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan,
@@ -102,6 +105,8 @@ test("collabTaskRegistry tracks plan repeats and terminates loop after exceeding
   // 3rd submission (isomorphic reordered plan)
   const planReordered = parseImplementationPlan(PLAN_A_REORDERED);
   const third = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-3",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan: planReordered,
@@ -112,6 +117,8 @@ test("collabTaskRegistry tracks plan repeats and terminates loop after exceeding
 
   // 4th submission -> exceeds maxPlanRepeats (3) -> terminates with duplicate_plan_loop_detected
   const fourth = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-4",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan,
@@ -144,12 +151,16 @@ test("submitting a non-isomorphic plan resets repeat counter and clears loop det
 
   // 2 consecutive submissions of plan A
   registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-5",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan: planA,
     maxPlanRepeats: 2,
   });
   const rep2 = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-6",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan: planA,
@@ -159,6 +170,8 @@ test("submitting a non-isomorphic plan resets repeat counter and clears loop det
 
   // Now submit different plan B -> resets counter
   const newPlan = registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-7",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan: planB,
@@ -176,12 +189,16 @@ test("processWorkflowEvidenceOutput emits loop-detected and plan-warning events"
 
   // Pre-seed up to threshold
   registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-8",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan,
     maxPlanRepeats: 2,
   });
   registry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-9",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "plan",
     plan,
@@ -190,6 +207,8 @@ test("processWorkflowEvidenceOutput emits loop-detected and plan-warning events"
 
   // 3rd generation exceeds maxPlanRepeats (2)
   const events = processWorkflowEvidenceOutput({
+    invocationId: "third-generation",
+    progressKey: "head-unchanged",
     agent: "codex",
     duty: "plan",
     content: PLAN_A,
@@ -211,21 +230,25 @@ test("processWorkflowEvidenceOutput emits loop-detected and plan-warning events"
 test("collabTaskRegistry detects duplicate code review loops", () => {
   const registry = createCollabTaskRegistry();
   const threadId = "test-review-loop-1";
-  const review = parseCodeReview([
-    "```code_review",
-    "verdict: changes_requested",
-    "summary: Replay pagination missing",
-    "findings:",
-    "  - P1: Memory unbounded on replay",
-    "tests:",
-    "  - node --test tests/replay.test.js",
-    "```",
-  ].join("\n"));
+  const review = parseCodeReview(
+    [
+      "```code_review",
+      "verdict: changes_requested",
+      "summary: Replay pagination missing",
+      "findings:",
+      "  - P1: Memory unbounded on replay",
+      "tests:",
+      "  - node --test tests/replay.test.js",
+      "```",
+    ].join("\n")
+  );
 
   registry.captureUserGoal(threadId, { text: "Fix bug" });
 
   for (let i = 0; i < 3; i++) {
     const res = registry.recordCodeReview(threadId, {
+      invocationId: "fixture-10" + i,
+      progressKey: "head-unchanged",
       actorAgentId: "codex",
       actorDuty: "review",
       review,
@@ -237,6 +260,8 @@ test("collabTaskRegistry detects duplicate code review loops", () => {
 
   // 4th review
   const fourth = registry.recordCodeReview(threadId, {
+    invocationId: "fixture-11",
+    progressKey: "head-unchanged",
     actorAgentId: "codex",
     actorDuty: "review",
     review,
@@ -246,4 +271,96 @@ test("collabTaskRegistry detects duplicate code review loops", () => {
   assert.equal(fourth.loopDetected, true);
   assert.equal(fourth.reason, "duplicate_review_loop_detected");
   assert.equal(fourth.consecutiveRepeats, 4);
+});
+
+test("callback and final evidence are idempotent within one invocation", () => {
+  const registry = createCollabTaskRegistry();
+  const plan = parseImplementationPlan(PLAN_A);
+  for (let i = 0; i < 5; i++) {
+    const result = registry.submitImplementationPlan("same-round", {
+      actorAgentId: "grok",
+      actorDuty: "implement",
+      invocationId: "i1",
+      plan,
+    });
+    assert.equal(result.accepted, true);
+    assert.notEqual(result.loopDetected, true);
+  }
+  const detailed = {
+    verdict: "changes_requested",
+    summary: "Detailed review",
+    findings: ["Fix timeout"],
+    tests: ["npm test failed"],
+  };
+  const a = registry.recordCodeReview("same-round", {
+    actorAgentId: "codex",
+    actorDuty: "review",
+    invocationId: "i2",
+    review: detailed,
+  });
+  const b = registry.recordCodeReview("same-round", {
+    actorAgentId: "codex",
+    actorDuty: "review",
+    invocationId: "i2",
+    review: { ...detailed, summary: "Brief summary" },
+  });
+  assert.equal(b.reused, true);
+  assert.equal(b.reviewEvidenceHash, a.reviewEvidenceHash);
+  assert.equal(b.task.artifacts.codeReview.summary, detailed.summary);
+});
+
+test("new Git progress resets duplicate-plan detection", () => {
+  const registry = createCollabTaskRegistry();
+  const plan = parseImplementationPlan(PLAN_A);
+  for (let i = 0; i < 6; i++) {
+    const result = registry.submitImplementationPlan("progress", {
+      actorAgentId: "grok",
+      actorDuty: "implement",
+      invocationId: "i" + i,
+      progressKey: "commit" + i,
+      plan,
+    });
+    assert.equal(result.accepted, true);
+    assert.notEqual(result.loopDetected, true);
+  }
+});
+
+test("repeated delivery in later invocation also counts only once", () => {
+  const registry = createCollabTaskRegistry();
+  const plan = parseImplementationPlan(PLAN_A);
+  registry.submitImplementationPlan("later", {
+    actorAgentId: "grok",
+    actorDuty: "implement",
+    invocationId: "i1",
+    plan,
+  });
+  for (let i = 0; i < 5; i++) {
+    const result = registry.submitImplementationPlan("later", {
+      actorAgentId: "grok",
+      actorDuty: "implement",
+      invocationId: "i2",
+      plan,
+    });
+    assert.equal(result.accepted, true);
+  }
+  assert.equal(registry.getTask("later").implementationGate.consecutiveRepeats, 2);
+});
+
+test("unbound evidence is rejected before creating collaboration state", () => {
+  const registry = createCollabTaskRegistry();
+  for (const invocationId of [undefined, "", "   ", 123, {}]) {
+    assert.equal(
+      registry.submitImplementationPlan("unbound", {
+        invocationId,
+        actorDuty: "plan",
+        plan: parseImplementationPlan(PLAN_A),
+      }).reason,
+      "missing_invocation"
+    );
+    assert.equal(
+      registry.recordCodeReview("unbound", { invocationId, actorDuty: "review" }).reason,
+      "missing_invocation"
+    );
+  }
+  assert.equal(registry.getTask("unbound"), null);
 });

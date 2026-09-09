@@ -141,6 +141,8 @@ test("approved Grok plan hash survives a registry and database restart", () => {
     let registry = createCollabTaskRegistry({ repository: storage.collaborationTasks });
     registry.ensureImplementationPlanRequired("thread-plan", { requestedBy: "codex" });
     const submitted = registry.submitImplementationPlan("thread-plan", {
+      invocationId: "fixture-1",
+      progressKey: "head-unchanged",
       actorAgentId: "grok",
       actorDuty: "plan",
       plan: {

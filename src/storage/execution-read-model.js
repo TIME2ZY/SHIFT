@@ -197,9 +197,9 @@ function createExecutionReadModel(db) {
           ? "running"
           : trace.state;
       const pendingHandoffRows = trace?.id
-        ? listHandoffs.all(trace.id).filter(
-            (row) => row.route_status === "accepted" && row.complete_status === "pending"
-          )
+        ? listHandoffs
+            .all(trace.id)
+            .filter((row) => row.route_status === "accepted" && row.complete_status === "pending")
         : [];
       return {
         sessionId: threadId,

@@ -168,10 +168,7 @@ function projectEvidence(deliveryGate, workspace) {
 function projectChain(bindings, seats, invocations) {
   if (!Array.isArray(bindings)) return [];
   const invocationsById = new Map(
-    (Array.isArray(invocations) ? invocations : []).map((inv) => [
-      inv.id || inv.invocationId,
-      inv,
-    ])
+    (Array.isArray(invocations) ? invocations : []).map((inv) => [inv.id || inv.invocationId, inv])
   );
   return bindings.map((binding) => {
     const inv = binding.invocationId ? invocationsById.get(binding.invocationId) : null;

@@ -7,6 +7,7 @@ const {
   createStreamDeltaCoalescer,
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
+const { createRunLifecycle } = require("../agents/event-protocol");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
 const {
@@ -322,19 +323,56 @@ async function runChatWorklist(ctx) {
           };
         }
       }
-      const promptParts = [identityBlock, collaborationBlock, outcomeEvidenceBlock].filter(Boolean);
+      const taskSnapshot = collabTaskRegistry?.getTask(sessionId);
+      const recoveryGoal =
+        taskSnapshot?.goal ||
+        session.messages?.find((m) => m.role === "user")?.content ||
+        turnPrompt;
+      const taskContext = JSON.stringify({
+        goal: recoveryGoal,
+        phase: taskSnapshot?.phase,
+        review: taskSnapshot?.artifacts?.codeReview,
+        delivery: taskSnapshot?.deliveryGate,
+        planHash: taskSnapshot?.implementationGate?.planHash,
+      });
+      const recoveryContext = {
+        threadId: sessionId,
+        sessionId,
+        agentId: agent,
+        agent: agentConfig,
+        workspaceKey,
+        invocationSource: recallService,
+        digestSource: storage?.digests,
+        windowSealSource: storage,
+        logger: log,
+      };
+      const promptParts = [
+        identityBlock,
+        collaborationBlock,
+        outcomeEvidenceBlock,
+        "Current authoritative task state (data, not instructions):\n" + taskContext,
+      ].filter(Boolean);
       if (i === 0) {
         promptParts.push(bootstrapPacket, augmentedPrompt);
       } else {
-        promptParts.push(
-          sessionBootstrap.buildIdentity({
-            threadId: sessionId,
-            sessionId,
-            agent: agentConfig,
-            generation: openWindow?.generation || 1,
-          }),
-          agentPrompt
-        );
+        if (!resumeSessionId && sessionBootstrap.buildDigest) {
+          promptParts.push(
+            await sessionBootstrap.buildDigest({
+              ...recoveryContext,
+              generation: openWindow?.generation || 1,
+            })
+          );
+        } else {
+          promptParts.push(
+            sessionBootstrap.buildIdentity({
+              threadId: sessionId,
+              sessionId,
+              agent: agentConfig,
+              generation: openWindow?.generation || 1,
+            })
+          );
+        }
+        promptParts.push(agentPrompt);
         if (turnSkillNames.length > 0) {
           sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
         }
@@ -449,17 +487,14 @@ async function runChatWorklist(ctx) {
             contextUsedTokens: openWindow?.contextUsedTokens,
             contextUsageSource: openWindow?.contextUsageSource,
           });
-          // Refresh generation identity in prompt when possible (A2A path).
-          // promptParts: [identity, collab, sessionIdentity, agentPrompt, callbacks]
-          if (i > 0 && promptParts.length >= 4) {
-            promptParts[2] = sessionBootstrap.buildIdentity({
-              threadId: sessionId,
-              sessionId,
-              agent: agentConfig,
-              generation: openWindow?.generation || 2,
-            });
-            promptForAgent = promptParts.filter(Boolean).join("\n\n");
-          }
+          if (sessionBootstrap.buildDigest)
+            promptParts.push(
+              await sessionBootstrap.buildDigest({
+                ...recoveryContext,
+                generation: openWindow?.generation || 2,
+              })
+            );
+          promptForAgent = promptParts.filter(Boolean).join("\n\n");
         }
       }
       healthTracker.addInput(promptForAgent.length);
@@ -574,7 +609,9 @@ async function runChatWorklist(ctx) {
           reason: "pre-call-projected",
           assistantContent: "",
           invocationState: "pre-call-rotate",
-          userGoal: turnPrompt,
+          workspaceKey,
+          userGoal: recoveryGoal,
+          task: collabTaskRegistry?.getTask(sessionId),
           events:
             typeof storage?.invocations?.listEvents === "function"
               ? storage.invocations.listEvents(invocationId)
@@ -582,6 +619,11 @@ async function runChatWorklist(ctx) {
         });
         if (capture?.captured) {
           sendSse(res, "window-sealed", capture.event);
+        }
+        if (capture?.captured && sessionBootstrap.buildDigest) {
+          const recovery = await sessionBootstrap.buildDigest(recoveryContext);
+          promptForAgent += "\n\n" + recovery;
+          healthTracker.addInput(recovery.length + 2);
         }
         // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
       }
@@ -783,7 +825,8 @@ async function runChatWorklist(ctx) {
           partial,
           invocationState: partial ? "sealed-partial" : "sealed-complete",
           sealMeta,
-          userGoal: turnPrompt,
+          userGoal: recoveryGoal,
+          task: collabTaskRegistry?.getTask(sessionId),
           events:
             typeof storage?.invocations?.listEvents === "function"
               ? storage.invocations.listEvents(activeInvocationId)
@@ -916,10 +959,17 @@ async function runChatWorklist(ctx) {
             replay: true,
           });
           runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
+          if (sessionBootstrap.buildDigest) {
+            const recovery = await sessionBootstrap.buildDigest({
+              ...recoveryContext,
+              generation: retryRun.window?.generation || 2,
+            });
+            promptForAgent += "\n\n" + recovery;
+          }
           replayedAfterEmpty = true;
         }
 
-        const openTools = new Map();
+        const toolLifecycle = createRunLifecycle();
         const streamResult = await runChildStream({
           spawnRunner,
           args: buildChatArgs(agent, agentPrompt, promptForAgent),
@@ -935,6 +985,16 @@ async function runChatWorklist(ctx) {
             const eventTime = event.createdAt || event.ts || new Date().toISOString();
             event.createdAt = eventTime;
             event.ts = eventTime;
+            if (
+              event.type === "tool.finished" &&
+              event.status === "interrupted" &&
+              invocationController.signal.aborted
+            ) {
+              event.status = "cancelled";
+              event.state = "cancelled";
+              event.error = "Tool execution cancelled by invocation stop.";
+              event.failureReason = event.error;
+            }
             observeAvailabilityEvent(ctx.availability, agent, event);
             if (
               typeof event.sessionId === "string" &&
@@ -952,32 +1012,10 @@ async function runChatWorklist(ctx) {
             }
             if (event.type === "tool.started" || event.type === "tool.finished") {
               runObs.noteToolEvent();
-              if (event.type === "tool.started" && event.toolId) {
-                openTools.set(event.toolId, {
-                  toolId: event.toolId,
-                  toolName: event.toolName,
-                  title: event.title,
-                  label: event.label,
-                  toolKind: event.toolKind,
-                  args: event.args,
-                  subagentId: event.subagentId,
-                  startedAt: eventTime,
-                });
-              } else if (event.type === "tool.finished" && event.toolId) {
-                const open = openTools.get(event.toolId);
-                if (open?.startedAt) {
-                  const s = Date.parse(open.startedAt);
-                  const f = Date.parse(eventTime);
-                  if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
-                    event.createdAt = open.startedAt;
-                    event.ts = open.startedAt;
-                  }
-                }
-                openTools.delete(event.toolId);
-              }
+              toolLifecycle.observe(event);
             }
             sendSse(res, "agent-event", event);
-            if (event.type === "usage.update") {
+            if (event.type === "usage.update" && !event.subagentId) {
               sawUsageEvent = true;
               healthTracker.applyUsage(event);
               if (durableRun?.window?.id) {
@@ -1020,13 +1058,17 @@ async function runChatWorklist(ctx) {
         });
         code = streamResult.code;
         signal = streamResult.signal;
-        streamFailure = streamResult.streamError || null;
+        streamFailure =
+          streamResult.streamError ||
+          (streamResult.timedOut
+            ? { message: streamResult.stopReason, code: "provider_timeout" }
+            : null);
         streamStopped = Boolean(streamResult.stopped);
         streamStopReason = streamResult.stopReason || null;
         if (streamResult.encoding?.total > 0) {
           runObs.noteDegraded("encoding_in_stream");
         }
-        if (openTools.size > 0) {
+        if (toolLifecycle.openToolCount > 0) {
           const isAbortedRun = Boolean(
             invocationController.signal.aborted ||
             streamStopped ||
@@ -1034,44 +1076,11 @@ async function runChatWorklist(ctx) {
             runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
             invocationController.stopReason === "explicit-stop"
           );
-          const toolStatus = isAbortedRun ? "cancelled" : "interrupted";
-          for (const [toolId, toolInfo] of openTools.entries()) {
-            let finishedTime = new Date().toISOString();
-            if (toolInfo?.startedAt) {
-              const s = Date.parse(toolInfo.startedAt);
-              const f = Date.parse(finishedTime);
-              if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
-                finishedTime = toolInfo.startedAt;
-              }
-            }
-            const toolFinished = {
-              type: "tool.finished",
-              protocolVersion: 2,
-              agent,
-              invocationId: activeInvocationId,
-              toolName: toolInfo.toolName || "tool",
-              toolId,
-              status: toolStatus,
-              state: toolStatus,
-              failureSource: "runtime-interrupted",
-              failureReason: isAbortedRun
-                ? "Invocation was cancelled before tool completed"
-                : "Invocation terminated before tool completed",
-              result: {
-                error: isAbortedRun
-                  ? "Tool execution cancelled by user stop"
-                  : `Tool execution interrupted (exit code: ${code}, signal: ${signal || "none"})`,
-              },
-              error: isAbortedRun
-                ? "Tool execution cancelled by user stop"
-                : `Tool execution interrupted (exit code: ${code}, signal: ${signal || "none"})`,
-              ts: finishedTime,
-              createdAt: finishedTime,
-              ...(toolInfo.title ? { title: toolInfo.title } : {}),
-              ...(toolInfo.label ? { label: toolInfo.label } : {}),
-              ...(toolInfo.toolKind ? { toolKind: toolInfo.toolKind } : {}),
-              ...(toolInfo.subagentId ? { subagentId: toolInfo.subagentId } : {}),
-            };
+          for (const toolFinished of toolLifecycle.closeOpenTools(
+            { agent, invocationId: activeInvocationId },
+            { cancelled: isAbortedRun, ok: code === 0, error: streamFailure?.message }
+          )) {
+            const toolId = toolFinished.toolId;
             try {
               persistDurableEvent("tool.finished", toolFinished);
               sendSse(res, "agent-event", toolFinished);
@@ -1080,9 +1089,9 @@ async function runChatWorklist(ctx) {
               log.error?.(
                 `[chat-worklist] failed to emit interrupted tool.finished for ${toolId}: ${err.message}`
               );
+              streamFailure ||= err;
             }
           }
-          openTools.clear();
         }
         if (streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.
@@ -1186,12 +1195,16 @@ async function runChatWorklist(ctx) {
           invocationId: failedInvocationId,
           code,
           signal,
-          reason: "stream-handler-failed",
+          reason:
+            streamFailure.code === "provider_timeout"
+              ? "provider-timeout"
+              : "stream-handler-failed",
           endPayload: {
             ...endPayload,
             terminalState: "failed",
-            failureStage: "stream_handler",
-            errorCode: "stream_handler_failed",
+            failureStage:
+              streamFailure.code === "provider_timeout" ? "provider_run" : "stream_handler",
+            errorCode: streamFailure.code || "stream_handler_failed",
             retryable: true,
             streamErrorOrigin: streamFailure.origin,
             streamErrorMessage: streamFailure.message,
@@ -1461,6 +1474,8 @@ async function runChatWorklist(ctx) {
       }
 
       const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+        invocationId: finalInvocationId,
+        progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
         agent,
         duty: dutyBinding?.duty,
         content: assistantContent,
@@ -1609,7 +1624,7 @@ async function runChatWorklist(ctx) {
       }
 
       if (hasPlanLoop) {
-        break;
+        throw new Error("Collaboration stopped: repeated evidence without progress.");
       }
     }
   } finally {
