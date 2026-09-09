@@ -331,7 +331,7 @@ export function sessionRunReducer(
         const finishedTool = {
           id: action.toolId,
           name: action.toolName || "tool",
-          status: action.failed ? ("error" as const) : ("done" as const),
+          status: action.status || (action.failed ? ("error" as const) : ("done" as const)),
           input: mergeInput(undefined, action.input),
           output: action.output,
           error: action.error,

@@ -261,23 +261,18 @@ test("runtime envelope closes open tools before the invocation terminal event", 
     terminal.map((event) => event.type),
     ["tool.finished", "run.finished"]
   );
-  assert.deepEqual(terminal[0], {
-    type: "tool.finished",
-    protocolVersion: PROTOCOL_VERSION,
-    agent: "codex",
-    invocationId: "inv-open-tool",
-    toolName: "web_search",
-    toolId: "tool-1",
-    args: { query: "SHIFT" },
-    title: undefined,
-    label: undefined,
-    toolKind: undefined,
-    status: "error",
-    error: "Provider run ended before the tool reported completion.",
-    failureSource: "lifecycle-terminal",
-    failureReason: "Provider run ended before the tool reported completion.",
-    state: "failed",
-  });
+  assert.equal(terminal[0].type, "tool.finished");
+  assert.equal(terminal[0].agent, "codex");
+  assert.equal(terminal[0].invocationId, "inv-open-tool");
+  assert.equal(terminal[0].toolName, "web_search");
+  assert.equal(terminal[0].toolId, "tool-1");
+  assert.deepEqual(terminal[0].args, { query: "SHIFT" });
+  assert.equal(terminal[0].status, "interrupted");
+  assert.equal(terminal[0].state, "interrupted");
+  assert.equal(terminal[0].error, "Provider run ended before the tool reported completion.");
+  assert.equal(terminal[0].failureSource, "lifecycle-terminal");
+  assert.ok(terminal[0].ts);
+  assert.ok(terminal[0].createdAt);
   assert.equal(lifecycle.openToolCount, 0);
 });
 
@@ -308,7 +303,7 @@ test("open tool lifecycle survives a provider retry and closes only at final ter
     terminal.map((event) => event.type),
     ["tool.finished", "run.failed"]
   );
-  assert.equal(terminal[0].error, "Provider run failed before the tool reported completion.");
+  assert.equal(terminal[0].error, "provider failed");
   assert.equal(lifecycle.openToolCount, 0);
 });
 
@@ -360,4 +355,133 @@ test("shared usage accumulator suppresses replayed cumulative usage after retry"
   assert.equal(first.filter((event) => event.type === "usage.update").length, 1);
   const retry = createProviderRuntime(config, { lifecycle, usageAccumulator }).transform(raw, ctx);
   assert.equal(retry.filter((event) => event.type === "usage.update").length, 0);
+});
+
+test("unclosed tools in session are closed with interrupted or cancelled status on finish", () => {
+  const runtime = createProviderRuntime(
+    { providerId: "grok", agent: "grok" },
+    { transport: "acp" }
+  );
+  const ctx = { agent: "grok", invocationId: "inv-open-tools" };
+
+  runtime.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "session_info_update",
+      },
+    },
+    ctx
+  );
+
+  runtime.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "call-unfinished-1",
+        name: "run_terminal_command",
+        status: "in_progress",
+        rawInput: { command: "npm test" },
+      },
+    },
+    ctx
+  );
+
+  // Normal exit with unclosed tool -> status: "interrupted"
+  const finishEvents = runtime.finish(ctx, {
+    terminal: true,
+    ok: false,
+    error: "Child exited prematurely",
+  });
+  const finishedTool = finishEvents.find(
+    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-1"
+  );
+  assert.ok(finishedTool, "tool.finished must be synthesized on finish for unclosed tool");
+  assert.equal(finishedTool.status, "interrupted");
+  assert.equal(finishedTool.failureSource, "lifecycle-terminal");
+
+  // Second check: cancelled exit
+  const runtime2 = createProviderRuntime(
+    { providerId: "grok", agent: "grok" },
+    { transport: "acp" }
+  );
+  runtime2.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-2",
+      update: {
+        sessionUpdate: "session_info_update",
+      },
+    },
+    ctx
+  );
+  runtime2.transform(
+    {
+      type: "acp.session_update",
+      sessionId: "sess-2",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "call-unfinished-2",
+        name: "fetch_data",
+        status: "in_progress",
+      },
+    },
+    ctx
+  );
+  const cancelEvents = runtime2.finish(ctx, {
+    terminal: true,
+    ok: false,
+    stopReason: "explicit-stop",
+  });
+  const cancelledTool = cancelEvents.find(
+    (e) => e.type === "tool.finished" && e.toolId === "call-unfinished-2"
+  );
+  assert.ok(cancelledTool, "tool.finished must be synthesized on cancel");
+  assert.equal(cancelledTool.status, "cancelled");
+});
+
+test("ACP timeout closes child tools once, preserving their source and failure", () => {
+  const runtime = createProviderRuntime(
+    { providerId: "grok", agent: "grok" },
+    { transport: "acp" }
+  );
+  const ctx = { agent: "grok", invocationId: "timeout-tools" };
+  runtime.transform({ type: "acp.session_started", sessionId: "parent" }, ctx);
+  const started = runtime
+    .transform(
+      {
+        type: "acp.session_update",
+        sessionId: "child",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "child-tool",
+          name: "fetch_data",
+          status: "in_progress",
+        },
+      },
+      ctx
+    )
+    .find((e) => e.type === "tool.started");
+  assert.ok(started);
+  const events = runtime.finish(ctx, {
+    terminal: true,
+    ok: false,
+    stopReason: "timeout",
+    error: "Provider timed out",
+  });
+  const ends = events.filter((e) => e.type === "tool.finished");
+  assert.equal(ends.length, 1);
+  assert.equal(ends[0].status, "interrupted");
+  assert.equal(ends[0].error, "Provider timed out");
+  assert.equal(ends[0].sessionId, started.sessionId);
+  assert.equal(ends[0].subagentId, started.subagentId);
+  assert.equal(ends[0].toolId, started.toolId);
+  assert.ok(
+    events.findIndex((e) => e.type === "tool.finished") <
+      events.findIndex((e) => e.type === "run.failed")
+  );
+  assert.deepEqual(runtime.finish(ctx, { terminal: true, ok: false }), []);
 });

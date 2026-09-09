@@ -16,6 +16,7 @@ const {
   parseImplementationPlan,
   validateImplementationPlan,
   hashImplementationPlan,
+  hashIsomorphicPlan,
   parseSolutionBaseline,
   hashSolutionBaseline,
   parseCodeReview,
@@ -26,6 +27,7 @@ const {
   validateFinalAcceptanceAgainstTask,
   hashUserGoal,
 } = require("./workflow-gates");
+const { ENV } = require("../shared/brand");
 
 const {
   isTaskImplementationApproved,
@@ -208,6 +210,8 @@ function createCollabTaskRegistry(options = {}) {
   }
 
   function recordCodeReview(threadId, input = {}) {
+    if (typeof input.invocationId !== "string" || !input.invocationId.trim())
+      return { accepted: false, reason: "missing_invocation" };
     if (!threadId) return { accepted: false, reason: "missing_thread" };
     const actorAgentId = String(input.actorAgentId || "").toLowerCase();
     const actorDuty = String(input.actorDuty || "").toLowerCase();
@@ -219,17 +223,74 @@ function createCollabTaskRegistry(options = {}) {
     const task = getTask(threadId);
     if (!task) return { accepted: false, reason: "collaboration_task_missing" };
 
+    if (task.codeReviewGate?.sourceInvocationId === input.invocationId) {
+      return {
+        accepted: !task.codeReviewGate.loopDetected,
+        loopDetected: Boolean(task.codeReviewGate.loopDetected),
+        reused: true,
+        verdict: task.codeReviewGate.verdict,
+        reviewEvidenceHash: task.codeReviewGate.evidenceHash,
+        task,
+      };
+    }
     const reviewEvidenceHash = hashCodeReview(review);
-    if (
+    const maxRepeats = Number(input.maxReviewRepeats || process.env[ENV.MAX_IDENTICAL_PLANS] || 3);
+    const isSameReview = Boolean(
       task.codeReviewGate?.evidenceHash === reviewEvidenceHash &&
-      task.codeReviewGate?.verdict === review.verdict
-    ) {
+      task.codeReviewGate?.verdict === review.verdict &&
+      (!input.progressKey || task.codeReviewGate?.progressKey === input.progressKey)
+    );
+    const consecutiveRepeats = isSameReview
+      ? (Number(task.codeReviewGate?.consecutiveRepeats) || 1) + 1
+      : 1;
+
+    if (isSameReview && consecutiveRepeats > maxRepeats) {
+      task.codeReviewGate = {
+        ...(task.codeReviewGate || {}),
+        evidenceHash: reviewEvidenceHash,
+        verdict: review.verdict,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
+        consecutiveRepeats,
+        loopDetected: true,
+        loopDetectedAt: new Date().toISOString(),
+      };
+      const saved = persist(task, {
+        type: "code_review_loop_detected",
+        from: task.phase,
+        to: task.phase,
+        actorAgentId,
+        intent: "review",
+        reviewEvidenceHash,
+        verdict: review.verdict,
+        consecutiveRepeats,
+      });
+      return {
+        accepted: false,
+        loopDetected: true,
+        reason: "duplicate_review_loop_detected",
+        verdict: review.verdict,
+        reviewEvidenceHash,
+        consecutiveRepeats,
+        task: saved,
+      };
+    }
+
+    if (isSameReview) {
+      task.codeReviewGate = {
+        ...task.codeReviewGate,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
+        consecutiveRepeats,
+      };
+      const saved = persist(task);
       return {
         accepted: true,
         reused: true,
         verdict: review.verdict,
         reviewEvidenceHash,
-        task,
+        consecutiveRepeats,
+        task: saved,
       };
     }
 
@@ -255,6 +316,10 @@ function createCollabTaskRegistry(options = {}) {
     task.codeReviewGate = {
       verdict: review.verdict,
       evidenceHash: reviewEvidenceHash,
+      sourceInvocationId: input.invocationId,
+      progressKey: input.progressKey || null,
+      consecutiveRepeats: 1,
+      loopDetected: false,
       reviewedBy: actorAgentId,
       reviewedAt,
     };
@@ -268,12 +333,14 @@ function createCollabTaskRegistry(options = {}) {
       intent: "review",
       verdict: review.verdict,
       reviewEvidenceHash,
+      consecutiveRepeats: 1,
     });
     return {
       accepted: true,
       reused: false,
       verdict: review.verdict,
       reviewEvidenceHash,
+      consecutiveRepeats: 1,
       task: saved,
     };
   }
@@ -338,6 +405,8 @@ function createCollabTaskRegistry(options = {}) {
     delete task.artifacts.acceptanceDecision;
     task.taskStatus = "active";
     task.codeReviewGate = {
+      ...task.codeReviewGate,
+      sourceInvocationId: input.invocationId || task.codeReviewGate?.sourceInvocationId || null,
       verdict: "approve",
       evidenceHash: reviewEvidenceHash,
       commitSha: verification.commitSha,
@@ -566,6 +635,9 @@ function createCollabTaskRegistry(options = {}) {
       status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
       requestHash,
       planHash: null,
+      isomorphicHash: null,
+      consecutiveRepeats: 0,
+      loopDetected: false,
       approvedPlanHash: null,
       requestedBy: input.requestedBy || null,
       requestedAt: new Date().toISOString(),
@@ -606,6 +678,8 @@ function createCollabTaskRegistry(options = {}) {
   }
 
   function submitImplementationPlan(threadId, input = {}) {
+    if (typeof input.invocationId !== "string" || !input.invocationId.trim())
+      return { accepted: false, reason: "missing_invocation" };
     if (!threadId) return { accepted: false, reason: "missing_thread" };
     const actorAgentId = String(input.actorAgentId || "").toLowerCase();
     if (!isImplementationDuty(input.actorDuty)) {
@@ -618,12 +692,85 @@ function createCollabTaskRegistry(options = {}) {
 
     const task = getOrCreateTask(threadId);
     if (!task.implementationGate) requireImplementationPlan(task, { requestedBy: actorAgentId });
+    if (task.implementationGate?.sourceInvocationId === input.invocationId) {
+      return {
+        accepted: !task.implementationGate.loopDetected,
+        loopDetected: Boolean(task.implementationGate.loopDetected),
+        reused: true,
+        planHash: task.implementationGate.planHash,
+        task,
+      };
+    }
     const planHash = hashImplementationPlan(plan);
+    const isomorphicHash = hashIsomorphicPlan(plan);
+
+    const prevPlanHash = task.implementationGate?.planHash || null;
+    const prevIsoHash = task.implementationGate?.isomorphicHash || null;
+    const isSamePlan =
+      (!input.progressKey || task.implementationGate?.progressKey === input.progressKey) &&
+      Boolean(
+        (prevPlanHash && prevPlanHash === planHash) ||
+        (prevIsoHash && prevIsoHash === isomorphicHash)
+      );
+
+    const maxRepeats = Number(input.maxPlanRepeats || process.env[ENV.MAX_IDENTICAL_PLANS] || 3);
+    const currentRepeats = isSamePlan
+      ? (Number(task.implementationGate?.consecutiveRepeats) || 1) + 1
+      : 1;
+
+    if (isSamePlan && currentRepeats > maxRepeats) {
+      task.implementationGate = {
+        ...(task.implementationGate || {}),
+        planHash,
+        isomorphicHash,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
+        consecutiveRepeats: currentRepeats,
+        loopDetected: true,
+        loopDetectedAt: new Date().toISOString(),
+      };
+      const saved = persist(task, {
+        type: "implementation_plan_loop_detected",
+        from: STATE.IMPLEMENT,
+        to: STATE.IMPLEMENT,
+        actorAgentId,
+        intent: "plan",
+        planHash,
+        isomorphicHash,
+        consecutiveRepeats: currentRepeats,
+      });
+      return {
+        accepted: false,
+        loopDetected: true,
+        reason: "duplicate_plan_loop_detected",
+        planHash,
+        isomorphicHash,
+        consecutiveRepeats: currentRepeats,
+        task: saved,
+      };
+    }
+
     if (
       task.implementationGate?.planHash === planHash &&
       task.artifacts?.implementationPlan?.hash === planHash
     ) {
-      return { accepted: true, reused: true, reason: null, planHash, task };
+      task.implementationGate = {
+        ...task.implementationGate,
+        sourceInvocationId: input.invocationId,
+        progressKey: input.progressKey || null,
+        isomorphicHash,
+        consecutiveRepeats: currentRepeats,
+      };
+      const saved = persist(task);
+      return {
+        accepted: true,
+        reused: true,
+        reason: null,
+        planHash,
+        isomorphicHash,
+        consecutiveRepeats: currentRepeats,
+        task: saved,
+      };
     }
     task.phase = STATE.IMPLEMENT;
     task.state = STATE.IMPLEMENT;
@@ -632,6 +779,7 @@ function createCollabTaskRegistry(options = {}) {
       implementationPlan: {
         ...plan,
         hash: planHash,
+        isomorphicHash,
         proposedBy: actorAgentId,
         proposedAt: new Date().toISOString(),
       },
@@ -645,6 +793,11 @@ function createCollabTaskRegistry(options = {}) {
       ...(task.implementationGate || {}),
       status: IMPLEMENTATION_GATE_STATUS.PENDING_APPROVAL,
       planHash,
+      isomorphicHash,
+      sourceInvocationId: input.invocationId,
+      progressKey: input.progressKey || null,
+      consecutiveRepeats: currentRepeats,
+      loopDetected: false,
       approvedPlanHash: null,
       proposedBy: actorAgentId,
       proposedAt: new Date().toISOString(),
@@ -662,8 +815,17 @@ function createCollabTaskRegistry(options = {}) {
       actorAgentId,
       intent: "plan",
       planHash,
+      isomorphicHash,
+      consecutiveRepeats: currentRepeats,
     });
-    return { accepted: true, reason: null, planHash, task: saved };
+    return {
+      accepted: true,
+      reason: null,
+      planHash,
+      isomorphicHash,
+      consecutiveRepeats: currentRepeats,
+      task: saved,
+    };
   }
 
   function approveImplementationPlan(threadId, input = {}) {
@@ -706,6 +868,16 @@ function createCollabTaskRegistry(options = {}) {
     const gate = task?.implementationGate || null;
     const artifactHash = String(task?.artifacts?.implementationPlan?.hash || "");
     const artifactBound = Boolean(gate?.planHash && artifactHash === String(gate.planHash));
+    if (gate?.loopDetected) {
+      return {
+        allowed: false,
+        reason: "duplicate_plan_loop_detected",
+        status: gate.status || IMPLEMENTATION_GATE_STATUS.REQUIRED,
+        planHash: gate.planHash || null,
+        artifactBound,
+        gate,
+      };
+    }
     if (isTaskImplementationApproved(task)) {
       return {
         allowed: true,
@@ -731,6 +903,15 @@ function createCollabTaskRegistry(options = {}) {
   }
 
   function shouldBlockImplementationRoute(input = {}) {
+    const task = getTask(input.threadId);
+    if (task?.implementationGate?.loopDetected) {
+      return {
+        skip: true,
+        reason: "duplicate_plan_loop_detected",
+        state: task?.phase || STATE.IMPLEMENT,
+        planHash: task?.implementationGate?.planHash,
+      };
+    }
     const intent = normalizeIntent(input.intent) || "";
     if (!["implement", "fix"].includes(input.toDuty) || !["implement", "fix"].includes(intent)) {
       return { skip: false };

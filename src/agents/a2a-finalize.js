@@ -51,6 +51,10 @@ function finalizeA2ARoutes(input = {}) {
   const invocationId = input.invocationId;
   const windowId = input.windowId || null;
   const useWorktree = Boolean(input.useWorktree);
+  const deliveryVerifier = input.deliveryVerifier || null;
+  const worktreeDir = input.worktreeDir || "";
+  const worktreeBranch = input.worktreeBranch || "";
+  const startHeadSha = input.startHeadSha || null;
   const worklist = Array.isArray(input.worklist) ? input.worklist : null;
   const maxDepth =
     Number.isFinite(Number(input.maxDepth)) && Number(input.maxDepth) > 0
@@ -170,11 +174,47 @@ function finalizeA2ARoutes(input = {}) {
       contentHash,
       handoff,
     });
+    let worktreeSkip = { skip: false };
+    const isCodeDeliveryHandoff =
+      useWorktree &&
+      Boolean(deliveryVerifier?.verifyWorktreeHandoff) &&
+      quality.intent !== "discuss" &&
+      quality.intent !== "plan" &&
+      ((["implement", "fix"].includes(fromDuty) &&
+        ["review", "deliver", "accept"].includes(duty)) ||
+        ["review", "deliver", "accept"].includes(quality.intent));
+
+    if (isCodeDeliveryHandoff && worktreeDir) {
+      const commitShaCandidate =
+        handoff?.commit_sha ||
+        (Array.isArray(handoff?.files) &&
+          handoff.files.find((f) => /^[a-f0-9]{40}$/i.test(String(f).trim()))) ||
+        null;
+      const worktreeCheck = deliveryVerifier.verifyWorktreeHandoff({
+        cwd: worktreeDir,
+        branch: worktreeBranch,
+        startHeadSha,
+        requireNewCommit:
+          ["implement", "fix"].includes(fromDuty) && ["review", "deliver", "accept"].includes(duty),
+        commitSha: commitShaCandidate,
+      });
+      if (!worktreeCheck.verified) {
+        worktreeSkip = {
+          skip: true,
+          reason: worktreeCheck.reason,
+          message: worktreeCheck.message || "工作区未落库，禁止下游消费。",
+          state: taskRegistry.getTask(sessionId)?.phase || null,
+        };
+      }
+    }
+
     const taskSkip = evidenceSkip.skip
       ? evidenceSkip
       : implementationSkip.skip
         ? implementationSkip
-        : reviewSkip;
+        : reviewSkip.skip
+          ? reviewSkip
+          : worktreeSkip;
     const policyInput = {
       quality,
       useWorktree,

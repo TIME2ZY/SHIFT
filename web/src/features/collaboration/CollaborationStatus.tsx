@@ -32,6 +32,9 @@ const BLOCKER_LABELS: Record<string, string> = {
   acceptance_workspace_unavailable: "无法读取当前工作区",
   acceptance_worktree_dirty: "工作区存在未提交改动",
   acceptance_head_mismatch: "当前提交与交付证据不一致",
+  invocation_failed: "上一轮执行失败，请排查原因后重试",
+  invocation_aborted: "执行已被用户停止",
+  handoff_rejected: "交接请求未满足门禁条件",
 };
 
 const REVIEW_MODE_LABELS: Record<string, string> = {
@@ -80,6 +83,31 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
               <dd>{REVIEW_MODE_LABELS[snapshot.reviewMode] || snapshot.reviewMode}</dd>
             </div>
           </dl>
+          {snapshot.chain && snapshot.chain.length > 0 ? (
+            <div className="react-task-chain" aria-label="协作链">
+              <small>协作链路</small>
+              <ol className="react-task-chain-steps">
+                {snapshot.chain.map((step, idx) => (
+                  <li key={step.invocationId || `${step.seatId}-${idx}`} data-status={step.status}>
+                    <span>{step.label || step.providerId || step.seatId}</span>
+                    {step.duty ? <span> ({DUTY_LABELS[step.duty] || step.duty})</span> : null}
+                    <em> · {step.status}</em>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+          {snapshot.pendingHandoffs && snapshot.pendingHandoffs.length > 0 ? (
+            <div className="react-task-pending-handoffs" role="status">
+              <small>待处理交接</small>
+              {snapshot.pendingHandoffs.map((h) => (
+                <p key={h.handoffId}>
+                  {h.sourceAgent || "当前席位"} ➔ {h.targetAgent || "下一席位"}
+                  {h.reason ? ` (${h.reason})` : ""}
+                </p>
+              ))}
+            </div>
+          ) : null}
           {snapshot.blocker ? (
             <div className="react-collab-blocker" role="status">
               <small>{blockerTypeLabel(snapshot.blocker.type)}</small>

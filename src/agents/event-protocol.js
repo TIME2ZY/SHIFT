@@ -53,6 +53,8 @@ const FIELD_TYPES = {
   signal: "stringOrNull",
   // Optional documented fields
   sessionId: "string",
+  subagentId: "string",
+  parentToolId: "string",
   status: "string",
   failureSource: "stringOrNull",
   failureReason: "stringOrNull",
@@ -87,6 +89,10 @@ const FIELD_TYPES = {
   originalOutputChars: "number",
   originalResultBytes: "number",
   originalResultChars: "number",
+  ts: "string",
+  createdAt: "string",
+  startedAt: "string",
+  finishedAt: "string",
 };
 
 const CANONICAL_EVENT_TYPES = new Set(Object.keys(CANONICAL_EVENT_FIELDS));
@@ -104,6 +110,8 @@ const STRING_COERCE_FIELDS = [
   "label",
   "toolKind",
   "sessionId",
+  "subagentId",
+  "parentToolId",
   "status",
   "failureSource",
   "failureReason",
@@ -117,6 +125,10 @@ const STRING_COERCE_FIELDS = [
   "visibility",
   "scope",
   "mode",
+  "ts",
+  "createdAt",
+  "startedAt",
+  "finishedAt",
 ];
 
 function normalizeProgressItem(item, index) {
@@ -179,8 +191,16 @@ function normalizeCanonicalEvent(event) {
     next.state = "running";
   }
   if (next.type === "tool.finished") {
-    const failed = next.status === "error" || next.status === "failed";
-    next.state = failed ? "failed" : "completed";
+    const failed = ["error", "failed", "cancelled", "canceled", "interrupted"].includes(
+      String(next.status || "").toLowerCase()
+    );
+    if (!next.state) {
+      next.state = failed
+        ? next.status === "cancelled" || next.status === "canceled"
+          ? "cancelled"
+          : "failed"
+        : "completed";
+    }
   }
   if (next.type === "usage.update") {
     const numericFields = [
@@ -422,19 +442,46 @@ function createRunLifecycle() {
           title: event.title,
           label: event.label,
           toolKind: event.toolKind,
+          sessionId: event.sessionId,
+          subagentId: event.subagentId,
+          parentToolCallId: event.parentToolCallId,
+          startedAt: event.ts || event.createdAt || new Date().toISOString(),
         });
       } else if (event.type === "tool.finished") {
+        const tool = openTools.get(event.toolId);
+        if (tool && Date.parse(event.ts || event.createdAt) < Date.parse(tool.startedAt)) {
+          event.ts = tool.startedAt;
+          event.createdAt = tool.startedAt;
+        }
         openTools.delete(event.toolId);
       }
     },
     closeOpenTools(context = {}, outcome = {}) {
       if (openTools.size === 0) return [];
+      const isCancelled = Boolean(
+        outcome.cancelled ||
+        ["explicit-stop", "cancelled"].includes(outcome.stopReason) ||
+        outcome.signal === "SIGINT"
+      );
+      const status = isCancelled ? "cancelled" : "interrupted";
       const error =
-        outcome.ok === false
-          ? "Provider run failed before the tool reported completion."
-          : "Provider run ended before the tool reported completion.";
-      const events = [...openTools.values()].map((tool) =>
-        makeEvent("tool.finished", {
+        outcome.error ||
+        (isCancelled
+          ? "Tool execution cancelled by invocation stop."
+          : outcome.ok === false
+            ? "Provider run failed before the tool reported completion."
+            : "Provider run ended before the tool reported completion.");
+      const now = new Date().toISOString();
+      const events = [...openTools.values()].map((tool) => {
+        let finishedTime = now;
+        if (tool.startedAt) {
+          const s = Date.parse(tool.startedAt);
+          const f = Date.parse(finishedTime);
+          if (Number.isFinite(s) && Number.isFinite(f) && f < s) {
+            finishedTime = tool.startedAt;
+          }
+        }
+        return makeEvent("tool.finished", {
           agent: context.agent,
           invocationId: context.invocationId,
           toolName: tool.toolName,
@@ -443,12 +490,19 @@ function createRunLifecycle() {
           title: tool.title,
           label: tool.label,
           toolKind: tool.toolKind,
-          status: "error",
+          sessionId: tool.sessionId,
+          subagentId: tool.subagentId,
+          parentToolCallId: tool.parentToolCallId,
+          status,
+          state: status,
           error,
+          result: { error },
           failureSource: "lifecycle-terminal",
           failureReason: error,
-        })
-      );
+          ts: finishedTime,
+          createdAt: finishedTime,
+        });
+      });
       openTools.clear();
       return events;
     },

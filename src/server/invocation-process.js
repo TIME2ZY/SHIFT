@@ -1,3 +1,4 @@
+const toolStatuses = require("../shared/tool-status.json");
 const { classifyShellOutcome } = require("../agents/tool-classification");
 const { formatToolResultForDisplay } = require("../agents/tool-result-format");
 
@@ -53,7 +54,14 @@ function limitedText(value) {
 }
 
 function eventTime(event) {
-  return typeof event?.ts === "string" || typeof event?.ts === "number" ? event.ts : undefined;
+  const t =
+    event?.createdAt ||
+    event?.created_at ||
+    event?.ts ||
+    event?.payload?.createdAt ||
+    event?.payload?.created_at ||
+    event?.payload?.ts;
+  return typeof t === "string" || typeof t === "number" ? t : undefined;
 }
 
 function toolKey(payload, eventNo) {
@@ -116,7 +124,23 @@ function projectInvocationProcess(invocationId, events = [], options = {}) {
   for (const event of ordered) {
     if (!event || typeof event !== "object") continue;
     const kind = String(event.kind || event.type || "");
-    const payload = event.payload && typeof event.payload === "object" ? event.payload : event;
+    const payload = {
+      ...(event.payload && typeof event.payload === "object" ? event.payload : event),
+    };
+    if (payload.subagentId) {
+      const source = "[子 Agent " + payload.subagentId + "] ";
+      if (payload.text) payload.text = source + payload.text;
+      if (payload.toolName) payload.title = source + (payload.title || payload.toolName);
+      if (kind === "progress.update") {
+        appendTimelineText(
+          timeline,
+          "commentary",
+          Number(event.eventNo) || 0,
+          source + (payload.items || []).map((i) => i.label || i.text || "").join(" · ")
+        );
+        continue;
+      }
+    }
     const eventNo = Number.isInteger(event.eventNo) ? event.eventNo : 0;
 
     if (kind === "thinking.delta") {
@@ -175,7 +199,13 @@ function projectInvocationProcess(invocationId, events = [], options = {}) {
           args: payload.args || current.input || {},
         });
         const failed = outcome.failed;
-        current.status = failed ? "error" : "done";
+        current.status = toolStatuses.cancelled.includes(payload.status)
+          ? "cancelled"
+          : toolStatuses.interrupted.includes(payload.status)
+            ? "interrupted"
+            : failed
+              ? "error"
+              : "done";
         if (failed && (payload.failureSource || outcome.failureSource)) {
           current.failureSource = payload.failureSource || outcome.failureSource;
         }
@@ -197,9 +227,13 @@ function projectInvocationProcess(invocationId, events = [], options = {}) {
       }
 
       if (current.startedAt && current.finishedAt) {
-        const started = Date.parse(String(current.startedAt));
-        const finished = Date.parse(String(current.finishedAt));
-        if (Number.isFinite(started) && Number.isFinite(finished) && finished >= started) {
+        let started = Date.parse(String(current.startedAt));
+        let finished = Date.parse(String(current.finishedAt));
+        if (Number.isFinite(started) && Number.isFinite(finished)) {
+          if (finished < started) {
+            finished = started;
+            current.finishedAt = current.startedAt;
+          }
           current.durationMs = finished - started;
         }
       }

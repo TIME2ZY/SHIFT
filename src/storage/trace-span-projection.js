@@ -93,7 +93,11 @@ function projectToolSpans(traceId, invocation, events) {
 
 function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
   const orphanFinish = Boolean(finished && !started);
-  const failed = finished && ["error", "failed"].includes(payload.status);
+  const failed =
+    finished &&
+    ["error", "failed", "cancelled", "canceled", "interrupted"].includes(
+      String(payload.status || "").toLowerCase()
+    );
   return {
     spanId: `tool:${invocationId}:${toolId}`,
     traceId,
@@ -103,10 +107,17 @@ function toolSpan(traceId, invocationId, toolId, started, finished, payload) {
     name: payload.toolName || payload.tool_name || "tool",
     state: orphanFinish ? "orphaned" : finished ? (failed ? "failed" : "completed") : "active",
     startedAt: started?.created_at || null,
-    endedAt: finished?.created_at || null,
+    endedAt:
+      started?.created_at &&
+      finished?.created_at &&
+      Date.parse(finished.created_at) < Date.parse(started.created_at)
+        ? started.created_at
+        : finished?.created_at || null,
     complete: Boolean(finished && started),
     attributes: {
       toolId,
+      subagentId: payload.subagentId || null,
+      parentToolId: payload.parentToolId || null,
       toolKind: payload.toolKind || null,
       status: payload.status || null,
       orphanFinish,

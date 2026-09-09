@@ -109,7 +109,7 @@ function createExecutionReadModel(db) {
       SELECT invocation_id, tool_id,
         SUM(CASE WHEN kind = 'tool.started' THEN 1 ELSE 0 END) AS starts,
         SUM(CASE WHEN kind = 'tool.finished' THEN 1 ELSE 0 END) AS finishes,
-        MAX(CASE WHEN kind = 'tool.finished' AND status IN ('error', 'failed') THEN 1 ELSE 0 END)
+        MAX(CASE WHEN kind = 'tool.finished' AND status IN ('error', 'failed', 'cancelled', 'canceled', 'interrupted') THEN 1 ELSE 0 END)
           AS failed
       FROM tool_events WHERE tool_id IS NOT NULL
       GROUP BY invocation_id, tool_id
@@ -196,6 +196,11 @@ function createExecutionReadModel(db) {
         : trace.state === "active" || active.length > 0
           ? "running"
           : trace.state;
+      const pendingHandoffRows = trace?.id
+        ? listHandoffs
+            .all(trace.id)
+            .filter((row) => row.route_status === "accepted" && row.complete_status === "pending")
+        : [];
       return {
         sessionId: threadId,
         traceId: trace?.id || null,
@@ -203,6 +208,7 @@ function createExecutionReadModel(db) {
         runStatus,
         lastEventId,
         activeInvocationIds: active.map((row) => row.id),
+        pendingHandoffs: pendingHandoffRows.map(handoffSummary),
         clientTurnId: trace?.client_turn_id || null,
       };
     },

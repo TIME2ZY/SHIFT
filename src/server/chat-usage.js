@@ -25,6 +25,7 @@ function invocationUsageDelta(current = {}, baseline = {}) {
 
 function contextCharsFromEvent(event) {
   if (!event || typeof event !== "object") return 0;
+  if (event.subagentId) return 0;
   if (event.type === "thinking.delta" || event.type === "commentary.delta") {
     return typeof event.text === "string" ? event.text.length : 0;
   }
@@ -35,6 +36,7 @@ function contextCharsFromEvent(event) {
   // can be orders of magnitude larger than what the provider kept.
   const value = event.output !== undefined ? event.output : event.result;
   if (typeof value === "string") return value.length;
+  if (typeof value?.output_for_prompt === "string") return value.output_for_prompt.length;
   if (value && typeof value === "object") {
     try {
       return JSON.stringify(value).length;

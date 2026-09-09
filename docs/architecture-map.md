@@ -123,6 +123,10 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   同样收口为该终态，不落入 `request-error-orphan`，也不再开一轮 invocation。
   `eventStore.append` 与 durable-recorder 使用同一 `withSqliteBusyRetry` 锁竞争重试策略；
   重试耗尽仍显式上抛。
+- Invocation 的 SQLite active 行表示已 durable started，读模型不再按事件数量猜测阶段；无输出调用允许直接收口终态，终态不可覆写由 repository/recorder 保证。工具结束时间不得早于开始时间。
+- 用户主动停止（abort）意图贯穿子进程取消链，权威终态统一记为 `aborted`；非零退出码不能覆盖已知停止原因，Trace 终态按最终链路结果判定，不因前序成功误报 completed。
+- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`），禁止残留悬挂的 started 工具。
+- ACP 子 Agent 事件、文本缓冲与恢复身份按 provider session 隔离；子输出作为带 subagent 标记的 commentary.delta 路由，不进入父 Agent 正文及交接解析；extractSessionId 锁定 rootSessionId。
 
 ---
 
@@ -158,6 +162,8 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 - 服务启动按 active Invocation → pending Handoff → active Trace 顺序收口崩溃遗留状态，
   Invocation 终态与 `invocation-end` 同事务提交，不补造成功。
 - 热路径去掉 transcript dual-write（callback 诊断事件同样）。
+- Handoff 策略在 balanced 模式下执行严格格式与意图契约校验；字段缺失或目标 Seat 不匹配的 degraded handoff 显式拒绝并生成结构化修复诊断，禁止静默入队下游。
+- 产生代码变更的 Duty（`implement` / `fix` 等）在 handoff 时必须通过工作区校验门禁（`verifyWorktreeHandoff`）：检查 worktree 是否存在未提交脏变更、是否存在前进的 commit 记录以及 commit 是否真实存在，未达标时拒绝交接。
 
 ---
 
@@ -331,6 +337,8 @@ phase=`done` 而没有匹配的 Seat 完成决定时，也不会投影为已验�
 `## 测试（旧接口测试是否处理）`、`## 风险与回滚`；缺少任一章节都会拒绝交付证据。
 正文末尾另起一行 `来自 <模型 ID>`，写当前 Seat 绑定的模型 ID，不要写厂家或 Seat 名；缺少该行同样拒绝交付证据。
 
+同构方案与审查死循环熔断：`submitImplementationPlan` 和 `recordCodeReview` 基于规范化同构哈希（忽略首尾空行、文件顺序与无关标点差异）跟踪连续重复提交计数。当连续提交相同方案超过阈值（默认 3 次，环境变量 `SHIFT_MAX_IDENTICAL_PLANS` 可调）时，标记 `loopDetected`，派发 `plan-warning` SSE 事件并在 worklist 中记录 warning diagnostic，立即阻断后续 A2A 级联入队并终止 worklist 循环。同时，`GET /api/sessions/:sessionId/collaboration` 支持恢复完整的多 Agent 协作链路链、未消费的 pending handoffs 以及执行失败或循环检测产生的 blocker 状态。
+
 ---
 
 ### 3.8 Seat / Duty 在线路由
@@ -421,10 +429,11 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 `memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
 Bootstrap 与 Active Memory Card 分别只接受结构化 `{ packet, inject }` 和
 `{ rendered, items, stats }` 返回契约，不再兼容历史字符串返回值。
-Callback token 只存在于当前进程的 active thread 上下文，必须携带有效 `expiresAt`；
-缺失、非法或已过期的 token 统一在验证入口清除，不存在永久有效兼容形态。
+Callback token 绑定在当前进程 active invocation 的生命周期中，只要任务处于 active 状态就保持有效；当 invocation 到达终态时由 `retireInvocation` 统筹失效清理，避免长时间执行被固定 TTL 提前作废。
 Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `recallService`，
 不再接受 transcript 作为在线回退读源。
+工作区物理健康检查与自动对齐：`worktreeManager.checkHealth` / `reconcileWorktree` 在服务启动、Session 状态和请求执行阶段检测物理目录与 git 分支一致性，物理删除或外部 prune 的孤儿记录安全清理，执行时自动重建或优雅回退。
+上下文恢复按 window seal 边界截断，`partitionInvocationsBySeal` 严格隔离密封前历史，防止跨窗口上下文膨胀。
 `createMemoryCapture` 只接受 EventStore；已删除 transcript 测试 sink、空转的
 `replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式
 注入 SQLite-backed source，模块不再默认读取文件 transcript。Agent 的 product Memory
@@ -567,7 +576,22 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-09-06。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
+最后核对日期：2026-09-08。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
 PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
+
+### 运行修复补充（2026-09-09）
+
+- ACP 的 session 缓冲和子工具标识位于 acp-runtime；chat-worklist 只将父 usage 应用到窗口。invocation-process 与前端 run-event-stream 标注子 Agent 来源。
+- child-stream 区分超时与用户取消，chat-worklist 收口工具和 invocation，chat-routes 汇总 trace；成功 trace 清空 failure 字段。
+- A2A 新 provider session 及调用前轮换通过 bootstrap.buildDigest 注入匹配 Agent/workspace 的 seal，任务目标和最新审查来自 registry。
+- workflow-evidence 将 invocationId 传入 registry 实现同轮幂等；重复循环失败通过既有后台失败路径收口。
+- MessageList 保留 callback、交接和 final 的顺序；useChatActions 根据运行/协作事件刷新会话及 trace 查询。
+- worktree manager 的自动 reconcile 仅清理已不存在目录的绑定；现存目录保留，已有分支用于恢复，创建失败不切换执行位置。
+
+### 本轮按用例收口计划
+
+- chat-worklist：删除独立工具 Map/补终态构造，复用 event-protocol lifecycle；四处恢复参数组装收口到 bootstrap 的恢复上下文绑定，调度分支只选择是否恢复及 generation。保留跨进程故障兜底，持久化仍走 durable recorder。
+- collab-task-registry：本轮只收窄方案/审查证据身份，删除无 invocation 身份的重复计数路径；后续修改这两个用例时，将证据去重判定移入既有 workflow-evidence/plan gate，registry 保留权威保存，禁止新增平行写入口。本轮不做全 registry 拆迁。
+- 删除 test-only transition 校验及 arePlansIsomorphic 包装；旧循环测试改为跨 invocation 无进展行为。前端工具状态从共享展示契约导入。

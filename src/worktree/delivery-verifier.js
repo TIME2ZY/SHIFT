@@ -1,11 +1,9 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
-const {
-  validateDeliveryReceipt,
-  validateVerifiedDelivery,
-} = require("../agents/workflow-gates");
+const { validateDeliveryReceipt, validateVerifiedDelivery } = require("../agents/workflow-gates");
 
 const SUCCESSFUL_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
@@ -22,7 +20,9 @@ function createDeliveryVerifier(options = {}) {
     });
     const status = Number.isInteger(result?.status) ? result.status : result?.error ? -1 : 0;
     if (!allowStatus.includes(status)) {
-      const message = String(result?.stderr || result?.stdout || result?.error?.message || "").trim();
+      const message = String(
+        result?.stderr || result?.stdout || result?.error?.message || ""
+      ).trim();
       throw new Error(message || `${command} ${args.join(" ")} failed`);
     }
     return String(result?.stdout || "").trim();
@@ -49,11 +49,10 @@ function createDeliveryVerifier(options = {}) {
       const commitSha = run("git", ["rev-parse", "HEAD"], cwd);
       const commitMessage = run("git", ["log", "-1", "--format=%s%x00%b"], cwd);
       const separator = commitMessage.indexOf("\0");
-      const commitSubject = separator >= 0 ? commitMessage.slice(0, separator).trim() : commitMessage;
+      const commitSubject =
+        separator >= 0 ? commitMessage.slice(0, separator).trim() : commitMessage;
       const commitBody = separator >= 0 ? commitMessage.slice(separator + 1).trim() : "";
-      const repository = JSON.parse(
-        run("gh", ["repo", "view", "--json", "defaultBranchRef"], cwd)
-      );
+      const repository = JSON.parse(run("gh", ["repo", "view", "--json", "defaultBranchRef"], cwd));
       const defaultBranch = String(repository?.defaultBranchRef?.name || "");
       if (!defaultBranch || defaultBranch !== String(receipt.base_branch)) {
         return {
@@ -95,7 +94,8 @@ function createDeliveryVerifier(options = {}) {
         verifiedAt: new Date().toISOString(),
       };
 
-      if (evidence.prState !== "OPEN") return { ...evidence, verified: false, reason: "pr_not_open" };
+      if (evidence.prState !== "OPEN")
+        return { ...evidence, verified: false, reason: "pr_not_open" };
       if (evidence.prDraft) return { ...evidence, verified: false, reason: "pr_is_draft" };
       if (evidence.prHeadBranch !== branch) {
         return { ...evidence, verified: false, reason: "pr_head_branch_mismatch" };
@@ -112,7 +112,79 @@ function createDeliveryVerifier(options = {}) {
     }
   }
 
-  return { verify };
+  function getHeadSha(cwd) {
+    try {
+      return run("git", ["rev-parse", "HEAD"], cwd);
+    } catch {
+      return null;
+    }
+  }
+
+  function verifyWorktreeHandoff(input = {}) {
+    if (!String(input.cwd || "").trim())
+      return { verified: false, reason: "managed_worktree_required" };
+    const cwd = path.resolve(String(input.cwd));
+    if (!cwd) return { verified: false, reason: "managed_worktree_required" };
+
+    if (!fs.existsSync(cwd)) {
+      return { verified: false, reason: "worktree_dir_not_found" };
+    }
+
+    if (!fs.existsSync(path.join(cwd, ".git"))) {
+      return { verified: false, reason: "not_a_git_repo" };
+    }
+
+    try {
+      const status = run("git", ["status", "--porcelain"], cwd);
+      if (status) {
+        return {
+          verified: false,
+          reason: "worktree_dirty",
+          message: "工作区存在未提交改动，未落库禁止下游消费。",
+          status,
+        };
+      }
+
+      const currentHead = run("git", ["rev-parse", "HEAD"], cwd);
+      const startHead = input.startHeadSha ? String(input.startHeadSha).trim() : null;
+      if (startHead && currentHead === startHead && input.requireNewCommit) {
+        return {
+          verified: false,
+          reason: "worktree_no_new_commit",
+          message: "工作区未产生新的 commit，未落库禁止下游消费。",
+          headSha: currentHead,
+        };
+      }
+
+      if (input.commitSha) {
+        const commitSha = String(input.commitSha).trim();
+        try {
+          run("git", ["cat-file", "-e", `${commitSha}^{commit}`], cwd);
+        } catch {
+          return {
+            verified: false,
+            reason: "commit_not_found",
+            message: `引用的 commit ${commitSha} 在 git 中不存在。`,
+            commitSha,
+          };
+        }
+      }
+
+      return {
+        verified: true,
+        headSha: currentHead,
+        clean: true,
+      };
+    } catch (error) {
+      return {
+        verified: false,
+        reason: "worktree_verification_failed",
+        error: error.message,
+      };
+    }
+  }
+
+  return { verify, verifyWorktreeHandoff, getHeadSha };
 }
 
 function resolveCiStatus(rollup) {
@@ -139,7 +211,9 @@ function resolveCiStatus(rollup) {
 }
 
 function normalizeUrl(value) {
-  return String(value || "").trim().replace(/\/$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/$/, "");
 }
 
 module.exports = {

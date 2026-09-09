@@ -3,7 +3,7 @@ title: "ADR-002: Multi-Agent Reliability and Trace Contracts"
 status: accepted
 decision_id: ADR-002
 created: 2026-07-28
-amended: 2026-09-07
+amended: 2026-09-09
 scope: trace identity, invocation lifecycle, A2A handoff hops, metric eligibility, memory funnel, and observability boundaries
 supersedes: []
 related:
@@ -90,12 +90,12 @@ active → completed | failed | aborted
 规范状态机保持：
 
 ```text
-created → started → streaming → completed | failed | cancelled | sealed
+durable started (DB active) → completed | failed | cancelled | sealed
 ```
 
 当前 SQLite 映射保持：
 
-- `created | started | streaming` → `active`
+- `created | started | running | streaming` 是运行展示词汇，映射为 `active`；不要求无输出调用制造 running/streaming 事件。SQLite active 行已具有 started_at，读模型投影为 started，不能按事件数量猜测阶段。
 - `cancelled` → `aborted`
 - `sealed` → `completed` + `terminal_reason = sealed`
 - `completed | failed` → 同名 DB 状态
@@ -382,3 +382,14 @@ Trace/指标标记为 incomplete；权威 Trace、Invocation 或 Handoff 写入�
 - Trace 查询必须通过可信 Thread → Project 做服务端隔离。
 - 阶段 1 可以从权威 Trace/Invocation/Handoff 构建 spans 和 links，而无需重写业务状态机。
 - 任何新增状态、failure stage、metric denominator 或 capture policy 都必须先更新本 ADR。
+
+## 运行修复约束（2026-09-09）
+
+- ACP 子 session 的事件保留 subagentId；子工具 ID 按 session 限定，正文、usage 和进度不得覆盖父 invocation。原始事件继续通过既有 canonical event/outbox 路径审计。
+- 用户取消落为 aborted；超时和内部故障落为 failed，成功 trace 不带失败字段。未结束工具记录 cancelled 或 interrupted，实时和恢复显示一致。
+- 新 provider session 必须获得本 Agent、workspace 的 seal 恢复信息及权威任务状态。封存表示上下文边界，不表示任务验收完成。
+- 同一 invocation 的方案、审查证据仅接受一次；callback 与 final 的重复呈现不得覆盖原证据或增加循环计数。跨 invocation 的无进展重复可触发失败终态，不能显示完成。
+- handoff 原始消息与路由记录均保留在会话中；事件到达和重连触发派生查询刷新，不增加人工确认。
+- worktree 健康检查不能删除现存目录或重置会话分支；恢复失败必须阻止运行，不得退回主项目执行。
+
+本轮收口约束：删除未接入权威写入的 transition 校验 API；终态不可覆写由既有 repository/recorder 保证。工具补终态由 Provider envelope 的 lifecycle 负责，ACP 只解码与刷新缓冲；服务端进程故障兜底复用同一 lifecycle。方案与审查提交必须携带非空 invocationId，重放不计循环。

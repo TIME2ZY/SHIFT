@@ -121,6 +121,7 @@ function createMemoryCapture({
       typeof input.partial === "boolean" ? input.partial : isPartialSealReason(reason, input);
     const metadata = {
       source: "window-seal",
+      workspaceKey: input.sealMeta?.workspaceKey || input.workspaceKey || null,
       agentId,
       generation: positiveIntegerOrNull(input.generation),
       ratio: finiteNumberOrNull(input.ratio),
@@ -136,6 +137,7 @@ function createMemoryCapture({
         ...metadata,
         assistantContent: input.assistantContent,
         userGoal: input.userGoal,
+        task: input.task,
         events: input.events,
       }),
       sourceInvocationId: invocationId,
@@ -223,7 +225,9 @@ function collectResumeFacts(events) {
       errorText = String(payload.error || payload.message || payload.text || kind).trim();
     }
     if (errorText) {
-      const clipped = errorText.slice(0, 160);
+      const clipped = errorText
+        .replace(new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g"), "")
+        .slice(0, 160);
       if (!seenErrors.has(clipped)) {
         seenErrors.add(clipped);
         errors.push(clipped);
@@ -235,7 +239,9 @@ function collectResumeFacts(events) {
 
 function renderWindowSealMemory(input) {
   const partial = input.partial !== false;
-  const facts = collectResumeFacts(input.events);
+  const facts = collectResumeFacts(
+    (input.events || []).filter((e) => !(e.payload || e).subagentId)
+  );
   const goal = compactText(input.userGoal, 240);
   const snapshot = truncateMiddle(
     typeof input.assistantContent === "string" && input.assistantContent.trim()
@@ -248,8 +254,24 @@ function renderWindowSealMemory(input) {
   const lines = [
     `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=${partial}`,
     goal ? `goal: ${goal}` : "goal: (无用户目标快照)",
-    `done: ${partial ? "中断，输出可能不完整" : "本轮已写出完整回复"}`,
+    `execution: ${partial ? "中断，输出可能不完整" : "本次回复已结束，任务完成以平台验收为准"}`,
   ];
+  if (input.task) {
+    lines.push(
+      "task_state: " +
+        compactText(
+          JSON.stringify({
+            phase: input.task.phase,
+            status: input.task.taskStatus,
+            review: input.task.artifacts?.codeReview,
+            delivery: input.task.deliveryGate,
+            acceptance: input.task.finalGate,
+            planHash: input.task.implementationGate?.planHash,
+          }),
+          1400
+        )
+    );
+  }
   if (facts.files.length > 0) {
     lines.push("files:");
     for (const file of facts.files) lines.push(`  - ${file}`);
@@ -282,18 +304,22 @@ function compactText(value, maxChars) {
   return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function readLatestWindowSealEvent(storage, threadId) {
+function readLatestWindowSealEvent(storage, threadId, scope = {}) {
   if (!storage?.invocations || typeof threadId !== "string" || !threadId) return null;
   const listThread = storage.invocations.listForThread;
   const listEvents = storage.invocations.listEvents;
   if (typeof listThread !== "function" || typeof listEvents !== "function") return null;
   const invocations = listThread.call(storage.invocations, threadId) || [];
   for (let i = invocations.length - 1; i >= 0; i -= 1) {
-    const invocationId = invocations[i].id || invocations[i].invocationId;
+    const invocation = invocations[i];
+    if (scope.agentId && (invocation.agentId || invocation.agent) !== scope.agentId) continue;
+    const window = storage.windows?.get?.(invocation.windowId);
+    if (scope.workspaceKey && window?.workspaceKey !== scope.workspaceKey) continue;
+    const invocationId = invocation.id || invocation.invocationId;
     if (!invocationId) continue;
     const events = listEvents.call(storage.invocations, invocationId) || [];
     for (let j = events.length - 1; j >= 0; j -= 1) {
-      if (events[j]?.kind === "window-sealed") return events[j];
+      if (events[j]?.kind === "window-sealed") return { ...events[j], invocationId };
     }
   }
   return null;

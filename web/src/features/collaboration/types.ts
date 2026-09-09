@@ -39,6 +39,29 @@ export interface AcceptanceCard {
   decidedAt: string | null;
 }
 
+export interface CollaborationChainStep {
+  seatId: string;
+  providerId: string | null;
+  label: string | null;
+  duty: string | null;
+  skillName: string | null;
+  enforcementLevel: string | null;
+  invocationId: string | null;
+  status: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  terminalReason: string | null;
+}
+
+export interface PendingHandoff {
+  handoffId: string;
+  sourceAgent: string | null;
+  targetAgent: string | null;
+  reason: string | null;
+  phaseId: string | null;
+  createdAt: string | null;
+}
+
 export interface CollaborationSnapshot {
   status: "active" | "waiting_human" | "accepted" | "rejected" | string;
   phase: "discuss" | "implement" | "review" | "deliver" | "done" | string;
@@ -53,6 +76,8 @@ export interface CollaborationSnapshot {
   evidence: CollaborationEvidence;
   reviewMode: "same_seat" | "other_seat" | "pending";
   acceptance: AcceptanceCard;
+  chain?: CollaborationChainStep[];
+  pendingHandoffs?: PendingHandoff[];
   nextAction: string;
 }
 

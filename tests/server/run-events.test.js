@@ -159,6 +159,10 @@ test("closing the event stream does not abort the backend run", async () => {
       const invocations = storage.invocations.listForThread(sessionId);
       assert.ok(invocations.some((row) => row.state === "completed"));
       assert.ok(traceId);
+      const trace = storage.traces.get(traceId);
+      assert.equal(trace.state, "completed");
+      assert.equal(trace.failureStage, null);
+      assert.equal(trace.errorCode, null);
       const replay = storage.invocations.listEventsAfter(sessionId, 0);
       assert.ok(replay.length > 0);
       assert.ok(replay.every((event) => event.traceId === traceId));

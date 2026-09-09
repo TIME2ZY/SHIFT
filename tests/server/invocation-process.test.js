@@ -295,3 +295,38 @@ test("projectInvocationProcess closes historical open tools at invocation termin
   assert.equal(summary.tools[0].input, undefined);
   assert.equal(summary.tools[0].error, undefined);
 });
+
+test("projectInvocationProcess enforces monotonic tool timestamps when finished is earlier than started", () => {
+  const events = [
+    {
+      eventNo: 1,
+      kind: "tool.started",
+      createdAt: "2026-07-31T00:00:01.032Z",
+      payload: {
+        toolId: "t-skew",
+        toolName: "shell",
+        args: { command: "ls" },
+      },
+    },
+    {
+      eventNo: 2,
+      kind: "tool.finished",
+      // Skewed: 32ms earlier than started
+      createdAt: "2026-07-31T00:00:01.000Z",
+      payload: {
+        toolId: "t-skew",
+        toolName: "shell",
+        result: { ok: true },
+      },
+    },
+    { eventNo: 3, kind: "run.finished", payload: { exitCode: 0 } },
+  ];
+  const process = projectInvocationProcess("i-skew", events);
+
+  assert.equal(process.status, "done");
+  const tool = process.tools[0];
+  assert.equal(tool.startedAt, "2026-07-31T00:00:01.032Z");
+  // Clamped to startedAt:
+  assert.equal(tool.finishedAt, "2026-07-31T00:00:01.032Z");
+  assert.equal(tool.durationMs, 0);
+});

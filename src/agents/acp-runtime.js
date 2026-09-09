@@ -1,3 +1,4 @@
+const { classifyShellOutcome } = require("./tool-classification");
 const { makeEvent } = require("./event-protocol");
 const { makeUsageEvent } = require("./usage");
 
@@ -131,10 +132,65 @@ function usdCostFromUpdate(update) {
   return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
 }
 
-function createAcpRuntime(_config = {}) {
-  const tools = new Map();
-  let thinkingBuffer = "";
-  let textBuffer = "";
+function extractSubagentId(result) {
+  if (!result) return null;
+  if (typeof result === "string") {
+    const match = result.match(/subagent_id:\s*([^\s\r\n]+)/i);
+    return match ? match[1].trim() : null;
+  }
+  if (typeof result === "object") {
+    if (typeof result.subagent_id === "string" && result.subagent_id.trim()) {
+      return result.subagent_id.trim();
+    }
+    if (typeof result.subagentId === "string" && result.subagentId.trim()) {
+      return result.subagentId.trim();
+    }
+    if (typeof result.text === "string") {
+      const match = result.text.match(/subagent_id:\s*([^\s\r\n]+)/i);
+      return match ? match[1].trim() : null;
+    }
+  }
+  return null;
+}
+
+function createAcpRuntime(config = {}) {
+  let rootSessionId =
+    typeof config?.resumeSessionId === "string" && config.resumeSessionId.trim()
+      ? config.resumeSessionId.trim()
+      : null;
+  const sessions = new Map();
+  const subagentToParentTool = new Map();
+
+  function getOrCreateSession(sessionId) {
+    const id =
+      typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : rootSessionId || "";
+    let session = sessions.get(id);
+    if (!session) {
+      const isRoot = !rootSessionId || id === rootSessionId;
+      if (!rootSessionId && id) {
+        rootSessionId = id;
+      }
+      session = {
+        sessionId: id,
+        isRoot,
+        parentToolId: subagentToParentTool.get(id) || null,
+        tools: new Map(),
+        thinkingBuffer: "",
+        textBuffer: "",
+      };
+      sessions.set(id, session);
+    }
+    return session;
+  }
+
+  function sessionMetadata(session) {
+    if (session.isRoot) return {};
+    return {
+      subagentId: session.sessionId,
+      ...(session.parentToolId ? { parentToolId: session.parentToolId } : {}),
+      sessionId: session.sessionId,
+    };
+  }
 
   function base(ctx) {
     return {
@@ -143,25 +199,47 @@ function createAcpRuntime(_config = {}) {
     };
   }
 
-  function flushBuffers(ctx, force = false) {
+  function flushSessionBuffers(session, ctx, force = false) {
     const out = [];
-    if (thinkingBuffer && (force || thinkingBuffer.length >= ACP_THINKING_FLUSH_CHARS)) {
-      out.push(makeEvent("thinking.delta", { ...base(ctx), text: thinkingBuffer }));
-      thinkingBuffer = "";
+    const meta = sessionMetadata(session);
+    if (
+      session.thinkingBuffer &&
+      (force || session.thinkingBuffer.length >= ACP_THINKING_FLUSH_CHARS)
+    ) {
+      out.push(
+        makeEvent("thinking.delta", {
+          ...base(ctx),
+          text: session.thinkingBuffer,
+          ...meta,
+        })
+      );
+      session.thinkingBuffer = "";
     }
-    if (textBuffer && (force || textBuffer.length >= ACP_TEXT_FLUSH_CHARS)) {
-      out.push(makeEvent("text.delta", { ...base(ctx), text: textBuffer }));
-      textBuffer = "";
+    if (session.textBuffer && (force || session.textBuffer.length >= ACP_TEXT_FLUSH_CHARS)) {
+      if (session.isRoot) {
+        out.push(makeEvent("text.delta", { ...base(ctx), text: session.textBuffer }));
+      } else {
+        // Child session text must NOT become text.delta of the parent agent.
+        out.push(
+          makeEvent("commentary.delta", {
+            ...base(ctx),
+            text: session.textBuffer,
+            ...meta,
+          })
+        );
+      }
+      session.textBuffer = "";
     }
     return out;
   }
 
-  function mapTool(update, ctx) {
-    const out = flushBuffers(ctx, true);
-    const toolId = String(update.toolCallId || "");
+  function mapTool(session, update, ctx) {
+    const out = flushSessionBuffers(session, ctx, true);
+    const rawToolId = String(update.toolCallId || "");
+    const toolId = rawToolId && !session.isRoot ? `${session.sessionId}:${rawToolId}` : rawToolId;
     if (!toolId) return out;
 
-    const previous = tools.get(toolId);
+    const previous = session.tools.get(toolId);
     const meta = acpToolMeta(update);
     const toolName = resolveToolName(update, previous);
     const title = resolveToolTitle(update, previous, toolName);
@@ -177,7 +255,9 @@ function createAcpRuntime(_config = {}) {
       status: update.status || previous?.status || "pending",
       finished: previous?.finished || false,
     };
-    tools.set(toolId, current);
+    session.tools.set(toolId, current);
+
+    const sMeta = sessionMetadata(session);
 
     if (!previous) {
       out.push(
@@ -187,22 +267,54 @@ function createAcpRuntime(_config = {}) {
           toolId,
           args: current.args,
           ...optionalToolDisplayFields(current),
+          ...sMeta,
         })
       );
     }
 
     if (["completed", "failed"].includes(current.status) && !current.finished) {
       current.finished = true;
+      const result = toolResult(update);
+      if (
+        session.isRoot &&
+        (current.toolName === "spawn_subagent" || current.toolKind === "task")
+      ) {
+        const subId = extractSubagentId(result);
+        if (subId) {
+          subagentToParentTool.set(subId, current.toolId);
+          const childSession = sessions.get(subId);
+          if (childSession && !childSession.parentToolId) {
+            childSession.parentToolId = current.toolId;
+          }
+        }
+      }
+      const outcome = classifyShellOutcome(
+        {
+          status: current.status,
+          result,
+          ...(result && typeof result === "object"
+            ? { exitCode: result.exit_code ?? result.exitCode }
+            : {}),
+        },
+        { toolName: current.toolName, args: current.args }
+      );
       out.push(
         makeEvent("tool.finished", {
           ...base(ctx),
           toolName: current.toolName,
           toolId,
-          status: current.status === "failed" ? "error" : "ok",
+          status: outcome.failed ? "error" : "ok",
+          exitCode: outcome.exitCode,
+          failureSource: outcome.failureSource,
+          failureReason: outcome.failureReason,
+          ...(typeof result?.output_for_prompt === "string"
+            ? { output: result.output_for_prompt }
+            : {}),
           // Final merged args (ACP often completes rawInput only on tool_call_update).
           args: current.args && Object.keys(current.args).length ? current.args : undefined,
-          result: toolResult(update),
+          result,
           ...optionalToolDisplayFields(current),
+          ...sMeta,
         })
       );
     }
@@ -214,6 +326,7 @@ function createAcpRuntime(_config = {}) {
           makeEvent("file.changed", {
             ...base(ctx),
             path: location.path,
+            ...sMeta,
           })
         );
       }
@@ -223,27 +336,47 @@ function createAcpRuntime(_config = {}) {
 
   return {
     extractSessionId(event) {
+      if (rootSessionId) return rootSessionId;
+      if (
+        event?.type === "acp.session_started" &&
+        typeof event?.sessionId === "string" &&
+        event.sessionId.trim()
+      ) {
+        return event.sessionId.trim();
+      }
       return typeof event?.sessionId === "string" ? event.sessionId : "";
     },
     transform(event, ctx) {
       if (!event || typeof event !== "object") return [];
-      if (event.type === "acp.session_started") return [];
+      if (event.type === "acp.session_started") {
+        if (typeof event.sessionId === "string" && event.sessionId.trim()) {
+          const sid = event.sessionId.trim();
+          rootSessionId = sid;
+          const root = getOrCreateSession(sid);
+          root.isRoot = true;
+        }
+        return [];
+      }
       if (event.type === "acp.permission_denied") {
+        const session = getOrCreateSession(event.sessionId);
+        const sMeta = sessionMetadata(session);
         return [
           makeEvent("diagnostic", {
             ...base(ctx),
             code: String(event.reason || "acp_permission_denied"),
             message: `ACP ${event.toolKind || "other"} tool denied by the implementation gate.`,
             ...(event.toolCallId ? { toolId: String(event.toolCallId) } : {}),
+            ...sMeta,
           }),
         ];
       }
       if (event.type === "acp.prompt_result") {
+        const root = getOrCreateSession(rootSessionId);
         const usageEvent = makeUsageEvent(base(ctx), usageFromPromptResult(event.result), {
           scope: "turn",
           mode: "cumulative",
         });
-        return [...flushBuffers(ctx, true), ...(usageEvent ? [usageEvent] : [])];
+        return [...flushSessionBuffers(root, ctx, true), ...(usageEvent ? [usageEvent] : [])];
       }
       if (event.type !== "acp.session_update") {
         return [
@@ -256,32 +389,33 @@ function createAcpRuntime(_config = {}) {
         ];
       }
 
+      const session = getOrCreateSession(event.sessionId);
       const update = event.update;
       if (!update || typeof update !== "object") return [];
       switch (update.sessionUpdate) {
         case "agent_message_chunk": {
           const text = contentText(update.content);
           const out = [];
-          if (thinkingBuffer) out.push(...flushBuffers(ctx, true));
-          if (text) textBuffer += text;
-          out.push(...flushBuffers(ctx));
+          if (session.thinkingBuffer) out.push(...flushSessionBuffers(session, ctx, true));
+          if (text) session.textBuffer += text;
+          out.push(...flushSessionBuffers(session, ctx));
           return out;
         }
         case "agent_thought_chunk": {
           const text = contentText(update.content);
           const out = [];
-          if (textBuffer) out.push(...flushBuffers(ctx, true));
-          if (text) thinkingBuffer += text;
-          out.push(...flushBuffers(ctx));
+          if (session.textBuffer) out.push(...flushSessionBuffers(session, ctx, true));
+          if (text) session.thinkingBuffer += text;
+          out.push(...flushSessionBuffers(session, ctx));
           return out;
         }
         case "tool_call":
         case "tool_call_update":
-          return mapTool(update, ctx);
+          return mapTool(session, update, ctx);
         case "plan":
         case "plan_update":
           return [
-            ...flushBuffers(ctx, true),
+            ...flushSessionBuffers(session, ctx, true),
             makeEvent("progress.update", {
               ...base(ctx),
               items: Array.isArray(update.entries)
@@ -291,6 +425,7 @@ function createAcpRuntime(_config = {}) {
                     label: entry.content || entry.title || "",
                   }))
                 : [],
+              ...sessionMetadata(session),
             }),
           ];
         case "usage_update": {
@@ -298,7 +433,7 @@ function createAcpRuntime(_config = {}) {
           const hasOccupancy = Number.isFinite(occupancy) && occupancy >= 0;
           const costUsd = usdCostFromUpdate(update);
           if (!hasOccupancy && costUsd === undefined) {
-            return flushBuffers(ctx, true);
+            return flushSessionBuffers(session, ctx, true);
           }
           const usageEvent = makeUsageEvent(
             base(ctx),
@@ -313,7 +448,10 @@ function createAcpRuntime(_config = {}) {
               contextTokensExact: hasOccupancy,
             }
           );
-          return [...flushBuffers(ctx, true), ...(usageEvent ? [usageEvent] : [])];
+          if (usageEvent && !session.isRoot) {
+            Object.assign(usageEvent, sessionMetadata(session));
+          }
+          return [...flushSessionBuffers(session, ctx, true), ...(usageEvent ? [usageEvent] : [])];
         }
         case "user_message_chunk":
         case "available_commands_update":
@@ -329,12 +467,17 @@ function createAcpRuntime(_config = {}) {
               code: "unmapped_acp_update",
               rawType: String(update.sessionUpdate || "unknown"),
               message: "ACP session update not mapped to canonical protocol",
+              ...sessionMetadata(session),
             }),
           ];
       }
     },
     finish(ctx) {
-      return flushBuffers(ctx, true);
+      const out = [];
+      for (const session of sessions.values()) {
+        out.push(...flushSessionBuffers(session, ctx, true));
+      }
+      return out;
     },
   };
 }
@@ -344,6 +487,7 @@ module.exports = {
   ACP_THINKING_FLUSH_CHARS,
   contentText,
   createAcpRuntime,
+  extractSubagentId,
   toolResult,
   acpToolMeta,
   resolveToolName,

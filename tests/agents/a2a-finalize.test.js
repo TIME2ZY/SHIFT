@@ -305,6 +305,8 @@ test("finalize binds Codex approval to Grok's submitted plan before enqueue", ()
   establishBaseline(threadId);
   collabTaskRegistry.ensureImplementationPlanRequired(threadId, { requestedBy: "codex" });
   const submitted = collabTaskRegistry.submitImplementationPlan(threadId, {
+    invocationId: "fixture-1",
+    progressKey: "head-unchanged",
     actorAgentId: "grok",
     actorDuty: "plan",
     plan: {
@@ -534,4 +536,94 @@ test("A2A causality stays queue-aligned when the same agent re-enters", () => {
   );
   assert.equal(state.a2aCauses[0].dutyBinding.seatId, "seat-t1-opencode");
   assert.equal(state.a2aCauses[0].dutyBinding.routingReason, "handoff_to");
+});
+
+test("finalize rejects worktree implementation handoff if worktree is dirty", () => {
+  const worklist = ["grok"];
+  const sseEvents = [];
+  const result = finalizeA2ARoutes({
+    text: [
+      "@Codex",
+      "```handoff",
+      "to: codex",
+      "intent: review",
+      "what: implemented the changes",
+      "why: ready for review",
+      "next_action: review the commit",
+      "files:",
+      "  - src/index.js",
+      "evidence:",
+      "  - tests pass",
+      "```",
+    ].join("\n"),
+    fromAgent: "grok",
+    fromDuty: "implement",
+    threadId: "t-wt-dirty",
+    sessionId: "t-wt-dirty",
+    invocationId: "inv-wt-dirty",
+    worklist,
+    useWorktree: true,
+    worktreeDir: "/tmp/fake-worktree",
+    deliveryVerifier: {
+      verifyWorktreeHandoff() {
+        return {
+          verified: false,
+          reason: "worktree_dirty",
+          message: "工作区存在未提交改动，未落库禁止下游消费。",
+        };
+      },
+    },
+    sendSse: (kind, payload) => sseEvents.push({ kind, payload }),
+    agentLabels: { grok: "Grok", codex: "Codex" },
+  });
+
+  assert.equal(result.enqueued.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].reason, "worktree_dirty");
+  assert.deepEqual(worklist, ["grok"]);
+  assert.ok(
+    sseEvents.some((e) => e.kind === "a2a-skipped" && e.payload.reason === "worktree_dirty")
+  );
+});
+
+test("finalize enqueues worktree implementation handoff when worktree is verified", () => {
+  const worklist = ["grok"];
+  const sseEvents = [];
+  const result = finalizeA2ARoutes({
+    text: [
+      "@Codex",
+      "```handoff",
+      "to: codex",
+      "intent: review",
+      "what: implemented the changes",
+      "why: ready for review",
+      "next_action: review the commit",
+      "files:",
+      "  - src/index.js",
+      "evidence:",
+      "  - tests pass",
+      "```",
+    ].join("\n"),
+    fromAgent: "grok",
+    fromDuty: "implement",
+    threadId: "t-wt-clean",
+    sessionId: "t-wt-clean",
+    invocationId: "inv-wt-clean",
+    worklist,
+    useWorktree: true,
+    worktreeDir: "/tmp/fake-worktree",
+    startHeadSha: "a".repeat(40),
+    deliveryVerifier: {
+      verifyWorktreeHandoff() {
+        return { verified: true, clean: true, headSha: "b".repeat(40) };
+      },
+    },
+    sendSse: (kind, payload) => sseEvents.push({ kind, payload }),
+    agentLabels: { grok: "Grok", codex: "Codex" },
+  });
+
+  assert.equal(result.enqueued.length, 1);
+  assert.equal(result.enqueued[0].to, "codex");
+  assert.equal(result.skipped.length, 0);
+  assert.deepEqual(worklist, ["grok", "codex"]);
 });

@@ -49,6 +49,8 @@ function route(registry, input) {
 
 function submitConcretePlan(registry) {
   return registry.submitImplementationPlan("thread-1", {
+    invocationId: "fixture-1",
+    progressKey: "head-unchanged",
     actorAgentId: "grok",
     actorDuty: "plan",
     content: [
@@ -103,6 +105,8 @@ test("five-phase registry follows discuss, implement, review, deliver, done", ()
     STATE.REVIEW
   );
   const reviewed = registry.recordCodeReview("thread-1", {
+    invocationId: "fixture-2",
+    progressKey: "head-unchanged",
     actorAgentId: "opencode",
     actorDuty: "review",
     review: {
@@ -184,6 +188,8 @@ test("review Duty changes return to implement and keep the requested review gate
   approveConcretePlan(registry);
   route(registry, { fromAgent: "grok", toAgent: "opencode", intent: "review" });
   const reviewed = registry.recordCodeReview("thread-1", {
+    invocationId: "fixture-3",
+    progressKey: "head-unchanged",
     actorAgentId: "opencode",
     actorDuty: "review",
     review: {
@@ -247,6 +253,8 @@ test("implementation Duty stays read-only until a concrete plan is approved", ()
   assert.equal(permission.reason, "implementation_plan_missing");
   assert.equal(
     registry.submitImplementationPlan("thread-1", {
+      invocationId: "fixture-4",
+      progressKey: "head-unchanged",
       actorAgentId: "grok",
       actorDuty: "plan",
       plan: { summary: "too vague", files: [], changes: [], tests: [] },
@@ -305,6 +313,8 @@ test("a revised implementation plan invalidates the prior approval", () => {
   assert.equal(registry.implementationPermission("thread-1").allowed, true);
 
   const revised = registry.submitImplementationPlan("thread-1", {
+    invocationId: "fixture-5",
+    progressKey: "head-unchanged",
     actorAgentId: "grok",
     actorDuty: "plan",
     plan: {

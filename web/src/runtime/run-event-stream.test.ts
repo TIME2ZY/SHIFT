@@ -152,3 +152,49 @@ it("isolates active Trace from historical and superseded terminals", () => {
     cursor: 7,
   });
 });
+
+it("refreshes durable handoff evidence and labels child output and interruption", () => {
+  const store = createSessionRunStore();
+  const refreshed: string[] = [];
+  const events = { onStateChange: (id: string) => refreshed.push(id) };
+  applyRunEventFrame(
+    "s1",
+    { event: "a2a-route", data: { from: "grok", to: "codex" } },
+    store,
+    events
+  );
+  expect(refreshed).toEqual(["s1"]);
+  applyRunEventFrame(
+    "s1",
+    {
+      event: "agent-event",
+      data: {
+        agent: "grok",
+        invocationId: "i1",
+        subagentId: "child",
+        type: "commentary.delta",
+        text: "child finding",
+      },
+    },
+    store
+  );
+  applyRunEventFrame(
+    "s1",
+    {
+      event: "agent-event",
+      data: {
+        agent: "grok",
+        invocationId: "i1",
+        type: "tool.finished",
+        toolId: "t1",
+        toolName: "shell",
+        status: "cancelled",
+      },
+    },
+    store
+  );
+  const message = store.getSnapshot().runs.s1.liveMessages.i1;
+  expect(message.commentary).toContain("[子 Agent child]");
+  expect(message.text).not.toContain("child finding");
+  expect(message.tools?.[0].status).toBe("cancelled");
+});

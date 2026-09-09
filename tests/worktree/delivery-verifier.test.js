@@ -3,10 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const {
-  createDeliveryVerifier,
-  resolveCiStatus,
-} = require("../../src/worktree/delivery-verifier");
+const { createDeliveryVerifier, resolveCiStatus } = require("../../src/worktree/delivery-verifier");
 
 const SHA = "a".repeat(40);
 const PR_URL = "https://github.com/acme/repo/pull/7";
@@ -53,9 +50,7 @@ function commandRunner(_command, args) {
           "风险可通过回滚该提交消除",
           "来自 deepseek-v4-flash",
         ].join("\n\n"),
-        statusCheckRollup: [
-          { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" },
-        ],
+        statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" }],
       }),
     };
   }
@@ -114,4 +109,93 @@ test("CI rollup distinguishes success, pending, and failure", () => {
     "failure"
   );
   assert.equal(resolveCiStatus([{ __typename: "StatusContext", state: "SUCCESS" }]), "success");
+});
+
+test("verifyWorktreeHandoff succeeds for clean worktree with new commit", () => {
+  const verifier = createDeliveryVerifier({
+    commandRunner(_cmd, args) {
+      const line = args.join(" ");
+      if (line === "status --porcelain") return { status: 0, stdout: "" };
+      if (line === "rev-parse HEAD") return { status: 0, stdout: "b".repeat(40) + "\n" };
+      if (line.startsWith("cat-file -e")) return { status: 0, stdout: "" };
+      return { status: 1, stderr: "unexpected" };
+    },
+  });
+
+  const result = verifier.verifyWorktreeHandoff({
+    cwd: process.cwd(),
+    startHeadSha: "a".repeat(40),
+    requireNewCommit: true,
+    commitSha: "b".repeat(40),
+  });
+
+  assert.equal(result.verified, true);
+  assert.equal(result.clean, true);
+  assert.equal(result.headSha, "b".repeat(40));
+});
+
+test("verifyWorktreeHandoff fails closed if worktree has uncommitted changes", () => {
+  const verifier = createDeliveryVerifier({
+    commandRunner(_cmd, args) {
+      if (args.join(" ") === "status --porcelain") {
+        return { status: 0, stdout: " M src/index.js\n" };
+      }
+      return { status: 0, stdout: "" };
+    },
+  });
+
+  const result = verifier.verifyWorktreeHandoff({
+    cwd: process.cwd(),
+    startHeadSha: "a".repeat(40),
+    requireNewCommit: true,
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.reason, "worktree_dirty");
+  assert.match(result.message, /未提交改动/);
+});
+
+test("verifyWorktreeHandoff fails closed if implementation produced no new commit", () => {
+  const head = "a".repeat(40);
+  const verifier = createDeliveryVerifier({
+    commandRunner(_cmd, args) {
+      const line = args.join(" ");
+      if (line === "status --porcelain") return { status: 0, stdout: "" };
+      if (line === "rev-parse HEAD") return { status: 0, stdout: `${head}\n` };
+      return { status: 1, stderr: "unexpected" };
+    },
+  });
+
+  const result = verifier.verifyWorktreeHandoff({
+    cwd: process.cwd(),
+    startHeadSha: head,
+    requireNewCommit: true,
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.reason, "worktree_no_new_commit");
+  assert.match(result.message, /未产生新的 commit/);
+});
+
+test("verifyWorktreeHandoff fails closed if referenced commit does not exist", () => {
+  const verifier = createDeliveryVerifier({
+    commandRunner(_cmd, args) {
+      const line = args.join(" ");
+      if (line === "status --porcelain") return { status: 0, stdout: "" };
+      if (line === "rev-parse HEAD") return { status: 0, stdout: "b".repeat(40) + "\n" };
+      if (line.startsWith("cat-file -e")) return { status: 1, stderr: "not found" };
+      return { status: 1, stderr: "unexpected" };
+    },
+  });
+
+  const result = verifier.verifyWorktreeHandoff({
+    cwd: process.cwd(),
+    startHeadSha: "a".repeat(40),
+    requireNewCommit: true,
+    commitSha: "c".repeat(40),
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.reason, "commit_not_found");
+  assert.match(result.message, /在 git 中不存在/);
 });

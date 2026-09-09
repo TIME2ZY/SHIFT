@@ -378,3 +378,19 @@ test("timer persistence failure retains the segment and rejects success-path flu
     (error) => error === failure
   );
 });
+
+test("durable coalescing never combines parent and child thinking", () => {
+  const { writes, coalescer } = collectWrites({ maxMs: 0 });
+  coalescer.accept({ type: "thinking.delta", text: "parent" });
+  coalescer.accept({ type: "thinking.delta", subagentId: "child", text: "child" });
+  coalescer.accept({ type: "thinking.delta", text: "parent again" });
+  coalescer.flushAll();
+  assert.deepEqual(
+    writes.map((w) => [w.payload.subagentId, w.payload.text]),
+    [
+      [undefined, "parent"],
+      ["child", "child"],
+      [undefined, "parent again"],
+    ]
+  );
+});

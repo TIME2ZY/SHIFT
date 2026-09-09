@@ -1333,6 +1333,19 @@ test("chat endpoint creates and uses a session worktree as child cwd", async () 
 test("worktree A2A keeps Grok read-only until Codex approves its concrete plan", async () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-base-"));
   const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-session-"));
+  const git = (...args) => {
+    const result = require("node:child_process").spawnSync("git", args, {
+      cwd: worktreeDir,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git("init");
+  git("config", "user.name", "Test");
+  git("config", "user.email", "test@example.invalid");
+  git("commit", "--allow-empty", "-m", "initial");
+  // Native skill materialization is generated data, not part of the implementation.
+  fs.writeFileSync(path.join(worktreeDir, ".git", "info", "exclude"), "*\n");
   const runs = [];
   let reviewedContent = "";
   let grokRuns = 0;
@@ -1425,6 +1438,8 @@ test("worktree A2A keeps Grok read-only until Codex approves its concrete plan",
             const isApproved = options.env.SHIFT_IMPLEMENTATION_GATE === "approved";
             if (isApproved) {
               fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
+              git("add", "-f", "review-target.txt");
+              git("commit", "-m", "implement approved plan");
             }
             child.stdout.write(
               JSON.stringify({
@@ -2815,6 +2830,41 @@ test("validateToken rejects tokens without a valid expiry", () => {
   callbacks.unregisterThread(sessionId);
 });
 
+test("active invocation token does not expire on wall-clock TTL and remains valid for long tasks", () => {
+  const sessionId = "session-long-task";
+  const invocationId = "inv-long-1";
+  const callbackToken = "tok-long-1";
+  const threadCtx = {
+    currentInvocationId: invocationId,
+    tokens: new Map([
+      [
+        invocationId,
+        {
+          agentId: "grok",
+          callbackToken,
+          createdAt: Date.now() - 3600_000,
+          expiresAt: Date.now() - 1000, // wall-clock expired
+          retired: false,
+        },
+      ],
+    ]),
+  };
+  callbacks.registerThread(sessionId, threadCtx);
+
+  // While the invocation is actively running, validateToken must succeed
+  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), true);
+  assert.equal(threadCtx.tokens.has(invocationId), true);
+  const record = threadCtx.tokens.get(invocationId);
+  assert.ok(record.expiresAt > Date.now(), "expiresAt should be extended while active");
+
+  // When the invocation finishes, retireInvocation reclaims the token
+  assert.equal(callbacks.retireInvocation(sessionId, invocationId), true);
+  assert.equal(threadCtx.tokens.has(invocationId), false);
+  assert.equal(callbacks.validateToken(sessionId, invocationId, callbackToken), false);
+
+  callbacks.unregisterThread(sessionId);
+});
+
 test("postMessage rejects cross-thread callbacks (Thread Affinity guard)", () => {
   const sseEvents = [];
   const fakeRes = {
@@ -3616,7 +3666,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
   }
 });
 
-test("A2A-routed agents get persona identity + light session header, not full bootstrap", async () => {
+test("A2A fresh sessions get persona, recovery digest and handoff", async () => {
   const prompts = [];
 
   await withServer(
@@ -3666,12 +3716,12 @@ test("A2A-routed agents get persona identity + light session header, not full bo
   assert.match(prompts[0], /<!-- Session Identity -->/);
   assert.match(prompts[0], /<!-- 回忆铁律/);
   assert.match(prompts[0], /<!-- Digest/);
-  // A2A agent: own persona + light session header + handoff, but no full digest/recall pack
+  // A2A agent: own persona + recovery digest + handoff; memory retrieval remains the A2A card
   assert.match(prompts[1], /<!-- Agent Identity: gemini \/ Gemini -->/);
   assert.match(prompts[1], /<!-- Session Identity -->/);
   assert.match(prompts[1], /Agent: Gemini/);
   assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
-  assert.doesNotMatch(prompts[1], /<!-- Digest/);
+  assert.match(prompts[1], /<!-- Digest/);
   // Wave R: A2A turns get compact Active Memory Card, not the full bootstrap packet.
   assert.match(prompts[1], /<!-- Active Memories/);
   assert.match(prompts[1], /任务交接/);

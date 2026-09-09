@@ -109,6 +109,11 @@ function createServer(options = {}) {
       rootDir: ROOT,
       stateFile: options.worktreeStateFile || appPaths.worktreeStateFile,
     });
+  try {
+    worktreeManager.reconcileAllWorktrees?.();
+  } catch (err) {
+    (options.logger || console).warn?.("[worktree] Startup reconciliation error:", err.message);
+  }
   const deliveryVerifier = options.deliveryVerifier || createDeliveryVerifier();
   const logger = options.logger || console;
   const auditTranscriptDir = path.resolve(

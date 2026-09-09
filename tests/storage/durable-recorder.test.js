@@ -80,7 +80,10 @@ test("durable recorder writes thread, window, message, and invocation data", () 
         enforcementLevel: "advisory",
       },
     });
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "started");
+    assert.ok(storage.invocations.get("invocation-1").startedAt);
     recorder.appendInvocationEvent("invocation-1", "text.delta", { text: "Stored" });
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "started");
     // Assistant-final goes only through completeInvocation (not mirror + finish*).
     const finished = recorder.completeInvocation({
       invocationId: "invocation-1",
@@ -98,6 +101,7 @@ test("durable recorder writes thread, window, message, and invocation data", () 
       },
     });
 
+    assert.equal(storage.invocations.get("invocation-1").canonicalState, "completed");
     assert.equal(finished.message.id, "message-assistant");
     assert.equal(storage.invocations.get("invocation-1").triggerMessageId, "message-user");
     assert.equal(storage.invocations.get("invocation-1").triggerType, "user-message");
@@ -230,6 +234,27 @@ test("completeInvocation covers abort, final, atomic rollback, and rejects missi
     assert.equal(failed.invocation.failureStage, "provider_run");
     assert.equal(failed.invocation.errorCode, "provider_exit_7");
     assert.equal(failed.invocation.retryable, false);
+
+    recorder.startInvocation({
+      session,
+      invocationId: "inv-user-abort",
+      threadId: session.id,
+      agentId: "codex",
+      providerKey: "codex:gpt-5.6-sol",
+      workspaceKey: "base:C:/repo",
+      capacityTokens: 200000,
+    });
+    const abortedExit = recorder.completeInvocation({
+      invocationId: "inv-user-abort",
+      code: 1,
+      signal: null,
+      reason: "aborted",
+    });
+    assert.equal(abortedExit.invocation.state, "aborted");
+    assert.equal(abortedExit.invocation.terminalReason, "aborted");
+    assert.equal(abortedExit.invocation.failureStage, "request");
+    assert.equal(abortedExit.invocation.errorCode, "invocation_aborted");
+    assert.equal(abortedExit.invocation.retryable, false);
 
     recorder.startInvocation({
       session,

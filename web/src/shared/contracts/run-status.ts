@@ -2,7 +2,7 @@
  * Run / live-message status mapping for SSE (Phase E).
  *
  * Server durable invocation states (DB): active | completed | failed | aborted
- * Canonical product states (collab-contracts): created|started|streaming|completed|failed|cancelled|sealed
+ * Canonical product states (collab-contracts): created|started|running|streaming|completed|failed|cancelled|sealed
  *
  * The browser run is an ephemeral SSE session, not a DB row. Map server frames to UI:
  * - agent-exit code===0, no signal → agent done

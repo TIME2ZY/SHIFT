@@ -78,8 +78,20 @@ function getThread(threadId) {
 function cleanExpiredTokens(thread) {
   if (!thread || !thread.tokens) return;
   const now = Date.now();
+  const currentId = thread.currentInvocationId;
   for (const [id, record] of thread.tokens) {
-    if (!record || typeof record.expiresAt !== "number" || record.expiresAt <= now) {
+    if (!record) {
+      thread.tokens.delete(id);
+      continue;
+    }
+    if (record.retired) {
+      thread.tokens.delete(id);
+      continue;
+    }
+    if (currentId && id === currentId) {
+      continue;
+    }
+    if (typeof record.expiresAt !== "number" || record.expiresAt <= now) {
       thread.tokens.delete(id);
     }
   }
@@ -88,8 +100,8 @@ function cleanExpiredTokens(thread) {
 /**
  * Create an invocation identity for a single agent run within a thread.
  * Returns { invocationId, callbackToken, expiresAt } and records them for
- * later validation. The token expires after getTokenTtlMs(); validateToken()
- * will reject it after that.
+ * later validation. Active invocations stay valid for their lifecycle;
+ * tokens are retired when the invocation reaches terminal state.
  */
 function createInvocation(threadId, agentId) {
   const thread = activeThreads.get(threadId);
@@ -105,10 +117,22 @@ function createInvocation(threadId, agentId) {
       callbackToken,
       createdAt: now,
       expiresAt,
+      retired: false,
     });
   }
 
   return { invocationId, callbackToken, expiresAt };
+}
+
+function retireInvocation(threadId, invocationId) {
+  const thread = activeThreads.get(threadId);
+  if (!thread || !thread.tokens) return false;
+  const record = thread.tokens.get(invocationId);
+  if (record) {
+    record.retired = true;
+    thread.tokens.delete(invocationId);
+  }
+  return Boolean(record);
 }
 
 function validateToken(threadId, invocationId, callbackToken) {
@@ -116,8 +140,13 @@ function validateToken(threadId, invocationId, callbackToken) {
   if (!thread || !thread.tokens) return false;
   cleanExpiredTokens(thread);
   const record = thread.tokens.get(invocationId);
-  if (!record) return false;
-  return record.callbackToken === callbackToken;
+  if (!record || record.retired) return false;
+  if (record.callbackToken !== callbackToken) return false;
+  if (thread.currentInvocationId === invocationId) {
+    record.expiresAt = Math.max(record.expiresAt || 0, Date.now() + getTokenTtlMs());
+    return true;
+  }
+  return typeof record.expiresAt === "number" && record.expiresAt > Date.now();
 }
 
 function summarizeHandoffOutcome(finalized) {
@@ -244,6 +273,8 @@ function postMessage(
   const taskRegistry = thread.collabTaskRegistry || null;
   const currentDuty = thread.currentDutyBinding?.duty || null;
   const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+    invocationId: routeInvocationId,
+    progressKey: thread.deliveryVerifier?.getHeadSha?.(thread.runWorkspace?.worktreeDir || ""),
     agent,
     duty: currentDuty,
     content,
@@ -260,33 +291,39 @@ function postMessage(
       ...workflowEvent.payload,
     });
   }
-  const finalized = finalizeA2ARoutes({
-    text: content,
-    fromAgent: agent,
-    threadId: callbackSessionId,
-    sessionId: callbackSessionId,
-    invocationId: routeInvocationId,
-    windowId: typeof thread.windowId === "string" ? thread.windowId : null,
-    useWorktree: Boolean(thread.useWorktree),
-    worklist: thread.worklist,
-    maxDepth: getMaxA2ADepth(),
-    memoryCapture,
-    eventStore,
-    durableRecorder,
-    sendSse: (event, payload) => emitThread(thread, event, payload),
-    appendToSession,
-    agentLabels,
-    source: "callback",
-    controller: thread.controller,
-    a2aState: thread,
-    logger: console,
-    collabTaskRegistry: taskRegistry,
-    threadSeats: thread.threadSeats || null,
-    availability: thread.availability,
-    agents: thread.agents || AGENTS,
-    fromSeatId: thread.currentDutyBinding?.seatId || null,
-    fromDuty: thread.currentDutyBinding?.duty || null,
-  });
+  const finalized = workflowEvidenceEvents.some((e) => e.payload?.loopDetected)
+    ? null
+    : finalizeA2ARoutes({
+        text: content,
+        fromAgent: agent,
+        threadId: callbackSessionId,
+        sessionId: callbackSessionId,
+        invocationId: routeInvocationId,
+        windowId: typeof thread.windowId === "string" ? thread.windowId : null,
+        useWorktree: Boolean(thread.useWorktree),
+        worktreeDir: thread.runWorkspace?.worktreeDir || "",
+        worktreeBranch: thread.runWorkspace?.branch || "",
+        startHeadSha: thread.turnStartHeadSha || null,
+        deliveryVerifier: thread.deliveryVerifier || null,
+        worklist: thread.worklist,
+        maxDepth: getMaxA2ADepth(),
+        memoryCapture,
+        eventStore,
+        durableRecorder,
+        sendSse: (event, payload) => emitThread(thread, event, payload),
+        appendToSession,
+        agentLabels,
+        source: "callback",
+        controller: thread.controller,
+        a2aState: thread,
+        logger: console,
+        collabTaskRegistry: taskRegistry,
+        threadSeats: thread.threadSeats || null,
+        availability: thread.availability,
+        agents: thread.agents || AGENTS,
+        fromSeatId: thread.currentDutyBinding?.seatId || null,
+        fromDuty: thread.currentDutyBinding?.duty || null,
+      });
 
   const writeStats = mergeWriteStats(
     thread.memoryWriteStats || emptyWriteStats(),
@@ -438,6 +475,7 @@ module.exports = {
   unregisterThread,
   getThread,
   createInvocation,
+  retireInvocation,
   validateToken,
   postMessage,
   summarizeHandoffOutcome,

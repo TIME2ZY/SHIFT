@@ -77,6 +77,7 @@ function runChildStream({
 
     let closed = false;
     let stopping = false;
+    let stopReason = null;
     let killTimer;
     let lastActivity = Date.now();
     let stdoutBuffer = "";
@@ -130,6 +131,9 @@ function runChildStream({
         }
         // Also scan decoded text fields inside events (replacement may appear after JSON parse).
         if (event && typeof event === "object") {
+          const serverNow = new Date().toISOString();
+          event.ts = serverNow;
+          event.createdAt = serverNow;
           if (typeof event.text === "string") noteEncoding(event.text, "event.text");
           if (typeof event.data === "string") noteEncoding(event.data, "event.data");
         }
@@ -148,6 +152,7 @@ function runChildStream({
     const stopChild = (reason) => {
       if (closed || stopping) return;
       stopping = true;
+      stopReason = reason ? String(reason.message || reason) : null;
       if (reason) console.error(reason);
       killProcessTree(child, "SIGTERM");
       killTimer = setTimeout(() => {
@@ -166,10 +171,12 @@ function runChildStream({
       });
       stopChild(`Stopping agent process after ${origin} failure.`);
     };
-    const abortHandler = () => stopChild("Invocation aborted by client or session conflict.");
+    const abortHandler = () =>
+      stopChild(signal?.reason || "Invocation aborted by client or session conflict.");
 
     if (signal) {
-      if (signal.aborted) stopChild();
+      if (signal.aborted)
+        stopChild(signal?.reason || "Invocation aborted by client or session conflict.");
       else signal.addEventListener("abort", abortHandler, { once: true });
     }
 
@@ -239,6 +246,9 @@ function runChildStream({
         encoding: encodingTracker.snapshot(),
         cwd: workDir,
         streamError: streamFailure,
+        stopped: Boolean(signal?.aborted),
+        timedOut: Boolean(stopReason?.startsWith("Server timeout:")),
+        stopReason: stopReason || (signal?.aborted ? signal?.reason || "aborted" : null),
       });
     });
   });

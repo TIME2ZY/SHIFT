@@ -4,6 +4,7 @@ export function formatToolResultForDisplay(result: unknown): string {
   if (typeof result === "string") return result;
   if (typeof result !== "object") return String(result);
   const obj = result as Record<string, unknown>;
+  if (typeof obj.output_for_prompt === "string") return obj.output_for_prompt;
   if (typeof obj.text === "string" && obj.text.trim()) return obj.text;
   const nested = obj.Result ?? obj.result;
   if (nested && typeof nested === "object") {

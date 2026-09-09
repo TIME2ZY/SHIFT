@@ -136,13 +136,40 @@ function createChatRunExecutor({
     const turnPrompt = existingUserMessage?.content || rawPrompt;
 
     let sessionWorktree = session.worktree;
-    if (useWorktree && !sessionWorktree) {
-      try {
-        sessionWorktree = worktreeManager.ensureWorktree({ baseDir: sessionProjectDir, sessionId });
-        session = setSessionWorktree(sessionId, sessionWorktree);
-      } catch (error) {
-        return fail(400, { error: error.message });
+    if (useWorktree) {
+      if (!sessionWorktree) {
+        try {
+          sessionWorktree = worktreeManager.ensureWorktree({
+            baseDir: sessionProjectDir,
+            sessionId,
+          });
+          session = setSessionWorktree(sessionId, sessionWorktree);
+        } catch (error) {
+          return fail(400, { error: error.message });
+        }
+      } else {
+        const health =
+          typeof worktreeManager.checkHealth === "function"
+            ? worktreeManager.checkHealth(sessionId)
+            : { ok: true };
+        if (!health.ok) {
+          try {
+            sessionWorktree = worktreeManager.ensureWorktree({
+              baseDir: sessionProjectDir,
+              sessionId,
+            });
+            session = setSessionWorktree(sessionId, sessionWorktree);
+          } catch (rebuildError) {
+            return fail(409, { error: rebuildError.message });
+          }
+        }
       }
+    } else if (sessionWorktree && typeof worktreeManager.checkHealth === "function") {
+      const health = worktreeManager.checkHealth(sessionId);
+      if (!health.ok)
+        return fail(409, {
+          error: "Bound worktree is unhealthy; project execution was not started.",
+        });
     }
 
     // Claim ownership before the first asynchronous preparation step. Otherwise
@@ -286,6 +313,7 @@ function createChatRunExecutor({
         sessionId,
         agent: AGENTS[requestedAgent],
         generation: initialWindow?.generation || 1,
+        workspaceKey,
         prompt: turnPrompt,
         invocationSource: recallService,
         digestSource: storage?.digests || null,
@@ -480,6 +508,7 @@ function createChatRunExecutor({
       prepareSkillDelivery,
       sessionProjectDir,
       isolatedWorkspace,
+      runtime,
     };
 
     function publishBackgroundFailure(error) {
@@ -588,28 +617,44 @@ function createChatRunExecutor({
         storage?.invocations?.listForThread(sessionId).filter((row) => row.traceId === traceId) ||
         [];
       const traceActive = traceInvocations.some((row) => row.state === "active");
-      const traceSucceeded = traceInvocations.some(
-        (row) => row.state === "completed" && row.terminalReason === "assistant-final"
+      const lastInvocation = traceInvocations.at(-1) || null;
+      const isAbortedRun = Boolean(
+        aborted || invocationController.signal.aborted || lastInvocation?.state === "aborted"
       );
+      const isFailedRun =
+        traceActive ||
+        !lastInvocation ||
+        lastInvocation.state === "failed" ||
+        lastInvocation.state !== "completed" ||
+        lastInvocation.terminalReason !== "assistant-final";
+
       durable.completeTrace({
         traceId,
-        state: aborted ? "aborted" : traceActive || !traceSucceeded ? "failed" : "completed",
-        terminalReason: aborted
+        state: isAbortedRun ? "aborted" : isFailedRun ? "failed" : "completed",
+        terminalReason: isAbortedRun
           ? "request-aborted"
           : traceActive
             ? "invocation-orphan-remaining"
-            : !traceSucceeded
-              ? "invocation-failed"
-              : "request-completed",
-        failureStage: traceActive ? "reconcile" : !traceSucceeded ? "provider_run" : null,
-        errorCode: traceActive
-          ? "invocation_orphan_remaining"
-          : !traceSucceeded
-            ? "invocation_failed"
-            : null,
+            : !lastInvocation
+              ? "invocation-missing"
+              : lastInvocation.terminalReason || "invocation-failed",
+        failureStage: isAbortedRun
+          ? "request"
+          : traceActive
+            ? "reconcile"
+            : isFailedRun
+              ? lastInvocation?.failureStage || "provider_run"
+              : null,
+        errorCode: isAbortedRun
+          ? "invocation_aborted"
+          : traceActive
+            ? "invocation_orphan_remaining"
+            : isFailedRun
+              ? lastInvocation?.errorCode || "invocation_failed"
+              : null,
         retryable: false,
       });
-      const terminalKind = aborted ? "run.aborted" : "done";
+      const terminalKind = isAbortedRun ? "run.aborted" : isFailedRun ? "run.failed" : "done";
       const persistId = finishInvocationId || traceInvocations.at(-1)?.id;
       if (persistId) {
         events.append({

@@ -108,7 +108,12 @@ function decidePolicy(input = {}) {
   const useWorktree = Boolean(input.useWorktree);
   const mode = POLICY_MODES.includes(input.mode) ? input.mode : resolveHandoffPolicyMode();
   const hasBlock = Boolean(quality.hasBlock) && !quality.emptyPacket;
-  const ok = Boolean(quality.ok) && hasBlock;
+  const isContractValid =
+    Boolean(quality.ok) &&
+    hasBlock &&
+    !quality.toMismatch &&
+    !quality.invalidIntent &&
+    !quality.riskFlags?.includes("invalid_intent");
 
   // Task-level skip (already approved same evidence)
   if (input.taskSkip && input.taskSkip.skip) {
@@ -141,21 +146,20 @@ function decidePolicy(input = {}) {
   }
 
   if (mode === "soft") {
-    return ok ? DECISIONS.ALLOW : DECISIONS.ALLOW_DEGRADED;
+    return isContractValid ? DECISIONS.ALLOW : DECISIONS.ALLOW_DEGRADED;
   }
 
   if (mode === "strict") {
-    return ok ? DECISIONS.ALLOW : DECISIONS.REQUEST_REPAIR;
+    return isContractValid ? DECISIONS.ALLOW : DECISIONS.REQUEST_REPAIR;
   }
 
-  // balanced (default)
-  if (ok) return DECISIONS.ALLOW;
+  // balanced (default): strict contract validation - incomplete blocks or semantic drift request repair
+  if (isContractValid) return DECISIONS.ALLOW;
   if (!hasBlock) {
-    // Worktree / write mode: missing fence must not silently continue.
-    return useWorktree ? DECISIONS.REQUEST_REPAIR : DECISIONS.ALLOW_DEGRADED;
+    const isDiscussion = !useWorktree && (!quality.intent || quality.intent === "discuss");
+    return isDiscussion ? DECISIONS.ALLOW_DEGRADED : DECISIONS.REQUEST_REPAIR;
   }
-  // hasBlock but incomplete required fields
-  return DECISIONS.ALLOW_DEGRADED;
+  return DECISIONS.REQUEST_REPAIR;
 }
 
 /**
@@ -172,6 +176,7 @@ function buildPhaseRejectPayload({ fromAgent, toAgent, phaseCheck, taskSkip, mod
     `⛔ 协作阶段/任务策略拒绝路由（policy=${mode || resolveHandoffPolicyMode()}）`,
     `${fromAgent || "?"} → ${toAgent || "?"} phase=${phase} reason=${reason}`,
     allowed.length ? `当前 Thread 可路由席位: ${allowed.map((a) => "@" + a).join(", ")}` : "",
+    taskSkip?.message || "",
     taskSkip?.state ? `任务状态: ${taskSkip.state}` : "",
   ]
     .filter(Boolean)
@@ -201,7 +206,7 @@ function buildRepairPayload({ fromAgent, toAgent, quality, mode } = {}) {
   const missing =
     quality && Array.isArray(quality.missing) && quality.missing.length > 0
       ? quality.missing.join(", ")
-      : "what, why, next_action";
+      : "";
   const empty = !quality || quality.emptyPacket || !quality.hasBlock;
   const example = [
     "```handoff",
@@ -220,7 +225,18 @@ function buildRepairPayload({ fromAgent, toAgent, quality, mode } = {}) {
     "```",
   ].join("\n");
 
-  const reason = empty ? "缺少标准 ```handoff 块" : `handoff 不完整（缺失: ${missing}）`;
+  let reason = empty ? "缺少标准 ```handoff 块" : "handoff 契约不满足";
+  let reasonCode = empty ? "missing_handoff" : "incomplete_handoff";
+  if (quality?.toMismatch) {
+    reason = `handoff.to 与 @ 目标 (${toAgent || ""}) 不一致`;
+    reasonCode = "to_mismatch";
+  } else if (quality?.riskFlags?.includes("invalid_intent")) {
+    reason = `intent 非法: ${quality.intent || ""}`;
+    reasonCode = "invalid_intent";
+  } else if (missing) {
+    reason = `handoff 不完整（缺失: ${missing}）`;
+    reasonCode = "incomplete_handoff";
+  }
 
   const message = [
     `⛔ 交接需补全后再 @（policy=${mode || resolveHandoffPolicyMode()}）`,
@@ -234,7 +250,7 @@ function buildRepairPayload({ fromAgent, toAgent, quality, mode } = {}) {
   return {
     from: fromAgent || null,
     to: toAgent || null,
-    reason: empty ? "missing_handoff" : "incomplete_handoff",
+    reason: reasonCode,
     missing: quality && Array.isArray(quality.missing) ? quality.missing.slice() : [],
     emptyPacket: Boolean(empty),
     policy: DECISIONS.REQUEST_REPAIR,

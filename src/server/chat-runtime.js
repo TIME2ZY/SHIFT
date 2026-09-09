@@ -16,6 +16,12 @@ const AGENT_EVENT_KINDS = new Set([
 function toSseFrame(event) {
   if (!event || typeof event !== "object") return null;
   const invocationId = event.invocationId || event.payload?.invocationId || null;
+  const serverTime =
+    event.createdAt ||
+    event.payload?.createdAt ||
+    event.ts ||
+    event.payload?.ts ||
+    new Date().toISOString();
   if (AGENT_EVENT_KINDS.has(event.kind)) {
     return {
       id: event.id ?? null,
@@ -25,13 +31,21 @@ function toSseFrame(event) {
         type: event.kind,
         invocationId,
         traceId: event.traceId || null,
+        ts: serverTime,
+        createdAt: serverTime,
       },
     };
   }
   return {
     id: event.id ?? null,
     event: event.kind,
-    data: { ...(event.payload || {}), invocationId, traceId: event.traceId || null },
+    data: {
+      ...(event.payload || {}),
+      invocationId,
+      traceId: event.traceId || null,
+      ts: serverTime,
+      createdAt: serverTime,
+    },
   };
 }
 
@@ -127,16 +141,22 @@ function createChatRuntime({ eventStore } = {}) {
 
   function stopRun(sessionId, traceId) {
     const record = runs.get(sessionId);
-    if (!record || !traceId || record.traceId !== traceId) {
+    if (!record) {
+      return { stopped: false, reason: "trace_not_active" };
+    }
+    if (traceId && record.traceId && record.traceId !== traceId) {
       return { stopped: false, reason: "trace_not_active" };
     }
     record.stopReason = "explicit-stop";
     try {
-      record.controller.abort();
+      if (record.controller) {
+        record.controller.stopReason = "explicit-stop";
+        record.controller.abort("explicit-stop");
+      }
     } catch {
       // already aborted
     }
-    return { stopped: true, traceId };
+    return { stopped: true, traceId: record.traceId || traceId };
   }
 
   function closeSubscriberSet(set) {

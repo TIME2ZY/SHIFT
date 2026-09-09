@@ -1,3 +1,4 @@
+import { projectToolStatus } from "../shared/contracts/tool-status";
 import { ApiError, authenticatedFetch } from "../shared/api/client";
 import { agentExitIndicatesFailure } from "../shared/contracts/run-status";
 import { formatToolResultForDisplay } from "./chat-stream";
@@ -9,12 +10,14 @@ export interface RunStreamEvents {
   onMemoryInject?(payload: Record<string, unknown>, sessionId: string): void;
   onMemoryMetrics?(payload: Record<string, unknown>, sessionId: string): void;
   onRunError?(message: string, sessionId: string): void;
+  onStateChange?(sessionId: string): void;
   onAgentExit?(sessionId: string, invocationId: string): void;
 }
 
 interface CanonicalAgentEvent {
   type?: string;
   agent?: string;
+  subagentId?: string;
   invocationId?: string;
   text?: string;
   error?: string;
@@ -81,6 +84,27 @@ export function applyRunEventFrame(
     }
   }
 
+  if (
+    [
+      "snapshot",
+      "callback-post",
+      "message",
+      "a2a-route",
+      "handoff-parsed",
+      "handoff-repair-needed",
+      "agent-start",
+      "agent-exit",
+      "done",
+      "run.aborted",
+      "window-sealed",
+    ].includes(frame.event) ||
+    /^(code-review|implementation-plan|delivery-|final-acceptance|solution-baseline)/.test(
+      frame.event
+    ) ||
+    (frame.event === "agent-event" && payload.type === "run.failed")
+  ) {
+    events.onStateChange?.(sessionId);
+  }
   switch (frame.event) {
     case "snapshot": {
       const traceId = typeof payload.traceId === "string" ? payload.traceId : undefined;
@@ -102,7 +126,18 @@ export function applyRunEventFrame(
       break;
     }
     case "agent-event": {
-      const agentEvent = payload as CanonicalAgentEvent;
+      const agentEvent = { ...payload } as CanonicalAgentEvent;
+      if (agentEvent.subagentId) {
+        const source = "[子 Agent " + agentEvent.subagentId + "] ";
+        if (agentEvent.text) agentEvent.text = source + agentEvent.text;
+        if (agentEvent.toolName)
+          agentEvent.title = source + (agentEvent.title || agentEvent.toolName);
+        if (agentEvent.type === "progress.update") {
+          agentEvent.type = "commentary.delta";
+          agentEvent.text =
+            source + (agentEvent.items || []).map((i) => i.label || i.text || "").join(" · ");
+        }
+      }
       const agentId = agentEvent.agent || "unknown";
       const invocationId = String(agentEvent.invocationId || "");
       if (!invocationId) break;
@@ -146,12 +181,13 @@ export function applyRunEventFrame(
       } else if (agentEvent.type === "tool.finished" && agentEvent.toolId) {
         store.dispatch({
           type: "tool/finished",
+          status: projectToolStatus(agentEvent.status, Boolean(agentEvent.error)),
           sessionId,
           agentId,
           invocationId,
           toolId: agentEvent.toolId,
           toolName: agentEvent.toolName,
-          failed: ["error", "failed"].includes(agentEvent.status || ""),
+          failed: projectToolStatus(agentEvent.status, Boolean(agentEvent.error)) !== "done",
           input: agentEvent.args,
           output:
             agentEvent.output ??
@@ -211,7 +247,7 @@ export function applyRunEventFrame(
       store.dispatch({
         type: "notice/received",
         sessionId,
-        message: "上下文已封存，本轮运行停止。",
+        message: "上下文窗口已封存；运行状态以执行终态为准。",
       });
       break;
     case "memory":

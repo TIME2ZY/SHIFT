@@ -478,15 +478,15 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         return;
       }
 
+      if (!state.runStarted) {
+        await route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body: 'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","lastEventId":0}\n\n',
+        });
+        return;
+      }
       if (chatMode === "slow") {
-        if (!state.runStarted) {
-          await route.fulfill({
-            status: 200,
-            contentType: "text/event-stream",
-            body: 'id: 1\nevent: snapshot\ndata: {"sessionId":"session-1","lastEventId":0}\n\n',
-          });
-          return;
-        }
         await new Promise((resolve) => setTimeout(resolve, 1200));
         await route.fulfill({
           status: 200,

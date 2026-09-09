@@ -9,6 +9,7 @@ const { processWorkflowEvidenceOutput } = require("../../src/agents/workflow-evi
 test("a missing implementation plan emits a required event without writing evidence", () => {
   const registry = createCollabTaskRegistry();
   const events = processWorkflowEvidenceOutput({
+    invocationId: "evidence-1",
     agent: "codex",
     duty: "plan",
     threadId: "thread-1",
@@ -34,7 +35,14 @@ for (const agent of ["codex", "gemini", "grok", "opencode"]) {
       "  - Run the regression test",
       "```",
     ].join("\n");
-    const input = { agent, duty: "plan", content, threadId: "thread-1", registry };
+    const input = {
+      invocationId: "plan-1",
+      agent,
+      duty: "plan",
+      content,
+      threadId: "thread-1",
+      registry,
+    };
     const submitted = processWorkflowEvidenceOutput(input)[0];
     assert.equal(submitted.event, "implementation-plan-submitted");
     const approval = registry.approveImplementationPlan("thread-1", {
@@ -48,6 +56,7 @@ for (const agent of ["codex", "gemini", "grok", "opencode"]) {
 
     const revised = processWorkflowEvidenceOutput({
       ...input,
+      invocationId: "plan-2",
       duty: "fix",
       content: content.replace("Preserve the public contract", "Correct the missing boundary"),
     })[0];
@@ -61,6 +70,7 @@ test("discuss Duty output becomes the baseline regardless of Seat provider", () 
   const registry = createCollabTaskRegistry();
   const goal = registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
   const events = processWorkflowEvidenceOutput({
+    invocationId: "evidence-1",
     agent: "codex",
     duty: "discuss",
     threadId: "thread-1",
@@ -116,6 +126,7 @@ test("review Duty output is independently verified regardless of Seat provider",
     "```",
   ].join("\n");
   const events = processWorkflowEvidenceOutput({
+    invocationId: "evidence-1",
     agent: "gemini",
     duty: "review",
     content,
@@ -143,6 +154,7 @@ test("review approve without a delivery receipt records the review gate only", (
   const registry = createCollabTaskRegistry();
   registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
   const events = processWorkflowEvidenceOutput({
+    invocationId: "evidence-1",
     agent: "codex",
     duty: "review",
     threadId: "thread-1",
@@ -172,6 +184,7 @@ test("review changes requested persist without pretending the review is missing"
   const registry = createCollabTaskRegistry();
   registry.captureUserGoal("thread-1", { text: "Deliver the requested outcome" });
   const events = processWorkflowEvidenceOutput({
+    invocationId: "evidence-1",
     agent: "codex",
     duty: "review",
     threadId: "thread-1",

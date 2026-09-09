@@ -47,13 +47,22 @@ assertNoRealRuntimeDependencies(testFiles);
 
 const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shift-tests-"));
 
+const testEnv = { ...process.env, SHIFT_HOME: runtimeRoot };
+// Tests started by an Agent must not resume its provider session or use its callback credentials.
+for (const key of [
+  "INVOKE_SESSION_ID",
+  "INVOKE_INVOCATION_ID",
+  "INVOKE_THREAD_ID",
+  "INVOKE_CALLBACK_TOKEN",
+  "SHIFT_CALLBACK_TOKEN",
+  "SHIFT_INVOCATION_ID",
+  "SHIFT_THREAD_ID",
+])
+  delete testEnv[key];
 try {
   const result = spawnSync(process.execPath, ["--test", ...testFiles], {
     cwd: ROOT,
-    env: {
-      ...process.env,
-      SHIFT_HOME: runtimeRoot,
-    },
+    env: testEnv,
     stdio: "inherit",
   });
   process.exitCode = result.status ?? 1;

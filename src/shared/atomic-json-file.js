@@ -18,7 +18,9 @@ function withFileLock(file, fn) {
       fs.mkdirSync(lockDir);
       break;
     } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
+      if (error?.code !== "EEXIST" && error?.code !== "EPERM" && error?.code !== "EACCES") {
+        throw error;
+      }
       if (Date.now() > deadline) {
         throw new Error(`Timed out waiting for file lock: ${lockDir}`);
       }

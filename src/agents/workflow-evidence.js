@@ -52,31 +52,81 @@ function processWorkflowEvidenceOutput(input = {}) {
         actorAgentId: agent,
         actorDuty: duty,
         plan,
+        invocationId: input.invocationId,
+        progressKey: input.progressKey,
+        maxPlanRepeats: input.maxPlanRepeats,
       });
       events.push({
-        event: result.accepted ? "implementation-plan-submitted" : "implementation-plan-required",
-        payload: summarize(result, ["planHash", "reused"]),
+        event: result.accepted
+          ? "implementation-plan-submitted"
+          : result.loopDetected
+            ? "implementation-plan-loop-detected"
+            : "implementation-plan-required",
+        payload: summarize(result, [
+          "planHash",
+          "isomorphicHash",
+          "reused",
+          "loopDetected",
+          "consecutiveRepeats",
+        ]),
       });
+      if (result.loopDetected) {
+        events.push({
+          event: "plan-warning",
+          payload: {
+            warning: "duplicate_plan_loop_detected",
+            planHash: result.planHash,
+            isomorphicHash: result.isomorphicHash,
+            consecutiveRepeats: result.consecutiveRepeats,
+            message: `连续生成相同或同构实现方案超过限制 (${result.consecutiveRepeats} 次)，已主动终止循环。`,
+          },
+        });
+      }
     }
   }
 
   if (["review", "deliver"].includes(duty)) {
-    const review = parseCodeReview(content);
+    let review = parseCodeReview(content);
     const receipt = parseDeliveryReceipt(content);
     if (review) {
       const recorded = registry.recordCodeReview(threadId, {
         actorAgentId: agent,
         actorDuty: duty,
         review,
+        invocationId: input.invocationId,
+        progressKey: input.progressKey,
+        maxReviewRepeats: input.maxReviewRepeats,
       });
+      if (recorded.reused && recorded.task?.artifacts?.codeReview)
+        review = recorded.task.artifacts.codeReview;
       events.push({
         event: recorded.accepted
           ? review.verdict === "approve"
             ? "code-review-approved"
             : "code-review-changes-requested"
-          : "code-review-rejected",
-        payload: summarize(recorded, ["verdict", "reviewEvidenceHash", "reused"]),
+          : recorded.loopDetected
+            ? "code-review-loop-detected"
+            : "code-review-rejected",
+        payload: summarize(recorded, [
+          "verdict",
+          "reviewEvidenceHash",
+          "reused",
+          "loopDetected",
+          "consecutiveRepeats",
+        ]),
       });
+      if (recorded.loopDetected) {
+        events.push({
+          event: "plan-warning",
+          payload: {
+            warning: "duplicate_review_loop_detected",
+            verdict: recorded.verdict,
+            reviewEvidenceHash: recorded.reviewEvidenceHash,
+            consecutiveRepeats: recorded.consecutiveRepeats,
+            message: `连续生成相同审查结论超过限制 (${recorded.consecutiveRepeats} 次)，已主动终止循环。`,
+          },
+        });
+      }
     }
     if (review?.verdict === "approve" && receipt) {
       if (!input.deliveryVerifier || typeof input.deliveryVerifier.verify !== "function") {
@@ -91,6 +141,7 @@ function processWorkflowEvidenceOutput(input = {}) {
           receipt,
         });
         const result = registry.recordDeliveryEvidence(threadId, {
+          invocationId: input.invocationId,
           actorAgentId: agent,
           actorDuty: duty,
           review,

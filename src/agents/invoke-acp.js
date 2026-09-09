@@ -168,12 +168,18 @@ async function invokeAcp({
   };
 
   let persistedSessionId = "";
+  let activeSessionId = "";
   const emitRaw = (event) => {
     if (typeof onRawEvent === "function") onRawEvent(event);
     const sessionId = runtime.extractSessionId(event);
-    if (sessionId && sessionId !== persistedSessionId && typeof onSessionId === "function") {
-      persistedSessionId = sessionId;
-      onSessionId(sessionId);
+    const candidateSessionId = activeSessionId || sessionId;
+    if (
+      candidateSessionId &&
+      candidateSessionId !== persistedSessionId &&
+      typeof onSessionId === "function"
+    ) {
+      persistedSessionId = candidateSessionId;
+      onSessionId(candidateSessionId);
     }
     for (const canonical of runtime.transform(event, eventContext)) onEvent(canonical);
   };
@@ -185,7 +191,6 @@ async function invokeAcp({
 
   try {
     const stream = acp.ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
-    let activeSessionId = "";
     const result = await acp
       .client({ name: "shift-console", version: "0.1.0" })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {

@@ -152,3 +152,128 @@ test("ensureWorktree rejects non-git base directories", () => {
     /not a git repository/i
   );
 });
+
+test("checkHealth detects missing directory and reconcileWorktree clears state", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "session-del" });
+
+  fs.rmSync(meta.worktreeDir, { recursive: true, force: true });
+
+  const health = manager.checkHealth("session-del");
+  assert.equal(health.ok, false);
+  assert.equal(health.reason, "directory_missing");
+
+  const rec = manager.reconcileWorktree("session-del");
+  assert.equal(rec.reconciled, true);
+
+  const after = manager.checkHealth("session-del");
+  assert.equal(after.ok, false);
+  assert.equal(after.reason, "not_found");
+});
+
+test("ensureWorktree auto-recreates unhealthy worktree when directory is deleted", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "session-recreate" });
+
+  fs.rmSync(meta.worktreeDir, { recursive: true, force: true });
+  assert.equal(fs.existsSync(meta.worktreeDir), false);
+
+  const recreated = manager.ensureWorktree({ baseDir, sessionId: "session-recreate" });
+  assert.equal(recreated.sessionId, "session-recreate");
+  assert.equal(fs.existsSync(recreated.worktreeDir), true);
+
+  const status = manager.getStatus("session-recreate");
+  assert.equal(status.clean, true);
+});
+
+test("checkHealth detects missing branch and ensureWorktree recovers", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "branch-del" });
+
+  // Delete the worktree and branch
+  spawnSync("git", ["worktree", "remove", "--force", meta.worktreeDir], { cwd: baseDir });
+  spawnSync("git", ["branch", "-D", meta.branch], { cwd: baseDir });
+
+  const health = manager.checkHealth("branch-del");
+  assert.equal(health.ok, false);
+
+  const recovered = manager.ensureWorktree({ baseDir, sessionId: "branch-del" });
+  assert.equal(recovered.sessionId, "branch-del");
+  assert.equal(fs.existsSync(recovered.worktreeDir), true);
+  assert.equal(manager.checkHealth("branch-del").ok, true);
+});
+
+test("getStatus auto-reconciles broken worktree and throws No managed worktree", () => {
+  const baseDir = makeGitRepo();
+  const stateFile = path.join(baseDir, "worktrees-state.json");
+  const manager = worktrees.createWorktreeManager({ rootDir: baseDir, stateFile });
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "status-reconcile" });
+
+  fs.rmSync(meta.worktreeDir, { recursive: true, force: true });
+
+  assert.throws(() => manager.getStatus("status-reconcile"), /No managed worktree/);
+
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(Boolean(state.worktrees["status-reconcile"]), false);
+});
+
+test("reconcileAllWorktrees cleans up all orphaned worktrees", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta1 = manager.ensureWorktree({ baseDir, sessionId: "s1" });
+  const _meta2 = manager.ensureWorktree({ baseDir, sessionId: "s2" });
+
+  fs.rmSync(meta1.worktreeDir, { recursive: true, force: true });
+
+  const results = manager.reconcileAllWorktrees();
+  assert.equal(results.length, 1);
+  assert.equal(results[0].sessionId, "s1");
+
+  assert.equal(manager.checkHealth("s1").ok, false);
+  assert.equal(manager.checkHealth("s2").ok, true);
+});
+
+test("automatic reconciliation preserves files when Git metadata is damaged", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "preserve-draft" });
+  const draft = path.join(meta.worktreeDir, "draft.txt");
+  fs.writeFileSync(draft, "uncommitted work");
+  fs.renameSync(path.join(meta.worktreeDir, ".git"), path.join(meta.worktreeDir, ".git.saved"));
+  assert.equal(manager.checkHealth("preserve-draft").ok, false);
+  fs.writeFileSync(path.join(meta.worktreeDir, ".git"), "gitdir: missing-metadata\n");
+  assert.equal(manager.checkHealth("preserve-draft").ok, false);
+  manager.reconcileAllWorktrees();
+  assert.throws(
+    () => manager.ensureWorktree({ baseDir, sessionId: "preserve-draft" }),
+    /preserved/
+  );
+  assert.equal(fs.readFileSync(draft, "utf8"), "uncommitted work");
+});
+
+test("recreating a missing worktree retains its committed session history", () => {
+  const baseDir = makeGitRepo();
+  const manager = createTestManager(baseDir);
+  const meta = manager.ensureWorktree({ baseDir, sessionId: "preserve-commit" });
+  fs.writeFileSync(path.join(meta.worktreeDir, "result.txt"), "session result");
+  for (const args of [
+    ["add", "result.txt"],
+    ["commit", "-m", "session result"],
+  ]) {
+    assert.equal(spawnSync("git", args, { cwd: meta.worktreeDir }).status, 0);
+  }
+  const head = manager.getStatus("preserve-commit").headSha;
+  assert.equal(
+    spawnSync("git", ["worktree", "remove", meta.worktreeDir], { cwd: baseDir }).status,
+    0
+  );
+  manager.ensureWorktree({ baseDir, sessionId: "preserve-commit" });
+  assert.equal(manager.getStatus("preserve-commit").headSha, head);
+  assert.equal(
+    fs.readFileSync(path.join(meta.worktreeDir, "result.txt"), "utf8"),
+    "session result"
+  );
+});
