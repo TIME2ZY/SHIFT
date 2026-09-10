@@ -48,7 +48,7 @@ Web App (web/src/app/App.tsx)
   durable-recorder  → trace_runs + invocations + events + (assistant-final 原子 finish)
   sqlite-session-service → threads + messages (appendToSession)
   message-persistence.appendMessage → messages 表 + recall 投影
-  event-store → invocation_events + outbox(JSONL 审计)
+  event-store → invocation_events（SQLite 唯一规范事件写入）
   memory-service → memories 表（产品记忆）
   handoff-repository → durable accept / bind / complete / restart reconcile
   observability-repository → live Trace completeness + qualified Handoff/Memory metrics
@@ -94,7 +94,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                                                               | 落库                                                                                           |
 | ------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                              | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
-| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor | `invocation_events` + outbox                                                                   |
+| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor | `invocation_events`                                                                            |
 | **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed）                                       | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
 | 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                             | 同上                                                                                           |
 | 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                         | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
@@ -418,7 +418,7 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 | server   | `index.js`, `project-routes.js`, `run-event-routes.js`, `chat-runtime.js`, `chat-routes.js`（executor）, `callback-routes.js`, `session-routes.js`, `*-transport`            |
 | agents   | `catalog`, providers, `handoff*`, `a2a-finalize`, `callbacks`, `collab-task-registry`, `skill-materialize`, invoke-*                                                         |
 | storage  | `server-storage`, `project-repository`, `durable-recorder`, `event-store`, `sqlite-session-service`, `message-*`, `memory-service`, `recall-service`, Seat/Duty repositories |
-| session  | bootstrap, health, sealer；transcript 仅供 canonical audit sink 与离线/测试工具                                                                                              |
+| session  | bootstrap, health, sealer；旧 transcript 模块已删除                                                                                                                          |
 | worktree | manager, delivery-verifier                                                                                                                                                   |
 
 公开进程关闭入口是 `server.shutdown`（`src/server/index.js`）。`src/server/main.js`
@@ -533,9 +533,9 @@ SHIFT webhook JSON 与 Sentry envelope 传输。它不是标准 OTLP exporter，
 不写 SQLite，失败仅通过独立 exporter health 暴露，不影响 Trace、Invocation、Handoff 或业务成功率。
 
 `memory_events.recordSafe` 同时维护 `telemetry_sink_health` 的 sink 尝试与失败计数，health
-由这些计数、权威完整性检查和 outbox pending age 派生本地告警。保留入口
+由这些计数与权威完整性检查派生本地告警。保留入口
 `POST /api/storage/observability/retention` 只清理过期 best-effort `memory_events`；权威执行
-事实和 pending outbox 不进入该清理路径。
+事实不进入该清理路径。
 
 Trace 完整性 health 以 migration 24 的实际应用时间作为契约适用边界：更早且没有
 `trace_id` 的 Invocation 仅作为 `historical` 诊断计数，不参与当前告警，也不会被补造 Trace。
@@ -595,3 +595,11 @@ PR 应明确说明原因。
 - chat-worklist：删除独立工具 Map/补终态构造，复用 event-protocol lifecycle；四处恢复参数组装收口到 bootstrap 的恢复上下文绑定，调度分支只选择是否恢复及 generation。保留跨进程故障兜底，持久化仍走 durable recorder。
 - collab-task-registry：本轮只收窄方案/审查证据身份，删除无 invocation 身份的重复计数路径；后续修改这两个用例时，将证据去重判定移入既有 workflow-evidence/plan gate，registry 保留权威保存，禁止新增平行写入口。本轮不做全 registry 拆迁。
 - 删除 test-only transition 校验及 arePlansIsomorphic 包装；旧循环测试改为跨 invocation 无进展行为。前端工具状态从共享展示契约导入。
+
+Canonical JSONL 归档于 2026-09-09 退役：event-store 不再入队，outbox repository / flusher、
+transcript 模块、归档开关与 cleanup API 已删除。迁移 31 删除 storage_outbox；历史迁移保持
+不可变。旧安装搬迁不再把 audit-transcripts 复制到新运行目录。Provider session 文件写入及
+session-map helper 已删除，主链路继续通过规范事件将 session ID 绑定到 SQLite window。
+Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans，以单条流式联表
+查询仅加载工具事件，复用详情投影的工具配对语义；不再逐 Trace 加载正文、Memory 和 Handoff。
+默认关闭的 raw provider 排障日志及按需结构化 Trace 导出保留。

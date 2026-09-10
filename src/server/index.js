@@ -116,14 +116,10 @@ function createServer(options = {}) {
   }
   const deliveryVerifier = options.deliveryVerifier || createDeliveryVerifier();
   const logger = options.logger || console;
-  const auditTranscriptDir = path.resolve(
-    options.auditTranscriptDir || appPaths.auditTranscriptDir
-  );
   const storageContext = createServerStorage(
     {
       ...options,
       memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
-      auditTranscriptDir,
     },
     logger
   );

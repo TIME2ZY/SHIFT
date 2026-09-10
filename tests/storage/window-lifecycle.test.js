@@ -4,11 +4,6 @@ const { createStorage } = require("../../src/storage");
 const { createDurableRecorder } = require("../../src/storage/durable-recorder");
 const { createRecallService } = require("../../src/storage/recall-service");
 const { appendMessage } = require("../../src/storage/message-persistence");
-const {
-  resolveResumeSessionId,
-  upsertAgentProviderSession,
-  clearAgentProviderSession,
-} = require("../../src/shared/session-map");
 
 function sessionFixture(id = "thread-1") {
   return {
@@ -365,7 +360,10 @@ test("concurrent-style callback after delete cannot resurrect data", () => {
 
     // Late dual-write from an in-flight callback / stream is suppressed in-process.
     assert.equal(recorder.appendInvocationEvent("inv-race", "text.delta", { text: "late" }), false);
-    assert.equal(recorder.completeInvocation({ invocationId: "inv-race", code: 0, signal: null }), null);
+    assert.equal(
+      recorder.completeInvocation({ invocationId: "inv-race", code: 0, signal: null }),
+      null
+    );
     assert.equal(
       recorder.startInvocation({
         session,
@@ -605,22 +603,4 @@ test("100k events: search and invocation list stay within acceptable latency", (
   } finally {
     storage.close();
   }
-});
-
-test("clearAgentProviderSession only drops the sealed workspace slot", () => {
-  const sessions = {};
-  upsertAgentProviderSession(sessions, "codex", "ps-base", "base:C:/repo", "codex:gpt-5.6-sol");
-  upsertAgentProviderSession(
-    sessions,
-    "codex",
-    "ps-wt",
-    "worktree:C:/repo/wt",
-    "codex:gpt-5.6-sol"
-  );
-  clearAgentProviderSession(sessions, "codex", "base:C:/repo");
-  assert.equal(resolveResumeSessionId(sessions, "codex", "base:C:/repo", "codex:gpt-5.6-sol"), "");
-  assert.equal(
-    resolveResumeSessionId(sessions, "codex", "worktree:C:/repo/wt", "codex:gpt-5.6-sol"),
-    "ps-wt"
-  );
 });

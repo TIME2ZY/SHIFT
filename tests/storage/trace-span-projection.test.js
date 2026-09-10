@@ -1,7 +1,44 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createStorage } = require("../../src/storage");
-const { projectTraceSpans } = require("../../src/storage/trace-span-projection");
+const {
+  projectTraceSpans,
+  countIncompleteTraceSpans,
+} = require("../../src/storage/trace-span-projection");
+
+test("health completeness matches detail for orphan, repeated and unfinished tool events", () => {
+  const storage = fixture();
+  try {
+    for (const [kind, toolId] of [
+      ["tool.finished", "orphan"],
+      ["tool.started", "complete"],
+      ["tool.started", "complete"],
+      ["tool.finished", "complete"],
+      ["tool.finished", "complete"],
+      ["tool.started", "unfinished"],
+    ])
+      storage.invocations.appendEvent({ invocationId: "inv-1", kind, payload: { toolId } });
+    assert.equal(
+      countIncompleteTraceSpans(storage.db, "2000-01-01"),
+      0,
+      "active traces are excluded"
+    );
+    storage.invocations.finish("inv-1", { state: "failed" });
+    storage.traces.finish("trace-1", { state: "failed" });
+    const expected = projectTraceSpans(storage.db, "trace-1").spans.filter(
+      (span) => !span.complete
+    ).length;
+    assert.equal(expected, 3);
+    assert.equal(countIncompleteTraceSpans(storage.db, "2000-01-01"), expected);
+    assert.equal(
+      countIncompleteTraceSpans(storage.db, "9999-01-01"),
+      0,
+      "historical cutoff is respected"
+    );
+  } finally {
+    storage.close();
+  }
+});
 
 function fixture() {
   const storage = createStorage({ file: ":memory:" });
@@ -282,6 +319,7 @@ test("interrupted and cancelled tools project to failed complete spans", () => {
       payload: { toolId: "tool-cnc", toolName: "read", status: "cancelled" },
     });
     storage.invocations.finish("inv-1", { state: "failed", endedAt: "2026-08-13T00:00:04.000Z" });
+    storage.invocations.finish("inv-1", { state: "failed" });
     storage.traces.finish("trace-1", { state: "failed" });
 
     const projection = projectTraceSpans(storage.db, "trace-1");

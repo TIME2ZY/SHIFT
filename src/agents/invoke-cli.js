@@ -10,7 +10,6 @@ const {
 } = require("./providers");
 const { normalizeRunOptions } = require("./run-options");
 const { resolveProxy, resolveProviderProxy, proxyEnvVars } = require("./proxy");
-const { persistSessionId } = require("./session-persistence");
 const { createRawEventLogger } = require("./raw-event-logger");
 const {
   DEFAULT_TIMEOUT_MS,
@@ -225,7 +224,6 @@ function invoke(cli, prompt, options = {}) {
         process.stdout.write(`${JSON.stringify(event)}\n`);
       },
       onRawEvent: (raw) => rawLogger.log(raw),
-      onSessionId: (sessionId) => persistSessionId(config, sessionId),
       timeoutMs: resolvedRun.timeoutMs,
       killGraceMs: resolvedRun.killGraceMs,
     });
@@ -253,7 +251,6 @@ function invoke(cli, prompt, options = {}) {
       process.stdout.write(`${JSON.stringify(event)}\n`);
     },
     onRawEvent: (raw) => rawLogger.log(raw),
-    onSessionId: (sessionId) => persistSessionId(config, sessionId),
   });
 }
 

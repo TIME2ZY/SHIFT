@@ -156,4 +156,37 @@ function parseJson(value) {
   }
 }
 
-module.exports = { projectTraceSpans };
+// Health needs completeness only. Stream one joined query instead of loading
+// full Trace detail (including text, Memory and handoffs) for every past run.
+function countIncompleteTraceSpans(db, cutoff) {
+  const rows = db.prepare(`
+    SELECT i.id AS invocation_id, i.state, i.ended_at,
+           e.kind, e.payload_json, e.created_at
+    FROM trace_runs t JOIN invocations i ON i.trace_id = t.id
+    LEFT JOIN invocation_events e ON e.invocation_id = i.id
+      AND e.kind IN ('tool.started', 'tool.finished')
+    WHERE t.state <> 'active' AND t.started_at >= @cutoff
+    ORDER BY i.id, e.sequence_no
+  `);
+  let count = 0;
+  let invocationId = null;
+  let events = [];
+  function finishTools() {
+    count += projectToolSpans(null, { id: invocationId }, events).filter(
+      (span) => !span.complete
+    ).length;
+    events = [];
+  }
+  for (const row of rows.iterate({ cutoff })) {
+    if (row.invocation_id !== invocationId) {
+      finishTools();
+      invocationId = row.invocation_id;
+      if (row.state === "active" || !row.ended_at) count += 1;
+    }
+    if (row.kind) events.push(row);
+  }
+  finishTools();
+  return count;
+}
+
+module.exports = { projectTraceSpans, countIncompleteTraceSpans };

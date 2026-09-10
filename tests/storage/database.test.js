@@ -13,6 +13,54 @@ const { applyMigrations, validateMigrations } = require("../../src/storage/migra
 const { MIGRATIONS } = require("../../src/storage/schema");
 const { createStorage } = require("../../src/storage");
 
+test("audit retirement removes pending and delivered copies while preserving execution facts", () => {
+  const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 30) });
+  const storage = createStorage({ db });
+  try {
+    storage.threads.create({ id: "audit-retirement" });
+    const window = storage.windows.create({
+      id: "audit-window",
+      threadId: "audit-retirement",
+      agentId: "codex",
+      providerKey: "codex",
+      workspaceKey: "base",
+      generation: 1,
+      capacityTokens: 1000,
+    });
+    storage.invocations.start({
+      id: "audit-invocation",
+      threadId: "audit-retirement",
+      windowId: window.id,
+      agentId: "codex",
+    });
+    for (const [sequence, status] of ["pending", "delivered"].entries()) {
+      storage.invocations.appendEvent({
+        invocationId: "audit-invocation",
+        kind: "text.delta",
+        payload: { text: status },
+      });
+      db.prepare(
+        `INSERT INTO storage_outbox
+        (id, thread_id, invocation_id, sequence_no, kind, payload_json, created_at, status)
+        VALUES (?, 'audit-retirement', 'audit-invocation', ?, 'text.delta', '{}', ?, ?)`
+      ).run(`copy-${sequence}`, sequence, new Date().toISOString(), status);
+    }
+    const events = storage.invocations.listEvents("audit-invocation");
+    applyMigrations(db);
+    assert.equal(
+      db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'storage_outbox%'").get(),
+      undefined
+    );
+    assert.deepEqual(storage.invocations.listEvents("audit-invocation"), events);
+    assert.ok(storage.invocations.get("audit-invocation"));
+    assert.ok(storage.threads.get("audit-retirement"));
+    assert.deepEqual(db.pragma("foreign_key_check"), []);
+    assert.equal(applyMigrations(db), 31);
+  } finally {
+    storage.close();
+  }
+});
+
 test("memory database applies schema and safety pragmas", () => {
   const db = openMemoryDatabase({ file: ":memory:" });
   try {
@@ -54,7 +102,6 @@ test("memory database applies schema and safety pragmas", () => {
       "projects",
       "purged_threads",
       "storage_metadata",
-      "storage_outbox",
       "embedding_indexes",
       "embedding_items",
       "collaboration_tasks",

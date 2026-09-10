@@ -108,8 +108,10 @@ test("one-time migration preserves SQLite data and moves known runtime artifacts
     assert.equal(fs.existsSync(fixture.runtimePaths.databaseFile), true);
     assert.equal(fs.existsSync(fixture.sourceFile), false);
     assert.equal(
-      fs.existsSync(path.join(fixture.runtimePaths.auditTranscriptDir, "epoch", "events.jsonl")),
-      true
+      fs.existsSync(
+        path.join(fixture.runtimePaths.dataDir, "audit-transcripts", "epoch", "events.jsonl")
+      ),
+      false
     );
     assert.equal(fs.existsSync(path.join(fixture.runtimePaths.rawEventsDir, "inv.jsonl")), true);
     assert.equal(fs.existsSync(fixture.runtimePaths.worktreeStateFile), true);
