@@ -84,6 +84,7 @@ function projectCollaboration(task, permission = null, context = {}) {
     chain,
     pendingHandoffs,
     taskContext: projectTaskContext(task, currentBinding),
+    recovery: projectRecovery(context.recoveryEvents || []),
     nextAction: deriveNextAction(currentBinding?.duty, task, blocker, pendingHandoffs),
   };
 }
@@ -381,6 +382,31 @@ function deriveNextAction(duty, task, blocker, pendingHandoffs = []) {
   return dutyActions[duty] || "继续推进当前目标。";
 }
 
+function projectRecovery(events) {
+  const restores = events.filter((event) => event.kind === "context-restored");
+  return events
+    .filter((event) => event.kind === "window-sealed")
+    .map((event) => {
+      const packet = event.payload || {};
+      const restorations = restores.filter((restore) =>
+        restore.payload?.seals?.some((seal) => seal.sealId === (packet.id || event.id))
+      );
+      return {
+        eventId: event.id,
+        sealId: packet.id || event.id,
+        sourceInvocationId: event.invocationId,
+        content: packet.content || "",
+        createdAt: event.createdAt,
+        metadata: packet.metadata || {},
+        restorations: restorations.map((restore) => ({
+          invocationId: restore.invocationId,
+          createdAt: restore.createdAt,
+          ...restore.payload,
+        })),
+      };
+    });
+}
+
 function nullableString(value) {
   if (value == null) return null;
   const text = String(value).trim();
@@ -389,6 +415,7 @@ function nullableString(value) {
 
 module.exports = {
   projectTaskContext,
+  projectRecovery,
   projectCollaboration,
   projectSeats,
   projectChain,

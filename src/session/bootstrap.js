@@ -61,6 +61,7 @@ async function buildDigest({
   workspaceKey = null,
   agent = null,
   generation = null,
+  recoveryEvidence = [],
   logger = console,
 }) {
   if (!invocationSource || typeof invocationSource.listInvocationsWithMeta !== "function") {
@@ -113,6 +114,13 @@ async function buildDigest({
     sealEvent?.payload?.sourceInvocationId || sealEvent?.invocationId || null;
 
   if (typeof sealContent === "string" && sealContent.trim()) {
+    recoveryEvidence.push({
+      sealId: sealEvent.payload?.id || sealEvent.id,
+      eventId: sealEvent.id || null,
+      sourceInvocationId: sealInvocationId,
+      generation: sealMetadata?.generation || null,
+      content: sealContent.trim(),
+    });
     const sealTargetLabel = sealInvocationId ? `（截止 invocation: ${sealInvocationId}）` : "";
     lines.push(
       `<!-- Window Seal Resume -->`,
@@ -357,7 +365,9 @@ async function buildBootstrapPacket(opts) {
     relatedLimit: relatedMemoryLimit,
     logger,
   });
+  const recoveryEvidence = [];
   const digest = await buildDigest({
+    recoveryEvidence,
     threadId,
     sessionId,
     invocationSource,
@@ -370,6 +380,7 @@ async function buildBootstrapPacket(opts) {
   const packet = [identity, memoryPack.rendered, digest, RECALL_RULE, ""].join("\n");
   return {
     packet,
+    recoveryEvidence,
     inject: {
       items: memoryPack.items,
       stats: memoryPack.stats || emptyInject().stats,

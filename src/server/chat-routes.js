@@ -307,6 +307,7 @@ function createChatRunExecutor({
     // Wave R: Memory Card uses retrieveForTurn(recency + related) when recallService supports it.
     let bootstrapPacket;
     let bootstrapInject = { items: [], stats: {} };
+    let bootstrapRecovery = [];
     try {
       const bootstrapResult = await sessionBootstrap.buildBootstrapPacket({
         threadId: sessionId,
@@ -322,6 +323,7 @@ function createChatRunExecutor({
         memorySource: memoryService || null,
       });
       bootstrapPacket = bootstrapResult.packet;
+      bootstrapRecovery = bootstrapResult.recoveryEvidence || [];
       bootstrapInject = bootstrapResult.inject || bootstrapInject;
     } catch (error) {
       failPreparationTrace(error, "bootstrap");
@@ -497,6 +499,7 @@ function createChatRunExecutor({
       nativeSkillDelivery,
       bootstrapPacket,
       bootstrapInject,
+      bootstrapRecovery,
       apiUrl,
       appendToSession,
       parseA2AMentions,
