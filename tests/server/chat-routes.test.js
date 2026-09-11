@@ -154,6 +154,7 @@ function baseDeps(res, overrides = {}) {
     sessionBootstrap: {
       buildBootstrapPacket: async () => ({ packet: "", inject: { items: [], stats: {} } }),
       buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+      renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
     agentIdentity: {
@@ -282,6 +283,7 @@ test("a slower older chat request cannot abort the newer request", async () => {
       buildBootstrapPacket: () =>
         new Promise((resolve) => pendingBootstraps.push(() => resolve({ packet: "", inject: {} }))),
       buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+      renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
       buildIdentity: () => "<!-- Session Identity -->\n",
     },
     appendToSession: (...args) => appended.push(args),
@@ -331,6 +333,7 @@ test("chat preparation failure closes the durable trace", async () => {
           throw Object.assign(new Error("recall unavailable"), { code: "recall_unavailable" });
         },
         buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
         buildIdentity: () => "<!-- Session Identity -->\n",
       },
     })
@@ -401,6 +404,7 @@ test("trace terminal state reflects final invocation outcome rather than earlier
       sessionBootstrap: {
         buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
         buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
         buildIdentity: () => "<!-- Session Identity -->\n",
       },
       runChildStream: async () => ({ code: 1, signal: null }),
@@ -469,6 +473,7 @@ test("user abort intent forces invocation and trace terminal state to aborted", 
       sessionBootstrap: {
         buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
         buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+        renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
         buildIdentity: () => "<!-- Session Identity -->\n",
       },
       runChildStream: async () => {
@@ -545,6 +550,7 @@ for (const failToolWrite of [false, true]) {
         sessionBootstrap: {
           buildBootstrapPacket: async () => ({ packet: "", inject: {} }),
           buildActiveMemoryCard: async () => ({ rendered: "", items: [], stats: {} }),
+          renderTaskContext: require("../../src/session/bootstrap").renderTaskContext,
           buildIdentity: () => "<!-- Session Identity -->\n",
         },
         runChildStream: async ({ onEvent }) => {
