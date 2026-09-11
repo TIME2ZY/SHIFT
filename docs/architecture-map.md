@@ -581,6 +581,12 @@ PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
 
+交付验证提示由 `outcome-evidence-gate` 与 `skills/code-review-deliver/SKILL.md` 遵循目标项目
+约定和改动范围生成，不再要求每次 review / deliver 执行固定的全量命令。可核对的相同代码版本、
+命令、范围和环境的通过证据允许复用；缺失、失败或受新改动影响的检查必须补跑，合并前要求
+仍须满足。这是 Agent 执行约定，未新增测试缓存或平台执行器；Git/PR/CI 仍由既有
+`delivery-verifier.verify` 核验，handoff 与完成写入口不变。
+
 ### 运行修复补充（2026-09-09）
 
 - ACP 的 session 缓冲和子工具标识位于 acp-runtime；chat-worklist 只将父 usage 应用到窗口。invocation-process 与前端 run-event-stream 标注子 Agent 来源。
