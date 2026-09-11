@@ -159,7 +159,7 @@ Agent 通过既有 workflow-evidence 提交 `task_progress` JSON fence，包含 
 初始原话不变。后续用户消息作为有 messageId 的补充指令持久化，不自动当作目标替换。
 需要修订当前目标时，discuss/plan/accept Duty 提交 `task_goal` JSON fence（`goal_hash`、
 `text`、`source_message_id`），来源只能是本任务已记录用户消息；同一来源重放幂等，
-旧 hash 拒绝，修订保存来源并撤销依赖旧目标的方案、进度和验收证据。
+旧 hash 拒绝，修订保存来源并撤销依赖旧目标的方案、进度和验收证据。相同修订跨 invocation 重放复用结果；当前目标与来源均未变化时不撤销证据。同一输出先处理目标修订，再处理需求/计划等证据，最后保存绑定最新目标与计划的进度。
 
 封存包只携带执行断点及引用，当前 task 投影优先于旧包。`context-restored` 规范事件记录
 实际进入新调用提示词的封存事件 ID、任务版本与摘要 hash；它表示已注入，不声称模型已理解。

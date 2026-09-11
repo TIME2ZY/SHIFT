@@ -72,11 +72,14 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
     const task = getOrCreateTask(threadId);
     const updateHash = crypto
       .createHash("sha256")
-      .update(JSON.stringify({ type: input.type, value }))
+      .update(JSON.stringify({ type: input.type, value: canonical(value) }))
       .digest("hex");
     const seen = task.history?.some((event) => {
       const payload = event.payload || event;
-      return payload.invocationId === input.invocationId && payload.updateHash === updateHash;
+      return (
+        (input.type === "task_goal" || payload.invocationId === input.invocationId) &&
+        payload.updateHash === updateHash
+      );
     });
     if (seen) return { accepted: true, reused: true, task };
     if (!task.artifacts?.userGoal?.hash || value.goal_hash !== task.artifacts.userGoal.hash)
@@ -90,6 +93,11 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
       const sources = [task.artifacts.userGoal, ...(task.artifacts.userUpdates || [])];
       const source = sources.find((m) => m.messageId && m.messageId === value.source_message_id);
       if (!source) return reject("goal_revision_requires_user_message");
+      if (
+        task.artifacts.userGoal.text === value.text.trim() &&
+        task.artifacts.userGoal.messageId === source.messageId
+      )
+        return { accepted: true, reused: true, task };
       const updates = task.artifacts.userUpdates || [];
       const original = task.goalOriginal || task.artifacts.userGoal.text;
       resetOutcomeEvidence(task);
@@ -103,7 +111,7 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
           text: task.goal,
           hash: task.goalHash,
           messageId: source.messageId,
-          sourceText: source.text,
+          sourceText: source.sourceText || source.text,
           capturedAt: new Date().toISOString(),
         },
       };
@@ -142,6 +150,15 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
 
 function text(value) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 4000;
+}
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonical(value[key])])
+  );
 }
 function list(value) {
   return Array.isArray(value) && value.length <= 50 && value.every(text);

@@ -18,7 +18,8 @@ function processWorkflowEvidenceOutput(input = {}) {
   const events = [];
   if (!threadId || !registry) return events;
 
-  for (const update of parseTaskUpdates(content)) {
+  const taskUpdates = parseTaskUpdates(content);
+  function applyTaskUpdate(update) {
     const result = registry.submitTaskUpdate(threadId, {
       ...update,
       actorAgentId: agent,
@@ -31,6 +32,9 @@ function processWorkflowEvidenceOutput(input = {}) {
       payload: { ...summarize(result, ["reused"]), version: result.task?.version },
     });
   }
+
+  for (const update of taskUpdates.filter((entry) => entry.type === "task_goal"))
+    applyTaskUpdate(update);
 
   if (["discuss", "plan", "accept"].includes(duty)) {
     const baseline = parseSolutionBaseline(content);
@@ -170,6 +174,9 @@ function processWorkflowEvidenceOutput(input = {}) {
       }
     }
   }
+
+  for (const update of taskUpdates.filter((entry) => entry.type === "task_progress"))
+    applyTaskUpdate(update);
 
   return events;
 }

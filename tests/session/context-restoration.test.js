@@ -1,7 +1,22 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { recordContextRestoration } = require("../../src/session/context-restoration");
-const { renderWindowSealMemory } = require("../../src/storage/memory-capture");
+const { renderWindowSealMemory, createMemoryCapture } = require("../../src/storage/memory-capture");
+
+test("seal persistence failure is explicit instead of reporting a successful recovery packet", () => {
+  const capture = createMemoryCapture({ eventStore: { append: () => ({ ok: false }) } });
+  assert.throws(
+    () =>
+      capture.captureWindowSeal({
+        threadId: "t",
+        invocationId: "i",
+        agentId: "codex",
+        userGoal: "Goal",
+        assistantContent: "Continue",
+      }),
+    /persist/i
+  );
+});
 
 test("restoration cannot claim a packet that was not included or could not be persisted", () => {
   const input = {

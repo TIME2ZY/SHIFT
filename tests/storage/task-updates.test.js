@@ -86,6 +86,19 @@ test("progress survives restart, rejects stale evidence and cannot complete a ta
     assert.equal(send({ ...value, current: "stale" }).payload.reason, "task_goal_mismatch");
     assert.equal(revised.history.at(-1).actorId, "s1");
     assert.equal(revised.history.at(-1).payload.value.source_message_id, "m2");
+    assert.equal(
+      send(revision, "task_goal", { duty: "discuss", invocationId: "i2" }).payload.reused,
+      true
+    );
+    assert.equal(
+      send(
+        { source_message_id: "m2", text: revision.text, goal_hash: revised.goalHash },
+        "task_goal",
+        { duty: "discuss", invocationId: "i3" }
+      ).payload.reused,
+      true
+    );
+    assert.equal(registry.getTask("t1").version, revised.version);
   } finally {
     storage.close();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -145,4 +158,21 @@ test("new plans invalidate reported progress but route changes do not", () => {
     invocationId: "i3",
   });
   assert.equal(registry.getTask("t").artifacts.progress, undefined);
+  const newest = registry.getTask("t").artifacts.implementationPlan;
+  const output = processWorkflowEvidenceOutput({
+    registry,
+    threadId: "t",
+    agent: "grok",
+    duty: "plan",
+    seatId: "s",
+    invocationId: "i4",
+    content:
+      "```implementation_plan\n" +
+      JSON.stringify({ ...plan, changes: ["new change"] }) +
+      "\n```\n```task_progress\n" +
+      JSON.stringify({ ...progress, plan_hash: newest.hash }) +
+      "\n```",
+  });
+  assert.equal(output.at(-1).event, "task-state-updated");
+  assert.equal(registry.getTask("t").artifacts.progress.plan_hash, newest.hash);
 });
