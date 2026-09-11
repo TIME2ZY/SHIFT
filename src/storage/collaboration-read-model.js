@@ -8,6 +8,31 @@
 
 "use strict";
 
+/** Bounded to current artifacts: never replay task event history as instructions. */
+function projectTaskContext(task, binding = null) {
+  if (!task) return null;
+  const artifacts = task.artifacts || {};
+  return {
+    threadId: task.threadId,
+    version: task.version,
+    updatedAt: task.updatedAt,
+    originalGoal: task.goalOriginal || artifacts.userGoal?.text || task.goal || null,
+    currentGoal: artifacts.userGoal || null,
+    userUpdates: artifacts.userUpdates || [],
+    requirements: artifacts.solutionBaseline || null,
+    plan: artifacts.implementationPlan || null,
+    planApproval: task.implementationGate || null,
+    status: task.taskStatus || "active",
+    phase: task.phase,
+    currentDuty: binding?.duty || null,
+    currentSeatId: binding?.seatId || null,
+    progress: artifacts.progress || null,
+    review: artifacts.codeReview || null,
+    delivery: task.deliveryGate || null,
+    acceptance: artifacts.acceptanceDecision || null,
+  };
+}
+
 function projectCollaboration(task, permission = null, context = {}) {
   if (!task) return null;
   const implPermission = permission && typeof permission === "object" ? permission : {};
@@ -58,6 +83,7 @@ function projectCollaboration(task, permission = null, context = {}) {
     acceptance,
     chain,
     pendingHandoffs,
+    taskContext: projectTaskContext(task, currentBinding),
     nextAction: deriveNextAction(currentBinding?.duty, task, blocker, pendingHandoffs),
   };
 }
@@ -362,6 +388,7 @@ function nullableString(value) {
 }
 
 module.exports = {
+  projectTaskContext,
   projectCollaboration,
   projectSeats,
   projectChain,

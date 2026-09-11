@@ -8,6 +8,35 @@ const SERVER_NAME = "shift-context";
 const SERVER_VERSION = "0.1.0";
 const PROTOCOL_VERSION = "2025-06-18";
 
+const TASK_READ_TOOL = Object.freeze({
+  name: "task_read",
+  description:
+    "Read the latest authoritative goal, requirements, plan, progress and evidence for this thread.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+});
+
+async function callTaskRead(args = {}, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!args || typeof args !== "object" || Array.isArray(args) || Object.keys(args).length) {
+    throw new Error("task_read takes no arguments; thread identity comes from the invocation.");
+  }
+  const context = requireShiftContext(env);
+  const url = new URL("/api/callbacks/task", `${context.apiUrl}/`);
+  url.searchParams.set("sessionId", context.sessionId);
+  url.searchParams.set("invocationId", context.invocationId);
+  const response = await fetchImpl(url, {
+    headers: { Accept: "application/json", "X-Callback-Token": context.callbackToken },
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || `Task read failed: ${response.status}`);
+  return value;
+}
+
 const MEMORY_WRITE_TOOL = Object.freeze({
   name: "memory_write",
   description: "Store one durable, grounded, atomic conclusion that will affect future work.",
@@ -466,6 +495,7 @@ function createRequestHandler({
     if (request.method === "tools/list") {
       return jsonRpcResult(request.id, {
         tools: [
+          TASK_READ_TOOL,
           MEMORY_WRITE_TOOL,
           MEMORY_EVIDENCE_LIST_TOOL,
           RECALL_SEARCH_TOOL,
@@ -478,6 +508,7 @@ function createRequestHandler({
     if (request.method === "tools/call") {
       const toolName = request.params?.name;
       if (
+        toolName !== TASK_READ_TOOL.name &&
         toolName !== MEMORY_WRITE_TOOL.name &&
         toolName !== MEMORY_EVIDENCE_LIST_TOOL.name &&
         toolName !== RECALL_SEARCH_TOOL.name &&
@@ -488,7 +519,9 @@ function createRequestHandler({
       }
       try {
         let result;
-        if (toolName === MEMORY_WRITE_TOOL.name) {
+        if (toolName === TASK_READ_TOOL.name) {
+          result = await callTaskRead(request.params?.arguments || {});
+        } else if (toolName === MEMORY_WRITE_TOOL.name) {
           result = await memoryWrite(request.params?.arguments || {});
         } else if (toolName === MEMORY_EVIDENCE_LIST_TOOL.name) {
           result = await memoryEvidenceList(request.params?.arguments || {});
@@ -554,6 +587,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  TASK_READ_TOOL,
+  callTaskRead,
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
   RECALL_SEARCH_TOOL,

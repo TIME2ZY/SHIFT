@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  TASK_READ_TOOL,
+  callTaskRead,
   MEMORY_WRITE_TOOL,
   MEMORY_EVIDENCE_LIST_TOOL,
   RECALL_SEARCH_TOOL,
@@ -41,6 +43,7 @@ test("shift context MCP exposes memory write and current evidence discovery", as
     method: "tools/list",
   });
   assert.deepEqual(listed.result.tools, [
+    TASK_READ_TOOL,
     MEMORY_WRITE_TOOL,
     MEMORY_EVIDENCE_LIST_TOOL,
     RECALL_SEARCH_TOOL,
@@ -278,7 +281,7 @@ test("Codex invocation config registers the per-invocation MCP bridge", () => {
   );
   assert.ok(
     args.includes(
-      'mcp_servers.shift_context.enabled_tools=["memory_write","memory_evidence_list","recall_search","list_platform_skills","load_platform_skill"]'
+      'mcp_servers.shift_context.enabled_tools=["task_read","memory_write","memory_evidence_list","recall_search","list_platform_skills","load_platform_skill"]'
     )
   );
   assert.ok(args.some((value) => value.includes("SHIFT_CALLBACK_TOKEN")));
@@ -341,4 +344,21 @@ test("load_platform_skill returns a known body and rejects traversal", () => {
     () => loadPlatformSkill({ name: "not-a-real-skill" }, { env: ENV }),
     /Unknown platform skill/
   );
+});
+
+test("task_read uses invocation identity and refuses caller-selected threads", async () => {
+  const result = await callTaskRead(
+    {},
+    {
+      env: ENV,
+      fetchImpl: async (url, options) => {
+        assert.equal(url.pathname, "/api/callbacks/task");
+        assert.equal(url.searchParams.get("sessionId"), ENV.SHIFT_THREAD_ID);
+        assert.equal(options.headers["X-Callback-Token"], ENV.SHIFT_CALLBACK_TOKEN);
+        return { ok: true, json: async () => ({ task: { version: 3 } }) };
+      },
+    }
+  );
+  assert.equal(result.task.version, 3);
+  await assert.rejects(callTaskRead({ threadId: "other" }, { env: ENV }), /no arguments/);
 });

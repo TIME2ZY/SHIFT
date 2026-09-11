@@ -185,6 +185,12 @@ handoff 选择时记录 `other_seat`。不得新增 Human-only 完成写入口�
 目标项目要求的合并前全量检查仍须满足。此约定不新增测试缓存、权威写入口或完成状态；
 平台继续通过既有 delivery verifier 核验 commit、PR 和 CI，不把 Agent 测试声明当作平台实测。
 
+每轮任务上下文、结构化进度和目标修订遵循 `collaboration-data-contract.md`：沿用
+workflow-evidence → registry → SQLite task/event，新增进度用例不新增在线真相源。
+原始目标和当前有效目标分离，目标修订需要用户消息来源；计划/目标变化使旧进度失效。
+统一只读投影供每轮提示词、MCP 读取和 UI 展示，seal 包只补充断点，不覆盖最新任务状态。
+封存注入使用规范恢复事件记录可核验证据，不增加 Human 审批或新协作 phase。
+
 ### 3.8 Provider 探测
 
 Provider 探测是带时间戳的派生运行状态，不是业务真相源：

@@ -609,3 +609,5 @@ session-map helper 已删除，主链路继续通过规范事件将 session ID �
 Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans，以单条流式联表
 查询仅加载工具事件，复用详情投影的工具配对语义；不再逐 Trace 加载正文、Memory 和 Handoff。
 默认关闭的 raw provider 排障日志及按需结构化 Trace 导出保留。
+
+任务上下文由 collaboration-read-model.projectTaskContext 投影，bootstrap.renderTaskContext 统一渲染，chat-worklist 每轮注入完整当前需求与计划，删除原先零散 goal/phase/planHash JSON 组装。GET collaboration 与 MCP task_read 复用投影；callback task 读取强制验证 invocation token。没有新增权威写入或存储模式。
