@@ -611,3 +611,5 @@ Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans�
 默认关闭的 raw provider 排障日志及按需结构化 Trace 导出保留。
 
 任务上下文由 collaboration-read-model.projectTaskContext 投影，bootstrap.renderTaskContext 统一渲染，chat-worklist 每轮注入完整当前需求与计划，删除原先零散 goal/phase/planHash JSON 组装。GET collaboration 与 MCP task_read 复用投影；callback task 读取强制验证 invocation token。没有新增权威写入或存储模式。
+
+结构化 task_goal/task_progress 经 workflow-evidence → registry.submitTaskUpdate → 原 task/event 事务保存。task-updates 用例通过 registry 注入的 get/persist 接口工作；原 captureUserGoal 实现迁入同一用例，registry 不新增业务分支。进度只表示有引用的 Agent 报告，不改变验收；新计划、需求基线和目标修订撤销旧进度。后续用户消息通过 captureUserGoal 记录来源，原始用户目标不覆盖。

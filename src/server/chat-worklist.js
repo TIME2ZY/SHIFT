@@ -1471,6 +1471,7 @@ async function runChatWorklist(ctx) {
       }
 
       const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+        seatId: dutyBinding?.seatId,
         invocationId: finalInvocationId,
         progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
         agent,

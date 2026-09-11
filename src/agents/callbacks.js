@@ -277,6 +277,7 @@ function postMessage(
     progressKey: thread.deliveryVerifier?.getHeadSha?.(thread.runWorkspace?.worktreeDir || ""),
     agent,
     duty: currentDuty,
+    seatId: thread.currentDutyBinding?.seatId,
     content,
     threadId: callbackSessionId,
     registry: taskRegistry,
