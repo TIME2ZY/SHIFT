@@ -9,6 +9,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { createTaskUpdates } = require("./task-updates");
 const { COLLAB_TASK_STATES } = require("../shared/collab-contracts");
 const { normalizeIntent } = require("./handoff");
 const {
@@ -25,7 +26,6 @@ const {
   validateVerifiedDelivery,
   parseFinalAcceptance,
   validateFinalAcceptanceAgainstTask,
-  hashUserGoal,
 } = require("./workflow-gates");
 const { ENV } = require("../shared/brand");
 
@@ -135,38 +135,11 @@ function createCollabTaskRegistry(options = {}) {
     return { ...task, history: task.history.slice() };
   }
 
-  function captureUserGoal(threadId, input = {}) {
-    if (!threadId) return { captured: false, reason: "missing_thread" };
-    const text = String(input.text || "").trim();
-    if (!text) return { captured: false, reason: "missing_user_goal" };
-    const task = getOrCreateTask(threadId);
-    const existing = task.artifacts?.userGoal;
-    if (existing?.hash && !input.force) {
-      return { captured: true, reused: true, goalHash: existing.hash, task };
-    }
-    if (input.force) resetOutcomeEvidence(task);
-    const goalHash = hashUserGoal(text);
-    task.goal = task.goal || text;
-    task.artifacts = {
-      ...(task.artifacts || {}),
-      userGoal: {
-        text,
-        hash: goalHash,
-        messageId: input.messageId || null,
-        capturedAt: new Date().toISOString(),
-      },
-    };
-    delete task.artifacts.acceptanceDecision;
-    const saved = persist(task, {
-      type: "user_goal_captured",
-      from: task.phase,
-      to: task.phase,
-      actorAgentId: "user",
-      intent: "discuss",
-      goalHash,
-    });
-    return { captured: true, reused: false, goalHash, task: saved };
-  }
+  const { captureUserGoal, submitTaskUpdate } = createTaskUpdates({
+    getOrCreateTask,
+    persist,
+    resetOutcomeEvidence,
+  });
 
   function submitSolutionBaseline(threadId, input = {}) {
     if (!threadId) return { accepted: false, reason: "missing_thread" };
@@ -648,6 +621,7 @@ function createCollabTaskRegistry(options = {}) {
     };
     task.artifacts = { ...(task.artifacts || {}) };
     delete task.artifacts.implementationPlan;
+    delete task.artifacts.progress;
     delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
@@ -784,6 +758,7 @@ function createCollabTaskRegistry(options = {}) {
         proposedAt: new Date().toISOString(),
       },
     };
+    delete task.artifacts.progress;
     delete task.artifacts.codeReview;
     delete task.artifacts.delivery;
     delete task.artifacts.finalAcceptance;
@@ -1090,6 +1065,7 @@ function createCollabTaskRegistry(options = {}) {
     getTask,
     getOrCreateTask,
     captureUserGoal,
+    submitTaskUpdate,
     submitSolutionBaseline,
     recordCodeReview,
     recordDeliveryEvidence,
@@ -1146,6 +1122,7 @@ function invalidateAfterSolutionRevision(task) {
   task.state = STATE.DISCUSS;
   task.artifacts = { ...(task.artifacts || {}) };
   delete task.artifacts.implementationPlan;
+  delete task.artifacts.progress;
   delete task.artifacts.codeReview;
   delete task.artifacts.delivery;
   delete task.artifacts.finalAcceptance;

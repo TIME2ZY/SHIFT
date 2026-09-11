@@ -1,4 +1,5 @@
 "use strict";
+const { parseTaskUpdates } = require("./task-updates");
 
 const {
   parseImplementationPlan,
@@ -16,6 +17,24 @@ function processWorkflowEvidenceOutput(input = {}) {
   const registry = input.registry;
   const events = [];
   if (!threadId || !registry) return events;
+
+  const taskUpdates = parseTaskUpdates(content);
+  function applyTaskUpdate(update) {
+    const result = registry.submitTaskUpdate(threadId, {
+      ...update,
+      actorAgentId: agent,
+      actorDuty: duty,
+      invocationId: input.invocationId,
+      seatId: input.seatId,
+    });
+    events.push({
+      event: result.accepted ? "task-state-updated" : "task-state-rejected",
+      payload: { ...summarize(result, ["reused"]), version: result.task?.version },
+    });
+  }
+
+  for (const update of taskUpdates.filter((entry) => entry.type === "task_goal"))
+    applyTaskUpdate(update);
 
   if (["discuss", "plan", "accept"].includes(duty)) {
     const baseline = parseSolutionBaseline(content);
@@ -155,6 +174,9 @@ function processWorkflowEvidenceOutput(input = {}) {
       }
     }
   }
+
+  for (const update of taskUpdates.filter((entry) => entry.type === "task_progress"))
+    applyTaskUpdate(update);
 
   return events;
 }

@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const SHIFT_CONTEXT_SERVER_NAME = "shift_context";
 const SHIFT_CONTEXT_TOOLS = Object.freeze([
+  "task_read",
   "memory_write",
   "memory_evidence_list",
   "recall_search",

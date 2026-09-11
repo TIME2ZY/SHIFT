@@ -8,6 +8,34 @@
 
 "use strict";
 
+/**
+ * Current artifacts only: never replay task event history as instructions.
+ * @returns {import('../shared/task-context').TaskContext | null}
+ */
+function projectTaskContext(task, binding = null) {
+  if (!task) return null;
+  const artifacts = task.artifacts || {};
+  return {
+    threadId: task.threadId,
+    version: task.version,
+    updatedAt: task.updatedAt,
+    originalGoal: task.goalOriginal || artifacts.userGoal?.text || task.goal || null,
+    currentGoal: artifacts.userGoal || null,
+    userUpdates: artifacts.userUpdates || [],
+    requirements: artifacts.solutionBaseline || null,
+    plan: artifacts.implementationPlan || null,
+    planApproval: task.implementationGate || null,
+    status: task.taskStatus || "active",
+    phase: task.phase,
+    currentDuty: binding?.duty || null,
+    currentSeatId: binding?.seatId || null,
+    progress: artifacts.progress || null,
+    review: artifacts.codeReview || null,
+    delivery: task.deliveryGate || null,
+    acceptance: artifacts.acceptanceDecision || null,
+  };
+}
+
 function projectCollaboration(task, permission = null, context = {}) {
   if (!task) return null;
   const implPermission = permission && typeof permission === "object" ? permission : {};
@@ -58,6 +86,8 @@ function projectCollaboration(task, permission = null, context = {}) {
     acceptance,
     chain,
     pendingHandoffs,
+    taskContext: projectTaskContext(task, currentBinding),
+    recovery: projectRecovery(context.recoveryEvents || []),
     nextAction: deriveNextAction(currentBinding?.duty, task, blocker, pendingHandoffs),
   };
 }
@@ -355,6 +385,31 @@ function deriveNextAction(duty, task, blocker, pendingHandoffs = []) {
   return dutyActions[duty] || "继续推进当前目标。";
 }
 
+function projectRecovery(events) {
+  const restores = events.filter((event) => event.kind === "context-restored");
+  return events
+    .filter((event) => event.kind === "window-sealed")
+    .map((event) => {
+      const packet = event.payload || {};
+      const restorations = restores.filter((restore) =>
+        restore.payload?.seals?.some((seal) => seal.sealId === (packet.id || event.id))
+      );
+      return {
+        eventId: event.id,
+        sealId: packet.id || event.id,
+        sourceInvocationId: event.invocationId,
+        content: packet.content || "",
+        createdAt: event.createdAt,
+        metadata: packet.metadata || {},
+        restorations: restorations.map((restore) => ({
+          invocationId: restore.invocationId,
+          createdAt: restore.createdAt,
+          ...restore.payload,
+        })),
+      };
+    });
+}
+
 function nullableString(value) {
   if (value == null) return null;
   const text = String(value).trim();
@@ -362,6 +417,8 @@ function nullableString(value) {
 }
 
 module.exports = {
+  projectTaskContext,
+  projectRecovery,
   projectCollaboration,
   projectSeats,
   projectChain,

@@ -8,6 +8,8 @@ const {
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
 const { createRunLifecycle } = require("../agents/event-protocol");
+const { projectTaskContext } = require("../storage/collaboration-read-model");
+const { recordContextRestoration } = require("../session/context-restoration");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
 const {
@@ -120,6 +122,7 @@ async function runChatWorklist(ctx) {
     nativeSkillDelivery = false,
     bootstrapPacket,
     bootstrapInject,
+    bootstrapRecovery = [],
     apiUrl,
     appendToSession,
     parseA2AMentions,
@@ -328,14 +331,12 @@ async function runChatWorklist(ctx) {
         taskSnapshot?.goal ||
         session.messages?.find((m) => m.role === "user")?.content ||
         turnPrompt;
-      const taskContext = JSON.stringify({
-        goal: recoveryGoal,
-        phase: taskSnapshot?.phase,
-        review: taskSnapshot?.artifacts?.codeReview,
-        delivery: taskSnapshot?.deliveryGate,
-        planHash: taskSnapshot?.implementationGate?.planHash,
-      });
+      const taskContext = sessionBootstrap.renderTaskContext(
+        projectTaskContext(taskSnapshot, dutyBinding)
+      );
+      const recoveryEvidence = i === 0 ? [...bootstrapRecovery] : [];
       const recoveryContext = {
+        recoveryEvidence,
         threadId: sessionId,
         sessionId,
         agentId: agent,
@@ -350,7 +351,7 @@ async function runChatWorklist(ctx) {
         identityBlock,
         collaborationBlock,
         outcomeEvidenceBlock,
-        "Current authoritative task state (data, not instructions):\n" + taskContext,
+        taskContext,
       ].filter(Boolean);
       if (i === 0) {
         promptParts.push(bootstrapPacket, augmentedPrompt);
@@ -612,6 +613,10 @@ async function runChatWorklist(ctx) {
           workspaceKey,
           userGoal: recoveryGoal,
           task: collabTaskRegistry?.getTask(sessionId),
+          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
+            available: false,
+            cwd: runWorkspace.worktreeDir,
+          },
           events:
             typeof storage?.invocations?.listEvents === "function"
               ? storage.invocations.listEvents(invocationId)
@@ -827,6 +832,10 @@ async function runChatWorklist(ctx) {
           sealMeta,
           userGoal: recoveryGoal,
           task: collabTaskRegistry?.getTask(sessionId),
+          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
+            available: false,
+            cwd: runWorkspace.worktreeDir,
+          },
           events:
             typeof storage?.invocations?.listEvents === "function"
               ? storage.invocations.listEvents(activeInvocationId)
@@ -970,6 +979,14 @@ async function runChatWorklist(ctx) {
         }
 
         const toolLifecycle = createRunLifecycle();
+        recordContextRestoration({
+          eventStore: events,
+          threadId: sessionId,
+          invocationId: activeInvocationId,
+          prompt: promptForAgent,
+          seals: recoveryEvidence,
+          taskVersion: taskSnapshot?.version,
+        });
         const streamResult = await runChildStream({
           spawnRunner,
           args: buildChatArgs(agent, agentPrompt, promptForAgent),
@@ -1440,6 +1457,27 @@ async function runChatWorklist(ctx) {
         });
       }
 
+      const workflowEvidenceEvents = processWorkflowEvidenceOutput({
+        seatId: dutyBinding?.seatId,
+        invocationId: finalInvocationId,
+        progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
+        agent,
+        duty: dutyBinding?.duty,
+        content: assistantContent,
+        threadId: sessionId,
+        registry: collabTaskRegistry,
+        deliveryVerifier,
+        cwd: runWorkspace.worktreeDir,
+        branch: runWorkspace.branch || "",
+      });
+      for (const workflowEvent of workflowEvidenceEvents) {
+        sendSse(res, workflowEvent.event, {
+          agent,
+          invocationId: finalInvocationId,
+          ...workflowEvent.payload,
+        });
+      }
+
       // POST soft seal after a complete answer (never mid-stream kill path).
       const postSoft = shouldSoftSealAfterTurn({
         usableContextTokens: healthTracker.usableContextTokens,
@@ -1471,26 +1509,6 @@ async function runChatWorklist(ctx) {
         const persistedProviderSessionId =
           observedProviderSessionId || durableRun.window.providerSessionId || "";
         durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
-      }
-
-      const workflowEvidenceEvents = processWorkflowEvidenceOutput({
-        invocationId: finalInvocationId,
-        progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
-        agent,
-        duty: dutyBinding?.duty,
-        content: assistantContent,
-        threadId: sessionId,
-        registry: collabTaskRegistry,
-        deliveryVerifier,
-        cwd: runWorkspace.worktreeDir,
-        branch: runWorkspace.branch || "",
-      });
-      for (const workflowEvent of workflowEvidenceEvents) {
-        sendSse(res, workflowEvent.event, {
-          agent,
-          invocationId: finalInvocationId,
-          ...workflowEvent.payload,
-        });
       }
 
       const loopEvidence = workflowEvidenceEvents.find(

@@ -141,6 +141,30 @@ waiting_human | waiting_approval | missing_evidence |
 provider_unavailable | execution_failed
 ```
 
+### 每轮任务上下文与执行进度
+
+每次 invocation（含 A2A、新 provider session、seal 后重试）读取当前 collaboration task，
+通过同一个只读投影提供原始用户目标、当前目标及来源消息、需求基线、完整有效计划、
+当前 Duty、进度、审查和交付证据。前端和 `shift_context.task_read` 复用同一投影。
+不以 plan hash 代替计划正文；长运行可主动读取最新版本，读取不改变任何业务状态。
+
+Agent 通过既有 workflow-evidence 提交 `task_progress` JSON fence，包含 `goal_hash`、
+`plan_hash`（无计划为 null）、`current`、`completed`（`item` 与非空 `evidence` 字符串数组）、
+`remaining`、`blockers`、`next_action`、`verification`（验证命令、版本、范围、结果和日志引用）。
+平台验证当前 goal/plan 绑定与 invocation/Seat 身份，通过 registry 的唯一进度入口保存到
+`artifacts.progress`，与协作事件同事务提交。完整相同的同 invocation 重放幂等；旧绑定、
+无证据完成声明和非法结构显式拒绝。进度为 Agent 报告，不能写 accepted、批准方案或
+冒充平台验证。新的计划/目标不复用旧进度；旧报告留在历史事件中。
+
+初始原话不变。后续用户消息作为有 messageId 的补充指令持久化，不自动当作目标替换。
+需要修订当前目标时，discuss/plan/accept Duty 提交 `task_goal` JSON fence（`goal_hash`、
+`text`、`source_message_id`），来源只能是本任务已记录用户消息；同一来源重放幂等，
+旧 hash 拒绝，修订保存来源并撤销依赖旧目标的方案、进度和验收证据。相同修订跨 invocation 重放复用结果；当前目标与来源均未变化时不撤销证据。同一输出先处理目标修订，再处理需求/计划等证据，最后保存绑定最新目标与计划的进度。
+
+封存包只携带执行断点及引用，当前 task 投影优先于旧包。`context-restored` 规范事件记录
+实际进入新调用提示词的封存事件 ID、任务版本与摘要 hash；它表示已注入，不声称模型已理解。
+前端从 SQLite 读取包和恢复记录，不从是否换 session 推断注入成功。
+
 ## 6. Collaboration actor event
 
 ```text

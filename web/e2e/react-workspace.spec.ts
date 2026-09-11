@@ -137,6 +137,36 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
                 phase: "implement",
                 goalOriginal: "实现工作区功能",
                 goalNormalized: "在隔离工作区完成并验证功能",
+                taskContext: {
+                  threadId: "session-1",
+                  version: 4,
+                  originalGoal: "实现工作区功能",
+                  currentGoal: { text: "实现工作区功能", hash: "goal-hash", messageId: "user-1" },
+                  userUpdates: [],
+                  requirements: null,
+                  plan: {
+                    summary: "隔离工作区执行方案",
+                    files: ["src/worktree/manager.js"],
+                    changes: ["恢复工作区绑定"],
+                    tests: ["重启恢复回归"],
+                    risks: [],
+                    hash: "plan-hash",
+                  },
+                  planApproval: null,
+                  progress: null,
+                  review: null,
+                },
+                recovery: [
+                  {
+                    eventId: 1,
+                    sealId: "seal-1",
+                    sourceInvocationId: "inv-1",
+                    content: "next_action: 运行重启恢复回归",
+                    createdAt: "2026-09-11T00:00:00Z",
+                    metadata: { agentId: "gemini", generation: 1 },
+                    restorations: [],
+                  },
+                ],
                 currentSeat: {
                   seatId: "seat-gemini",
                   providerId: "gemini",
@@ -548,6 +578,12 @@ test("keeps worktree execution while exposing Audit in the former workspace slot
 
   await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
   await expect(page.getByRole("region", { name: "任务卡" })).toContainText("等待讨论席位批准方案");
+  await page.getByText("需求与计划", { exact: false }).click();
+  await expect(page.getByText("隔离工作区执行方案", { exact: true })).toBeVisible();
+  await expect(page.getByText("重启恢复回归", { exact: true })).toBeVisible();
+  await page.getByText("上下文续接", { exact: false }).click();
+  await page.getByText(/gemini · 窗口 1 · 未记录后续注入/).click();
+  await expect(page.getByLabel("续工包内容")).toHaveText("next_action: 运行重启恢复回归");
   await expect(page.locator(".react-run-status")).toHaveText("已完成");
   await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
   await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();

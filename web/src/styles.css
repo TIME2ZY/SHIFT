@@ -4795,3 +4795,69 @@ body {
   color: var(--text-secondary);
   cursor: wait;
 }
+
+.react-task-context details {
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-2) 0;
+  min-width: 0;
+}
+.react-task-context summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.react-task-context summary small {
+  color: var(--text-secondary);
+  margin-inline-start: 6px;
+}
+.react-task-context p,
+.react-task-context li {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.react-task-context strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.react-task-context ul {
+  padding-inline-start: 18px;
+  margin-block: 4px 10px;
+}
+.react-task-context small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.react-task-context pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  padding: 8px;
+  background: var(--surface-inset);
+}
+.react-task-context .react-recovery-packet {
+  margin-top: 8px;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--accent);
+}
+.react-task-context summary:focus-visible,
+.react-handoff-card button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.react-handoff-card {
+  flex-wrap: wrap;
+}
+.react-handoff-card button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
