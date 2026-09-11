@@ -11,6 +11,9 @@ export interface PersistedMessage {
   from?: string;
   to?: string;
   handoffDegraded?: boolean;
+  parentInvocationId?: string;
+  source?: string;
+  duty?: string;
   exitCode?: number | null;
   createdAt?: string | number;
 }

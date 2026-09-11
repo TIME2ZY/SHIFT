@@ -557,6 +557,9 @@ describe("MessageList", () => {
           },
           {
             id: "route1",
+            parentInvocationId: "i-handoff",
+            source: "callback",
+            duty: "review",
             role: "system",
             messageType: "a2a-route",
             from: "codex",
@@ -615,6 +618,9 @@ describe("MessageList", () => {
 
     await user.click(screen.getByText("执行完成"));
     expect(await screen.findByText("shell")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看交接原文" }));
+    expect(screen.getByText("@Gemini").closest("article")).toHaveFocus();
+    expect(screen.getByText("中途消息交接 · review")).toBeInTheDocument();
     // Durable process loads only for the final host, not the callback.
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(

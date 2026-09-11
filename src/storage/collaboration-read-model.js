@@ -8,7 +8,10 @@
 
 "use strict";
 
-/** Bounded to current artifacts: never replay task event history as instructions. */
+/**
+ * Current artifacts only: never replay task event history as instructions.
+ * @returns {import('../shared/task-context').TaskContext | null}
+ */
 function projectTaskContext(task, binding = null) {
   if (!task) return null;
   const artifacts = task.artifacts || {};
