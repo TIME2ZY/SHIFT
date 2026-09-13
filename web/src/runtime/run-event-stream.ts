@@ -97,6 +97,9 @@ export function applyRunEventFrame(
       "done",
       "run.aborted",
       "window-sealed",
+      "context-restored",
+      "task-state-updated",
+      "task-state-rejected",
     ].includes(frame.event) ||
     /^(code-review|implementation-plan|delivery-|final-acceptance|solution-baseline)/.test(
       frame.event
@@ -248,6 +251,13 @@ export function applyRunEventFrame(
         type: "notice/received",
         sessionId,
         message: "上下文窗口已封存；运行状态以执行终态为准。",
+      });
+      break;
+    case "task-state-rejected":
+      store.dispatch({
+        type: "notice/received",
+        sessionId,
+        message: `任务状态更新未接受：${String(payload.reason || "证据无效")}`,
       });
       break;
     case "memory":

@@ -184,7 +184,21 @@ function createDeliveryVerifier(options = {}) {
     }
   }
 
-  return { verify, verifyWorktreeHandoff, getHeadSha };
+  function getWorkspaceState(cwd) {
+    try {
+      return {
+        available: true,
+        cwd,
+        headSha: run("git", ["rev-parse", "HEAD"], cwd),
+        branch: run("git", ["branch", "--show-current"], cwd),
+        changes: run("git", ["status", "--porcelain"], cwd).split("\n").filter(Boolean),
+      };
+    } catch (error) {
+      return { available: false, cwd, error: error.message };
+    }
+  }
+
+  return { verify, verifyWorktreeHandoff, getHeadSha, getWorkspaceState };
 }
 
 function resolveCiStatus(rollup) {

@@ -152,6 +152,18 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
       assert.match(body, /event: window-sealed|event: sealed/);
       assert.match(body, /pre-call-projected|post-turn/);
       assert.equal(spawnCount, 1, "exactly one provider spawn after pre-rotate");
+      const recoveryEvents = storage.invocations.listRecoveryEvents(session.id);
+      const restoration = recoveryEvents
+        .filter((event) => event.kind === "context-restored")
+        .at(-1);
+      assert.ok(restoration, "prepared recovery is durable, not inferred from session rotation");
+      assert.equal(restoration.payload.stage, "prompt_prepared");
+      assert.match(prompts[0], /Current Task Context/);
+      for (const source of restoration.payload.seals) {
+        const seal = recoveryEvents.find((event) => event.payload?.id === source.sealId);
+        assert.ok(seal);
+        assert.ok(prompts[0].includes(seal.payload.content));
+      }
       assert.match(body, /answer after rotate on fresh window/);
 
       const msgRes = await apiFetch(`${baseUrl}/api/messages?sessionId=${session.id}`).then((r) =>
@@ -175,6 +187,49 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
       const active = wins.find((w) => w.state === "active");
       assert.ok(active);
       assert.ok(active.generation > genBefore, "generation advanced after rotate");
+    }
+  );
+});
+
+test("A2A fresh sessions restore scoped seals and expose prepared-input evidence", async () => {
+  const prompts = [];
+  await withSealServer(
+    (_cmd, args) => {
+      prompts.push(args.at(-1));
+      const target = prompts.length === 1 ? "grok" : prompts.length === 2 ? "codex" : null;
+      return spawnText(
+        target
+          ? `@${target}\n\n\`\`\`handoff\nto: ${target}\nintent: discuss\nwhat: Resume the investigation\nwhy: Cross-check the evidence\nnext_action: Preserve original requirements\n\`\`\``
+          : "Investigation complete."
+      );
+    },
+    async ({ baseUrl, storage, projectKey }) => {
+      const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        body: JSON.stringify({ projectKey }),
+      }).then((r) => r.json());
+      await startChat(baseUrl, {
+        sessionId: session.id,
+        agent: "codex",
+        prompt: "Original requirement: do not discard user changes",
+      }).then((r) => r.text());
+      assert.equal(prompts.length, 3);
+      assert.match(prompts[2], /Original requirement: do not discard user changes/);
+      assert.match(prompts[2], /Window Seal Resume/);
+      const invocations = storage.invocations.listForThread(session.id);
+      assert.ok(invocations.every((i) => i.state === "completed"));
+      const restoration = storage.invocations
+        .listRecoveryEvents(session.id)
+        .find((e) => e.kind === "context-restored" && e.invocationId === invocations.at(-1).id);
+      assert.ok(restoration);
+      const sources = restoration.payload.seals.map((s) =>
+        storage.invocations.get(s.sourceInvocationId)
+      );
+      assert.ok(sources.every((source) => source.agentId === "codex"));
+      const { collaboration } = await apiFetch(
+        `${baseUrl}/api/sessions/${session.id}/collaboration`
+      ).then((r) => r.json());
+      assert.ok(collaboration.recovery.some((seal) => seal.restorations.length > 0));
     }
   );
 });

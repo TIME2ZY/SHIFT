@@ -81,6 +81,7 @@ function createSessionRoutes({
           acceptanceReadiness,
           handoffs,
           invocations,
+          recoveryEvents: executionStorage?.invocations?.listRecoveryEvents?.(sessionId) || [],
         }),
         seats: projectSeats(seats),
       });

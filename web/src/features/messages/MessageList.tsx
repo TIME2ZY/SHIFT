@@ -211,9 +211,11 @@ function MessageRow({
 function HandoffDivider({
   message,
   agents,
+  onShowSource,
 }: {
   message: PersistedMessage;
   agents: AgentSummary[];
+  onShowSource?: () => void;
 }) {
   const fallback = message.content.replace(/^\s*[^\p{L}\p{N}@]+/u, "").split("→");
   const fromId = message.from || fallback[0]?.trim() || "agent";
@@ -261,6 +263,19 @@ function HandoffDivider({
         </span>
         {message.handoffDegraded ? (
           <small className="react-handoff-degraded">交接信息不完整</small>
+        ) : null}
+        <small>
+          {message.source === "callback"
+            ? "中途消息交接"
+            : message.source === "chat"
+              ? "最终回答交接"
+              : "已记录交接"}
+          {message.duty ? ` · ${message.duty}` : ""}
+        </small>
+        {onShowSource ? (
+          <button type="button" onClick={onShowSource}>
+            查看交接原文
+          </button>
         ) : null}
       </div>
     </div>
@@ -589,10 +604,29 @@ export function MessageList({
 
         {transcriptMessages.map((message, transcriptIndex) => {
           if (message.role === "system") {
+            const source = [...visibleMessages]
+              .reverse()
+              .find(
+                (candidate) =>
+                  Boolean(message.parentInvocationId) &&
+                  candidate.invocationId === message.parentInvocationId &&
+                  (message.source === "callback"
+                    ? isAssistantCallback(candidate)
+                    : isAssistantFinal(candidate)) &&
+                  messages.indexOf(candidate) < messages.indexOf(message)
+              );
             return (
               <HandoffDivider
                 message={message}
                 agents={agents}
+                onShowSource={
+                  source
+                    ? () =>
+                        scrollToMessage(
+                          persistedMessageKey(source, visibleMessages.indexOf(source))
+                        )
+                    : undefined
+                }
                 key={persistedMessageKey(message, transcriptIndex)}
               />
             );

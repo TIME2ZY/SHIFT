@@ -46,7 +46,13 @@ tests:
 
 ## 交付（approve 之后）
 
-在当前 worktree 运行 `npm run verify:pr`，规范 commit、push、创建 ready PR，并等待 GitHub checks。
+验证命令遵循目标项目的 `AGENTS.md`、测试配置和本次改动范围，不固定使用 `npm run verify:pr`。
+实现与修复阶段执行相关检查；review / deliver 先核对已有证据，只补跑缺失、失败或受新改动影响的检查。
+复用通过结果必须能追溯到相同代码版本、命令、覆盖范围、环境和实际日志，不能仅凭口头声明。
+换 Seat 或 Duty 本身不要求重跑；目标项目要求的合并前全量检查仍须满足。
+
+规范 commit、push、创建 ready PR，并等待 GitHub checks。记录实际验证命令、范围、结果与证据位置；
+复用时注明来源及适用代码版本。平台核验 Git/PR/CI，不把测试声明当作平台实测。
 
 - commit subject：Conventional Commit，不超过 72 字符
 - commit body：说明改动与原因
@@ -60,7 +66,7 @@ commit_sha: <40-char commit sha>
 pr_url: <https://github.com/.../pull/...>
 base_branch: <master|main|实际目标分支>
 verification:
-  - npm run verify:pr: passed
+  - <目标项目实际验证命令、范围、结果、代码版本及日志位置；复用则注明来源>
   - GitHub checks: passed
 ```
 ````

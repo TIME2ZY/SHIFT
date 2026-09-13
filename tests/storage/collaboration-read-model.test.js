@@ -70,7 +70,7 @@ test("task card projects goal, current Duty binding, workspace evidence, and nex
   assert.equal(snapshot.blocker, null);
 });
 
-test("pending plan projects a categorized approval blocker without dumping the plan body", () => {
+test("pending plan exposes its body in task context while retaining the approval blocker", () => {
   const snapshot = projectCollaboration(
     {
       phase: "implement",
@@ -97,7 +97,7 @@ test("pending plan projects a categorized approval blocker without dumping the p
     reason: "implementation_plan_not_approved",
   });
   assert.equal(snapshot.nextAction, "请由讨论或验收席位批准方案后继续。");
-  assert.equal(JSON.stringify(snapshot).includes("src/index.js"), false);
+  assert.deepEqual(snapshot.taskContext.plan.files, ["src/index.js"]);
 });
 
 test("approved review without delivery is waiting for evidence, not unreviewed", () => {

@@ -31,12 +31,13 @@ function createMemoryCapture({
   }
   function emitCollaborationEvent(threadId, invocationId, event) {
     const eventKind = event.kind === "window-seal" ? "window-sealed" : "handoff-captured";
-    eventStore.append({
+    const stored = eventStore.append({
       threadId,
       invocationId,
       kind: eventKind,
       payload: event,
     });
+    if (stored?.ok === false) throw new Error("Collaboration event was not persisted.");
   }
 
   function persistCapture(input, eventInvocationId) {
@@ -128,6 +129,10 @@ function createMemoryCapture({
       reason,
       partial,
       invocationState: input.invocationState || "sealed",
+      taskVersion: input.task?.version || null,
+      goalHash: input.task?.artifacts?.userGoal?.hash || null,
+      planHash: input.task?.artifacts?.implementationPlan?.hash || null,
+      workspace: input.workspace || null,
     };
     const memoryInput = {
       id,
@@ -139,6 +144,7 @@ function createMemoryCapture({
         userGoal: input.userGoal,
         task: input.task,
         events: input.events,
+        workspace: input.workspace,
       }),
       sourceInvocationId: invocationId,
       createdBy: "system:window-seal",
@@ -162,8 +168,11 @@ function createMemoryCapture({
 
   return {
     captureHandoff: (input) => safelyCapture("handoff", () => captureHandoffUnsafe(input)),
-    captureWindowSeal: (input) =>
-      safelyCapture("window-seal", () => captureWindowSealUnsafe(input)),
+    captureWindowSeal: (input) => {
+      const result = captureWindowSealUnsafe(input);
+      if (!result.captured) throw new Error(`Seal recovery capture failed: ${result.reason}`);
+      return result;
+    },
   };
 }
 
@@ -242,7 +251,10 @@ function renderWindowSealMemory(input) {
   const facts = collectResumeFacts(
     (input.events || []).filter((e) => !(e.payload || e).subagentId)
   );
-  const goal = compactText(input.userGoal, 240);
+  const goal = compactText(
+    input.task?.artifacts?.userGoal?.text || input.task?.goalOriginal || input.userGoal,
+    240
+  );
   const snapshot = truncateMiddle(
     typeof input.assistantContent === "string" && input.assistantContent.trim()
       ? input.assistantContent
@@ -255,6 +267,9 @@ function renderWindowSealMemory(input) {
     `[window-seal] agent=${input.agentId} generation=${input.generation || "?"} reason=${input.reason} partial=${partial}`,
     goal ? `goal: ${goal}` : "goal: (无用户目标快照)",
     `execution: ${partial ? "中断，输出可能不完整" : "本次回复已结束，任务完成以平台验收为准"}`,
+    `next_action: ${compactText(input.task?.artifacts?.progress?.next_action, 300) || "读取最新任务状态，核对未完成项后继续；不可假定已验收"}`,
+    `workspace: ${compactText(JSON.stringify(input.workspace || {}), 400)}`,
+    `progress: ${compactText(JSON.stringify(input.task?.artifacts?.progress || null), 700)}`,
   ];
   if (input.task) {
     lines.push(
@@ -285,11 +300,6 @@ function renderWindowSealMemory(input) {
     lines.push("errors: (无)");
   }
   lines.push(
-    `next_action: ${
-      partial
-        ? "从中断点继续用户目标；先 recall_search / read-invocation 再改代码"
-        : "在新 generation 继续用户目标；细节用 recall_search / read-invocation"
-    }`,
     "snapshot:",
     snapshot,
     "说明: provider session 已放弃。本包是协作事件，不是产品 Memory。"

@@ -56,6 +56,11 @@ function createInvocationRepository(db) {
   const countEvents = db.prepare(
     "SELECT COUNT(*) AS count FROM invocation_events WHERE invocation_id = ?"
   );
+  const listRecoveryEvents = db.prepare(`
+    SELECT e.* FROM invocation_events e JOIN invocations i ON i.id = e.invocation_id
+    WHERE i.thread_id = ? AND e.kind IN ('window-sealed', 'context-restored')
+    ORDER BY e.id ASC
+  `);
   const readEventsPage = db.prepare(`
     SELECT * FROM invocation_events
     WHERE invocation_id = ?
@@ -179,6 +184,9 @@ function createInvocationRepository(db) {
 
     listEvents(invocationId) {
       return listEvents.all(invocationId).map(mapEvent);
+    },
+    listRecoveryEvents(threadId) {
+      return listRecoveryEvents.all(threadId).map(mapEvent);
     },
 
     readEventsPage(invocationId, { from = 0, limit = 200 } = {}) {

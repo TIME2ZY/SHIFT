@@ -1,3 +1,5 @@
+import type { TaskContext, RecoveryPacket } from "../../../../src/shared/task-context";
+
 export interface CollaborationSeat {
   seatId: string;
   providerId: string | null;
@@ -63,6 +65,8 @@ export interface PendingHandoff {
 }
 
 export interface CollaborationSnapshot {
+  taskContext?: TaskContext | null;
+  recovery?: RecoveryPacket[];
   status: "active" | "waiting_human" | "accepted" | "rejected" | string;
   phase: "discuss" | "implement" | "review" | "deliver" | "done" | string;
   goalOriginal: string | null;

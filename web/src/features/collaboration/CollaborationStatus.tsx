@@ -1,4 +1,5 @@
 import type { AcceptanceCard, CollaborationSnapshot } from "./types";
+import { TaskContextDetails } from "./TaskContextDetails";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "推进中",
@@ -131,6 +132,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
             <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
             <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
+          <TaskContextDetails task={snapshot.taskContext} recovery={snapshot.recovery} />
           <details className="react-task-acceptance-details">
             <summary>验收：{acceptanceVerdictLabel(snapshot.acceptance.verdict)}</summary>
             <AcceptanceCardView card={snapshot.acceptance} />

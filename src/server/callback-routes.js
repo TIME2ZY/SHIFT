@@ -1,4 +1,5 @@
 const { PRODUCT_KINDS } = require("../storage/memory-keys");
+const { projectTaskContext } = require("../storage/collaboration-read-model");
 const {
   emptyWriteStats,
   buildMemoryWriteMetrics,
@@ -117,6 +118,30 @@ function createCallbackRoutes({
   if (!recallService) throw new TypeError("recallService is required");
   const recall = recallService;
   return async function handleCallbackRoutes(req, res, url) {
+    if (req.method === "GET" && url.pathname === "/api/callbacks/task") {
+      const sessionId = url.searchParams.get("sessionId");
+      const invocationId = url.searchParams.get("invocationId");
+      const token = req.headers["x-callback-token"];
+      if (
+        !sessionId ||
+        !invocationId ||
+        !token ||
+        !callbacks.validateToken(sessionId, invocationId, token)
+      ) {
+        sendJson(res, 401, { error: "Valid invocation callback credentials are required." });
+        return true;
+      }
+      const thread = callbacks.getThread(sessionId);
+      const registry = thread?.collabTaskRegistry;
+      if (!registry) {
+        sendJson(res, 503, { error: "Task state is unavailable." });
+        return true;
+      }
+      sendJson(res, 200, {
+        task: projectTaskContext(registry.getTask(sessionId), thread.currentDutyBinding),
+      });
+      return true;
+    }
     if (req.method === "POST" && url.pathname === "/api/callbacks/recall-search") {
       let body;
       try {

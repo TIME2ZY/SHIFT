@@ -19,6 +19,7 @@ test("shared Shift MCP descriptor exposes one server and the trusted environment
   assert.match(descriptor.args[0], /shift-context-mcp\.js$/);
   assert.deepEqual(descriptor.envKeys, [...SHIFT_CONTEXT_ENV_KEYS]);
   assert.deepEqual(descriptor.tools, [
+    "task_read",
     "memory_write",
     "memory_evidence_list",
     "recall_search",

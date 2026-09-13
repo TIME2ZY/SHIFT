@@ -53,7 +53,7 @@ test("code review and delivery receipt require structured evidence", () => {
       "findings:",
       "  - none",
       "tests:",
-      "  - npm run verify:pr: passed",
+      "  - python -m pytest tests/test_delivery.py: passed; commit aaaaaaa; log /tmp/delivery-test.log",
       "```",
     ].join("\n")
   );
@@ -67,11 +67,12 @@ test("code review and delivery receipt require structured evidence", () => {
       "pr_url: https://github.com/acme/repo/pull/7",
       "base_branch: master",
       "verification:",
-      "  - npm run verify:pr: passed",
+      "  - python -m pytest tests/test_delivery.py: passed; commit aaaaaaa; log /tmp/delivery-test.log",
       "```",
     ].join("\n")
   );
   assert.equal(receipt.base_branch, "master");
+  assert.match(receipt.verification[0], /python -m pytest/);
 });
 
 test("commit and PR descriptions enforce auditable conventions", () => {
@@ -206,6 +207,10 @@ test("Duty evidence prompts keep review and final acceptance responsibilities se
   assert.match(review, /Review 与交付门禁/);
   assert.match(review, /delivery_receipt/);
   assert.match(review, /来自 <当前模型 ID>/);
+  assert.match(review, /目标项目的 AGENTS.md/);
+  assert.match(review, /换 Seat 或 Duty 本身不要求重跑/);
+  assert.match(review, /合并前全量检查仍须满足/);
+  assert.doesNotMatch(review, /必须由你在当前 worktree 运行|npm run verify:pr: passed/);
   assert.equal(renderOutcomeEvidenceBlock("implement", task), "");
   for (const block of [acceptance, review]) {
     assert.doesNotMatch(block, /Codex|Grok|OpenCode/);

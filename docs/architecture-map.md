@@ -581,6 +581,12 @@ PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
 
+交付验证提示由 `outcome-evidence-gate` 与 `skills/code-review-deliver/SKILL.md` 遵循目标项目
+约定和改动范围生成，不再要求每次 review / deliver 执行固定的全量命令。可核对的相同代码版本、
+命令、范围和环境的通过证据允许复用；缺失、失败或受新改动影响的检查必须补跑，合并前要求
+仍须满足。这是 Agent 执行约定，未新增测试缓存或平台执行器；Git/PR/CI 仍由既有
+`delivery-verifier.verify` 核验，handoff 与完成写入口不变。
+
 ### 运行修复补充（2026-09-09）
 
 - ACP 的 session 缓冲和子工具标识位于 acp-runtime；chat-worklist 只将父 usage 应用到窗口。invocation-process 与前端 run-event-stream 标注子 Agent 来源。
@@ -603,3 +609,11 @@ session-map helper 已删除，主链路继续通过规范事件将 session ID �
 Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans，以单条流式联表
 查询仅加载工具事件，复用详情投影的工具配对语义；不再逐 Trace 加载正文、Memory 和 Handoff。
 默认关闭的 raw provider 排障日志及按需结构化 Trace 导出保留。
+
+任务上下文由 collaboration-read-model.projectTaskContext 投影，bootstrap.renderTaskContext 统一渲染，chat-worklist 每轮注入完整当前需求与计划，删除原先零散 goal/phase/planHash JSON 组装。GET collaboration 与 MCP task_read 复用投影；callback task 读取强制验证 invocation token。没有新增权威写入或存储模式。
+
+结构化 task_goal/task_progress 经 workflow-evidence → registry.submitTaskUpdate → 原 task/event 事务保存。task-updates 用例通过 registry 注入的 get/persist 接口工作；原 captureUserGoal 实现迁入同一用例，registry 不新增业务分支。进度只表示有引用的 Agent 报告，不改变验收；新计划、需求基线和目标修订撤销旧进度。后续用户消息通过 captureUserGoal 记录来源，原始用户目标不覆盖。
+
+Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 provider 调用前通过 event-store 写 context-restored（prompt_prepared、包 ID/hash、任务版本、输入 hash）。PRE、A2A 和 emergency retry 共用记录入口。封存读取最新已处理 workflow evidence；包优先保留目标、进度和 Git 工作区引用，封存写失败显式上抛。invocation repository 的定向恢复事件查询供 collaboration API 展示包和恢复证据，不扫描工具正文、不推断模型已理解。
+
+前端 TaskContextDetails 通过 collaboration API 展示需求、计划、进度、续工包及输入准备证据，类型来自 src/shared/task-context.d.ts。run-event-stream 在任务更新或恢复事件后刷新既有查询。MessageList 使用既有路由消息的 parentInvocationId/source 定位 callback 或最终回答原文；没有新增交接消费、审批或写入路径。
