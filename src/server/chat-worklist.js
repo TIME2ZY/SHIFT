@@ -23,18 +23,6 @@ const {
   logMemoryWriteMetrics,
 } = require("../storage/memory-metrics");
 const { refreshDigest } = require("../storage/memory-digest");
-const {
-  projectTurnBudget,
-  shouldPreSealRotate,
-  shouldSoftSealAfterTurn,
-  shouldEmergencyStop,
-  charsToTokens,
-} = require("../session/context-budget");
-const {
-  resolveRotateCapacity,
-  buildSealMeta,
-  formatSealReason,
-} = require("../session/seal-lifecycle");
 const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
@@ -42,6 +30,7 @@ const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("
 const { assemblePrompt } = require("./chat-prompt-assembly");
 const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
 const { announceMemoryInject } = require("./chat-memory-inject");
+const { createSealCoordinator } = require("./chat-seal-coordination");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -83,7 +72,6 @@ async function runChatWorklist(ctx) {
     AGENTS,
     callbacks,
     contextHealth,
-    sessionSealer,
     sessionBootstrap,
     recallService,
     memoryService,
@@ -161,6 +149,8 @@ async function runChatWorklist(ctx) {
           reserveRatio: contextHealth.getAgentReserveRatio(agent),
         });
       turnRunState.resumeSessionId = turnRunState.openWindow?.providerSessionId || "";
+      // Owns every seal decision for this entry; reads mutable state at call time.
+      const seals = createSealCoordinator(ctx, turnRunState, { agent, providerKey });
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
       const dutyBinding = queuedCause?.dutyBinding || null;
@@ -245,89 +235,8 @@ async function runChatWorklist(ctx) {
         capacityFallback: contextHealth.getAgentCapacity(agent),
         reserveFallback: contextHealth.getAgentReserveRatio(agent),
       });
-      const usedBeforePrompt = turnRunState.healthTracker.getUsedTokens();
-      const promptTokens = charsToTokens(turnRunState.promptForAgent.length);
-      const preBudget = projectTurnBudget({
-        currentContextTokens: usedBeforePrompt,
-        estimatedFullPromptTokens: promptTokens,
-      });
-      if (
-        shouldPreSealRotate({
-          usableContextTokens: turnRunState.healthTracker.usableContextTokens,
-          projected: preBudget.projected,
-        })
-      ) {
-        const ratio0 = turnRunState.healthTracker.getFillRatio();
-        const rotateCapacity = resolveRotateCapacity({
-          agentId: agent,
-          getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity: turnRunState.healthTracker.capacityTokens,
-        });
-        const preSealReason = formatSealReason("pre-call-projected", true);
-        const rotated = durable.sealAndRotateWindow({
-          session: turnRunState.session,
-          threadId: sessionId,
-          agentId: agent,
-          providerKey,
-          workspaceKey,
-          capacityTokens: rotateCapacity,
-          reserveRatio: turnRunState.healthTracker.reserveRatio,
-          windowId: turnRunState.openWindow?.id || null,
-          reason: preSealReason,
-        });
-        if (rotated?.next || rotated?.sealed) {
-          turnRunState.preCallRotated = true;
-          turnRunState.preCallSealedWindowId =
-            turnRunState.openWindow?.id || rotated?.sealed?.id || null;
-          turnRunState.preCallSealedGeneration =
-            turnRunState.openWindow?.generation || rotated?.sealed?.generation || null;
-          turnRunState.preCallSealedRatio = ratio0;
-          const sealMeta = buildSealMeta({
-            partial: true,
-            reason: "pre-call-projected",
-            ratio: ratio0,
-            workspaceKey,
-            generation: turnRunState.preCallSealedGeneration,
-            nextCapacityTokens: rotateCapacity,
-            missingFields: ["assistantContent"],
-          });
-          sendSse(res, "sealed", {
-            agent,
-            ratio: ratio0,
-            reason: "pre-call-projected",
-            projected: preBudget.projected,
-            usable: turnRunState.healthTracker.usableContextTokens,
-            ...sealMeta,
-            nextCapacityTokens: rotateCapacity,
-            workspaceKey,
-          });
-          turnRunState.contextSealedSseSent = true;
-          // Capture after startInvocation (needs a real invocation id for SQLite FK).
-          turnRunState.openWindow =
-            rotated?.next ||
-            storage?.windows?.getOpen?.({
-              threadId: sessionId,
-              agentId: agent,
-              providerKey,
-              workspaceKey,
-            });
-          turnRunState.resumeSessionId = "";
-          turnRunState.healthTracker = createTurnTracker(agent, turnRunState.openWindow, {
-            contextHealth,
-            capacityFallback: rotateCapacity,
-            reserveFallback: contextHealth.getAgentReserveRatio(agent),
-            withBilling: false,
-          });
-          if (sessionBootstrap.buildDigest)
-            turnRunState.promptParts.push(
-              await sessionBootstrap.buildDigest({
-                ...turnRunState.recoveryContext,
-                generation: turnRunState.openWindow?.generation || 2,
-              })
-            );
-          turnRunState.promptForAgent = turnRunState.promptParts.filter(Boolean).join("\n\n");
-        }
-      }
+      // PRE-call rotation, if the projected budget overflows the usable window.
+      await seals.preCallRotateIfNeeded();
       turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
 
       // Start invocation only on the window that will actually run the provider.
@@ -355,55 +264,14 @@ async function runChatWorklist(ctx) {
         turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
       }
       turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
-      const sealBudget = contextHealth.getAgentSealThresholds(agent, {
-        capacityTokens: turnRunState.healthTracker.capacityTokens,
-        reserveRatio: turnRunState.healthTracker.reserveRatio,
-      });
-      const sealer = sessionSealer.makeSealer({
-        warnThreshold: sealBudget.usable.sealer.warn,
-        actionThreshold: sealBudget.usable.sealer.action,
-        recoveryThreshold: sealBudget.usable.sealer.recovery,
-      });
-      sealer.update(turnRunState.healthTracker.getFillRatio());
-      threadCtx.sealer = sealer;
+      seals.bindSealer();
       const turnStartHeadSha =
         useWorktree && runWorkspace?.worktreeDir && deliveryVerifier?.getHeadSha
           ? deliveryVerifier.getHeadSha(runWorkspace.worktreeDir)
           : null;
       threadCtx.turnStartHeadSha = turnStartHeadSha;
-      if (turnRunState.preCallRotated && turnRunState.preCallSealedWindowId) {
-        const capture = memories.captureWindowSeal({
-          threadId: sessionId,
-          invocationId,
-          windowId: turnRunState.preCallSealedWindowId,
-          agentId: agent,
-          generation: turnRunState.preCallSealedGeneration,
-          ratio: turnRunState.preCallSealedRatio,
-          reason: "pre-call-projected",
-          assistantContent: "",
-          invocationState: "pre-call-rotate",
-          workspaceKey,
-          userGoal: turnRunState.recoveryGoal,
-          task: collabTaskRegistry?.getTask(sessionId),
-          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
-            available: false,
-            cwd: runWorkspace.worktreeDir,
-          },
-          events:
-            typeof storage?.invocations?.listEvents === "function"
-              ? storage.invocations.listEvents(invocationId)
-              : [],
-        });
-        if (capture?.captured) {
-          sendSse(res, "window-sealed", capture.event);
-        }
-        if (capture?.captured && sessionBootstrap.buildDigest) {
-          const recovery = await sessionBootstrap.buildDigest(turnRunState.recoveryContext);
-          turnRunState.promptForAgent += "\n\n" + recovery;
-          turnRunState.healthTracker.addInput(recovery.length + 2);
-        }
-        // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
-      }
+      // Capture the pre-call seal now that an invocation id exists for the SQLite FK.
+      await seals.capturePreCallSeal();
       if (i === 0) {
         announceMemoryInject(ctx, turnRunState, {
           source: "bootstrap",
@@ -484,136 +352,8 @@ async function runChatWorklist(ctx) {
         ...resolveCoalesceOptionsFromEnv(),
         write: persistDurableEvent,
       });
-      const sealContextWindow = (ratio, reason = "post-turn-soft", opts = {}) => {
-        if (turnRunState.contextSealHandled) return null;
-        turnRunState.contextSealHandled = true;
-        durableCoalescer.flushAll();
-        // Mid-stream / emergency → partial; completed post-turn soft seal → complete.
-        const partial =
-          opts.partial !== undefined
-            ? Boolean(opts.partial)
-            : /physical-ceiling|emergency|mid-stream|pre-call/i.test(String(reason));
-        const rotateCapacity = resolveRotateCapacity({
-          agentId: agent,
-          getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity:
-            turnRunState.durableRun?.window?.capacityTokens ||
-            turnRunState.healthTracker.capacityTokens,
-          explicitCapacity: opts.capacityTokens,
-        });
-        const sealReason = formatSealReason(reason, partial);
-        const sealedWindowId = turnRunState.durableRun?.window?.id || null;
-        const sealedGeneration = turnRunState.durableRun?.window?.generation || null;
-        let rotated = null;
-        if (turnRunState.durableRun?.window?.id) {
-          rotated = durable.sealAndRotateWindow({
-            session: turnRunState.session,
-            threadId: sessionId,
-            agentId: agent,
-            providerKey,
-            workspaceKey,
-            capacityTokens: rotateCapacity,
-            reserveRatio:
-              turnRunState.durableRun.window.reserveRatio ??
-              contextHealth.getAgentReserveRatio(agent),
-            windowId: turnRunState.durableRun.window.id,
-            reason: sealReason,
-          });
-          if (!rotated) {
-            durable.sealWindow(turnRunState.durableRun.window.id, sealReason);
-          } else if (rotated.next) {
-            // Keep runtime tracker aligned with new generation capacity.
-            turnRunState.durableRun = {
-              ...turnRunState.durableRun,
-              window: rotated.next,
-            };
-            turnRunState.healthTracker = createTurnTracker(agent, rotated.next, {
-              contextHealth,
-              capacityFallback: rotateCapacity,
-              withBilling: false,
-            });
-          }
-        }
-        const sealMeta = buildSealMeta({
-          partial,
-          reason,
-          ratio,
-          workspaceKey,
-          generation: sealedGeneration,
-          nextCapacityTokens: rotateCapacity,
-          missingFields:
-            partial && !String(turnRunState.assistantContent || "").trim()
-              ? ["assistantContent"]
-              : [],
-        });
-        const capture = memories.captureWindowSeal({
-          threadId: sessionId,
-          invocationId: turnRunState.activeInvocationId,
-          windowId: sealedWindowId,
-          agentId: agent,
-          generation: sealedGeneration,
-          ratio,
-          reason: sealReason,
-          assistantContent: turnRunState.assistantContent,
-          partial,
-          invocationState: partial ? "sealed-partial" : "sealed-complete",
-          sealMeta,
-          userGoal: turnRunState.recoveryGoal,
-          task: collabTaskRegistry?.getTask(sessionId),
-          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
-            available: false,
-            cwd: runWorkspace.worktreeDir,
-          },
-          events:
-            typeof storage?.invocations?.listEvents === "function"
-              ? storage.invocations.listEvents(turnRunState.activeInvocationId)
-              : [],
-        });
-        if (capture?.captured) {
-          sendSse(res, "window-sealed", capture.event);
-        }
-        return { rotated, sealMeta, rotateCapacity };
-      };
-      const noteContextPressure = () => {
-        const usableRatio = turnRunState.healthTracker.getFillRatio();
-        sealer.update(usableRatio);
-        if (usableRatio >= sealer.thresholds.warn && !turnRunState.contextWarned) {
-          sendSse(res, "context-warning", {
-            agent,
-            ratio: usableRatio,
-            threshold: sealer.thresholds.warn,
-          });
-          turnRunState.contextWarned = true;
-          turnRunState.sealPending = true;
-        }
-        const emergency = shouldEmergencyStop({
-          physicalContextTokens: turnRunState.healthTracker.capacityTokens,
-          usedTokens: turnRunState.healthTracker.getUsedTokens(),
-          physicalKillRatio: 0.98,
-        });
-        // A character estimate is useful for warnings and turn-boundary rotation,
-        // but it is not authoritative enough to kill a live provider process.
-        if (
-          emergency.stop &&
-          turnRunState.healthTracker.snapshot().contextUsageSource === "provider_exact"
-        ) {
-          turnRunState.emergencyStop = true;
-          if (!turnRunState.contextSealedSseSent) {
-            sendSse(res, "sealed", {
-              agent,
-              ratio: usableRatio,
-              physicalRatio: turnRunState.healthTracker.getPhysicalFillRatio(),
-              reason: emergency.reason || "physical-ceiling",
-            });
-            turnRunState.contextSealedSseSent = true;
-          }
-        }
-      };
-      const addObservedContext = (charCount) => {
-        turnRunState.healthTracker.addOutput(charCount);
-        noteContextPressure();
-      };
-
+      // Published so the seal coordinator can flush pending deltas before a seal.
+      turnRunState.durableCoalescer = durableCoalescer;
       // Replay loop: at most one automatic re-run after empty emergency stop.
       turnRunState.code = 0;
       turnRunState.signal = null;
@@ -733,10 +473,10 @@ async function runChatWorklist(ctx) {
                   turnRunState.healthTracker.snapshot()
                 );
               }
-              noteContextPressure();
+              seals.noteContextPressure();
             }
             const contextChars = contextCharsFromEvent(event);
-            if (contextChars > 0) addObservedContext(contextChars);
+            if (contextChars > 0) seals.addObservedContext(contextChars);
             durableCoalescer.accept(event);
           },
           onStderr(text) {
@@ -764,7 +504,7 @@ async function runChatWorklist(ctx) {
               });
             }
           },
-          onHealth: addObservedContext,
+          onHealth: seals.addObservedContext,
           // Only physical/emergency stop mid-stream — never soft usable seal.
           shouldStop: () => turnRunState.emergencyStop,
         });
@@ -869,7 +609,7 @@ async function runChatWorklist(ctx) {
           });
           callbacks.retireInvocation?.(sessionId, turnRunState.activeInvocationId);
           if (!turnRunState.contextSealHandled) {
-            sealContextWindow(ratio, "physical-ceiling-empty");
+            seals.sealContextWindow(ratio, "physical-ceiling-empty");
           }
           const nextWin = storage?.windows?.getOpen?.({
             threadId: sessionId,
@@ -897,7 +637,7 @@ async function runChatWorklist(ctx) {
         contentBytes: turnRunState.assistantContent.length,
         usage: invocationUsage,
         fillRatioAtEnd: turnRunState.healthTracker.getFillRatio(),
-        sealerState: sealer.getState(),
+        sealerState: turnRunState.sealer.getState(),
         emergencyStop: turnRunState.emergencyStop,
         sealPending: turnRunState.sealPending,
         preCallRotated: turnRunState.preCallRotated,
@@ -1191,43 +931,9 @@ async function runChatWorklist(ctx) {
         });
       }
 
-      // POST soft seal after a complete answer (never mid-stream kill path).
-      const postSoft = shouldSoftSealAfterTurn({
-        usableContextTokens: turnRunState.healthTracker.usableContextTokens,
-        usedTokens: turnRunState.healthTracker.getUsedTokens(),
-        softRatio: sealBudget.usable.softRatio,
-      });
-      if (
-        (turnRunState.sealPending || postSoft.seal || turnRunState.emergencyStop) &&
-        !turnRunState.contextSealHandled
-      ) {
-        const ratio = turnRunState.healthTracker.getFillRatio();
-        const reason = turnRunState.emergencyStop
-          ? "physical-ceiling"
-          : postSoft.reason
-            ? `post-turn-${postSoft.reason}`
-            : "post-turn-soft";
-        // Emergency mid-stream remains partial; normal post-turn soft seal is complete.
-        const partial = Boolean(turnRunState.emergencyStop);
-        if (!turnRunState.contextSealedSseSent) {
-          sendSse(res, "sealed", {
-            agent,
-            ratio,
-            reason,
-            partial,
-            complete: !partial,
-            workspaceKey,
-          });
-          turnRunState.contextSealedSseSent = true;
-        }
-        sealContextWindow(ratio, reason, { partial });
-      } else if (turnRunState.durableRun && !turnRunState.contextSealHandled) {
-        const persistedProviderSessionId =
-          turnRunState.observedProviderSessionId ||
-          turnRunState.durableRun.window.providerSessionId ||
-          "";
-        durable.bindProviderSession(turnRunState.durableRun.window.id, persistedProviderSessionId);
-      }
+      // POST soft seal after a complete answer, or provider-session bind if it
+      // is not warranted (never the mid-stream kill path).
+      seals.finalizeTurnSeal();
 
       const loopEvidence = workflowEvidenceEvents.find(
         (e) =>
