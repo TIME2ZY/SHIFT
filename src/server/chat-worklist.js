@@ -137,11 +137,12 @@ async function runChatWorklist(ctx) {
     runtime,
   } = ctx;
 
-  let session = ctx.session;
-  let aborted = false;
-  let previousInvocationId = null;
-  let ownedInvocationSlotAtCleanup = false;
-
+  const turnRunState = {
+    session: ctx.session,
+    aborted: false,
+    previousInvocationId: null,
+    ownedInvocationSlotAtCleanup: false,
+  };
   if (!Array.isArray(worklist) || worklist.length === 0) {
     throw new Error("runChatWorklist: worklist is empty or missing");
   }
@@ -152,7 +153,7 @@ async function runChatWorklist(ctx) {
   try {
     for (let i = 0; i < worklist.length; i++) {
       if (invocationController.signal.aborted) {
-        aborted = true;
+        turnRunState.aborted = true;
         break;
       }
       const agent = worklist[i];
@@ -160,7 +161,7 @@ async function runChatWorklist(ctx) {
       const providerId = agentConfig.providerId || "";
       const providerKey =
         providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
-      let openWindow =
+      turnRunState.openWindow =
         storage?.windows?.getOpen?.({
           threadId: sessionId,
           agentId: agent,
@@ -168,7 +169,7 @@ async function runChatWorklist(ctx) {
           workspaceKey,
         }) ||
         durable.ensureWindow({
-          session,
+          session: turnRunState.session,
           threadId: sessionId,
           agentId: agent,
           providerKey,
@@ -176,32 +177,32 @@ async function runChatWorklist(ctx) {
           capacityTokens: contextHealth.getAgentCapacity(agent),
           reserveRatio: contextHealth.getAgentReserveRatio(agent),
         });
-      let resumeSessionId = openWindow?.providerSessionId || "";
-      let assistantContent = "";
-      let observedProviderSessionId = "";
-      let contextWarned = false;
-      let contextSealedSseSent = false;
-      let contextSealHandled = false;
-      let emergencyStop = false;
-      let sealPending = false;
-      let preCallRotated = false;
-      let preCallSealedWindowId = null;
-      let preCallSealedGeneration = null;
-      let preCallSealedRatio = 0;
+      turnRunState.resumeSessionId = turnRunState.openWindow?.providerSessionId || "";
+      turnRunState.assistantContent = "";
+      turnRunState.observedProviderSessionId = "";
+      turnRunState.contextWarned = false;
+      turnRunState.contextSealedSseSent = false;
+      turnRunState.contextSealHandled = false;
+      turnRunState.emergencyStop = false;
+      turnRunState.sealPending = false;
+      turnRunState.preCallRotated = false;
+      turnRunState.preCallSealedWindowId = null;
+      turnRunState.preCallSealedGeneration = null;
+      turnRunState.preCallSealedRatio = 0;
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
       const dutyBinding = queuedCause?.dutyBinding || null;
       const parentInvocationId =
-        i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
+        i === 0 ? null : queuedCause?.parentInvocationId || turnRunState.previousInvocationId;
       const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
       const triggerMessageId =
         i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
 
-      let agentPrompt;
+      turnRunState.agentPrompt = undefined;
       /** @type {string[]} */
-      let turnSkillNames = skillNames;
+      turnRunState.turnSkillNames = skillNames;
       if (i === 0) {
-        agentPrompt = turnPrompt;
+        turnRunState.agentPrompt = turnPrompt;
       } else {
         const prev = a2aHistory[a2aHistory.length - 1];
         const prevLabel = AGENTS[prev.agent]?.label || prev.agent;
@@ -247,8 +248,8 @@ async function runChatWorklist(ctx) {
           rawPrompt: receiveBundle.text,
           skillNames: activeSkillNames(dutyBinding),
         });
-        agentPrompt = a2aSkills.augmentedPrompt;
-        turnSkillNames = a2aSkills.skillNames;
+        turnRunState.agentPrompt = a2aSkills.augmentedPrompt;
+        turnRunState.turnSkillNames = a2aSkills.skillNames;
         // Stash for metrics after full prompt assembly (needs promptBytes).
         threadCtx._pendingA2AInject = {
           agent,
@@ -305,7 +306,7 @@ async function runChatWorklist(ctx) {
       const enforcesImplementationPermission =
         dutyBinding?.enforcementLevel === "enforced" &&
         agentConfig.runtimeCapabilities?.permissionCallbacks === true;
-      let implementationPermission = null;
+      turnRunState.implementationPermission = null;
       if (enforcesImplementationPermission) {
         if (
           collabTaskRegistry &&
@@ -316,9 +317,10 @@ async function runChatWorklist(ctx) {
             requestedBy: parentInvocationId ? null : "user",
             force: triggerType === "user-message" && existing.allowed,
           });
-          implementationPermission = collabTaskRegistry.implementationPermission(sessionId);
+          turnRunState.implementationPermission =
+            collabTaskRegistry.implementationPermission(sessionId);
         } else {
-          implementationPermission = {
+          turnRunState.implementationPermission = {
             allowed: false,
             status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
             planHash: null,
@@ -329,7 +331,7 @@ async function runChatWorklist(ctx) {
       const taskSnapshot = collabTaskRegistry?.getTask(sessionId);
       const recoveryGoal =
         taskSnapshot?.goal ||
-        session.messages?.find((m) => m.role === "user")?.content ||
+        turnRunState.session.messages?.find((m) => m.role === "user")?.content ||
         turnPrompt;
       const taskContext = sessionBootstrap.renderTaskContext(
         projectTaskContext(taskSnapshot, dutyBinding)
@@ -356,11 +358,11 @@ async function runChatWorklist(ctx) {
       if (i === 0) {
         promptParts.push(bootstrapPacket, augmentedPrompt);
       } else {
-        if (!resumeSessionId && sessionBootstrap.buildDigest) {
+        if (!turnRunState.resumeSessionId && sessionBootstrap.buildDigest) {
           promptParts.push(
             await sessionBootstrap.buildDigest({
               ...recoveryContext,
-              generation: openWindow?.generation || 1,
+              generation: turnRunState.openWindow?.generation || 1,
             })
           );
         } else {
@@ -369,30 +371,30 @@ async function runChatWorklist(ctx) {
               threadId: sessionId,
               sessionId,
               agent: agentConfig,
-              generation: openWindow?.generation || 1,
+              generation: turnRunState.openWindow?.generation || 1,
             })
           );
         }
-        promptParts.push(agentPrompt);
-        if (turnSkillNames.length > 0) {
-          sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
+        promptParts.push(turnRunState.agentPrompt);
+        if (turnRunState.turnSkillNames.length > 0) {
+          sendSse(res, "skills-active", { skills: turnRunState.turnSkillNames, agent, a2a: true });
         }
       }
-      if (implementationPermission) {
+      if (turnRunState.implementationPermission) {
         promptParts.push(
           renderImplementationGateBlock(
-            implementationPermission.gate || {
-              status: implementationPermission.status,
-              planHash: implementationPermission.planHash,
-              approvedPlanHash: implementationPermission.allowed
-                ? implementationPermission.planHash
+            turnRunState.implementationPermission.gate || {
+              status: turnRunState.implementationPermission.status,
+              planHash: turnRunState.implementationPermission.planHash,
+              approvedPlanHash: turnRunState.implementationPermission.allowed
+                ? turnRunState.implementationPermission.planHash
                 : null,
             }
           )
         );
       }
       promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
-      let promptForAgent = promptParts.filter(Boolean).join("\n\n");
+      turnRunState.promptForAgent = promptParts.filter(Boolean).join("\n\n");
       if (i === 0 && nativeSkillDelivery) {
         log.info?.(
           `[skills] native worktree delivery at ${runWorkspace.worktreeDir}; prompt fallback skipped`
@@ -400,62 +402,66 @@ async function runChatWorklist(ctx) {
       }
 
       // Tracker from open window *before* this prompt (for PRE projection).
-      let healthTracker = contextHealth.makeTracker(agent, {
-        capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
-        inputChars: openWindow?.inputChars,
-        outputChars: openWindow?.outputChars,
-        reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-        contextUsedTokens: openWindow?.contextUsedTokens,
-        contextUsageSource: openWindow?.contextUsageSource,
-        billingInputTokens: openWindow?.billingInputTokens,
-        billingCachedInputTokens: openWindow?.billingCachedInputTokens,
-        billingOutputTokens: openWindow?.billingOutputTokens,
-        billingReasoningTokens: openWindow?.billingReasoningTokens,
-        billingTotalTokens: openWindow?.billingTotalTokens,
-        billingCostUsd: openWindow?.billingCostUsd,
-        billingComplete: openWindow?.billingComplete,
+      turnRunState.healthTracker = contextHealth.makeTracker(agent, {
+        capacityTokens:
+          turnRunState.openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
+        inputChars: turnRunState.openWindow?.inputChars,
+        outputChars: turnRunState.openWindow?.outputChars,
+        reserveRatio:
+          turnRunState.openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
+        contextUsedTokens: turnRunState.openWindow?.contextUsedTokens,
+        contextUsageSource: turnRunState.openWindow?.contextUsageSource,
+        billingInputTokens: turnRunState.openWindow?.billingInputTokens,
+        billingCachedInputTokens: turnRunState.openWindow?.billingCachedInputTokens,
+        billingOutputTokens: turnRunState.openWindow?.billingOutputTokens,
+        billingReasoningTokens: turnRunState.openWindow?.billingReasoningTokens,
+        billingTotalTokens: turnRunState.openWindow?.billingTotalTokens,
+        billingCostUsd: turnRunState.openWindow?.billingCostUsd,
+        billingComplete: turnRunState.openWindow?.billingComplete,
       });
-      const usedBeforePrompt = healthTracker.getUsedTokens();
-      const promptTokens = charsToTokens(promptForAgent.length);
+      const usedBeforePrompt = turnRunState.healthTracker.getUsedTokens();
+      const promptTokens = charsToTokens(turnRunState.promptForAgent.length);
       const preBudget = projectTurnBudget({
         currentContextTokens: usedBeforePrompt,
         estimatedFullPromptTokens: promptTokens,
       });
       if (
         shouldPreSealRotate({
-          usableContextTokens: healthTracker.usableContextTokens,
+          usableContextTokens: turnRunState.healthTracker.usableContextTokens,
           projected: preBudget.projected,
         })
       ) {
-        const ratio0 = healthTracker.getFillRatio();
+        const ratio0 = turnRunState.healthTracker.getFillRatio();
         const rotateCapacity = resolveRotateCapacity({
           agentId: agent,
           getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity: healthTracker.capacityTokens,
+          previousCapacity: turnRunState.healthTracker.capacityTokens,
         });
         const preSealReason = formatSealReason("pre-call-projected", true);
         const rotated = durable.sealAndRotateWindow({
-          session,
+          session: turnRunState.session,
           threadId: sessionId,
           agentId: agent,
           providerKey,
           workspaceKey,
           capacityTokens: rotateCapacity,
-          reserveRatio: healthTracker.reserveRatio,
-          windowId: openWindow?.id || null,
+          reserveRatio: turnRunState.healthTracker.reserveRatio,
+          windowId: turnRunState.openWindow?.id || null,
           reason: preSealReason,
         });
         if (rotated?.next || rotated?.sealed) {
-          preCallRotated = true;
-          preCallSealedWindowId = openWindow?.id || rotated?.sealed?.id || null;
-          preCallSealedGeneration = openWindow?.generation || rotated?.sealed?.generation || null;
-          preCallSealedRatio = ratio0;
+          turnRunState.preCallRotated = true;
+          turnRunState.preCallSealedWindowId =
+            turnRunState.openWindow?.id || rotated?.sealed?.id || null;
+          turnRunState.preCallSealedGeneration =
+            turnRunState.openWindow?.generation || rotated?.sealed?.generation || null;
+          turnRunState.preCallSealedRatio = ratio0;
           const sealMeta = buildSealMeta({
             partial: true,
             reason: "pre-call-projected",
             ratio: ratio0,
             workspaceKey,
-            generation: preCallSealedGeneration,
+            generation: turnRunState.preCallSealedGeneration,
             nextCapacityTokens: rotateCapacity,
             missingFields: ["assistantContent"],
           });
@@ -464,14 +470,14 @@ async function runChatWorklist(ctx) {
             ratio: ratio0,
             reason: "pre-call-projected",
             projected: preBudget.projected,
-            usable: healthTracker.usableContextTokens,
+            usable: turnRunState.healthTracker.usableContextTokens,
             ...sealMeta,
             nextCapacityTokens: rotateCapacity,
             workspaceKey,
           });
-          contextSealedSseSent = true;
+          turnRunState.contextSealedSseSent = true;
           // Capture after startInvocation (needs a real invocation id for SQLite FK).
-          openWindow =
+          turnRunState.openWindow =
             rotated?.next ||
             storage?.windows?.getOpen?.({
               threadId: sessionId,
@@ -479,41 +485,42 @@ async function runChatWorklist(ctx) {
               providerKey,
               workspaceKey,
             });
-          resumeSessionId = "";
-          healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens: openWindow?.capacityTokens || rotateCapacity,
-            inputChars: openWindow?.inputChars,
-            outputChars: openWindow?.outputChars,
-            reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-            contextUsedTokens: openWindow?.contextUsedTokens,
-            contextUsageSource: openWindow?.contextUsageSource,
+          turnRunState.resumeSessionId = "";
+          turnRunState.healthTracker = contextHealth.makeTracker(agent, {
+            capacityTokens: turnRunState.openWindow?.capacityTokens || rotateCapacity,
+            inputChars: turnRunState.openWindow?.inputChars,
+            outputChars: turnRunState.openWindow?.outputChars,
+            reserveRatio:
+              turnRunState.openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
+            contextUsedTokens: turnRunState.openWindow?.contextUsedTokens,
+            contextUsageSource: turnRunState.openWindow?.contextUsageSource,
           });
           if (sessionBootstrap.buildDigest)
             promptParts.push(
               await sessionBootstrap.buildDigest({
                 ...recoveryContext,
-                generation: openWindow?.generation || 2,
+                generation: turnRunState.openWindow?.generation || 2,
               })
             );
-          promptForAgent = promptParts.filter(Boolean).join("\n\n");
+          turnRunState.promptForAgent = promptParts.filter(Boolean).join("\n\n");
         }
       }
-      healthTracker.addInput(promptForAgent.length);
+      turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
 
       // Start invocation only on the window that will actually run the provider.
       const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
       const startedAt = new Date().toISOString();
-      let durableRun = durable.startInvocation({
-        session,
+      turnRunState.durableRun = durable.startInvocation({
+        session: turnRunState.session,
         invocationId,
         threadId: sessionId,
         traceId,
         agentId: agent,
         providerKey,
         workspaceKey,
-        capacityTokens: healthTracker.capacityTokens,
-        reserveRatio: healthTracker.reserveRatio,
-        resumeSessionId,
+        capacityTokens: turnRunState.healthTracker.capacityTokens,
+        reserveRatio: turnRunState.healthTracker.reserveRatio,
+        resumeSessionId: turnRunState.resumeSessionId,
         startedAt,
         parentInvocationId,
         triggerMessageId,
@@ -521,58 +528,60 @@ async function runChatWorklist(ctx) {
         handoffId: queuedCause?.handoffId || null,
         dutyBinding,
       });
-      if (!durableRun) {
+      if (!turnRunState.durableRun) {
         throw new Error(`Failed to persist invocation start for ${invocationId}.`);
       }
-      let activeInvocationId = invocationId;
-      threadCtx.currentDutyBinding = durableRun.binding || dutyBinding;
+      turnRunState.activeInvocationId = invocationId;
+      threadCtx.currentDutyBinding = turnRunState.durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
-      if (durableRun.window) {
-        healthTracker = contextHealth.makeTracker(agent, {
-          capacityTokens: durableRun.window.capacityTokens,
-          inputChars: durableRun.window.inputChars,
-          outputChars: durableRun.window.outputChars,
-          reserveRatio: durableRun.window.reserveRatio,
-          contextUsedTokens: durableRun.window.contextUsedTokens,
-          contextUsageSource: durableRun.window.contextUsageSource,
-          billingInputTokens: durableRun.window.billingInputTokens,
-          billingCachedInputTokens: durableRun.window.billingCachedInputTokens,
-          billingOutputTokens: durableRun.window.billingOutputTokens,
-          billingReasoningTokens: durableRun.window.billingReasoningTokens,
-          billingTotalTokens: durableRun.window.billingTotalTokens,
-          billingCostUsd: durableRun.window.billingCostUsd,
-          billingComplete: durableRun.window.billingComplete,
+      if (turnRunState.durableRun.window) {
+        turnRunState.healthTracker = contextHealth.makeTracker(agent, {
+          capacityTokens: turnRunState.durableRun.window.capacityTokens,
+          inputChars: turnRunState.durableRun.window.inputChars,
+          outputChars: turnRunState.durableRun.window.outputChars,
+          reserveRatio: turnRunState.durableRun.window.reserveRatio,
+          contextUsedTokens: turnRunState.durableRun.window.contextUsedTokens,
+          contextUsageSource: turnRunState.durableRun.window.contextUsageSource,
+          billingInputTokens: turnRunState.durableRun.window.billingInputTokens,
+          billingCachedInputTokens: turnRunState.durableRun.window.billingCachedInputTokens,
+          billingOutputTokens: turnRunState.durableRun.window.billingOutputTokens,
+          billingReasoningTokens: turnRunState.durableRun.window.billingReasoningTokens,
+          billingTotalTokens: turnRunState.durableRun.window.billingTotalTokens,
+          billingCostUsd: turnRunState.durableRun.window.billingCostUsd,
+          billingComplete: turnRunState.durableRun.window.billingComplete,
         });
-        healthTracker.addInput(promptForAgent.length);
+        turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
       }
-      let billingAtStart = { ...healthTracker.snapshot().billing };
+      turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
       const sealBudget = contextHealth.getAgentSealThresholds(agent, {
-        capacityTokens: healthTracker.capacityTokens,
-        reserveRatio: healthTracker.reserveRatio,
+        capacityTokens: turnRunState.healthTracker.capacityTokens,
+        reserveRatio: turnRunState.healthTracker.reserveRatio,
       });
       const sealer = sessionSealer.makeSealer({
         warnThreshold: sealBudget.usable.sealer.warn,
         actionThreshold: sealBudget.usable.sealer.action,
         recoveryThreshold: sealBudget.usable.sealer.recovery,
       });
-      sealer.update(healthTracker.getFillRatio());
+      sealer.update(turnRunState.healthTracker.getFillRatio());
       threadCtx.sealer = sealer;
       threadCtx.currentInvocationId = invocationId;
-      threadCtx.windowId = durableRun?.window?.id || null;
+      threadCtx.windowId = turnRunState.durableRun?.window?.id || null;
       // Surface invocation identity together with its immutable Seat/Duty contract.
       // A2A causality remains on window-meta and is joined by invocationId.
       sendSse(res, "agent-start", {
         agent,
         invocationId,
-        seatId: durableRun.binding?.seatId || null,
-        duty: durableRun.binding?.duty || null,
+        seatId: turnRunState.durableRun.binding?.seatId || null,
+        duty: turnRunState.durableRun.binding?.duty || null,
       });
       sendSse(res, "window-meta", {
         agent,
         invocationId,
-        generation: durableRun?.window?.generation || openWindow?.generation || 1,
-        preCallRotated,
-        capacityTokens: durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
+        generation:
+          turnRunState.durableRun?.window?.generation || turnRunState.openWindow?.generation || 1,
+        preCallRotated: turnRunState.preCallRotated,
+        capacityTokens:
+          turnRunState.durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
         workspaceKey,
         worktree: Boolean(activeWorktree),
         cwd: runWorkspace.worktreeDir,
@@ -580,8 +589,8 @@ async function runChatWorklist(ctx) {
         parentInvocationId,
         triggerMessageId,
         triggerType,
-        seatId: durableRun.binding?.seatId || null,
-        duty: durableRun.binding?.duty || null,
+        seatId: turnRunState.durableRun.binding?.seatId || null,
+        duty: turnRunState.durableRun.binding?.duty || null,
       });
       // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
       sendSse(res, "workspace-meta", {
@@ -599,14 +608,14 @@ async function runChatWorklist(ctx) {
           ? deliveryVerifier.getHeadSha(runWorkspace.worktreeDir)
           : null;
       threadCtx.turnStartHeadSha = turnStartHeadSha;
-      if (preCallRotated && preCallSealedWindowId) {
+      if (turnRunState.preCallRotated && turnRunState.preCallSealedWindowId) {
         const capture = memories.captureWindowSeal({
           threadId: sessionId,
           invocationId,
-          windowId: preCallSealedWindowId,
+          windowId: turnRunState.preCallSealedWindowId,
           agentId: agent,
-          generation: preCallSealedGeneration,
-          ratio: preCallSealedRatio,
+          generation: turnRunState.preCallSealedGeneration,
+          ratio: turnRunState.preCallSealedRatio,
           reason: "pre-call-projected",
           assistantContent: "",
           invocationState: "pre-call-rotate",
@@ -627,8 +636,8 @@ async function runChatWorklist(ctx) {
         }
         if (capture?.captured && sessionBootstrap.buildDigest) {
           const recovery = await sessionBootstrap.buildDigest(recoveryContext);
-          promptForAgent += "\n\n" + recovery;
-          healthTracker.addInput(recovery.length + 2);
+          turnRunState.promptForAgent += "\n\n" + recovery;
+          turnRunState.healthTracker.addInput(recovery.length + 2);
         }
         // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
       }
@@ -675,7 +684,7 @@ async function runChatWorklist(ctx) {
           threadId: sessionId,
           invocationId,
           memoryCard: pending.memoryCard,
-          promptBytes: promptForAgent.length,
+          promptBytes: turnRunState.promptForAgent.length,
         });
         logA2AInjectMetrics(injectMetrics, log);
         sendSse(res, "handoff-metrics", injectMetrics);
@@ -713,7 +722,7 @@ async function runChatWorklist(ctx) {
         }
       }
       threadCtx.currentInvocationId = invocationId;
-      threadCtx.windowId = durableRun?.window?.id || null;
+      threadCtx.windowId = turnRunState.durableRun?.window?.id || null;
       threadCtx.parentInvocationId = parentInvocationId;
       threadCtx.triggerMessageId = triggerMessageId;
       const invocationEnv = {
@@ -727,15 +736,15 @@ async function runChatWorklist(ctx) {
         [ENV.BRANCH]: runWorkspace.branch || "",
         ...(enforcesImplementationPermission
           ? {
-              [ENV.IMPLEMENTATION_GATE]: implementationPermission?.allowed
+              [ENV.IMPLEMENTATION_GATE]: turnRunState.implementationPermission?.allowed
                 ? IMPLEMENTATION_GATE_STATUS.APPROVED
                 : IMPLEMENTATION_GATE_STATUS.REQUIRED,
-              [ENV.APPROVED_PLAN_HASH]: implementationPermission?.allowed
-                ? implementationPermission.planHash || ""
+              [ENV.APPROVED_PLAN_HASH]: turnRunState.implementationPermission?.allowed
+                ? turnRunState.implementationPermission.planHash || ""
                 : "",
             }
           : {}),
-        INVOKE_SESSION_ID: resumeSessionId,
+        INVOKE_SESSION_ID: turnRunState.resumeSessionId,
         INVOKE_WORKSPACE_KEY: workspaceKey,
       };
 
@@ -748,9 +757,9 @@ async function runChatWorklist(ctx) {
           const createdAt = payload?.createdAt || payload?.ts || new Date().toISOString();
           events.append({
             threadId: sessionId,
-            invocationId: activeInvocationId,
+            invocationId: turnRunState.activeInvocationId,
             kind,
-            payload: { ...payload, agent, invocationId: activeInvocationId },
+            payload: { ...payload, agent, invocationId: turnRunState.activeInvocationId },
             createdAt,
           });
         } catch (error) {
@@ -763,8 +772,8 @@ async function runChatWorklist(ctx) {
         write: persistDurableEvent,
       });
       const sealContextWindow = (ratio, reason = "post-turn-soft", opts = {}) => {
-        if (contextSealHandled) return null;
-        contextSealHandled = true;
+        if (turnRunState.contextSealHandled) return null;
+        turnRunState.contextSealHandled = true;
         durableCoalescer.flushAll();
         // Mid-stream / emergency → partial; completed post-turn soft seal → complete.
         const partial =
@@ -774,35 +783,38 @@ async function runChatWorklist(ctx) {
         const rotateCapacity = resolveRotateCapacity({
           agentId: agent,
           getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity: durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
+          previousCapacity:
+            turnRunState.durableRun?.window?.capacityTokens ||
+            turnRunState.healthTracker.capacityTokens,
           explicitCapacity: opts.capacityTokens,
         });
         const sealReason = formatSealReason(reason, partial);
-        const sealedWindowId = durableRun?.window?.id || null;
-        const sealedGeneration = durableRun?.window?.generation || null;
+        const sealedWindowId = turnRunState.durableRun?.window?.id || null;
+        const sealedGeneration = turnRunState.durableRun?.window?.generation || null;
         let rotated = null;
-        if (durableRun?.window?.id) {
+        if (turnRunState.durableRun?.window?.id) {
           rotated = durable.sealAndRotateWindow({
-            session,
+            session: turnRunState.session,
             threadId: sessionId,
             agentId: agent,
             providerKey,
             workspaceKey,
             capacityTokens: rotateCapacity,
             reserveRatio:
-              durableRun.window.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-            windowId: durableRun.window.id,
+              turnRunState.durableRun.window.reserveRatio ??
+              contextHealth.getAgentReserveRatio(agent),
+            windowId: turnRunState.durableRun.window.id,
             reason: sealReason,
           });
           if (!rotated) {
-            durable.sealWindow(durableRun.window.id, sealReason);
+            durable.sealWindow(turnRunState.durableRun.window.id, sealReason);
           } else if (rotated.next) {
             // Keep runtime tracker aligned with new generation capacity.
-            durableRun = {
-              ...durableRun,
+            turnRunState.durableRun = {
+              ...turnRunState.durableRun,
               window: rotated.next,
             };
-            healthTracker = contextHealth.makeTracker(agent, {
+            turnRunState.healthTracker = contextHealth.makeTracker(agent, {
               capacityTokens: rotated.next.capacityTokens || rotateCapacity,
               reserveRatio: rotated.next.reserveRatio,
             });
@@ -816,17 +828,19 @@ async function runChatWorklist(ctx) {
           generation: sealedGeneration,
           nextCapacityTokens: rotateCapacity,
           missingFields:
-            partial && !String(assistantContent || "").trim() ? ["assistantContent"] : [],
+            partial && !String(turnRunState.assistantContent || "").trim()
+              ? ["assistantContent"]
+              : [],
         });
         const capture = memories.captureWindowSeal({
           threadId: sessionId,
-          invocationId: activeInvocationId,
+          invocationId: turnRunState.activeInvocationId,
           windowId: sealedWindowId,
           agentId: agent,
           generation: sealedGeneration,
           ratio,
           reason: sealReason,
-          assistantContent,
+          assistantContent: turnRunState.assistantContent,
           partial,
           invocationState: partial ? "sealed-partial" : "sealed-complete",
           sealMeta,
@@ -838,7 +852,7 @@ async function runChatWorklist(ctx) {
           },
           events:
             typeof storage?.invocations?.listEvents === "function"
-              ? storage.invocations.listEvents(activeInvocationId)
+              ? storage.invocations.listEvents(turnRunState.activeInvocationId)
               : [],
         });
         if (capture?.captured) {
@@ -847,94 +861,98 @@ async function runChatWorklist(ctx) {
         return { rotated, sealMeta, rotateCapacity };
       };
       const noteContextPressure = () => {
-        const usableRatio = healthTracker.getFillRatio();
+        const usableRatio = turnRunState.healthTracker.getFillRatio();
         sealer.update(usableRatio);
-        if (usableRatio >= sealer.thresholds.warn && !contextWarned) {
+        if (usableRatio >= sealer.thresholds.warn && !turnRunState.contextWarned) {
           sendSse(res, "context-warning", {
             agent,
             ratio: usableRatio,
             threshold: sealer.thresholds.warn,
           });
-          contextWarned = true;
-          sealPending = true;
+          turnRunState.contextWarned = true;
+          turnRunState.sealPending = true;
         }
         const emergency = shouldEmergencyStop({
-          physicalContextTokens: healthTracker.capacityTokens,
-          usedTokens: healthTracker.getUsedTokens(),
+          physicalContextTokens: turnRunState.healthTracker.capacityTokens,
+          usedTokens: turnRunState.healthTracker.getUsedTokens(),
           physicalKillRatio: 0.98,
         });
         // A character estimate is useful for warnings and turn-boundary rotation,
         // but it is not authoritative enough to kill a live provider process.
-        if (emergency.stop && healthTracker.snapshot().contextUsageSource === "provider_exact") {
-          emergencyStop = true;
-          if (!contextSealedSseSent) {
+        if (
+          emergency.stop &&
+          turnRunState.healthTracker.snapshot().contextUsageSource === "provider_exact"
+        ) {
+          turnRunState.emergencyStop = true;
+          if (!turnRunState.contextSealedSseSent) {
             sendSse(res, "sealed", {
               agent,
               ratio: usableRatio,
-              physicalRatio: healthTracker.getPhysicalFillRatio(),
+              physicalRatio: turnRunState.healthTracker.getPhysicalFillRatio(),
               reason: emergency.reason || "physical-ceiling",
             });
-            contextSealedSseSent = true;
+            turnRunState.contextSealedSseSent = true;
           }
         }
       };
       const addObservedContext = (charCount) => {
-        healthTracker.addOutput(charCount);
+        turnRunState.healthTracker.addOutput(charCount);
         noteContextPressure();
       };
 
       // Replay loop: at most one automatic re-run after empty emergency stop.
-      let code = 0;
-      let signal = null;
-      let streamFailure = null;
-      let streamStopped = false;
-      let streamStopReason = null;
-      let replayedAfterEmpty = false;
-      let sawUsageEvent = false;
+      turnRunState.code = 0;
+      turnRunState.signal = null;
+      turnRunState.streamFailure = null;
+      turnRunState.streamStopped = false;
+      turnRunState.streamStopReason = null;
+      turnRunState.replayedAfterEmpty = false;
+      turnRunState.sawUsageEvent = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (attempt > 0) {
           // New window after empty emergency — start a fresh invocation.
-          assistantContent = "";
-          observedProviderSessionId = "";
-          emergencyStop = false;
-          sealPending = false;
-          contextSealHandled = false;
-          contextSealedSseSent = false;
-          contextWarned = false;
-          sawUsageEvent = false;
+          turnRunState.assistantContent = "";
+          turnRunState.observedProviderSessionId = "";
+          turnRunState.emergencyStop = false;
+          turnRunState.sealPending = false;
+          turnRunState.contextSealHandled = false;
+          turnRunState.contextSealedSseSent = false;
+          turnRunState.contextWarned = false;
+          turnRunState.sawUsageEvent = false;
           const retry = callbacks.createInvocation(sessionId, agent);
           const retryRun = durable.startInvocation({
-            session,
+            session: turnRunState.session,
             invocationId: retry.invocationId,
             threadId: sessionId,
             traceId,
             agentId: agent,
             providerKey,
             workspaceKey,
-            capacityTokens: healthTracker.capacityTokens,
-            reserveRatio: healthTracker.reserveRatio,
+            capacityTokens: turnRunState.healthTracker.capacityTokens,
+            reserveRatio: turnRunState.healthTracker.reserveRatio,
             resumeSessionId: "",
             startedAt: new Date().toISOString(),
             parentInvocationId,
             triggerMessageId,
             triggerType,
-            dutyBinding: durableRun.binding || dutyBinding,
+            dutyBinding: turnRunState.durableRun.binding || dutyBinding,
           });
           if (!retryRun) break;
-          durableRun = retryRun;
-          activeInvocationId = retry.invocationId;
+          turnRunState.durableRun = retryRun;
+          turnRunState.activeInvocationId = retry.invocationId;
           threadCtx.currentDutyBinding = retryRun.binding || dutyBinding;
           invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
           invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
           invocationEnv.INVOKE_SESSION_ID = "";
           threadCtx.currentInvocationId = retry.invocationId;
           threadCtx.windowId = retryRun.window?.id || null;
-          healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
-            reserveRatio: retryRun.window?.reserveRatio ?? healthTracker.reserveRatio,
+          turnRunState.healthTracker = contextHealth.makeTracker(agent, {
+            capacityTokens:
+              retryRun.window?.capacityTokens || turnRunState.healthTracker.capacityTokens,
+            reserveRatio: retryRun.window?.reserveRatio ?? turnRunState.healthTracker.reserveRatio,
           });
-          healthTracker.addInput(promptForAgent.length);
-          billingAtStart = { ...healthTracker.snapshot().billing };
+          turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
+          turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
           sendSse(res, "agent-start", {
             agent,
             invocationId: retry.invocationId,
@@ -946,7 +964,8 @@ async function runChatWorklist(ctx) {
             invocationId: retry.invocationId,
             generation: retryRun.window?.generation || 2,
             replay: true,
-            capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
+            capacityTokens:
+              retryRun.window?.capacityTokens || turnRunState.healthTracker.capacityTokens,
             workspaceKey,
             worktree: Boolean(activeWorktree),
             cwd: runWorkspace.worktreeDir,
@@ -973,23 +992,23 @@ async function runChatWorklist(ctx) {
               ...recoveryContext,
               generation: retryRun.window?.generation || 2,
             });
-            promptForAgent += "\n\n" + recovery;
+            turnRunState.promptForAgent += "\n\n" + recovery;
           }
-          replayedAfterEmpty = true;
+          turnRunState.replayedAfterEmpty = true;
         }
 
         const toolLifecycle = createRunLifecycle();
         recordContextRestoration({
           eventStore: events,
           threadId: sessionId,
-          invocationId: activeInvocationId,
-          prompt: promptForAgent,
+          invocationId: turnRunState.activeInvocationId,
+          prompt: turnRunState.promptForAgent,
           seals: recoveryEvidence,
           taskVersion: taskSnapshot?.version,
         });
         const streamResult = await runChildStream({
           spawnRunner,
-          args: buildChatArgs(agent, agentPrompt, promptForAgent),
+          args: buildChatArgs(agent, turnRunState.agentPrompt, turnRunState.promptForAgent),
           cwd: runWorkspace.worktreeDir,
           killGraceMs: options.killGraceMs,
           timeoutMs: options.timeoutMs,
@@ -1017,14 +1036,14 @@ async function runChatWorklist(ctx) {
               typeof event.sessionId === "string" &&
               event.sessionId &&
               !event.subagentId &&
-              durableRun?.window?.id
+              turnRunState.durableRun?.window?.id
             ) {
-              observedProviderSessionId = event.sessionId;
-              durable.bindProviderSession(durableRun.window.id, event.sessionId);
+              turnRunState.observedProviderSessionId = event.sessionId;
+              durable.bindProviderSession(turnRunState.durableRun.window.id, event.sessionId);
             }
             if (event.type === "text.delta" && !event.subagentId) {
               const text = typeof event.text === "string" ? event.text : "";
-              assistantContent += text;
+              turnRunState.assistantContent += text;
               sendSse(res, "message", { agent, role: "assistant", text });
             }
             if (event.type === "tool.started" || event.type === "tool.finished") {
@@ -1033,10 +1052,13 @@ async function runChatWorklist(ctx) {
             }
             sendSse(res, "agent-event", event);
             if (event.type === "usage.update" && !event.subagentId) {
-              sawUsageEvent = true;
-              healthTracker.applyUsage(event);
-              if (durableRun?.window?.id) {
-                durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+              turnRunState.sawUsageEvent = true;
+              turnRunState.healthTracker.applyUsage(event);
+              if (turnRunState.durableRun?.window?.id) {
+                durable.setWindowUsageSnapshot?.(
+                  turnRunState.durableRun.window.id,
+                  turnRunState.healthTracker.snapshot()
+                );
               }
               noteContextPressure();
             }
@@ -1058,7 +1080,7 @@ async function runChatWorklist(ctx) {
             if (payload.first) {
               sendSse(res, "encoding-warning", {
                 agent,
-                invocationId: activeInvocationId,
+                invocationId: turnRunState.activeInvocationId,
                 channel: payload.channel,
                 count: payload.count,
                 total: payload.total,
@@ -1071,31 +1093,35 @@ async function runChatWorklist(ctx) {
           },
           onHealth: addObservedContext,
           // Only physical/emergency stop mid-stream — never soft usable seal.
-          shouldStop: () => emergencyStop,
+          shouldStop: () => turnRunState.emergencyStop,
         });
-        code = streamResult.code;
-        signal = streamResult.signal;
-        streamFailure =
+        turnRunState.code = streamResult.code;
+        turnRunState.signal = streamResult.signal;
+        turnRunState.streamFailure =
           streamResult.streamError ||
           (streamResult.timedOut
             ? { message: streamResult.stopReason, code: "provider_timeout" }
             : null);
-        streamStopped = Boolean(streamResult.stopped);
-        streamStopReason = streamResult.stopReason || null;
+        turnRunState.streamStopped = Boolean(streamResult.stopped);
+        turnRunState.streamStopReason = streamResult.stopReason || null;
         if (streamResult.encoding?.total > 0) {
           runObs.noteDegraded("encoding_in_stream");
         }
         if (toolLifecycle.openToolCount > 0) {
           const isAbortedRun = Boolean(
             invocationController.signal.aborted ||
-            streamStopped ||
+            turnRunState.streamStopped ||
             threadCtx?.controller?.signal?.aborted ||
             runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
             invocationController.stopReason === "explicit-stop"
           );
           for (const toolFinished of toolLifecycle.closeOpenTools(
-            { agent, invocationId: activeInvocationId },
-            { cancelled: isAbortedRun, ok: code === 0, error: streamFailure?.message }
+            { agent, invocationId: turnRunState.activeInvocationId },
+            {
+              cancelled: isAbortedRun,
+              ok: turnRunState.code === 0,
+              error: turnRunState.streamFailure?.message,
+            }
           )) {
             const toolId = toolFinished.toolId;
             try {
@@ -1106,51 +1132,59 @@ async function runChatWorklist(ctx) {
               log.error?.(
                 `[chat-worklist] failed to emit interrupted tool.finished for ${toolId}: ${err.message}`
               );
-              streamFailure ||= err;
+              turnRunState.streamFailure ||= err;
             }
           }
         }
-        if (streamFailure) {
+        if (turnRunState.streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.
           durableCoalescer.cancelAll();
           break;
         }
         try {
           durableCoalescer.flushAll();
-          if (!sawUsageEvent && agent === "codex") {
-            healthTracker.markBillingIncomplete();
+          if (!turnRunState.sawUsageEvent && agent === "codex") {
+            turnRunState.healthTracker.markBillingIncomplete();
           }
-          if (durableRun) {
-            durable.addWindowUsage(durableRun.window.id, {
-              inputChars: promptForAgent.length,
-              outputChars: assistantContent.length,
+          if (turnRunState.durableRun) {
+            durable.addWindowUsage(turnRunState.durableRun.window.id, {
+              inputChars: turnRunState.promptForAgent.length,
+              outputChars: turnRunState.assistantContent.length,
             });
-            durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+            durable.setWindowUsageSnapshot?.(
+              turnRunState.durableRun.window.id,
+              turnRunState.healthTracker.snapshot()
+            );
           }
         } catch (error) {
-          streamFailure = {
+          turnRunState.streamFailure = {
             origin: "event persistence",
             message: error instanceof Error ? error.message : String(error),
           };
-          log.error?.(`[event-store] post-stream persist failed: ${streamFailure.message}`);
+          log.error?.(
+            `[event-store] post-stream persist failed: ${turnRunState.streamFailure.message}`
+          );
           break;
         }
 
-        const hasText = Boolean(String(assistantContent || "").trim());
-        if (!hasText && emergencyStop && attempt === 0) {
+        const hasText = Boolean(String(turnRunState.assistantContent || "").trim());
+        if (!hasText && turnRunState.emergencyStop && attempt === 0) {
           // The scheduler-facing terminal write owns invocation completion. Finish
           // the old invocation before rotation, whose orphan cleanup must never
           // race the normal terminal path.
-          const ratio = healthTracker.getFillRatio();
+          const ratio = turnRunState.healthTracker.getFillRatio();
           durable.completeInvocation({
-            invocationId: activeInvocationId,
-            code,
-            signal,
+            invocationId: turnRunState.activeInvocationId,
+            code: turnRunState.code,
+            signal: turnRunState.signal,
             reason: "empty-emergency",
             endPayload: {
               agent,
               contentBytes: 0,
-              usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
+              usage: invocationUsageDelta(
+                turnRunState.healthTracker.snapshot().billing,
+                turnRunState.billingAtStart
+              ),
               fillRatioAtEnd: ratio,
               sealerState: "sealed",
               emptyEmergency: true,
@@ -1160,8 +1194,8 @@ async function runChatWorklist(ctx) {
               retryable: true,
             },
           });
-          callbacks.retireInvocation?.(sessionId, activeInvocationId);
-          if (!contextSealHandled) {
+          callbacks.retireInvocation?.(sessionId, turnRunState.activeInvocationId);
+          if (!turnRunState.contextSealHandled) {
             sealContextWindow(ratio, "physical-ceiling-empty");
           }
           const nextWin = storage?.windows?.getOpen?.({
@@ -1171,7 +1205,7 @@ async function runChatWorklist(ctx) {
             workspaceKey,
           });
           if (nextWin) {
-            healthTracker = contextHealth.makeTracker(agent, {
+            turnRunState.healthTracker = contextHealth.makeTracker(agent, {
               capacityTokens: nextWin.capacityTokens,
               reserveRatio: nextWin.reserveRatio,
             });
@@ -1182,52 +1216,54 @@ async function runChatWorklist(ctx) {
       }
 
       const invocationUsage = invocationUsageDelta(
-        healthTracker.snapshot().billing,
-        billingAtStart
+        turnRunState.healthTracker.snapshot().billing,
+        turnRunState.billingAtStart
       );
       const endPayload = {
         agent,
-        contentBytes: assistantContent.length,
+        contentBytes: turnRunState.assistantContent.length,
         usage: invocationUsage,
-        fillRatioAtEnd: healthTracker.getFillRatio(),
+        fillRatioAtEnd: turnRunState.healthTracker.getFillRatio(),
         sealerState: sealer.getState(),
-        emergencyStop,
-        sealPending,
-        preCallRotated,
-        replayedAfterEmpty,
+        emergencyStop: turnRunState.emergencyStop,
+        sealPending: turnRunState.sealPending,
+        preCallRotated: turnRunState.preCallRotated,
+        replayedAfterEmpty: turnRunState.replayedAfterEmpty,
       };
 
-      if (streamFailure) {
+      if (turnRunState.streamFailure) {
         // Handler or persist failure: one failed terminal, no silent retry.
         const failedInvocationId = threadCtx.currentInvocationId || invocationId;
         const failedMessage = buildAssistantFinalMessage({
           agent,
-          content: assistantContent,
-          code,
-          signal,
+          content: turnRunState.assistantContent,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: failedInvocationId,
           usage: invocationUsage,
         });
         durable.completeInvocation({
           invocationId: failedInvocationId,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           reason:
-            streamFailure.code === "provider_timeout"
+            turnRunState.streamFailure.code === "provider_timeout"
               ? "provider-timeout"
               : "stream-handler-failed",
           endPayload: {
             ...endPayload,
             terminalState: "failed",
             failureStage:
-              streamFailure.code === "provider_timeout" ? "provider_run" : "stream_handler",
-            errorCode: streamFailure.code || "stream_handler_failed",
+              turnRunState.streamFailure.code === "provider_timeout"
+                ? "provider_run"
+                : "stream_handler",
+            errorCode: turnRunState.streamFailure.code || "stream_handler_failed",
             retryable: true,
-            streamErrorOrigin: streamFailure.origin,
-            streamErrorMessage: streamFailure.message,
+            streamErrorOrigin: turnRunState.streamFailure.origin,
+            streamErrorMessage: turnRunState.streamFailure.message,
           },
-          session,
-          windowId: durableRun?.window?.id || null,
+          session: turnRunState.session,
+          windowId: turnRunState.durableRun?.window?.id || null,
           message: failedMessage || undefined,
         });
         callbacks.retireInvocation?.(sessionId, failedInvocationId);
@@ -1235,23 +1271,23 @@ async function runChatWorklist(ctx) {
           message: "Agent stream failed while handling events; invocation closed as failed.",
           retryable: true,
           agent,
-          reason: streamFailure.origin,
+          reason: turnRunState.streamFailure.origin,
         });
         sendSse(res, "agent-exit", {
           agent,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: failedInvocationId,
           usage: invocationUsage,
         });
-        previousInvocationId = failedInvocationId;
-        aborted = false;
+        turnRunState.previousInvocationId = failedInvocationId;
+        turnRunState.aborted = false;
         break;
       }
 
       const isAborted = Boolean(
         invocationController.signal.aborted ||
-        streamStopped ||
+        turnRunState.streamStopped ||
         threadCtx?.controller?.signal?.aborted ||
         runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
         invocationController.stopReason === "explicit-stop"
@@ -1261,17 +1297,17 @@ async function runChatWorklist(ctx) {
         const abortInvId = threadCtx.currentInvocationId || invocationId;
         const abortMessage = buildAssistantFinalMessage({
           agent,
-          content: assistantContent,
-          code,
-          signal,
+          content: turnRunState.assistantContent,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: abortInvId,
           usage: invocationUsage,
         });
         // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
         durable.completeInvocation({
           invocationId: abortInvId,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           reason: "aborted",
           endPayload: {
             ...endPayload,
@@ -1280,30 +1316,34 @@ async function runChatWorklist(ctx) {
             errorCode: "invocation_aborted",
             failureStage: "request",
             retryable: false,
-            stopReason: streamStopReason || invocationController.stopReason || null,
+            stopReason: turnRunState.streamStopReason || invocationController.stopReason || null,
             supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
           },
-          session,
-          windowId: durableRun?.window?.id || null,
+          session: turnRunState.session,
+          windowId: turnRunState.durableRun?.window?.id || null,
           message: abortMessage || undefined,
         });
         callbacks.retireInvocation?.(sessionId, abortInvId);
-        aborted = true;
-        previousInvocationId = abortInvId;
+        turnRunState.aborted = true;
+        turnRunState.previousInvocationId = abortInvId;
         break;
       }
 
       const finalInvocationId = threadCtx.currentInvocationId || invocationId;
-      const hasAssistantText = Boolean(String(assistantContent || "").trim());
+      const hasAssistantText = Boolean(String(turnRunState.assistantContent || "").trim());
 
       // Under seal pressure, never treat empty content as a completed reply.
       // Clean zero-output exits (legacy mocks / silent success) may still persist "".
-      const sealPressure = emergencyStop || sealPending || preCallRotated || contextSealedSseSent;
+      const sealPressure =
+        turnRunState.emergencyStop ||
+        turnRunState.sealPending ||
+        turnRunState.preCallRotated ||
+        turnRunState.contextSealedSseSent;
       if (!hasAssistantText && sealPressure) {
         durable.completeInvocation({
           invocationId: finalInvocationId,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           reason: "empty-under-seal",
           endPayload: {
             ...endPayload,
@@ -1319,33 +1359,33 @@ async function runChatWorklist(ctx) {
           message: "Assistant produced no content after context pressure; request not completed.",
           retryable: true,
           agent,
-          reason: emergencyStop ? "physical-ceiling" : "empty-assistant",
+          reason: turnRunState.emergencyStop ? "physical-ceiling" : "empty-assistant",
         });
         sendSse(res, "agent-exit", {
           agent,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
         });
-        previousInvocationId = finalInvocationId;
-        aborted = true;
+        turnRunState.previousInvocationId = finalInvocationId;
+        turnRunState.aborted = true;
         break;
       }
 
-      if (code !== 0 || signal) {
+      if (turnRunState.code !== 0 || turnRunState.signal) {
         const failedMessage = buildAssistantFinalMessage({
           agent,
-          content: assistantContent,
-          code,
-          signal,
+          content: turnRunState.assistantContent,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
         });
         durable.completeInvocation({
           invocationId: finalInvocationId,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           reason: "provider-failed",
           endPayload: {
             ...endPayload,
@@ -1353,8 +1393,8 @@ async function runChatWorklist(ctx) {
             failureStage: "provider_run",
             retryable: false,
           },
-          session,
-          windowId: durableRun?.window?.id || null,
+          session: turnRunState.session,
+          windowId: turnRunState.durableRun?.window?.id || null,
           message: failedMessage || undefined,
         });
         callbacks.retireInvocation?.(sessionId, finalInvocationId);
@@ -1362,25 +1402,25 @@ async function runChatWorklist(ctx) {
           message: "Agent process exited without a successful durable result.",
           retryable: false,
           agent,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
         });
         sendSse(res, "agent-exit", {
           agent,
-          code,
-          signal,
+          code: turnRunState.code,
+          signal: turnRunState.signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
         });
-        previousInvocationId = finalInvocationId;
+        turnRunState.previousInvocationId = finalInvocationId;
         break;
       }
 
       const assistantMessage = buildAssistantFinalMessage({
         agent,
-        content: assistantContent,
-        code,
-        signal,
+        content: turnRunState.assistantContent,
+        code: turnRunState.code,
+        signal: turnRunState.signal,
         invocationId: finalInvocationId,
         usage: invocationUsage,
         allowEmpty: true,
@@ -1390,12 +1430,12 @@ async function runChatWorklist(ctx) {
         durable.enabled && typeof durable.completeInvocation === "function"
           ? durable.completeInvocation({
               invocationId: finalInvocationId,
-              code,
-              signal,
+              code: turnRunState.code,
+              signal: turnRunState.signal,
               reason: "assistant-final",
               endPayload,
-              session,
-              windowId: durableRun?.window?.id || null,
+              session: turnRunState.session,
+              windowId: turnRunState.durableRun?.window?.id || null,
               message: assistantMessage,
             })
           : null;
@@ -1404,9 +1444,9 @@ async function runChatWorklist(ctx) {
       if (completed?.message?.id) assistantMessage.id = completed.message.id;
 
       if (completed) {
-        session = {
-          ...session,
-          messages: [...(session.messages || []), assistantMessage],
+        turnRunState.session = {
+          ...turnRunState.session,
+          messages: [...(turnRunState.session.messages || []), assistantMessage],
         };
       } else {
         throw new DurableWriteError(
@@ -1418,9 +1458,9 @@ async function runChatWorklist(ctx) {
           }
         );
       }
-      previousInvocationId = finalInvocationId;
+      turnRunState.previousInvocationId = finalInvocationId;
       // Final text scan (in case deltas were clean but concat/store introduced issues).
-      const finalEnc = scanReplacementChars(assistantContent);
+      const finalEnc = scanReplacementChars(turnRunState.assistantContent);
       if (!finalEnc.ok) {
         runObs.noteEncoding(finalEnc.count);
         sendSse(res, "encoding-warning", {
@@ -1433,14 +1473,14 @@ async function runChatWorklist(ctx) {
         });
       }
       runObs.noteInvocationEnd(finalInvocationId, {
-        exitCode: code,
+        exitCode: turnRunState.code,
         usage: invocationUsage,
         encodingWarnings: finalEnc.count || 0,
       });
       sendSse(res, "agent-exit", {
         agent,
-        code,
-        signal,
+        code: turnRunState.code,
+        signal: turnRunState.signal,
         invocationId: finalInvocationId,
         usage: invocationUsage,
       });
@@ -1463,7 +1503,7 @@ async function runChatWorklist(ctx) {
         progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
         agent,
         duty: dutyBinding?.duty,
-        content: assistantContent,
+        content: turnRunState.assistantContent,
         threadId: sessionId,
         registry: collabTaskRegistry,
         deliveryVerifier,
@@ -1480,20 +1520,23 @@ async function runChatWorklist(ctx) {
 
       // POST soft seal after a complete answer (never mid-stream kill path).
       const postSoft = shouldSoftSealAfterTurn({
-        usableContextTokens: healthTracker.usableContextTokens,
-        usedTokens: healthTracker.getUsedTokens(),
+        usableContextTokens: turnRunState.healthTracker.usableContextTokens,
+        usedTokens: turnRunState.healthTracker.getUsedTokens(),
         softRatio: sealBudget.usable.softRatio,
       });
-      if ((sealPending || postSoft.seal || emergencyStop) && !contextSealHandled) {
-        const ratio = healthTracker.getFillRatio();
-        const reason = emergencyStop
+      if (
+        (turnRunState.sealPending || postSoft.seal || turnRunState.emergencyStop) &&
+        !turnRunState.contextSealHandled
+      ) {
+        const ratio = turnRunState.healthTracker.getFillRatio();
+        const reason = turnRunState.emergencyStop
           ? "physical-ceiling"
           : postSoft.reason
             ? `post-turn-${postSoft.reason}`
             : "post-turn-soft";
         // Emergency mid-stream remains partial; normal post-turn soft seal is complete.
-        const partial = Boolean(emergencyStop);
-        if (!contextSealedSseSent) {
+        const partial = Boolean(turnRunState.emergencyStop);
+        if (!turnRunState.contextSealedSseSent) {
           sendSse(res, "sealed", {
             agent,
             ratio,
@@ -1502,13 +1545,15 @@ async function runChatWorklist(ctx) {
             complete: !partial,
             workspaceKey,
           });
-          contextSealedSseSent = true;
+          turnRunState.contextSealedSseSent = true;
         }
         sealContextWindow(ratio, reason, { partial });
-      } else if (durableRun && !contextSealHandled) {
+      } else if (turnRunState.durableRun && !turnRunState.contextSealHandled) {
         const persistedProviderSessionId =
-          observedProviderSessionId || durableRun.window.providerSessionId || "";
-        durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
+          turnRunState.observedProviderSessionId ||
+          turnRunState.durableRun.window.providerSessionId ||
+          "";
+        durable.bindProviderSession(turnRunState.durableRun.window.id, persistedProviderSessionId);
       }
 
       const loopEvidence = workflowEvidenceEvents.find(
@@ -1541,7 +1586,7 @@ async function runChatWorklist(ctx) {
       }
 
       // Parse structured handoff once per turn (soft — never blocks routing).
-      const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+      const primaryHandoff = agentHandoff.extractPrimaryHandoff(turnRunState.assistantContent, {
         currentAgentId: agent,
       });
       const primaryQuality = agentHandoff.evaluateHandoff(primaryHandoff);
@@ -1550,7 +1595,7 @@ async function runChatWorklist(ctx) {
 
       a2aHistory.push({
         agent,
-        content: assistantContent,
+        content: turnRunState.assistantContent,
         handoff: primaryHandoff,
         handoffQuality: primaryQuality,
         handoffByTarget,
@@ -1566,12 +1611,12 @@ async function runChatWorklist(ctx) {
           Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
         );
         const finalized = finalizeA2ARoutes({
-          text: assistantContent,
+          text: turnRunState.assistantContent,
           fromAgent: agent,
           threadId: sessionId,
           sessionId,
           invocationId: finalInvocationId,
-          windowId: durableRun?.window?.id || null,
+          windowId: turnRunState.durableRun?.window?.id || null,
           useWorktree: Boolean(useWorktree),
           worktreeDir: runWorkspace?.worktreeDir || "",
           worktreeBranch: runWorkspace?.branch || "",
@@ -1646,8 +1691,9 @@ async function runChatWorklist(ctx) {
       }
     }
   } finally {
-    ownedInvocationSlotAtCleanup = activeInvocations.get(sessionId) === invocationController;
-    if (ownedInvocationSlotAtCleanup) {
+    turnRunState.ownedInvocationSlotAtCleanup =
+      activeInvocations.get(sessionId) === invocationController;
+    if (turnRunState.ownedInvocationSlotAtCleanup) {
       activeInvocations.delete(sessionId);
     }
     if (callbacks.getThread(sessionId) === threadCtx) {
@@ -1655,9 +1701,12 @@ async function runChatWorklist(ctx) {
     }
   }
 
-  ctx.session = session;
-  ctx.aborted = aborted;
-  return { aborted, ownedInvocationSlotAtCleanup };
+  ctx.session = turnRunState.session;
+  ctx.aborted = turnRunState.aborted;
+  return {
+    aborted: turnRunState.aborted,
+    ownedInvocationSlotAtCleanup: turnRunState.ownedInvocationSlotAtCleanup,
+  };
 }
 
 module.exports = { runChatWorklist, generateMessageId, buildAssistantFinalMessage };
