@@ -60,7 +60,7 @@ const MEMORY_WRITE_TOOL = Object.freeze({
       },
       scope: {
         type: "string",
-        enum: ["thread", "project"],
+        enum: ["thread"],
       },
       evidenceEventNo: {
         type: "integer",
@@ -224,7 +224,7 @@ async function callMemoryWrite(args, { env = process.env, fetchImpl = globalThis
       kind: args?.kind,
       topic: args?.topic,
       content: args?.content,
-      scope: args?.scope,
+      scope: args?.scope ?? "thread",
       ...(args?.evidenceEventNo === undefined ? {} : { evidenceEventNo: args.evidenceEventNo }),
     }),
   });
@@ -354,8 +354,8 @@ function validateMemoryWriteArguments(args) {
   ) {
     throw new Error("memory_write content must contain 10 to 500 characters.");
   }
-  if (!["thread", "project"].includes(args.scope)) {
-    throw new Error("memory_write scope must be thread or project.");
+  if (args.scope !== undefined && args.scope !== "thread") {
+    throw new Error("memory_write scope must be thread; project memory is retired.");
   }
   if (
     args.evidenceEventNo !== undefined &&

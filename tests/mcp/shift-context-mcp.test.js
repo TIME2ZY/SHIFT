@@ -269,6 +269,44 @@ test("memory_write bridge returns policy rejection without an MCP transport erro
   });
 });
 
+test("memory_write defaults omitted scope to thread and rejects retired project scope", async () => {
+  let captured;
+  const defaulted = await callMemoryWrite(
+    {
+      kind: "fact",
+      topic: "runtime.database",
+      content: "SQLite is available at runtime.",
+    },
+    {
+      env: ENV,
+      fetchImpl: async (url, init) => {
+        captured = { url, init };
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ outcome: "created" }),
+        };
+      },
+    }
+  );
+  assert.equal(defaulted.outcome, "created");
+  assert.equal(JSON.parse(captured.init.body).scope, "thread");
+
+  await assert.rejects(
+    () =>
+      callMemoryWrite(
+        {
+          kind: "fact",
+          topic: "runtime.database",
+          content: "SQLite is available at runtime.",
+          scope: "project",
+        },
+        { env: ENV, fetchImpl: async () => ({ ok: true, status: 200, text: async () => "{}" }) }
+      ),
+    /project memory is retired/
+  );
+});
+
 test("Codex invocation config registers the per-invocation MCP bridge", () => {
   const args = shiftContextMcpConfigArgs();
   assert.ok(args.some((value) => value.startsWith("mcp_servers.shift_context.command=")));
