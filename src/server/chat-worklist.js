@@ -49,6 +49,7 @@ const {
 const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
+const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -137,12 +138,7 @@ async function runChatWorklist(ctx) {
     runtime,
   } = ctx;
 
-  const turnRunState = {
-    session: ctx.session,
-    aborted: false,
-    previousInvocationId: null,
-    ownedInvocationSlotAtCleanup: false,
-  };
+  const turnRunState = createTurnState(ctx);
   if (!Array.isArray(worklist) || worklist.length === 0) {
     throw new Error("runChatWorklist: worklist is empty or missing");
   }
@@ -161,6 +157,7 @@ async function runChatWorklist(ctx) {
       const providerId = agentConfig.providerId || "";
       const providerKey =
         providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
+      resetTurnStateForEntry(turnRunState, { skillNames });
       turnRunState.openWindow =
         storage?.windows?.getOpen?.({
           threadId: sessionId,
@@ -178,17 +175,6 @@ async function runChatWorklist(ctx) {
           reserveRatio: contextHealth.getAgentReserveRatio(agent),
         });
       turnRunState.resumeSessionId = turnRunState.openWindow?.providerSessionId || "";
-      turnRunState.assistantContent = "";
-      turnRunState.observedProviderSessionId = "";
-      turnRunState.contextWarned = false;
-      turnRunState.contextSealedSseSent = false;
-      turnRunState.contextSealHandled = false;
-      turnRunState.emergencyStop = false;
-      turnRunState.sealPending = false;
-      turnRunState.preCallRotated = false;
-      turnRunState.preCallSealedWindowId = null;
-      turnRunState.preCallSealedGeneration = null;
-      turnRunState.preCallSealedRatio = 0;
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
       const dutyBinding = queuedCause?.dutyBinding || null;
@@ -198,9 +184,6 @@ async function runChatWorklist(ctx) {
       const triggerMessageId =
         i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
 
-      turnRunState.agentPrompt = undefined;
-      /** @type {string[]} */
-      turnRunState.turnSkillNames = skillNames;
       if (i === 0) {
         turnRunState.agentPrompt = turnPrompt;
       } else {
@@ -402,22 +385,10 @@ async function runChatWorklist(ctx) {
       }
 
       // Tracker from open window *before* this prompt (for PRE projection).
-      turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-        capacityTokens:
-          turnRunState.openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
-        inputChars: turnRunState.openWindow?.inputChars,
-        outputChars: turnRunState.openWindow?.outputChars,
-        reserveRatio:
-          turnRunState.openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-        contextUsedTokens: turnRunState.openWindow?.contextUsedTokens,
-        contextUsageSource: turnRunState.openWindow?.contextUsageSource,
-        billingInputTokens: turnRunState.openWindow?.billingInputTokens,
-        billingCachedInputTokens: turnRunState.openWindow?.billingCachedInputTokens,
-        billingOutputTokens: turnRunState.openWindow?.billingOutputTokens,
-        billingReasoningTokens: turnRunState.openWindow?.billingReasoningTokens,
-        billingTotalTokens: turnRunState.openWindow?.billingTotalTokens,
-        billingCostUsd: turnRunState.openWindow?.billingCostUsd,
-        billingComplete: turnRunState.openWindow?.billingComplete,
+      turnRunState.healthTracker = createTurnTracker(agent, turnRunState.openWindow, {
+        contextHealth,
+        capacityFallback: contextHealth.getAgentCapacity(agent),
+        reserveFallback: contextHealth.getAgentReserveRatio(agent),
       });
       const usedBeforePrompt = turnRunState.healthTracker.getUsedTokens();
       const promptTokens = charsToTokens(turnRunState.promptForAgent.length);
@@ -486,14 +457,11 @@ async function runChatWorklist(ctx) {
               workspaceKey,
             });
           turnRunState.resumeSessionId = "";
-          turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens: turnRunState.openWindow?.capacityTokens || rotateCapacity,
-            inputChars: turnRunState.openWindow?.inputChars,
-            outputChars: turnRunState.openWindow?.outputChars,
-            reserveRatio:
-              turnRunState.openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-            contextUsedTokens: turnRunState.openWindow?.contextUsedTokens,
-            contextUsageSource: turnRunState.openWindow?.contextUsageSource,
+          turnRunState.healthTracker = createTurnTracker(agent, turnRunState.openWindow, {
+            contextHealth,
+            capacityFallback: rotateCapacity,
+            reserveFallback: contextHealth.getAgentReserveRatio(agent),
+            withBilling: false,
           });
           if (sessionBootstrap.buildDigest)
             promptParts.push(
@@ -535,20 +503,8 @@ async function runChatWorklist(ctx) {
       threadCtx.currentDutyBinding = turnRunState.durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
       if (turnRunState.durableRun.window) {
-        turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-          capacityTokens: turnRunState.durableRun.window.capacityTokens,
-          inputChars: turnRunState.durableRun.window.inputChars,
-          outputChars: turnRunState.durableRun.window.outputChars,
-          reserveRatio: turnRunState.durableRun.window.reserveRatio,
-          contextUsedTokens: turnRunState.durableRun.window.contextUsedTokens,
-          contextUsageSource: turnRunState.durableRun.window.contextUsageSource,
-          billingInputTokens: turnRunState.durableRun.window.billingInputTokens,
-          billingCachedInputTokens: turnRunState.durableRun.window.billingCachedInputTokens,
-          billingOutputTokens: turnRunState.durableRun.window.billingOutputTokens,
-          billingReasoningTokens: turnRunState.durableRun.window.billingReasoningTokens,
-          billingTotalTokens: turnRunState.durableRun.window.billingTotalTokens,
-          billingCostUsd: turnRunState.durableRun.window.billingCostUsd,
-          billingComplete: turnRunState.durableRun.window.billingComplete,
+        turnRunState.healthTracker = createTurnTracker(agent, turnRunState.durableRun.window, {
+          contextHealth,
         });
         turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
       }
@@ -814,9 +770,10 @@ async function runChatWorklist(ctx) {
               ...turnRunState.durableRun,
               window: rotated.next,
             };
-            turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: rotated.next.capacityTokens || rotateCapacity,
-              reserveRatio: rotated.next.reserveRatio,
+            turnRunState.healthTracker = createTurnTracker(agent, rotated.next, {
+              contextHealth,
+              capacityFallback: rotateCapacity,
+              withBilling: false,
             });
           }
         }
@@ -946,10 +903,11 @@ async function runChatWorklist(ctx) {
           invocationEnv.INVOKE_SESSION_ID = "";
           threadCtx.currentInvocationId = retry.invocationId;
           threadCtx.windowId = retryRun.window?.id || null;
-          turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens:
-              retryRun.window?.capacityTokens || turnRunState.healthTracker.capacityTokens,
-            reserveRatio: retryRun.window?.reserveRatio ?? turnRunState.healthTracker.reserveRatio,
+          turnRunState.healthTracker = createTurnTracker(agent, retryRun.window, {
+            contextHealth,
+            capacityFallback: turnRunState.healthTracker.capacityTokens,
+            reserveFallback: turnRunState.healthTracker.reserveRatio,
+            withBilling: false,
           });
           turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
           turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
@@ -1205,9 +1163,9 @@ async function runChatWorklist(ctx) {
             workspaceKey,
           });
           if (nextWin) {
-            turnRunState.healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: nextWin.capacityTokens,
-              reserveRatio: nextWin.reserveRatio,
+            turnRunState.healthTracker = createTurnTracker(agent, nextWin, {
+              contextHealth,
+              withBilling: false,
             });
             continue;
           }
