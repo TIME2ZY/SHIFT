@@ -6,6 +6,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const VERIFY_SCRIPTS = Object.freeze([
   "check",
+  "format:check",
   "lint",
   "test",
   "typecheck:web",
