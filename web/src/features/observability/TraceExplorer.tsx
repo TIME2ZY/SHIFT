@@ -466,6 +466,9 @@ export function TraceExplorer({
     limit: 100,
   });
   const visible = sessionId ? filtered.data?.traces || [] : traces;
+  // A failed list query is not an empty ledger: without this the error reads as
+  // "run a task first" and hides a real backend problem.
+  const tracesFailed = Boolean(sessionId) && filtered.isError && !filtered.data;
   const selected = useMemo(
     () => visible.find((trace) => trace.traceId === selectedId) || visible[0] || null,
     [selectedId, visible]
@@ -521,7 +524,25 @@ export function TraceExplorer({
 
         <div className="trace-workbench-split">
           <div className="trace-ledger" aria-label="Trace 列表" tabIndex={0}>
-            {!visible.length ? (
+            {tracesFailed ? (
+              <div className="react-panel-error" role="alert">
+                <span>
+                  {`无法加载 Trace：${
+                    filtered.error instanceof Error ? filtered.error.message : "请求失败。"
+                  }`}
+                </span>
+                <button
+                  type="button"
+                  disabled={filtered.isFetching}
+                  onClick={() => {
+                    void filtered.refetch();
+                  }}
+                >
+                  重试
+                </button>
+              </div>
+            ) : null}
+            {!tracesFailed && !visible.length ? (
               <p className="react-panel-empty">运行一次任务后，这里会出现可追溯的协作航线。</p>
             ) : null}
             {visible.map((trace) => (
