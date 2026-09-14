@@ -1,14 +1,25 @@
 /**
- * Product Memory write/read service (Phase D-2 boundary).
+ * Product Memory write service (Phase D-2 boundary, Phase C-10 facade).
+ *
+ * The write path and the read queries this module used to carry in one 903-line
+ * closure are now sibling modules: memory-read owns the six read shapes,
+ * memory-write-evidence owns anchor resolution. This file keeps the write path
+ * itself — capture, captureOnce, createProduct, writeMemoryCandidate — because
+ * those four share one transaction and one idempotency contract, and composes
+ * the reads into the service callers already hold.
+ *
+ * The exported shape is unchanged: createMemoryService returns the same method
+ * set, and the module still re-exports deriveWriteFields, resolveProductScope,
+ * recordMemoryLifecycleEvents and the scope constants.
  *
  * Online roles:
  * - Write path: this module (`writeMemoryCandidate` / captureOnce) → memory-repository.
  *   Product Memory is thread-only (ADR-005): every write entry point fixes
  *   `scope = "thread"` and rejects `scope: "project"`. Legacy project rows stay
  *   readable for audit but can no longer be created or superseded.
- * - Read/list: this module + memory-repository
+ * - Read/list: memory-read + memory-repository
  * - Inject into prompts: memory-inject + memory-funnel (ranking/budget)
- * - Metrics: memory-metrics
+ * - Evidence anchoring: memory-write-evidence + memory-evidence
  * - Keys/kinds/topics: memory-keys + memory-topic-canon
  * - Retrieval predicate shared with recall: memory-retrieval-contract
  * - Collaboration events (not product rows): memory-capture
@@ -19,22 +30,15 @@
 const crypto = require("node:crypto");
 const {
   PRODUCT_KINDS,
-  ALL_KINDS,
-  ALL_STATUSES,
-  ACTIVE_STATUSES,
   normalizeProductKind,
   buildSupersessionKey,
   buildProductCaptureKey,
   deriveTopicFromContent,
   parseSupersessionKey,
 } = require("./memory-keys");
-const {
-  MEMORY_EVIDENCE_EVENT_KINDS,
-  isSuccessfulMemoryEvidenceEvent,
-  summarizeMemoryEvidenceEvent,
-} = require("./memory-evidence");
-const { isRetrievableMemory } = require("./memory-retrieval-contract");
 const { enqueueMemoryEmbedding } = require("./embedding-projection");
+const { createMemoryRead } = require("./memory-read");
+const { resolveMemoryWriteEvidence, hashMemoryWriteContent } = require("./memory-write-evidence");
 
 const MAX_SUPERSESSION_RETRIES = 3;
 const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
@@ -55,6 +59,8 @@ function createMemoryService({
   if (!storage?.memories || typeof storage.transaction !== "function") {
     throw new Error("Memory service requires storage with transactions and a memory repository.");
   }
+
+  const readers = createMemoryRead({ storage });
 
   function capture(input) {
     assertNotRetiredWriteScope(input?.scope);
@@ -397,189 +403,16 @@ function createMemoryService({
     }
   }
 
-  /**
-   * Active memories for inject / recency.
-   *
-   * options.scope:
-   *   - "thread"  — thread-owned only
-   *   - "project" — project-owned only (requires thread project identity)
-   *   - "all"     — thread ∪ project (default, PR-2 cross-thread inject)
-   */
-  function listActive(threadId, options = {}) {
-    const id = requiredString(threadId, "thread id");
-    const scope = options.scope === "thread" || options.scope === "project" ? options.scope : "all";
-    const limit = normalizeLimit(options.limit, 100);
-    const kinds = options.kinds;
-
-    let items = [];
-    if (scope === "thread" || scope === "all") {
-      items = items.concat(storage.memories.listActive(id, { limit, kinds }));
-    }
-    if (scope === "project" || scope === "all") {
-      const thread = storage.threads?.get?.(id);
-      if (thread?.projectKey) {
-        items = items.concat(
-          storage.memories.listActiveByProject(thread.projectKey, {
-            limit,
-            kinds,
-          })
-        );
-      }
-    }
-
-    // Deduplicate (same id should not appear twice).
-    const byId = new Map();
-    for (const item of items) {
-      if (!item?.id) continue;
-      if (!byId.has(item.id)) byId.set(item.id, item);
-    }
-    items = [...byId.values()];
-
-    if (options.forInject !== false) {
-      items = items.filter((item) => isRetrievableMemory(item));
-    }
-
-    // Product kind priority, then recency.
-    items.sort((a, b) => {
-      const kindDelta = kindRank(b.kind) - kindRank(a.kind);
-      if (kindDelta !== 0) return kindDelta;
-      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-    });
-
-    if (Number.isFinite(Number(options.limit)) && Number(options.limit) > 0) {
-      items = items.slice(0, Math.floor(Number(options.limit)));
-    }
-
-    const maxChars = normalizeMaxChars(options.maxChars);
-    if (maxChars === null) return items;
-
-    const selected = [];
-    let usedChars = 0;
-    for (const item of items) {
-      const contentChars = item.content.length;
-      if (usedChars + contentChars > maxChars) continue;
-      selected.push(item);
-      usedChars += contentChars;
-    }
-    return selected;
-  }
-
-  function listActiveForTurn(threadId, options = {}) {
-    // Product Memory inject is thread-only; project truth is docs/project-doc.
-    return listActive(threadId, { ...options, scope: "thread", forInject: true });
-  }
-
-  function listRetrievableForTurn(threadId, options = {}) {
-    return listActive(threadId, {
-      ...options,
-      scope: "thread",
-      forInject: false,
-    }).filter((item) => isRetrievableMemory(item));
-  }
-
-  function list(threadId, options = {}) {
-    const id = requiredString(threadId, "thread id");
-    const includeRetired = options.includeRetired !== false;
-    const kinds = normalizeFilterList(options.kinds, ALL_KINDS);
-    const statuses = normalizeFilterList(
-      options.statuses,
-      ALL_STATUSES,
-      includeRetired ? ALL_STATUSES : ACTIVE_STATUSES
-    );
-    const limit = normalizeLimit(options.limit, 200);
-
-    let items = storage.memories.listForThread(id);
-    if (kinds.length > 0) items = items.filter((item) => kinds.includes(item.kind));
-    if (statuses.length > 0) items = items.filter((item) => statuses.includes(item.status));
-
-    items = items
-      .slice()
-      .sort((a, b) => {
-        const byTime = String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
-        if (byTime !== 0) return byTime;
-        return String(b.id).localeCompare(String(a.id));
-      })
-      .slice(0, limit);
-
-    return items.map(enrichMemory);
-  }
-
-  function get(id) {
-    const memory = storage.memories.get(id);
-    return memory ? enrichMemory(memory) : null;
-  }
-
-  /**
-   * Whether a live thread may access this memory.
-   * - thread-scoped: owner/origin must match session
-   * - project-scoped: same projectKey as the calling thread
-   */
-  function canAccessFromThread(memory, threadId) {
-    if (!memory || !threadId) return false;
-    const thread = storage.threads?.get?.(threadId) || null;
-    if (!thread) return false;
-
-    const scope = memory.scope || "thread";
-    if (scope === "project") {
-      if (!memory.projectKey || !thread.projectKey) return false;
-      return memory.projectKey === thread.projectKey;
-    }
-
-    const owner = memory.ownerThreadId || memory.threadId || memory.originThreadId;
-    return owner === threadId;
-  }
-
-  function enrichMemory(memory) {
-    if (!memory) return null;
-    const relatedKey = memory.supersessionKey;
-    let related = [];
-    if (relatedKey) {
-      related = storage.db
-        ? storage.db
-            .prepare(
-              `
-              SELECT id, status, created_at, superseded_by, scope, project_key, owner_thread_id
-              FROM memory_entries
-              WHERE supersession_key = ? AND id != ?
-                AND (
-                  (scope = 'thread' AND owner_thread_id = ?)
-                  OR (scope = 'project' AND project_key = ?)
-                )
-              ORDER BY created_at DESC
-            `
-            )
-            .all(relatedKey, memory.id, memory.ownerThreadId || "", memory.projectKey || "")
-            .map((item) => ({
-              id: item.id,
-              status: item.status,
-              createdAt: item.created_at,
-              supersededBy: item.superseded_by,
-            }))
-        : [];
-    }
-    return {
-      ...memory,
-      topic:
-        memory.topic ||
-        parseSupersessionKey(memory.supersessionKey)?.topic ||
-        memory.metadata?.topic ||
-        null,
-      related,
-      isActive: ACTIVE_STATUSES.includes(memory.status),
-      isProduct: PRODUCT_KINDS.includes(memory.kind),
-    };
-  }
-
   return {
     capture,
     createProduct,
     writeMemoryCandidate,
-    listActive,
-    listActiveForTurn,
-    listRetrievableForTurn,
-    list,
-    get,
-    canAccessFromThread,
+    listActive: readers.listActive,
+    listActiveForTurn: readers.listActiveForTurn,
+    listRetrievableForTurn: readers.listRetrievableForTurn,
+    list: readers.list,
+    get: readers.get,
+    canAccessFromThread: readers.canAccessFromThread,
     PRODUCT_KINDS,
   };
 }
@@ -618,93 +451,6 @@ function assertMemoryWriteCandidateShape(candidate) {
   }
 }
 
-function resolveMemoryWriteEvidence({
-  storage,
-  candidate,
-  threadId,
-  invocationId,
-  storedInvocation,
-  sourceMessageId,
-  projectKey,
-}) {
-  if (candidate.evidenceEventNo !== undefined) {
-    if (!storedInvocation || !invocationId) {
-      throw new Error("Memory event evidence requires a persisted invocation.");
-    }
-    const event = storage.invocations?.getEvent?.(invocationId, candidate.evidenceEventNo);
-    if (!event) {
-      throw new Error(
-        `Evidence event ${candidate.evidenceEventNo} does not exist in the current invocation.`
-      );
-    }
-    if (!isSuccessfulMemoryEvidenceEvent(event)) {
-      if (MEMORY_EVIDENCE_EVENT_KINDS.includes(event.kind)) {
-        throw new Error("Failed tool events cannot ground a memory.");
-      }
-      throw new Error(`Evidence event kind "${event.kind}" cannot ground a memory.`);
-    }
-    const snapshot = summarizeMemoryEvidenceEvent(event);
-    return {
-      eventNo: event.sequenceNo,
-      eventKind: event.kind,
-      anchors: [
-        {
-          type: "invocation",
-          ref: invocationId,
-          eventNo: event.sequenceNo,
-          eventKind: event.kind,
-          originThreadId: threadId,
-          capturedProjectKey: projectKey,
-          capturedAt: event.createdAt,
-          label: snapshot,
-          contentHash: hashMemoryWriteContent(snapshot),
-        },
-      ],
-    };
-  }
-
-  if (sourceMessageId) {
-    const message = storage.messages?.get?.(sourceMessageId);
-    const snapshot = String(message?.content || "")
-      .trim()
-      .slice(0, 240);
-    return {
-      eventNo: null,
-      eventKind: null,
-      anchors: [
-        {
-          type: "message",
-          ref: sourceMessageId,
-          originThreadId: threadId,
-          capturedProjectKey: projectKey,
-          capturedAt: message?.createdAt || null,
-          label: snapshot,
-          contentHash: hashMemoryWriteContent(snapshot),
-        },
-      ],
-    };
-  }
-
-  if (invocationId) {
-    return {
-      eventNo: null,
-      eventKind: null,
-      anchors: [
-        {
-          type: "invocation",
-          ref: invocationId,
-          originThreadId: threadId,
-          capturedProjectKey: projectKey,
-          capturedAt: storedInvocation?.startedAt || null,
-          label: "Current invocation",
-        },
-      ],
-    };
-  }
-
-  throw new Error("Memory write requires a source message or invocation.");
-}
-
 function normalizeMemoryWriteContent(value) {
   return String(value || "")
     .trim()
@@ -712,10 +458,6 @@ function normalizeMemoryWriteContent(value) {
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n");
-}
-
-function hashMemoryWriteContent(content) {
-  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function formatMemoryWriteOutcome(outcome, result) {
@@ -726,19 +468,6 @@ function formatMemoryWriteOutcome(outcome, result) {
     memoryId: result.memory?.id || null,
     replacedMemoryId: outcome === "superseded" ? superseded[0] || null : undefined,
   };
-}
-
-function kindRank(kind) {
-  switch (kind) {
-    case "decision":
-      return 30;
-    case "constraint":
-      return 28;
-    case "fact":
-      return 24;
-    default:
-      return 0;
-  }
 }
 
 /**
@@ -819,33 +548,6 @@ function isActiveUniqueConflict(error) {
     (String(error.message || "").includes("memory_active_") ||
       String(error.message || "").includes("supersession"))
   );
-}
-
-function normalizeMaxChars(value) {
-  if (value === undefined || value === null) return null;
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) {
-    throw new Error("maxChars must be a non-negative number.");
-  }
-  return Math.floor(number);
-}
-
-function normalizeLimit(value, fallback = 200) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.max(1, Math.min(Math.floor(number), 1000));
-}
-
-function normalizeFilterList(value, allowed, defaultList = []) {
-  if (value === undefined || value === null || value === "") return defaultList.slice();
-  const raw = Array.isArray(value)
-    ? value
-    : String(value)
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean);
-  const filtered = raw.filter((item) => allowed.includes(item));
-  return filtered;
 }
 
 function requiredString(value, label) {
