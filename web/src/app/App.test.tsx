@@ -18,7 +18,7 @@ vi.mock("../features/collaboration/queries", () => ({
 
 const mocks = vi.hoisted(() => ({
   agents: [{ id: "codex", label: "Codex", routable: true }],
-  send: vi.fn().mockResolvedValue(undefined),
+  send: vi.fn().mockResolvedValue(true),
   stop: vi.fn(),
   navigate: vi.fn(),
   dispose: vi.fn(),

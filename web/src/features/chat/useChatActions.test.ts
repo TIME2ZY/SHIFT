@@ -33,7 +33,7 @@ it("waits for the accepted Trace and Stop acknowledgement", async () => {
       })
   );
   const { result } = renderHook(() => useChatActions());
-  let sent!: Promise<void>;
+  let sent!: Promise<boolean>;
   act(() => {
     sent = result.current.send("s", "codex", "work", false, "turn");
   });
@@ -66,7 +66,7 @@ it("reports failed deferred Stop without claiming cancellation", async () => {
   );
   mocks.stop.mockRejectedValue(new Error("Stop unavailable"));
   const { result } = renderHook(() => useChatActions());
-  let sent!: Promise<void>;
+  let sent!: Promise<boolean>;
   act(() => {
     sent = result.current.send("s", "codex", "work", false, "turn");
     result.current.stop("s");
@@ -83,4 +83,47 @@ it("reports failed deferred Stop without claiming cancellation", async () => {
   expect(
     (mocks.store as ReturnType<typeof createSessionRunStore>).getSnapshot().runs.s
   ).toMatchObject({ traceId: "accepted", status: "connecting" });
+});
+
+it("resolves true once accepted, false when the start never reached the server", async () => {
+  mocks.start.mockResolvedValue({ sessionId: "s", traceId: "accepted" });
+  const { result } = renderHook(() => useChatActions());
+  let delivered!: boolean;
+  await act(async () => {
+    delivered = await result.current.send("s", "codex", "work", false, "turn");
+  });
+  expect(delivered).toBe(true);
+
+  mocks.start.mockRejectedValue(new Error("后端不可用"));
+  await act(async () => {
+    delivered = await result.current.send("s", "codex", "again", false, "turn-2");
+  });
+  expect(delivered).toBe(false);
+  expect(mocks.toast).toHaveBeenCalledWith(
+    "后端不可用",
+    expect.objectContaining({ variant: "error" })
+  );
+});
+
+it("resolves false when a Stop wins the race against a pending start", async () => {
+  let accept!: (value: { sessionId: string; traceId: string }) => void;
+  mocks.start.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        accept = resolve;
+      })
+  );
+  mocks.stop.mockResolvedValue({ stopped: true });
+  const { result } = renderHook(() => useChatActions());
+  let sent!: Promise<boolean>;
+  act(() => {
+    sent = result.current.send("s", "codex", "work", false, "turn");
+    result.current.stop("s");
+  });
+  let delivered: boolean | undefined;
+  await act(async () => {
+    accept({ sessionId: "s", traceId: "accepted" });
+    delivered = await sent;
+  });
+  expect(delivered).toBe(false);
 });

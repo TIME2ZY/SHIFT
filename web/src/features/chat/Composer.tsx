@@ -18,7 +18,8 @@ interface ComposerProps {
   draftSeed?: ComposerDraftSeed | null;
   focusRequestId?: number;
   onDraftSeedApplied?(): void;
-  onSend(prompt: string, useWorktree: boolean, clientTurnId: string): Promise<void>;
+  /** Resolves true once the turn reached the server; false means nothing was sent. */
+  onSend(prompt: string, useWorktree: boolean, clientTurnId: string): Promise<boolean>;
   onStop(): void;
 }
 
@@ -111,7 +112,17 @@ export function Composer({
       textareaRef.current.style.height = "";
     }
     try {
-      await onSend(prompt, useWorktree, clientTurnId);
+      const delivered = await onSend(prompt, useWorktree, clientTurnId);
+      if (delivered) return;
+      // The turn never reached the server: hand the draft back so a transient
+      // start failure does not cost the user's text. Keep anything typed while
+      // the request was in flight.
+      setDrafts((current) =>
+        (current[sessionId] ?? "").trim() ? current : { ...current, [sessionId]: prompt }
+      );
+      if (useWorktree) {
+        setWorktreeModes((current) => ({ ...current, [sessionId]: true }));
+      }
     } finally {
       submittingRef.current = false;
     }

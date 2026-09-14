@@ -168,11 +168,15 @@ export function App() {
     setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
   }
 
-  function sendPrompt(prompt: string, useWorktree: boolean, clientTurnId: string) {
-    if (!activeSessionId) return Promise.resolve();
+  function sendPrompt(
+    prompt: string,
+    useWorktree: boolean,
+    clientTurnId: string
+  ): Promise<boolean> {
+    if (!activeSessionId) return Promise.resolve(false);
     const explicitAgent = findExplicitLeadingAgent(prompt, routableAgents);
     const targetAgentId = explicitAgent?.id || selectedAgentId;
-    if (!targetAgentId) return Promise.resolve();
+    if (!targetAgentId) return Promise.resolve(false);
     return chat.send(activeSessionId, targetAgentId, prompt, useWorktree, clientTurnId);
   }
 
