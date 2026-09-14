@@ -2,7 +2,10 @@
  * Product Memory write/read service (Phase D-2 boundary).
  *
  * Online roles:
- * - Write path: this module (`writeMemoryCandidate` / captureOnce) → memory-repository
+ * - Write path: this module (`writeMemoryCandidate` / captureOnce) → memory-repository.
+ *   Product Memory is thread-only (ADR-005): every write entry point fixes
+ *   `scope = "thread"` and rejects `scope: "project"`. Legacy project rows stay
+ *   readable for audit but can no longer be created or superseded.
  * - Read/list: this module + memory-repository
  * - Inject into prompts: memory-inject + memory-funnel (ranking/budget)
  * - Metrics: memory-metrics
@@ -54,6 +57,7 @@ function createMemoryService({
   }
 
   function capture(input) {
+    assertNotRetiredWriteScope(input?.scope);
     let attempt = 0;
     while (attempt < MAX_SUPERSESSION_RETRIES) {
       attempt += 1;
@@ -68,10 +72,12 @@ function createMemoryService({
         return outcome;
       } catch (error) {
         if (isCaptureKeyConflict(error)) {
-          const scope = input.scope === "project" ? "project" : "thread";
-          const owner =
-            scope === "project" ? input.projectKey : input.ownerThreadId || input.threadId;
-          const existing = storage.memories.getByCaptureKey(owner, input.captureKey, { scope });
+          // Product Memory is thread-only, so the capture owner is always the
+          // calling thread — never a project key.
+          const existing = storage.memories.getByCaptureKey(
+            input.ownerThreadId || input.threadId,
+            input.captureKey
+          );
           if (existing) return { memory: existing, created: false, superseded: [] };
         }
         if (isActiveUniqueConflict(error) && attempt < MAX_SUPERSESSION_RETRIES) {
@@ -85,27 +91,18 @@ function createMemoryService({
 
   function captureOnce(input) {
     normalizeProductKind(input?.kind);
-    const scope = input.scope === "project" ? "project" : "thread";
+    // Product Memory is thread-only (ADR-005): scope is fixed here rather than
+    // taken from input, so no caller can write a project-scoped row.
+    const scope = "thread";
     const captureKey = requiredString(input?.captureKey, "memory capture key");
-    const ownerThreadId =
-      scope === "thread"
-        ? requiredString(input?.ownerThreadId || input?.threadId, "thread id")
-        : null;
-    const projectKey =
-      scope === "project" ? requiredString(input?.projectKey, "project key") : null;
+    const ownerThreadId = requiredString(input?.ownerThreadId || input?.threadId, "thread id");
     const originThreadId = nullableString(
       input?.originThreadId || input?.threadId || ownerThreadId
     );
 
     return storage.transaction(() => {
-      const existing = storage.memories.getByCaptureKey(
-        scope === "project" ? projectKey : ownerThreadId,
-        captureKey,
-        { scope }
-      );
+      const existing = storage.memories.getByCaptureKey(ownerThreadId, captureKey);
       if (existing) return { memory: existing, created: false, superseded: [] };
-
-      ensureProjectRow(projectKey, input.projectIdentity);
 
       const id = input.id || idFactory();
       const supersessionKey = nullableString(input.supersessionKey);
@@ -136,9 +133,7 @@ function createMemoryService({
       };
       if (supersessionKey || topicForPeers) {
         retire({
-          scope,
           ownerThreadId,
-          projectKey,
           supersessionKey,
           topic: topicForPeers,
         });
@@ -148,7 +143,7 @@ function createMemoryService({
         id,
         scope,
         ownerThreadId,
-        projectKey,
+        projectKey: null,
         originThreadId,
         captureKey,
         supersessionKey,
@@ -176,31 +171,6 @@ function createMemoryService({
         superseded: previous.map((item) => item.id),
       };
     });
-  }
-
-  function ensureProjectRow(projectKey, identity) {
-    if (!projectKey || !storage.db) return;
-    const existing = storage.db
-      .prepare("SELECT 1 FROM projects WHERE project_key = ?")
-      .get(projectKey);
-    if (existing) return;
-    const now = nowIso(clock);
-    storage.db
-      .prepare(
-        `
-        INSERT OR IGNORE INTO projects
-          (project_key, identity_kind, canonical_path, created_at, updated_at, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `
-      )
-      .run(
-        projectKey,
-        identity?.kind || "directory",
-        identity?.canonicalPath || projectKey,
-        now,
-        now,
-        identity ? JSON.stringify(identity) : null
-      );
   }
 
   /**
@@ -251,8 +221,7 @@ function createMemoryService({
     const outcome = capture({
       id: input.id,
       threadId,
-      ownerThreadId: scope === "thread" ? threadId : null,
-      projectKey: scope === "project" ? thread.projectKey : null,
+      ownerThreadId: threadId,
       originThreadId: threadId,
       scope,
       projectIdentity: thread
@@ -345,12 +314,8 @@ function createMemoryService({
     if (!thread) throw new Error(`Thread ${threadId} does not exist.`);
     const scope = resolveProductScope(kind, candidate.scope, thread);
 
-    const ownerThreadId = scope === "thread" ? threadId : null;
-    const projectKey = null;
     const existing = storage.memories.listActiveProductByTopic({
-      scope,
-      ownerThreadId,
-      projectKey,
+      ownerThreadId: threadId,
       topic,
     })[0];
     const contentHash = hashMemoryWriteContent(content);
@@ -821,6 +786,12 @@ function inferWriteChannel(input = {}) {
  * Product Memory is always thread-scoped.
  * Cross-session project truth must be written to docs/ and retrieved as project-doc.
  */
+function assertNotRetiredWriteScope(scope) {
+  if (scope === "project") {
+    throw new Error(PROJECT_SCOPE_RETIRED_MESSAGE);
+  }
+}
+
 function resolveProductScope(_kind, requested, _thread) {
   if (requested === "project") {
     throw new Error(PROJECT_SCOPE_RETIRED_MESSAGE);

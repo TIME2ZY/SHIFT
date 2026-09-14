@@ -631,6 +631,62 @@ test("createProduct rejects cross-kind supersession keys and cross-thread source
   }
 });
 
+test("capture rejects retired project scope and stores writes thread-only", () => {
+  const storage = createFixture();
+  try {
+    assert.throws(
+      () => capture(storage, { id: "project-write", scope: "project" }),
+      /Project-scoped memory is retired/
+    );
+
+    // A caller-supplied project key cannot smuggle a project row in either:
+    // the write path fixes scope/owner, not the caller.
+    const written = capture(storage, {
+      id: "thread-write",
+      projectKey: "caller-project-key",
+    });
+    assert.equal(written.created, true);
+    assert.equal(written.memory.scope, "thread");
+    assert.equal(written.memory.projectKey, null);
+    assert.equal(written.memory.ownerThreadId, "thread-1");
+    assert.equal(storage.memories.listActiveByProject("caller-project-key").length, 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("writeMemoryCandidate rejects project scope on the server side", () => {
+  const storage = createFixture();
+  storage.invocations.start({
+    id: "invocation-scope",
+    threadId: "thread-1",
+    windowId: "window-1",
+    agentId: "codex",
+  });
+  try {
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime.database",
+            content: "SQLite is available at runtime.",
+            scope: "project",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-scope",
+            agentId: "codex",
+          }
+        ),
+      /Project-scoped memory is retired/
+    );
+    assert.equal(storage.memory.listActive("thread-1").length, 0);
+  } finally {
+    storage.close();
+  }
+});
+
 test("capture rolls back new memory and supersession when projection fails", () => {
   const storage = createFixture();
   try {
