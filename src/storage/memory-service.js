@@ -586,14 +586,6 @@ function createMemoryService({
     const relatedKey = memory.supersessionKey;
     let related = [];
     if (relatedKey) {
-      if (memory.scope === "project" && memory.projectKey) {
-        related = storage.memories
-          .listActiveByProject(memory.projectKey, { limit: 200 })
-          .concat(
-            // include retired peers via origin listing is expensive; scan project by supersession in SQL
-            []
-          );
-      }
       related = storage.db
         ? storage.db
             .prepare(
