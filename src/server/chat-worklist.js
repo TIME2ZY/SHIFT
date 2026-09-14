@@ -8,19 +8,10 @@ const {
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
 const { createRunLifecycle } = require("../agents/event-protocol");
-const { projectTaskContext } = require("../storage/collaboration-read-model");
 const { recordContextRestoration } = require("../session/context-restoration");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
-const {
-  deriveThreadParticipation,
-  renderCollaborationRules,
-} = require("../agents/collaboration-rules");
-const {
-  IMPLEMENTATION_GATE_STATUS,
-  renderImplementationGateBlock,
-  renderOutcomeEvidenceBlock,
-} = require("../agents/workflow-gates");
+const { IMPLEMENTATION_GATE_STATUS } = require("../agents/workflow-gates");
 const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
 const { finalizeA2ARoutes, isEffectiveHandoffHop } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
@@ -50,6 +41,7 @@ const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
 const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
+const { assemblePrompt } = require("./chat-prompt-assembly");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -97,7 +89,6 @@ async function runChatWorklist(ctx) {
     recallService,
     memoryService,
     storage,
-    agentIdentity,
     agentHandoff,
     durable,
     events,
@@ -119,11 +110,7 @@ async function runChatWorklist(ctx) {
     userMessageId,
     turnPrompt,
     skillNames,
-    augmentedPrompt,
-    nativeSkillDelivery = false,
-    bootstrapPacket,
     bootstrapInject,
-    bootstrapRecovery = [],
     apiUrl,
     appendToSession,
     parseA2AMentions,
@@ -244,145 +231,14 @@ async function runChatWorklist(ctx) {
           },
         };
       }
-
-      // Prompt layout (top → bottom):
-      //   1. Agent identity (every turn, including A2A)
-      //   2. Collaboration rules (every turn: soft ban nested subagents; A2A uses compact)
-      //   3. Session bootstrap (first turn only: coords + digest + recall)
-      //   4. Light session header on later turns (correct agent label)
-      //   5. Task body (user/skills or Receive Bundle + current Duty Skills)
-      //   6. Callback instructions
-      const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
-      const enabledProviderIds = new Set(
-        storage?.threadSeats?.listEnabledForThread?.(sessionId).map((seat) => seat.providerId) || [
-          agent,
-        ]
-      );
-      const enabledAgents = Object.fromEntries(
-        Object.entries(AGENTS).filter(
-          ([providerId]) =>
-            enabledProviderIds.has(providerId) &&
-            (!ctx.availability || ctx.availability.isRoutable(providerId))
-        )
-      );
-      const participation = deriveThreadParticipation({
-        bindings: storage?.invocationDutyBindings?.listForThread?.(sessionId) || [],
-        seats: storage?.threadSeats?.listForThread?.(sessionId) || [],
-        invocations: storage?.invocations?.listForThread?.(sessionId) || [],
-        agents: AGENTS,
-        current: {
-          seatId: dutyBinding?.seatId || null,
-          providerId: agent,
-          label: agentConfig.label || agent,
-          duty: dutyBinding?.duty || null,
-        },
+      await assemblePrompt(ctx, turnRunState, {
+        agent,
+        agentConfig,
+        i,
+        dutyBinding,
+        parentInvocationId,
+        triggerType,
       });
-      const collaborationBlock = renderCollaborationRules(agent, enabledAgents, participation);
-      const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
-        dutyBinding?.duty,
-        collabTaskRegistry?.getTask(sessionId) || null,
-        {
-          branch: runWorkspace.branch || "",
-          modelId: agentConfig.model || "",
-        }
-      );
-      const enforcesImplementationPermission =
-        dutyBinding?.enforcementLevel === "enforced" &&
-        agentConfig.runtimeCapabilities?.permissionCallbacks === true;
-      turnRunState.implementationPermission = null;
-      if (enforcesImplementationPermission) {
-        if (
-          collabTaskRegistry &&
-          typeof collabTaskRegistry.ensureImplementationPlanRequired === "function"
-        ) {
-          const existing = collabTaskRegistry.implementationPermission(sessionId);
-          collabTaskRegistry.ensureImplementationPlanRequired(sessionId, {
-            requestedBy: parentInvocationId ? null : "user",
-            force: triggerType === "user-message" && existing.allowed,
-          });
-          turnRunState.implementationPermission =
-            collabTaskRegistry.implementationPermission(sessionId);
-        } else {
-          turnRunState.implementationPermission = {
-            allowed: false,
-            status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
-            planHash: null,
-            gate: { status: IMPLEMENTATION_GATE_STATUS.REQUIRED },
-          };
-        }
-      }
-      const taskSnapshot = collabTaskRegistry?.getTask(sessionId);
-      const recoveryGoal =
-        taskSnapshot?.goal ||
-        turnRunState.session.messages?.find((m) => m.role === "user")?.content ||
-        turnPrompt;
-      const taskContext = sessionBootstrap.renderTaskContext(
-        projectTaskContext(taskSnapshot, dutyBinding)
-      );
-      const recoveryEvidence = i === 0 ? [...bootstrapRecovery] : [];
-      const recoveryContext = {
-        recoveryEvidence,
-        threadId: sessionId,
-        sessionId,
-        agentId: agent,
-        agent: agentConfig,
-        workspaceKey,
-        invocationSource: recallService,
-        digestSource: storage?.digests,
-        windowSealSource: storage,
-        logger: log,
-      };
-      const promptParts = [
-        identityBlock,
-        collaborationBlock,
-        outcomeEvidenceBlock,
-        taskContext,
-      ].filter(Boolean);
-      if (i === 0) {
-        promptParts.push(bootstrapPacket, augmentedPrompt);
-      } else {
-        if (!turnRunState.resumeSessionId && sessionBootstrap.buildDigest) {
-          promptParts.push(
-            await sessionBootstrap.buildDigest({
-              ...recoveryContext,
-              generation: turnRunState.openWindow?.generation || 1,
-            })
-          );
-        } else {
-          promptParts.push(
-            sessionBootstrap.buildIdentity({
-              threadId: sessionId,
-              sessionId,
-              agent: agentConfig,
-              generation: turnRunState.openWindow?.generation || 1,
-            })
-          );
-        }
-        promptParts.push(turnRunState.agentPrompt);
-        if (turnRunState.turnSkillNames.length > 0) {
-          sendSse(res, "skills-active", { skills: turnRunState.turnSkillNames, agent, a2a: true });
-        }
-      }
-      if (turnRunState.implementationPermission) {
-        promptParts.push(
-          renderImplementationGateBlock(
-            turnRunState.implementationPermission.gate || {
-              status: turnRunState.implementationPermission.status,
-              planHash: turnRunState.implementationPermission.planHash,
-              approvedPlanHash: turnRunState.implementationPermission.allowed
-                ? turnRunState.implementationPermission.planHash
-                : null,
-            }
-          )
-        );
-      }
-      promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
-      turnRunState.promptForAgent = promptParts.filter(Boolean).join("\n\n");
-      if (i === 0 && nativeSkillDelivery) {
-        log.info?.(
-          `[skills] native worktree delivery at ${runWorkspace.worktreeDir}; prompt fallback skipped`
-        );
-      }
 
       // Tracker from open window *before* this prompt (for PRE projection).
       turnRunState.healthTracker = createTurnTracker(agent, turnRunState.openWindow, {
@@ -464,13 +320,13 @@ async function runChatWorklist(ctx) {
             withBilling: false,
           });
           if (sessionBootstrap.buildDigest)
-            promptParts.push(
+            turnRunState.promptParts.push(
               await sessionBootstrap.buildDigest({
-                ...recoveryContext,
+                ...turnRunState.recoveryContext,
                 generation: turnRunState.openWindow?.generation || 2,
               })
             );
-          turnRunState.promptForAgent = promptParts.filter(Boolean).join("\n\n");
+          turnRunState.promptForAgent = turnRunState.promptParts.filter(Boolean).join("\n\n");
         }
       }
       turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
@@ -576,7 +432,7 @@ async function runChatWorklist(ctx) {
           assistantContent: "",
           invocationState: "pre-call-rotate",
           workspaceKey,
-          userGoal: recoveryGoal,
+          userGoal: turnRunState.recoveryGoal,
           task: collabTaskRegistry?.getTask(sessionId),
           workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
             available: false,
@@ -591,7 +447,7 @@ async function runChatWorklist(ctx) {
           sendSse(res, "window-sealed", capture.event);
         }
         if (capture?.captured && sessionBootstrap.buildDigest) {
-          const recovery = await sessionBootstrap.buildDigest(recoveryContext);
+          const recovery = await sessionBootstrap.buildDigest(turnRunState.recoveryContext);
           turnRunState.promptForAgent += "\n\n" + recovery;
           turnRunState.healthTracker.addInput(recovery.length + 2);
         }
@@ -690,7 +546,7 @@ async function runChatWorklist(ctx) {
         [ENV.BASE_DIR]: runWorkspace.baseDir,
         [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
         [ENV.BRANCH]: runWorkspace.branch || "",
-        ...(enforcesImplementationPermission
+        ...(turnRunState.enforcesImplementationPermission
           ? {
               [ENV.IMPLEMENTATION_GATE]: turnRunState.implementationPermission?.allowed
                 ? IMPLEMENTATION_GATE_STATUS.APPROVED
@@ -801,7 +657,7 @@ async function runChatWorklist(ctx) {
           partial,
           invocationState: partial ? "sealed-partial" : "sealed-complete",
           sealMeta,
-          userGoal: recoveryGoal,
+          userGoal: turnRunState.recoveryGoal,
           task: collabTaskRegistry?.getTask(sessionId),
           workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
             available: false,
@@ -947,7 +803,7 @@ async function runChatWorklist(ctx) {
           runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
           if (sessionBootstrap.buildDigest) {
             const recovery = await sessionBootstrap.buildDigest({
-              ...recoveryContext,
+              ...turnRunState.recoveryContext,
               generation: retryRun.window?.generation || 2,
             });
             turnRunState.promptForAgent += "\n\n" + recovery;
@@ -961,8 +817,8 @@ async function runChatWorklist(ctx) {
           threadId: sessionId,
           invocationId: turnRunState.activeInvocationId,
           prompt: turnRunState.promptForAgent,
-          seals: recoveryEvidence,
-          taskVersion: taskSnapshot?.version,
+          seals: turnRunState.recoveryEvidence,
+          taskVersion: turnRunState.taskSnapshot?.version,
         });
         const streamResult = await runChildStream({
           spawnRunner,
