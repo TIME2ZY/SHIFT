@@ -20,7 +20,7 @@ import { useSessionTracesQuery } from "../features/observability/queries";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
 
-const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running"]);
+const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running", "reconnecting"]);
 const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
 const ACTIVE_PROJECT_KEY = "shift.active-project-key";
 
@@ -39,6 +39,8 @@ function statusLabel(status: RunStatus | undefined): string | null {
   switch (status) {
     case "connecting":
       return "连接中";
+    case "reconnecting":
+      return "重连中";
     case "running":
       return "运行中";
     case "done":

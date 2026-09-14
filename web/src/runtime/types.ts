@@ -87,6 +87,10 @@ export interface SessionRun {
     clientTurnId: string;
   };
   error?: string;
+  /** Non-zero while the SSE connection dropped and is retrying with backoff. */
+  reconnectAttempt?: number;
+  /** Delay in ms before the next reconnect attempt, for display. */
+  reconnectDelayMs?: number;
 }
 
 export interface SessionRunState {
@@ -193,5 +197,12 @@ export type SessionRunAction =
   | { type: "run/done"; sessionId: string }
   | { type: "run/failed"; sessionId: string; error: string }
   | { type: "run/aborted"; sessionId: string }
+  | {
+      type: "run/reconnecting";
+      sessionId: string;
+      attempt: number;
+      delayMs: number;
+    }
+  | { type: "run/connected"; sessionId: string }
   | { type: "run/synced"; sessionId: string }
   | { type: "session/disposed"; sessionId: string };

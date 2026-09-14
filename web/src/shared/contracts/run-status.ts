@@ -12,7 +12,8 @@
  * - client abort                    → run aborted
  */
 
-export type UiRunStatus = "idle" | "connecting" | "running" | "done" | "error" | "aborted";
+export type UiRunStatus =
+  "idle" | "connecting" | "running" | "reconnecting" | "done" | "error" | "aborted";
 
 export type UiLiveMessageStatus = "thinking" | "streaming" | "done" | "error" | "aborted";
 
@@ -25,6 +26,15 @@ export const SERVER_INVOCATION_TERMINAL = Object.freeze({
 
 export function isTerminalUiRunStatus(status: UiRunStatus | string | undefined): boolean {
   return status === "done" || status === "error" || status === "aborted";
+}
+
+/**
+ * True while a live run has given up on the SSE connection but the run itself
+ * may still be active server-side. `reconnecting` is an observable degraded
+ * state, not a terminal one.
+ */
+export function isDegradedUiRunStatus(status: UiRunStatus | string | undefined): boolean {
+  return status === "reconnecting";
 }
 
 /**
