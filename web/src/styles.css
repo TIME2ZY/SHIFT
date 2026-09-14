@@ -2357,13 +2357,6 @@ body {
   background: var(--surface-instrument);
 }
 
-.react-panel-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  min-height: 52px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
 .react-panel-title {
   display: flex;
   min-height: 58px;
@@ -3288,39 +3281,6 @@ body {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.react-panel-tabs button {
-  position: relative;
-  color: var(--text-tertiary);
-  font: 600 13px/1 var(--font-ui);
-}
-
-.react-panel-tabs button::after {
-  position: absolute;
-  right: var(--space-3);
-  bottom: 0;
-  left: var(--space-3);
-  height: 2px;
-  background: transparent;
-  content: "";
-}
-
-.react-panel-tabs button:hover {
-  color: var(--text-secondary);
-}
-
-.react-panel-tabs button[data-active] {
-  color: var(--text-primary);
-}
-
-.react-panel-tabs button[data-active]::after {
-  background: var(--accent);
-}
-
-.react-panel-tabs button:focus-visible {
-  outline: none;
-  box-shadow: inset var(--focus-ring);
 }
 
 .react-panel-body {
@@ -4480,10 +4440,6 @@ body {
     stroke: currentColor;
     stroke-linecap: round;
     stroke-width: 1.8;
-  }
-
-  .react-panel-tabs {
-    min-height: 52px;
   }
 
   .react-panel-body {

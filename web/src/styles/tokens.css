@@ -143,29 +143,6 @@
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Explicit theme: always set via JS (light | dark) */
-:root[data-theme="light"] {
-  color-scheme: light;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #000 40%, transparent);
-  --shadow-md: 0 6px 22px color-mix(in srgb, #000 45%, transparent);
-  --shadow-lg: 0 14px 40px color-mix(in srgb, #000 55%, transparent);
-  --overlay-scrim: color-mix(in srgb, #000 55%, transparent);
-}
-
-:root[data-density="compact"] {
-  --density: 0.82;
-  --btn-height: 32px;
-  --btn-height-sm: 26px;
-  --sidebar-w: 220px;
-  --sidebar-w-narrow: 180px;
-  --instrument-w: 260px;
-  --instrument-w-narrow: 210px;
-}
-
 /* Agent color slots via data-agent-color="1".."6" */
 [data-agent-color="1"] {
   --agent-color: var(--agent-1);

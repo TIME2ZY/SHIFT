@@ -85,12 +85,3 @@ export function useMemoryUsageQuery(sessionId: string | null, enabled: boolean) 
     enabled: enabled && Boolean(sessionId),
   });
 }
-
-export function useMemoryInjectQuery(sessionId: string | null) {
-  return useQuery({
-    queryKey: queryKeys.sessions.memoryInject(sessionId ?? ""),
-    queryFn: async (): Promise<MemoryInjectEvent | null> => null,
-    enabled: false,
-    initialData: null,
-  });
-}
