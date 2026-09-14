@@ -405,6 +405,7 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 - A2A 业务 finalize = 单一 `finalizeA2ARoutes`；handoff lifecycle 由 SQLite repository 仲裁。
 - Message 物理 insert = 单一 `appendMessage`（热路径）。
 - Invocation 调度终态 = 单一 `completeInvocation`。
+- Secret 比较 = 单一 `shared/secret-compare` 的 `safeEqual`（恒定时间）。凭据生成一律 CSPRNG：UI token 与 callback token 均为 `crypto.randomBytes(32)`，且 invocation id 与 callback token 使用独立熵源——invocation id 经 SSE/URL/UI 广泛公开，若共用 `Math.random()` 生成器，观测到 id 即可恢复 PRNG 状态并预测配对凭据。
 - 产品记忆写 = `writeMemoryCandidate`；协作事件 = `memoryCapture`（无 memoryService）。
 
 ---

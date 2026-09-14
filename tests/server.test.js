@@ -2737,6 +2737,37 @@ test("createInvocation returns expiresAt and stamps expiresAt on the token", () 
   callbacks.unregisterThread(sessionId);
 });
 
+test("createInvocation draws the callback token from an independent CSPRNG source", () => {
+  const sessionId = "session-token-entropy";
+  callbacks.registerThread(sessionId, { tokens: new Map(), controller: new AbortController() });
+  try {
+    const issued = new Set();
+    for (let i = 0; i < 64; i += 1) {
+      const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, "codex");
+      // The invocation id is published (SSE, URLs, UI); the callback token is
+      // the secret that authenticates the MCP bridge. They must not share a
+      // generator, and the token must be unpredictable CSPRNG output.
+      assert.notEqual(invocationId, callbackToken);
+      assert.ok(!invocationId.includes(callbackToken));
+      assert.ok(callbackToken.length >= 32, "token carries 256 bits of entropy");
+      issued.add(callbackToken);
+    }
+    assert.equal(issued.size, 64, "no duplicate tokens across 64 invocations");
+  } finally {
+    callbacks.unregisterThread(sessionId);
+  }
+});
+
+test("safeEqual compares secrets in constant time and never throws", () => {
+  const { safeEqual } = require("../src/shared/secret-compare");
+  assert.equal(safeEqual("abc", "abc"), true);
+  assert.equal(safeEqual("abc", "abd"), false);
+  // Differing lengths must not throw — timingSafeEqual would.
+  assert.equal(safeEqual("a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), false);
+  assert.equal(safeEqual(null, undefined), true);
+  assert.equal(safeEqual(undefined, "x"), false);
+});
+
 test("SHIFT_TOKEN_TTL_MS overrides the default TTL", () => {
   const sessionId = "session-ttl-2";
   const threadCtx = {

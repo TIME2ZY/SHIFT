@@ -1,5 +1,7 @@
+const crypto = require("node:crypto");
 const { getMaxA2ADepth } = require("./routing");
 const { ENV } = require("../shared/brand");
+const { safeEqual } = require("../shared/secret-compare");
 const { finalizeA2ARoutes } = require("./a2a-finalize");
 const { processWorkflowEvidenceOutput } = require("./workflow-evidence");
 const { AGENTS } = require("./catalog");
@@ -30,8 +32,24 @@ const DEFAULT_TOKEN_TTL_MS = 30 * 60 * 1000;
 // }
 const activeThreads = new Map();
 
-function generateToken() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+/**
+ * Monotonic-ish id for one agent run. The Date.now() prefix keeps ids sortable
+ * for debugging; the random tail comes from the CSPRNG so ids are unpredictable
+ * even though they are published (SSE, URLs, UI).
+ */
+function generateInvocationId() {
+  return `${Date.now()}-${crypto.randomBytes(16).toString("base64url")}`;
+}
+
+/**
+ * Credential that authenticates an agent subprocess to the MCP bridge routes.
+ * Pure CSPRNG output and an entropy source independent of the invocation id —
+ * `Math.random()` is a xorshift128+ PRNG whose internal state can be recovered
+ * from observed outputs, and the invocation id generated right before this
+ * token is published widely, so a shared generator would leak the credential.
+ */
+function generateCallbackToken() {
+  return crypto.randomBytes(32).toString("base64url");
 }
 
 function getTokenTtlMs() {
@@ -105,8 +123,8 @@ function cleanExpiredTokens(thread) {
  */
 function createInvocation(threadId, agentId) {
   const thread = activeThreads.get(threadId);
-  const invocationId = generateToken();
-  const callbackToken = generateToken();
+  const invocationId = generateInvocationId();
+  const callbackToken = generateCallbackToken();
   const now = Date.now();
   const expiresAt = now + getTokenTtlMs();
 
@@ -141,7 +159,7 @@ function validateToken(threadId, invocationId, callbackToken) {
   cleanExpiredTokens(thread);
   const record = thread.tokens.get(invocationId);
   if (!record || record.retired) return false;
-  if (record.callbackToken !== callbackToken) return false;
+  if (!safeEqual(record.callbackToken, callbackToken)) return false;
   if (thread.currentInvocationId === invocationId) {
     record.expiresAt = Math.max(record.expiresAt || 0, Date.now() + getTokenTtlMs());
     return true;
