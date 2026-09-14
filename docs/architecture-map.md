@@ -91,14 +91,14 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.1 Invocation 生命周期（start / event / finish）
 
-| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                                                                                   | 落库                                                                                           |
-| ------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                                                  | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
-| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor                     | `invocation_events`                                                                            |
-| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-worklist 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed，字面量位于 chat-worklist，chat-routes 只读取终态做汇总） | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
-| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                                                 | 同上                                                                                           |
-| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                                             | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
-| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                                                                             | 避免长期 `active`                                                                              |
+| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                                                                                                                                                                                      | 落库                                                                                           |
+| ------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                                                                                                                                                     | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
+| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor                                                                                                                        | `invocation_events`                                                                            |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-worklist 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed；终态分支收口在 `chat-terminal.closeTurnFailure`，字面量随之落在该模块，`empty-emergency` 的空回答重放判定仍在 chat-worklist；chat-routes 只读取终态做汇总） | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
+| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                                                                                                                                                    | 同上                                                                                           |
+| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                                                                                                                                                | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
+| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                                                                                                                                                                                | 避免长期 `active`                                                                              |
 
 **结论（终态）— B-1 已落地（2026-08-07）：**
 
@@ -430,6 +430,10 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 | session  | bootstrap, health, sealer；旧 transcript 模块已删除                                                                                                                          |
 | worktree | manager, delivery-verifier                                                                                                                                                   |
 
+`chat-worklist`、`collab-task-registry`、`recall-service`、`memory-service` 仍是本表所列的
+热路径入口，但内部已按 facade + 兄弟模块拆分；边界与职责见
+「P2 结构拆分与前端守卫（2026-09-14）」。
+
 公开进程关闭入口是 `server.shutdown`（`src/server/index.js`）。`src/server/main.js`
 与 `src/server/recovery-verification.js` 必须 await 该入口；只 `server.close` 不会等待
 `chatRuntime.shutdown` 与 SQLite 释放。恢复演练的产品 API 核验走同一关闭合同。
@@ -632,9 +636,39 @@ Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 p
 
 ---
 
-最后核对日期：2026-09-14，覆盖以上全部章节，含「运行修复补充（2026-09-09）」与
-Canonical JSONL 归档退役说明。核对确认本文件引用的代码锚点（路径、模块名、迁移编号）
-在当前实现中真实存在；被声明删除的旧入口（`role-contracts.js`、`/api/chat`、
-`mirrorLastMessage`、storage_outbox、transcript 模块）确实零残留。下列两处描述已按
-当前实现修正：产品终态 reason 字面量的归属（见 §3.1）与产品记忆写入链的中间层级
-（见 §3.4）。
+### P2 结构拆分与前端守卫（2026-09-14）
+
+三个越过 1000 行硬线的文件按「facade + 同目录兄弟模块」拆分，facade 对外方法集逐字不变，
+消费方（`a2a-finalize` / `handoff-policy` / `server/index.js` / callback-routes 等）零改动：
+
+| facade（拆分前后）                   | 兄弟模块与职责                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat-worklist.js` 1663 → 851        | `chat-turn-state`（回合可变状态 + tracker）、`chat-prompt-assembly`（identity / 协作规则 / taskContext / digest）、`chat-invocation-starter`（启动 + 启动期 SSE 广播）、`chat-memory-inject`（bootstrap 与 a2a 共用 `memory_injected` 单一发射点）、`chat-seal-coordination`（pre-call rotate / post-turn soft seal / `sealContextWindow`）、`chat-terminal`（四个终态分支合一为 `closeTurnFailure`） |
+| `collab-task-registry.js` 1203 → 232 | `task-gate-recorder`（六个 submit/record 门禁走同一 `applyGateUpdate` 骨架）、`task-route-policy`（`PHASE_BY_INTENT` 映射表 + 三个路由阻断判定）、`task-permission`（权限与就绪查询）、`task-evidence-reset`（31 处 `delete task.artifacts.*` 收口为 `clearDownstreamEvidence(task, { from, keep })`，删除集合逐字不变）、`task-updates`（goal / progress）                                           |
+| `recall-service.js` 1073 → 112       | `recall-search`（FTS / vector 融合、候选收集与作用域解析）、`recall-inject-pack`（`retrieveForTurn` 的 recency / related / vector 三通道）、`recall-metrics`（指标与降级文案）                                                                                                                                                                                                                        |
+| `memory-service.js` 903 → 605        | `memory-read`（六个读查询 + `enrichMemory` 的 supersession 关联查询）、`memory-write-evidence`（锚定证据组装 + 内容哈希，`hashMemoryWriteContent` 随之迁入以保持单向依赖）                                                                                                                                                                                                                            |
+
+- facade 只保留组合与不属于任何兄弟的关注点；兄弟模块是工厂，接收 deps / core 句柄，
+  依赖单向（inject-pack → search、memory-service → memory-write-evidence）以避免 require 环。
+- 产品记忆写入口仍是 `writeMemoryCandidate` → `createProduct` → `capture` → `captureOnce` →
+  `memories.create`。`capture` 保留为公开低层入口：`createProduct` 内部调用它，且 11 处测试
+  fixture 直接用它写入固定 id 的行；删除它会迫使 fixture 改走 `writeMemoryCandidate`，属于
+  语义改写而非结构整理（B-4 的作用域拒绝守卫在三个入口上各自生效，未因拆分放松）。
+- `enrichMemory` 的逐行 supersession 查询仍按条目执行；拆分只把它集中到单一可见位置，
+  批量化是独立的性能改动，未在本轮。
+- `src/agents/tool-classification.js` → `src/shared/tool-classification.js`（纯函数、零依赖）。
+  `storage/offline/audit-storage` 不再反向依赖 `agents`，跨层共享统一落 `src/shared/`；
+  §5.2 的「禁止从 server/agents require storage/offline/*」方向不变。
+- 前端并发与无障碍守卫：`useChatActions.send` 在已接受运行（有 `traceId` 且未到终态）未结束前
+  直接拒绝并提示，待接受的启动仍走 `startControllers` 的 supersede-abort，乐观链与
+  abort-on-supersede 语义不变；`MessageList` 的 `role="log"` 在流式期以 `aria-busy` 静默，
+  仅终态 / 错误帧播报，运行错误另经 toast 的 polite 区通知。
+
+---
+
+最后核对日期：2026-09-14，覆盖以上全部章节，含「运行修复补充（2026-09-09）」、
+Canonical JSONL 归档退役说明与「P2 结构拆分与前端守卫（2026-09-14）」。核对确认本文件
+引用的代码锚点（路径、模块名、迁移编号）在当前实现中真实存在；被声明删除的旧入口
+（`role-contracts.js`、`/api/chat`、`mirrorLastMessage`、storage_outbox、transcript 模块）
+确实零残留。下列三处描述已按当前实现修正：产品终态 reason 字面量的归属（见 §3.1）、
+产品记忆写入链的中间层级（见 §3.4）、三个 1000+ 行文件的模块边界（见本节）。
