@@ -21,8 +21,6 @@ const {
   mergeWriteStats,
   buildMemoryWriteMetrics,
   logMemoryWriteMetrics,
-  buildMemoryInjectPayload,
-  collectInjectIdSets,
 } = require("../storage/memory-metrics");
 const { refreshDigest } = require("../storage/memory-digest");
 const {
@@ -43,6 +41,7 @@ const { activeSkillNames } = require("../agents/duty-routing");
 const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
 const { assemblePrompt } = require("./chat-prompt-assembly");
 const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
+const { announceMemoryInject } = require("./chat-memory-inject");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -406,35 +405,10 @@ async function runChatWorklist(ctx) {
         // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
       }
       if (i === 0) {
-        const injectPayload = buildMemoryInjectPayload({
-          sessionId,
-          agent,
+        announceMemoryInject(ctx, turnRunState, {
           source: "bootstrap",
-          items: bootstrapInject.deliveredItems || bootstrapInject.items,
-          stats: bootstrapInject.stats,
-        });
-        const injectIds = collectInjectIdSets(bootstrapInject, injectPayload.items);
-        sendSse(res, "memory-inject", injectPayload);
-        storage?.memoryEvents?.recordSafe?.({
-          eventType: "memory_injected",
-          threadId: sessionId,
-          invocationId,
-          agentId: agent,
-          operationKey: `inject:${invocationId}:bootstrap`,
-          payloadVersion: 1,
-          payload: {
-            source: "bootstrap",
-            selectedIds: injectIds.selectedIds,
-            deliveredIds: injectIds.deliveredIds,
-            droppedIds: injectIds.droppedIds,
-            memoryIds: injectIds.deliveredIds,
-            renderedIds: injectIds.deliveredIds,
-            availability: injectPayload.availability,
-            funnel: injectPayload.funnel,
-            delivered: Number(injectPayload.funnel?.delivered || injectIds.deliveredIds.length),
-            selected: Number(injectPayload.funnel?.selected || injectIds.selectedIds.length),
-            truncated: Boolean(injectPayload.funnel?.truncated),
-          },
+          agent,
+          inject: bootstrapInject,
         });
       }
 
@@ -453,35 +427,10 @@ async function runChatWorklist(ctx) {
         logA2AInjectMetrics(injectMetrics, log);
         sendSse(res, "handoff-metrics", injectMetrics);
         if (pending.inject) {
-          const a2aInject = buildMemoryInjectPayload({
-            sessionId,
-            agent: pending.agent,
+          announceMemoryInject(ctx, turnRunState, {
             source: "a2a",
-            items: pending.inject.deliveredItems || pending.inject.items,
-            stats: pending.inject.stats,
-          });
-          const a2aIds = collectInjectIdSets(pending.inject, a2aInject.items);
-          sendSse(res, "memory-inject", a2aInject);
-          storage?.memoryEvents?.recordSafe?.({
-            eventType: "memory_injected",
-            threadId: sessionId,
-            invocationId,
-            agentId: pending.agent,
-            operationKey: `inject:${invocationId}:a2a`,
-            payloadVersion: 1,
-            payload: {
-              source: "a2a",
-              selectedIds: a2aIds.selectedIds,
-              deliveredIds: a2aIds.deliveredIds,
-              droppedIds: a2aIds.droppedIds,
-              memoryIds: a2aIds.deliveredIds,
-              renderedIds: a2aIds.deliveredIds,
-              availability: a2aInject.availability,
-              funnel: a2aInject.funnel,
-              delivered: Number(a2aInject.funnel?.delivered || a2aIds.deliveredIds.length),
-              selected: Number(a2aInject.funnel?.selected || a2aIds.selectedIds.length),
-              truncated: Boolean(a2aInject.funnel?.truncated),
-            },
+            agent: pending.agent,
+            inject: pending.inject,
           });
         }
       }
