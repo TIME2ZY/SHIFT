@@ -52,10 +52,6 @@ function isImplementationDuty(duty) {
   return ["plan", "implement", "fix"].includes(String(duty || "").toLowerCase());
 }
 
-function isDiscussDuty(duty) {
-  return String(duty || "").toLowerCase() === "discuss";
-}
-
 function isDeliverDuty(duty) {
   return String(duty || "").toLowerCase() === "deliver";
 }
@@ -1202,7 +1198,6 @@ module.exports = {
   hashEvidence,
   isReviewDuty,
   isImplementationDuty,
-  isDiscussDuty,
   isDeliverDuty,
   normalizePhase,
 };

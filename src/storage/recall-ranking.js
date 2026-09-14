@@ -676,7 +676,6 @@ module.exports = {
   invocationFromSqlite,
   recallItemToTranscriptHit,
   requiredString,
-  extractSearchTerms,
   clampSearchQuery,
   isWeakQuery,
 };

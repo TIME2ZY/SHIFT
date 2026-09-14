@@ -1065,7 +1065,6 @@ function collectSearchHitIds(hits = []) {
 module.exports = {
   createRecallService,
   recallItemToTranscriptHit,
-  extractSearchTerms,
   LAYER_MEMORY,
   LAYER_MESSAGE,
   LAYER_EVIDENCE,
