@@ -441,6 +441,7 @@ Agent 子进程环境是**拒绝名单**而非白名单（provider CLI 需要 PA
 `replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式
 注入 SQLite-backed source，模块不再默认读取文件 transcript。Agent 的 product Memory
 写入说明固定为 thread scope，不再引导已退役的 project Memory 写入。
+发往第三方 LLM 的降级文案（Bootstrap Active Memory Card、recall 降级警告）**只允许固定文案与机读 `availability.reason` 常量**（`retrieve_failed` / `recency_failed` / `listActive_failed` 等）。better-sqlite3 的错误消息含 DB 绝对路径与 SQL 片段，禁止拼入 prompt；`error.message` 只进 `logger.error`。
 
 ### 5.2 离线 / 工具（应保持出热路径）
 

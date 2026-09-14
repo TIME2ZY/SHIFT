@@ -253,7 +253,7 @@ async function buildActiveMemoryCard({
         "<!-- Active Memories (unavailable) -->",
         "## 本 thread 活跃记忆（系统注入的历史数据）",
         "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
-        `原因: ${error.message}`,
+        "原因: 记忆检索失败，详情见服务端日志。",
         "请稍后重试 recall_search；不要假设「尚无记忆」。",
         "<!-- /Active Memories -->",
       ].join("\n");
@@ -266,7 +266,7 @@ async function buildActiveMemoryCard({
           byKind: {},
           weakQuery: true,
           channels: { recency: 0, related: 0 },
-          availability: { state: "unavailable", reason: error.message },
+          availability: { state: "unavailable", reason: "retrieve_failed" },
         },
       };
     }
@@ -286,7 +286,7 @@ async function buildActiveMemoryCard({
         "<!-- Active Memories (unavailable) -->",
         "## 本 thread 活跃记忆（系统注入的历史数据）",
         "⚠ 记忆系统暂时不可用（非空库）。当前无法确认是否存在结构化记忆。",
-        `原因: ${error.message}`,
+        "原因: 记忆检索失败，详情见服务端日志。",
         "请稍后重试 recall_search；不要假设「尚无记忆」。",
         "<!-- /Active Memories -->",
       ].join("\n");
@@ -299,7 +299,7 @@ async function buildActiveMemoryCard({
           byKind: {},
           weakQuery: true,
           channels: { recency: 0, related: 0 },
-          availability: { state: "unavailable", reason: error.message },
+          availability: { state: "unavailable", reason: "retrieve_failed" },
         },
       };
     }
