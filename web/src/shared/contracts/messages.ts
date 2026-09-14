@@ -18,15 +18,11 @@ export const MESSAGE_TYPES = Object.freeze({
 
 export type MessageType = (typeof MESSAGE_TYPES)[keyof typeof MESSAGE_TYPES];
 
-export function isAssistantCallbackMessage(message: {
-  messageType?: string | null;
-}): boolean {
+export function isAssistantCallbackMessage(message: { messageType?: string | null }): boolean {
   return message.messageType === MESSAGE_TYPES.ASSISTANT_CALLBACK;
 }
 
-export function isAssistantFinalMessage(message: {
-  messageType?: string | null;
-}): boolean {
+export function isAssistantFinalMessage(message: { messageType?: string | null }): boolean {
   return message.messageType === MESSAGE_TYPES.ASSISTANT_FINAL;
 }
 

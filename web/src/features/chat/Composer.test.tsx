@@ -135,10 +135,7 @@ describe("Composer", () => {
     expect(toggle).not.toBeChecked();
 
     rerender(
-      <Composer
-        {...props}
-        draftSeed={{ id: 2, text: "重构推荐提示", useWorktree: true }}
-      />
+      <Composer {...props} draftSeed={{ id: 2, text: "重构推荐提示", useWorktree: true }} />
     );
     expect(toggle).toBeChecked();
 
@@ -170,11 +167,7 @@ describe("Composer", () => {
     await userEvent.type(input, "review this");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith(
-      "@Gemini review this",
-      false,
-      expect.any(String)
-    );
+    expect(onSend).toHaveBeenCalledWith("@Gemini review this", false, expect.any(String));
   });
 
   it("locks synchronous duplicate submissions until the active send settles", async () => {

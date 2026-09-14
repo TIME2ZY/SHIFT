@@ -7,7 +7,7 @@ cleanup executors were retired after the cutover evidence and real legacy data w
 
 Do not `require` them from `src/server`, `src/agents`, or other runtime modules.
 
-| Module | Purpose |
-|--------|---------|
+| Module                                                           | Purpose                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------ |
 | `audit-storage`, `recovery-drill`, `clean-epoch`, `runtime-home` | SQLite audit / recovery / installation migration |
-| `memory-stabilization`, `memory-write-eval` | Offline memory audit and write eval gates |
+| `memory-stabilization`, `memory-write-eval`                      | Offline memory audit and write eval gates        |

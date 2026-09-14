@@ -1,0 +1,19 @@
+# Prettier is configured with endOfLine: lf. Normalising text files to LF in
+# the repository keeps `npm run format:check` green on Windows checkouts,
+# which would otherwise arrive as CRLF via core.autocrlf and fail the check.
+* text=auto eol=lf
+
+# Binary assets must never be rewritten, whatever the filename suggests.
+# `binary` alone does not cancel the inherited eol attribute, so -eol is
+# required to keep prettier and git from touching their bytes.
+*.png binary -eol
+*.jpg binary -eol
+*.jpeg binary -eol
+*.gif binary -eol
+*.ico binary -eol
+*.svg binary -eol
+*.woff binary -eol
+*.woff2 binary -eol
+*.pdf binary -eol
+*.sqlite binary -eol
+*.db binary -eol

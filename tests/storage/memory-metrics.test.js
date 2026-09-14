@@ -11,10 +11,7 @@ const {
 } = require("../../src/storage/memory-metrics");
 
 test("mergeWriteStats adds numeric fields", () => {
-  const merged = mergeWriteStats(
-    { upsertCallback: 1 },
-    { errors: 1 }
-  );
+  const merged = mergeWriteStats({ upsertCallback: 1 }, { errors: 1 });
   assert.equal(merged.upsertCallback, 1);
   assert.equal(merged.errors, 1);
 });

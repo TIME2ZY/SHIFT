@@ -3,11 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const {
-  parseEnvContent,
-  applyEnv,
-  loadProjectEnv,
-} = require("../../src/shared/load-env");
+const { parseEnvContent, applyEnv, loadProjectEnv } = require("../../src/shared/load-env");
 
 describe("parseEnvContent", () => {
   it("parses KEY=VALUE, comments, export, and quotes", () => {

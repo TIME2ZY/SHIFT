@@ -33,7 +33,10 @@ function validateLocalRequestSource(req) {
     } catch {
       return { ok: false, status: 403, error: "Invalid Origin header." };
     }
-    if (originUrl.host.toLowerCase() !== hostHeader || !["http:", "https:"].includes(originUrl.protocol)) {
+    if (
+      originUrl.host.toLowerCase() !== hostHeader ||
+      !["http:", "https:"].includes(originUrl.protocol)
+    ) {
       return { ok: false, status: 403, error: "Origin is not allowed." };
     }
   }

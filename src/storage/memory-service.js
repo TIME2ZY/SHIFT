@@ -30,9 +30,7 @@ const {
   isSuccessfulMemoryEvidenceEvent,
   summarizeMemoryEvidenceEvent,
 } = require("./memory-evidence");
-const {
-  isRetrievableMemory,
-} = require("./memory-retrieval-contract");
+const { isRetrievableMemory } = require("./memory-retrieval-contract");
 const { enqueueMemoryEmbedding } = require("./embedding-projection");
 
 const MAX_SUPERSESSION_RETRIES = 3;
@@ -41,13 +39,7 @@ const MEMORY_WRITE_KINDS = Object.freeze(["decision", "constraint", "fact"]);
 const MEMORY_WRITE_SCOPES = Object.freeze(["thread"]);
 const PROJECT_SCOPE_RETIRED_MESSAGE =
   "Project-scoped memory is retired. Write durable project decisions to docs/ (e.g. docs/decisions/) and use recall_search with layer project-doc.";
-const MEMORY_WRITE_INPUT_FIELDS = new Set([
-  "kind",
-  "topic",
-  "content",
-  "scope",
-  "evidenceEventNo",
-]);
+const MEMORY_WRITE_INPUT_FIELDS = new Set(["kind", "topic", "content", "scope", "evidenceEventNo"]);
 const MEMORY_WRITE_TOPIC_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 const MEMORY_WRITE_MIN_CONTENT_CHARS = 10;
 const MEMORY_WRITE_MAX_CONTENT_CHARS = 500;
@@ -78,9 +70,7 @@ function createMemoryService({
         if (isCaptureKeyConflict(error)) {
           const scope = input.scope === "project" ? "project" : "thread";
           const owner =
-            scope === "project"
-              ? input.projectKey
-              : input.ownerThreadId || input.threadId;
+            scope === "project" ? input.projectKey : input.ownerThreadId || input.threadId;
           const existing = storage.memories.getByCaptureKey(owner, input.captureKey, { scope });
           if (existing) return { memory: existing, created: false, superseded: [] };
         }
@@ -190,7 +180,9 @@ function createMemoryService({
 
   function ensureProjectRow(projectKey, identity) {
     if (!projectKey || !storage.db) return;
-    const existing = storage.db.prepare("SELECT 1 FROM projects WHERE project_key = ?").get(projectKey);
+    const existing = storage.db
+      .prepare("SELECT 1 FROM projects WHERE project_key = ?")
+      .get(projectKey);
     if (existing) return;
     const now = nowIso(clock);
     storage.db
@@ -314,19 +306,14 @@ function createMemoryService({
     if (!invocationId && invocationContext.allowUnmirroredInvocation !== true) {
       throw new Error("invocation id is required for memory_write.");
     }
-    if (
-      invocationId &&
-      !storedInvocation &&
-      invocationContext.allowUnmirroredInvocation !== true
-    ) {
+    if (invocationId && !storedInvocation && invocationContext.allowUnmirroredInvocation !== true) {
       throw new Error(`Source invocation ${invocationId} does not exist.`);
     }
     if (storedInvocation && storedInvocation.threadId !== threadId) {
       throw new Error(`Source invocation ${invocationId} belongs to another thread.`);
     }
     const sourceMessageId =
-      requestedSourceMessageId ||
-      nullableString(storedInvocation?.triggerMessageId);
+      requestedSourceMessageId || nullableString(storedInvocation?.triggerMessageId);
     if (sourceMessageId) {
       const sourceMessage = storage.messages?.get?.(sourceMessageId);
       if (!sourceMessage) throw new Error(`Source message ${sourceMessageId} does not exist.`);
@@ -351,9 +338,7 @@ function createMemoryService({
       );
     }
     if (content.length > MEMORY_WRITE_MAX_CONTENT_CHARS) {
-      throw new Error(
-        `Memory content exceeds ${MEMORY_WRITE_MAX_CONTENT_CHARS} characters.`
-      );
+      throw new Error(`Memory content exceeds ${MEMORY_WRITE_MAX_CONTENT_CHARS} characters.`);
     }
 
     const thread = storage.threads?.get?.(threadId) || null;
@@ -442,9 +427,7 @@ function createMemoryService({
         throw new Error(`Source invocation ${input.sourceInvocationId} does not exist.`);
       }
       if (invocation.threadId !== threadId) {
-        throw new Error(
-          `Source invocation ${input.sourceInvocationId} belongs to another thread.`
-        );
+        throw new Error(`Source invocation ${input.sourceInvocationId} belongs to another thread.`);
       }
     }
   }
@@ -600,12 +583,7 @@ function createMemoryService({
               ORDER BY created_at DESC
             `
             )
-            .all(
-              relatedKey,
-              memory.id,
-              memory.ownerThreadId || "",
-              memory.projectKey || ""
-            )
+            .all(relatedKey, memory.id, memory.ownerThreadId || "", memory.projectKey || "")
             .map((item) => ({
               id: item.id,
               status: item.status,
@@ -688,10 +666,7 @@ function resolveMemoryWriteEvidence({
     if (!storedInvocation || !invocationId) {
       throw new Error("Memory event evidence requires a persisted invocation.");
     }
-    const event = storage.invocations?.getEvent?.(
-      invocationId,
-      candidate.evidenceEventNo
-    );
+    const event = storage.invocations?.getEvent?.(invocationId, candidate.evidenceEventNo);
     if (!event) {
       throw new Error(
         `Evidence event ${candidate.evidenceEventNo} does not exist in the current invocation.`
@@ -725,7 +700,9 @@ function resolveMemoryWriteEvidence({
 
   if (sourceMessageId) {
     const message = storage.messages?.get?.(sourceMessageId);
-    const snapshot = String(message?.content || "").trim().slice(0, 240);
+    const snapshot = String(message?.content || "")
+      .trim()
+      .slice(0, 240);
     return {
       eventNo: null,
       eventKind: null,
@@ -805,7 +782,8 @@ function kindRank(kind) {
  */
 function deriveWriteFields(input = {}) {
   const channel = input.writeChannel || inferWriteChannel(input);
-  const requestedBy = typeof input.createdBy === "string" && input.createdBy ? input.createdBy : null;
+  const requestedBy =
+    typeof input.createdBy === "string" && input.createdBy ? input.createdBy : null;
 
   if (channel === "system") {
     return {
@@ -860,8 +838,7 @@ function nowIso(clock) {
 
 function isCaptureKeyConflict(error) {
   return (
-    error?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
-    String(error.message || "").includes("capture")
+    error?.code === "SQLITE_CONSTRAINT_UNIQUE" && String(error.message || "").includes("capture")
   );
 }
 

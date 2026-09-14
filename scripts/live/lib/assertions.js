@@ -12,7 +12,9 @@ const TERMINAL_TRACE_STATES = new Set(["completed", "failed", "aborted"]);
 function matchesTestName(assertion, expectedName) {
   const title = assertion.title || "";
   const fullName = assertion.fullName || "";
-  return title === expectedName || fullName === expectedName || fullName.endsWith(` ${expectedName}`);
+  return (
+    title === expectedName || fullName === expectedName || fullName.endsWith(` ${expectedName}`)
+  );
 }
 
 function collectAssertionResults(jestJson) {
@@ -142,12 +144,16 @@ function evaluatePersistence(messages, { expectedUserTextPrefix }) {
   const problems = [];
   const list = Array.isArray(messages) ? messages : [];
   const userMessages = list.filter((m) => m.role === "user");
-  const finalAnswers = list.filter((m) => m.messageType === "assistant-final" || m.type === "assistant-final");
+  const finalAnswers = list.filter(
+    (m) => m.messageType === "assistant-final" || m.type === "assistant-final"
+  );
   if (userMessages.length === 0) {
     problems.push("no user message persisted");
   } else if (
     expectedUserTextPrefix &&
-    !String(userMessages[0].text || userMessages[0].content || "").startsWith(expectedUserTextPrefix)
+    !String(userMessages[0].text || userMessages[0].content || "").startsWith(
+      expectedUserTextPrefix
+    )
   ) {
     problems.push("persisted user message does not match the sent prompt");
   }
@@ -186,7 +192,11 @@ function evaluateTrace(trace) {
   if (!primary) {
     problems.push("no completed invocation in the trace");
   }
-  return { ok: problems.length === 0, problems, primaryInvocationId: primary ? primary.invocationId : "" };
+  return {
+    ok: problems.length === 0,
+    problems,
+    primaryInvocationId: primary ? primary.invocationId : "",
+  };
 }
 
 function buildIssuePrompt(issueText) {

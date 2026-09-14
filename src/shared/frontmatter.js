@@ -17,7 +17,10 @@ function parseSkillFrontmatter(content) {
 
     // YAML list item: "- value" or "- "value""
     if (trimmed.startsWith("- ") && currentArrayKey) {
-      const item = trimmed.slice(2).trim().replace(/^["']|["']$/g, "");
+      const item = trimmed
+        .slice(2)
+        .trim()
+        .replace(/^["']|["']$/g, "");
       meta[currentArrayKey].push(item);
       continue;
     }
@@ -52,9 +55,7 @@ function parseSkillFrontmatter(content) {
     // JSON-style array: [item1, item2]
     if (value.startsWith("[") && value.endsWith("]")) {
       const inner = value.slice(1, -1);
-      meta[key] = inner
-        ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, ""))
-        : [];
+      meta[key] = inner ? inner.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")) : [];
       continue;
     }
 

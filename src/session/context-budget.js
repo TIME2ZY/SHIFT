@@ -86,8 +86,7 @@ function shouldSoftSealAfterTurn(input = {}) {
 function shouldEmergencyStop(input = {}) {
   const physical = Math.max(1, nonNeg(input.physicalContextTokens));
   const used = nonNeg(input.usedTokens);
-  const threshold =
-    typeof input.physicalKillRatio === "number" ? input.physicalKillRatio : 0.98;
+  const threshold = typeof input.physicalKillRatio === "number" ? input.physicalKillRatio : 0.98;
   const providerOverflow = Boolean(input.providerContextOverflow);
   if (providerOverflow) return { stop: true, reason: "provider-overflow" };
   if (used / physical >= threshold) {
@@ -129,9 +128,7 @@ function nonNeg(n) {
 function usableFromPhysical(physicalTokens, reserveRatio = 0.2) {
   const physical = Math.max(1, nonNeg(physicalTokens));
   const ratio =
-    typeof reserveRatio === "number" && reserveRatio >= 0 && reserveRatio < 1
-      ? reserveRatio
-      : 0.2;
+    typeof reserveRatio === "number" && reserveRatio >= 0 && reserveRatio < 1 ? reserveRatio : 0.2;
   return Math.max(1, physical - Math.floor(physical * ratio));
 }
 

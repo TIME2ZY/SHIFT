@@ -3,12 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const COMMANDS = new Set([
-  "post-message",
-  "thread-context",
-  "list-invocations",
-  "read-invocation",
-]);
+const COMMANDS = new Set(["post-message", "thread-context", "list-invocations", "read-invocation"]);
 
 function parseArgs(argv) {
   const [command = "", ...rest] = argv;

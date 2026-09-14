@@ -5,11 +5,7 @@ const {
   resolveEmbeddingConfig,
 } = require("./embedding-provider");
 const { createEmbeddingWorker } = require("./embedding-worker");
-const {
-  createVectorIndex,
-  loadVectorExtension,
-  searchVector,
-} = require("./vector-index");
+const { createVectorIndex, loadVectorExtension, searchVector } = require("./vector-index");
 const {
   enqueueMemoryEmbedding,
   enqueueProjectDocumentEmbedding,
@@ -33,8 +29,7 @@ function createEmbeddingRuntime(options = {}) {
     return disabledRuntime("vector_extension_unavailable", config, vector.reason);
   }
   storage.embeddings.pruneStaleVectors?.();
-  const provider =
-    options.provider || createEmbeddingProvider(config, { fetch: options.fetch });
+  const provider = options.provider || createEmbeddingProvider(config, { fetch: options.fetch });
   if (provider.available === false) {
     return disabledRuntime(provider.reason || "provider_unavailable", config);
   }

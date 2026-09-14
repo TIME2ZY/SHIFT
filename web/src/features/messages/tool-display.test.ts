@@ -8,11 +8,13 @@ import {
 
 describe("tool-display", () => {
   it("detects spawn_subagent and task await tools", () => {
+    expect(isSubagentTool("spawn_subagent", { subagent_type: "explore" }, "task")).toBe(true);
     expect(
-      isSubagentTool("spawn_subagent", { subagent_type: "explore" }, "task")
-    ).toBe(true);
-    expect(
-      isSubagentTool("get_command_or_subagent_output", { task_ids: ["abc"] }, "background_task_action")
+      isSubagentTool(
+        "get_command_or_subagent_output",
+        { task_ids: ["abc"] },
+        "background_task_action"
+      )
     ).toBe(true);
     expect(isSubagentTool("list_dir", { target_directory: "." })).toBe(false);
   });

@@ -7,10 +7,7 @@ const {
   evaluateMemoryWritePredictions,
 } = require("../src/storage/offline/memory-write-eval");
 
-const DEFAULT_CASES = path.resolve(
-  __dirname,
-  "../evals/memory-write/cases.jsonl"
-);
+const DEFAULT_CASES = path.resolve(__dirname, "../evals/memory-write/cases.jsonl");
 
 function parseArgs(argv) {
   const options = {

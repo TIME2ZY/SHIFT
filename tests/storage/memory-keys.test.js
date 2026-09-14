@@ -28,5 +28,8 @@ test("product capture keys are unique per write", () => {
   const b = buildProductCaptureKey("fact", "runtime", () => `id-${++n}`);
   assert.match(a, /^product:fact:runtime:/);
   assert.notEqual(a, b);
-  assert.equal(deriveTopicFromContent("Use SQLite as source of truth\nmore"), "use-sqlite-as-source-of-truth");
+  assert.equal(
+    deriveTopicFromContent("Use SQLite as source of truth\nmore"),
+    "use-sqlite-as-source-of-truth"
+  );
 });

@@ -37,7 +37,9 @@ function seed(storage, projectDir) {
     agentId: "codex",
   });
   const trace = storage.traces.start({ threadId: "thread-1" });
-  storage.db.prepare("UPDATE invocations SET trace_id = ? WHERE id = ?").run(trace.id, "invocation-1");
+  storage.db
+    .prepare("UPDATE invocations SET trace_id = ? WHERE id = ?")
+    .run(trace.id, "invocation-1");
   storage.traces.bindRootInvocation(trace.id, "invocation-1");
   storage.handoffs.accept({
     sourceInvocationId: "invocation-1",

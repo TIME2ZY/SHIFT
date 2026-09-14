@@ -78,9 +78,7 @@ function createProjectEvidenceRepository(db, options = {}) {
   const listDocs = db.prepare(
     "SELECT * FROM project_documents WHERE project_key = ? ORDER BY path"
   );
-  const findDoc = db.prepare(
-    "SELECT * FROM project_documents WHERE project_key = ? AND path = ?"
-  );
+  const findDoc = db.prepare("SELECT * FROM project_documents WHERE project_key = ? AND path = ?");
   const insertPassage = db.prepare(`
     INSERT INTO project_passages
       (document_id, project_key, path, heading, start_line, end_line, content, content_hash)
@@ -117,7 +115,13 @@ function createProjectEvidenceRepository(db, options = {}) {
           LIMIT ?
         `
         )
-        .all(projectKey, normalizedQuery, `%${escapeLike(normalizedQuery)}%`, normalizedQuery, limit),
+        .all(
+          projectKey,
+          normalizedQuery,
+          `%${escapeLike(normalizedQuery)}%`,
+          normalizedQuery,
+          limit
+        ),
       "exact"
     );
 

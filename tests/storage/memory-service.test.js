@@ -128,10 +128,7 @@ test("supersession only retires active memories with the same explicit topic key
         .sort(),
       ["login-v2", "parallel-a", "parallel-b"].sort()
     );
-    assert.equal(
-      storage.memories.getSearchProjection("login-v1").metadata.status,
-      "superseded"
-    );
+    assert.equal(storage.memories.getSearchProjection("login-v1").metadata.status, "superseded");
   } finally {
     storage.close();
   }
@@ -152,9 +149,10 @@ test("same-topic replacement is the only retirement path", () => {
     });
     assert.equal(storage.memories.get("first").status, "superseded");
     assert.equal(storage.memories.get("replacement").status, "active");
-    assert.deepEqual(storage.memory.listActive("thread-1").map((item) => item.id), [
-      "replacement",
-    ]);
+    assert.deepEqual(
+      storage.memory.listActive("thread-1").map((item) => item.id),
+      ["replacement"]
+    );
   } finally {
     storage.close();
   }
@@ -182,9 +180,7 @@ test("same-topic replacement retires the superseded Memory embedding", () => {
       writeChannel: "agent",
     });
     const embedding = storage.db
-      .prepare(
-        "SELECT * FROM embedding_items WHERE source_kind = 'memory' AND source_id = ?"
-      )
+      .prepare("SELECT * FROM embedding_items WHERE source_kind = 'memory' AND source_id = ?")
       .get(first.memory.id);
     assert.ok(embedding);
 
@@ -662,10 +658,7 @@ test("capture rolls back new memory and supersession when projection fails", () 
     assert.equal(storage.memories.get("login-v1").status, "active");
     assert.equal(storage.memories.get("login-v1").supersededBy, null);
     assert.equal(storage.memories.getSearchProjection("login-v2"), null);
-    assert.equal(
-      storage.memories.getSearchProjection("login-v1").metadata.status,
-      "active"
-    );
+    assert.equal(storage.memories.getSearchProjection("login-v1").metadata.status, "active");
   } finally {
     storage.close();
   }

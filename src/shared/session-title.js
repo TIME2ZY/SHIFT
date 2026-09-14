@@ -8,7 +8,10 @@ function buildSessionTitle(input, maxLength = 24) {
 
   title = title
     .replace(/^@\S+\s*/, "")
-    .replace(/^(?:请(?:你)?|麻烦(?:你)?|能否|可以|帮我|我想(?:请你)?|我觉得(?:还是)?|我认为)\s*/, "")
+    .replace(
+      /^(?:请(?:你)?|麻烦(?:你)?|能否|可以|帮我|我想(?:请你)?|我觉得(?:还是)?|我认为)\s*/,
+      ""
+    )
     .replace(/^[吧把，,：:\-—\s]+/, "");
 
   const firstSentence = title.split(/[。！？!?；;\n]/, 1)[0].trim();

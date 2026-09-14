@@ -62,10 +62,7 @@ test("sqlite-vec loads and filters KNN candidates by partition scope", () => {
     );
     assert.ok(threadAndProject.every((item) => item.scopeKey !== "thread:b"));
 
-    assert.equal(
-      deleteVector(db, { tableName: "embedding_vec_test_3", itemId: 1 }),
-      true
-    );
+    assert.equal(deleteVector(db, { tableName: "embedding_vec_test_3", itemId: 1 }), true);
   } finally {
     db.close();
   }

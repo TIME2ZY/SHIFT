@@ -11,32 +11,13 @@ const { createStorage } = require("../../src/storage");
 
 test("retrieval contract admits only active product memories", () => {
   assert.equal(MEMORY_RETRIEVAL_CONTRACT_VERSION, "product-memory-v2");
-  assert.deepEqual(RETRIEVABLE_MEMORY_KINDS, [
-    "decision",
-    "constraint",
-    "fact",
-  ]);
+  assert.deepEqual(RETRIEVABLE_MEMORY_KINDS, ["decision", "constraint", "fact"]);
+  assert.equal(isRetrievableMemory({ kind: "decision", status: "active" }), true);
+  assert.equal(isRetrievableMemory({ kind: "fact", status: "active" }), true);
+  assert.equal(isRetrievableMemory({ kind: "handoff", status: "active" }), false);
+  assert.equal(isRetrievableMemory({ kind: "decision", status: "superseded" }), false);
   assert.equal(
-    isRetrievableMemory({ kind: "decision", status: "active" }),
-    true
-  );
-  assert.equal(
-    isRetrievableMemory({ kind: "fact", status: "active" }),
-    true
-  );
-  assert.equal(
-    isRetrievableMemory({ kind: "handoff", status: "active" }),
-    false
-  );
-  assert.equal(
-    isRetrievableMemory({ kind: "decision", status: "superseded" }),
-    false
-  );
-  assert.equal(
-    isRetrievableMemory(
-      { kind: "decision", status: "superseded" },
-      { includeRetired: true }
-    ),
+    isRetrievableMemory({ kind: "decision", status: "superseded" }, { includeRetired: true }),
     true
   );
 });

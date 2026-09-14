@@ -24,16 +24,16 @@ JSONL 文件。直接删除旧目录会损失这段审计归档，因此先执�
 
 `data/runtime/legacy-cleanup-manifest-20260726.json`
 
-| 目标 | 文件数 | bytes |
-| --- | ---: | ---: |
-| `sessions.json` | 1 | 383,593 |
-| `invocations.json` | 1 | 5,842,789 |
-| `transcripts/` | 357 | 4,358,345 |
-| `session-maps/` | 16 | 11,573 |
-| `memory.sqlite` | 1 | 7,962,624 |
-| `memory.sqlite-wal` | 1 | 4,457,872 |
-| `memory.sqlite-shm` | 1 | 32,768 |
-| 合计 | 378 | 23,049,564 |
+| 目标                | 文件数 |      bytes |
+| ------------------- | -----: | ---------: |
+| `sessions.json`     |      1 |    383,593 |
+| `invocations.json`  |      1 |  5,842,789 |
+| `transcripts/`      |    357 |  4,358,345 |
+| `session-maps/`     |     16 |     11,573 |
+| `memory.sqlite`     |      1 |  7,962,624 |
+| `memory.sqlite-wal` |      1 |  4,457,872 |
+| `memory.sqlite-shm` |      1 |     32,768 |
+| 合计                |    378 | 23,049,564 |
 
 每个候选记录 SHA-256 内容指纹。执行时若路径、类型、文件数、字节数或指纹发生变化，
 命令会拒绝删除并要求重新生成清单。

@@ -3,12 +3,9 @@
  * Pure-ish functions used by createRecallService — no service lifecycle.
  */
 
-const { clampSearchQuery, extractSearchTerms, isWeakQuery } = require("./query-terms");
+const { clampSearchQuery, isWeakQuery } = require("./query-terms");
 const { isRetrievableMemory } = require("./memory-retrieval-contract");
-const {
-  resolveSearchMemoryQuota,
-  resolveSearchMessageQuota,
-} = require("./memory-inject");
+const { resolveSearchMemoryQuota, resolveSearchMessageQuota } = require("./memory-inject");
 
 const LAYER_MEMORY = "memory";
 const LAYER_MESSAGE = "message";
@@ -122,15 +119,8 @@ function finalizeSearchResult(hits, { query, limit, weakQuery }) {
 }
 
 function vectorItemToHit(item, context) {
-  const {
-    storage,
-    terms,
-    layers,
-    includeRetired,
-    includeThinking,
-    memoryScope,
-    projectKey,
-  } = context;
+  const { storage, terms, layers, includeRetired, includeThinking, memoryScope, projectKey } =
+    context;
   if (item.sourceKind === "memory") {
     if (!layers.includes(LAYER_MEMORY)) return null;
     const memory = storage.memories?.get?.(item.sourceId);
@@ -248,10 +238,7 @@ function fuseRecallChannels(keywordHits, vectorHits, options = {}) {
     limit: options.limit,
     memoryQuota: clampQuota(options.memoryQuota, resolveSearchMemoryQuota()),
     messageQuota: clampQuota(options.messageQuota, resolveSearchMessageQuota()),
-    projectDocQuota: clampQuota(
-      options.projectDocQuota,
-      DEFAULT_SEARCH_PROJECT_DOC_QUOTA
-    ),
+    projectDocQuota: clampQuota(options.projectDocQuota, DEFAULT_SEARCH_PROJECT_DOC_QUOTA),
     layers: options.layers,
   });
 }
@@ -577,10 +564,7 @@ function allocateFlatHitsByLayer(hits, options) {
     limit: options.limit,
     memoryQuota: clampQuota(options.memoryQuota, resolveSearchMemoryQuota()),
     messageQuota: clampQuota(options.messageQuota, resolveSearchMessageQuota()),
-    projectDocQuota: clampQuota(
-      options.projectDocQuota,
-      DEFAULT_SEARCH_PROJECT_DOC_QUOTA
-    ),
+    projectDocQuota: clampQuota(options.projectDocQuota, DEFAULT_SEARCH_PROJECT_DOC_QUOTA),
     layers: options.layers,
   });
 }

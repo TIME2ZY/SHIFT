@@ -766,10 +766,10 @@ test("retrieveForTurn rejects collaboration records as product Memory", async ()
       () =>
         storage.memory.capture({
           id: "handoff-1",
-        threadId: "thread-1",
-        kind: "handoff",
+          threadId: "thread-1",
+          kind: "handoff",
           content: "handoff noise about CSS and layout",
-        createdBy: "codex",
+          createdBy: "codex",
           captureKey: "handoff:inv-1:to:0",
         }),
       /Memory kind must be one of/

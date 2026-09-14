@@ -5,7 +5,10 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createStorage, openMemoryDatabase } = require("../../src/storage");
-const { resolveProjectIdentity, normalizeCanonicalPath } = require("../../src/storage/project-identity");
+const {
+  resolveProjectIdentity,
+  normalizeCanonicalPath,
+} = require("../../src/storage/project-identity");
 const { deriveWriteFields } = require("../../src/storage/memory-service");
 
 function createFixture(options = {}) {
@@ -308,7 +311,9 @@ test("legacy capture_key null rows migrate via open of prebuilt v5-like path", (
     // Direct insert simulating post-migration create requires capture_key NOT NULL —
     // verify the unique index exists for thread capture.
     const indexes = storage.db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'memory_entries'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'memory_entries'"
+      )
       .all()
       .map((r) => r.name);
     assert.ok(indexes.includes("memory_capture_thread"));

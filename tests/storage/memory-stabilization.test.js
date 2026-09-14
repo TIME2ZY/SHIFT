@@ -38,9 +38,7 @@ test("stabilization audit reports missing evidence and active slot conflicts", (
     product({ id: "memory-2" }),
   ]);
   assert.equal(report.readyForRetrieval, false);
-  assert.deepEqual(report.qualityReview, [
-    { memoryId: "memory-1", issues: ["missing_evidence"] },
-  ]);
+  assert.deepEqual(report.qualityReview, [{ memoryId: "memory-1", issues: ["missing_evidence"] }]);
   assert.deepEqual(report.conflicts, [
     {
       slot: "thread:thread-1:storage.authoritative",
