@@ -12,10 +12,8 @@ const { recordContextRestoration } = require("../session/context-restoration");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
 const { IMPLEMENTATION_GATE_STATUS } = require("../agents/workflow-gates");
-const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
-const { finalizeA2ARoutes, isEffectiveHandoffHop } = require("../agents/a2a-finalize");
+const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
-const { scanReplacementChars } = require("../shared/encoding-guard");
 const {
   emptyWriteStats,
   mergeWriteStats,
@@ -23,7 +21,6 @@ const {
   logMemoryWriteMetrics,
 } = require("../storage/memory-metrics");
 const { refreshDigest } = require("../storage/memory-digest");
-const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
 const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
@@ -31,34 +28,12 @@ const { assemblePrompt } = require("./chat-prompt-assembly");
 const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
 const { announceMemoryInject } = require("./chat-memory-inject");
 const { createSealCoordinator } = require("./chat-seal-coordination");
-
-function generateMessageId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function buildAssistantFinalMessage({
-  agent,
-  content,
-  code,
-  signal,
-  invocationId,
-  usage,
-  allowEmpty = false,
-}) {
-  if (!allowEmpty && !String(content || "").trim()) return null;
-  return {
-    id: generateMessageId(),
-    role: "assistant",
-    agent,
-    content,
-    exitCode: code,
-    signal,
-    invocationId,
-    usage,
-    messageType: "assistant-final",
-    createdAt: new Date().toISOString(),
-  };
-}
+const {
+  generateMessageId,
+  buildAssistantFinalMessage,
+  closeTurnFailure,
+  completeAssistantTurn,
+} = require("./chat-terminal");
 
 /**
  * @param {object} ctx shared chat run context (mutated: session, aborted)
@@ -646,55 +621,13 @@ async function runChatWorklist(ctx) {
 
       if (turnRunState.streamFailure) {
         // Handler or persist failure: one failed terminal, no silent retry.
-        const failedInvocationId = threadCtx.currentInvocationId || invocationId;
-        const failedMessage = buildAssistantFinalMessage({
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "stream-failure",
           agent,
-          content: turnRunState.assistantContent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          invocationId: failedInvocationId,
+          invocationId: threadCtx.currentInvocationId || invocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        durable.completeInvocation({
-          invocationId: failedInvocationId,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          reason:
-            turnRunState.streamFailure.code === "provider_timeout"
-              ? "provider-timeout"
-              : "stream-handler-failed",
-          endPayload: {
-            ...endPayload,
-            terminalState: "failed",
-            failureStage:
-              turnRunState.streamFailure.code === "provider_timeout"
-                ? "provider_run"
-                : "stream_handler",
-            errorCode: turnRunState.streamFailure.code || "stream_handler_failed",
-            retryable: true,
-            streamErrorOrigin: turnRunState.streamFailure.origin,
-            streamErrorMessage: turnRunState.streamFailure.message,
-          },
-          session: turnRunState.session,
-          windowId: turnRunState.durableRun?.window?.id || null,
-          message: failedMessage || undefined,
-        });
-        callbacks.retireInvocation?.(sessionId, failedInvocationId);
-        sendSse(res, "error", {
-          message: "Agent stream failed while handling events; invocation closed as failed.",
-          retryable: true,
-          agent,
-          reason: turnRunState.streamFailure.origin,
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          invocationId: failedInvocationId,
-          usage: invocationUsage,
-        });
-        turnRunState.previousInvocationId = failedInvocationId;
-        turnRunState.aborted = false;
         break;
       }
 
@@ -707,38 +640,14 @@ async function runChatWorklist(ctx) {
       );
 
       if (isAborted) {
-        const abortInvId = threadCtx.currentInvocationId || invocationId;
-        const abortMessage = buildAssistantFinalMessage({
-          agent,
-          content: turnRunState.assistantContent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          invocationId: abortInvId,
-          usage: invocationUsage,
-        });
         // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
-        durable.completeInvocation({
-          invocationId: abortInvId,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          reason: "aborted",
-          endPayload: {
-            ...endPayload,
-            terminalState: "aborted",
-            terminalReason: "aborted",
-            errorCode: "invocation_aborted",
-            failureStage: "request",
-            retryable: false,
-            stopReason: turnRunState.streamStopReason || invocationController.stopReason || null,
-            supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
-          },
-          session: turnRunState.session,
-          windowId: turnRunState.durableRun?.window?.id || null,
-          message: abortMessage || undefined,
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "aborted",
+          agent,
+          invocationId: threadCtx.currentInvocationId || invocationId,
+          usage: invocationUsage,
+          endPayload,
         });
-        callbacks.retireInvocation?.(sessionId, abortInvId);
-        turnRunState.aborted = true;
-        turnRunState.previousInvocationId = abortInvId;
         break;
       }
 
@@ -753,183 +662,34 @@ async function runChatWorklist(ctx) {
         turnRunState.preCallRotated ||
         turnRunState.contextSealedSseSent;
       if (!hasAssistantText && sealPressure) {
-        durable.completeInvocation({
-          invocationId: finalInvocationId,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          reason: "empty-under-seal",
-          endPayload: {
-            ...endPayload,
-            emptyAssistant: true,
-            terminalState: "failed",
-            failureStage: "seal",
-            errorCode: "empty_under_seal",
-            retryable: true,
-          },
-        });
-        callbacks.retireInvocation?.(sessionId, finalInvocationId);
-        sendSse(res, "error", {
-          message: "Assistant produced no content after context pressure; request not completed.",
-          retryable: true,
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "empty-under-seal",
           agent,
-          reason: turnRunState.emergencyStop ? "physical-ceiling" : "empty-assistant",
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        turnRunState.previousInvocationId = finalInvocationId;
-        turnRunState.aborted = true;
         break;
       }
 
       if (turnRunState.code !== 0 || turnRunState.signal) {
-        const failedMessage = buildAssistantFinalMessage({
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "provider-failed",
           agent,
-          content: turnRunState.assistantContent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        durable.completeInvocation({
-          invocationId: finalInvocationId,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          reason: "provider-failed",
-          endPayload: {
-            ...endPayload,
-            terminalState: "failed",
-            failureStage: "provider_run",
-            retryable: false,
-          },
-          session: turnRunState.session,
-          windowId: turnRunState.durableRun?.window?.id || null,
-          message: failedMessage || undefined,
-        });
-        callbacks.retireInvocation?.(sessionId, finalInvocationId);
-        sendSse(res, "error", {
-          message: "Agent process exited without a successful durable result.",
-          retryable: false,
-          agent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code: turnRunState.code,
-          signal: turnRunState.signal,
-          invocationId: finalInvocationId,
-          usage: invocationUsage,
-        });
-        turnRunState.previousInvocationId = finalInvocationId;
         break;
       }
 
-      const assistantMessage = buildAssistantFinalMessage({
+      const { workflowEvidenceEvents } = completeAssistantTurn(ctx, turnRunState, {
         agent,
-        content: turnRunState.assistantContent,
-        code: turnRunState.code,
-        signal: turnRunState.signal,
         invocationId: finalInvocationId,
         usage: invocationUsage,
-        allowEmpty: true,
+        endPayload,
+        dutyBinding,
       });
-
-      const completed =
-        durable.enabled && typeof durable.completeInvocation === "function"
-          ? durable.completeInvocation({
-              invocationId: finalInvocationId,
-              code: turnRunState.code,
-              signal: turnRunState.signal,
-              reason: "assistant-final",
-              endPayload,
-              session: turnRunState.session,
-              windowId: turnRunState.durableRun?.window?.id || null,
-              message: assistantMessage,
-            })
-          : null;
-      callbacks.retireInvocation?.(sessionId, finalInvocationId);
-
-      if (completed?.message?.id) assistantMessage.id = completed.message.id;
-
-      if (completed) {
-        turnRunState.session = {
-          ...turnRunState.session,
-          messages: [...(turnRunState.session.messages || []), assistantMessage],
-        };
-      } else {
-        throw new DurableWriteError(
-          `Failed to atomically persist completion for ${finalInvocationId}.`,
-          {
-            code: "durable_write_failed",
-            invocationId: finalInvocationId,
-            retryable: true,
-          }
-        );
-      }
-      turnRunState.previousInvocationId = finalInvocationId;
-      // Final text scan (in case deltas were clean but concat/store introduced issues).
-      const finalEnc = scanReplacementChars(turnRunState.assistantContent);
-      if (!finalEnc.ok) {
-        runObs.noteEncoding(finalEnc.count);
-        sendSse(res, "encoding-warning", {
-          agent,
-          invocationId: finalInvocationId,
-          channel: "assistant-final",
-          count: finalEnc.count,
-          samples: finalEnc.samples,
-          message: "Replacement character U+FFFD in final assistant text.",
-        });
-      }
-      runObs.noteInvocationEnd(finalInvocationId, {
-        exitCode: turnRunState.code,
-        usage: invocationUsage,
-        encodingWarnings: finalEnc.count || 0,
-      });
-      sendSse(res, "agent-exit", {
-        agent,
-        code: turnRunState.code,
-        signal: turnRunState.signal,
-        invocationId: finalInvocationId,
-        usage: invocationUsage,
-      });
-
-      const hop = storage?.handoffs?.getByTargetInvocation?.(finalInvocationId);
-      if (hop) {
-        sendSse(res, "a2a-hop-complete", {
-          handoffId: hop.handoffId,
-          sourceInvocationId: hop.sourceInvocationId,
-          targetInvocationId: hop.targetInvocationId,
-          completeStatus: hop.completeStatus,
-          routeStatus: hop.routeStatus,
-          effective: isEffectiveHandoffHop(hop),
-        });
-      }
-
-      const workflowEvidenceEvents = processWorkflowEvidenceOutput({
-        seatId: dutyBinding?.seatId,
-        invocationId: finalInvocationId,
-        progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
-        agent,
-        duty: dutyBinding?.duty,
-        content: turnRunState.assistantContent,
-        threadId: sessionId,
-        registry: collabTaskRegistry,
-        deliveryVerifier,
-        cwd: runWorkspace.worktreeDir,
-        branch: runWorkspace.branch || "",
-      });
-      for (const workflowEvent of workflowEvidenceEvents) {
-        sendSse(res, workflowEvent.event, {
-          agent,
-          invocationId: finalInvocationId,
-          ...workflowEvent.payload,
-        });
-      }
 
       // POST soft seal after a complete answer, or provider-session bind if it
       // is not warranted (never the mid-stream kill path).
