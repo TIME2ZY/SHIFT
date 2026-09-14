@@ -1,7 +1,7 @@
 "use strict";
 
 const { ENV } = require("../shared/brand");
-const { assertValidOpaqueId } = require("./id-policy");
+const { assertValidOpaqueId } = require("../shared/id-policy");
 const { toSseFrame } = require("./chat-runtime");
 
 const REPLAY_PAGE_SIZE = 500;

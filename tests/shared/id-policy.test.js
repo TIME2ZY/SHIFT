@@ -3,7 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const policy = require("../../src/server/id-policy");
+const policy = require("../../src/shared/id-policy");
 
 test("opaque IDs accept generated session forms and reject path syntax", () => {
   assert.equal(policy.assertValidOpaqueId("1783002404316-mhkj90", "sessionId"), "1783002404316-mhkj90");

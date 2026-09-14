@@ -2,7 +2,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
-const { assertValidOpaqueId, resolveInside } = require("../server/id-policy");
+const { assertValidOpaqueId, resolveInside } = require("../shared/id-policy");
 const { ENV, LOCAL_STATE_DIR } = require("../shared/brand");
 const { ROOT, createRuntimePaths } = require("../shared/runtime-paths");
 

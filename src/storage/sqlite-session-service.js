@@ -1,4 +1,4 @@
-const { assertValidOpaqueId, isValidOpaqueId } = require("../server/id-policy");
+const { assertValidOpaqueId, isValidOpaqueId } = require("../shared/id-policy");
 const { buildSessionTitle } = require("../shared/session-title");
 const { appendMessage, durableMessageMetadata } = require("./message-persistence");
 const { withSqliteBusyRetry } = require("./sqlite-retry");
