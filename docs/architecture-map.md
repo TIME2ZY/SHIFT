@@ -434,6 +434,8 @@ Callback token 绑定在当前进程 active invocation 的生命周期中，只�
 Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `recallService`，
 不再接受 transcript 作为在线回退读源。
 工作区物理健康检查与自动对齐：`worktreeManager.checkHealth` / `reconcileWorktree` 在服务启动、Session 状态和请求执行阶段检测物理目录与 git 分支一致性，物理删除或外部 prune 的孤儿记录安全清理，执行时自动重建或优雅回退。
+预览服务器入口必须是已安装目录的**绝对路径**（`rootDir/src/server/index.js`）。`startPreview` 的 `cwd` 是 agent 可自由写的隔离 worktree，相对入口会解析到该目录，被 prompt 注入的 agent 即可植入替代入口并以主服务器权限执行。预览进程同时清空 `SHIFT_UI_TOKEN`：它服务 agent 控制的工作区，继承操作者 token 会让工作区内任意命令以 UI 身份调用全部 `/api/*`。
+Agent 子进程环境是**拒绝名单**而非白名单（provider CLI 需要 PATH、HOME 与各自 API key）：`buildAgentChildEnvironment` 在 spread 之后删除 `SHIFT_HOME`、`SHIFT_MEMORY_DB`、`SHIFT_TRANSCRIPT_DIR`、`SHIFT_AUDIT_TRANSCRIPT_DIR`、`SHIFT_TEST_CAPACITY`、`SHIFT_UI_TOKEN`、`SHIFT_EMBEDDING_API_KEY`，顺序保证 caller override 无法重新引入这些 key。
 上下文恢复按 window seal 边界截断，`partitionInvocationsBySeal` 严格隔离密封前历史，防止跨窗口上下文膨胀。
 `createMemoryCapture` 只接受 EventStore；已删除 transcript 测试 sink、空转的
 `replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式

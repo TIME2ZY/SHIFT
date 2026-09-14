@@ -462,8 +462,17 @@ function createWorktreeManager(opts = {}) {
       NODE_PATH: path.join(rootDir, "node_modules"),
       [ENV.RUNTIME_ROOT]: rootDir,
       [ENV.PREVIEW]: "1",
+      // The preview server must never pick up the UI token of the parent
+      // process: it serves an agent-controlled worktree, and sharing the
+      // operator's token would let anything run inside the worktree hit every
+      // /api/* route as the UI.
+      [ENV.UI_TOKEN]: "",
     };
-    const child = spawn("node", ["src/server/index.js"], {
+    // Absolute entry path: `cwd` is the agent's worktree, which the agent can
+    // write freely. A relative "src/server/index.js" would resolve against it,
+    // so a prompt-injected agent could plant a replacement entry point and get
+    // it executed with the parent server's privileges on the next preview.
+    const child = spawn("node", [path.join(rootDir, "src", "server", "index.js")], {
       cwd: existing.worktreeDir,
       env,
       detached: true,

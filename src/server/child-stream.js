@@ -6,12 +6,29 @@ const { createEncodingTracker } = require("../shared/encoding-guard");
 
 const DEFAULT_KILL_GRACE_MS = 5000;
 const DEFAULT_SERVER_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Environment keys that belong to the live server and must never reach an
+ * Agent child process.
+ *
+ * `SHIFT_UI_TOKEN` authorizes every `/api/*` route as the UI (including
+ * destructive ones like DELETE /api/sessions/:id) and is exempted from the
+ * callback-token check only for the browser. An Agent holding it authenticates
+ * as the operator, not as itself. `SHIFT_EMBEDDING_API_KEY` is a server-side
+ * credential for the embedding provider; the child never calls it directly.
+ *
+ * The rest are live-data locators: leaking them lets commands run by the Agent
+ * migrate the authoritative live database, write into the server transcript, or
+ * inherit harness-only capacity values.
+ */
 const SERVER_ONLY_AGENT_ENV_KEYS = Object.freeze([
   "SHIFT_HOME",
   "SHIFT_MEMORY_DB",
   "SHIFT_TRANSCRIPT_DIR",
   "SHIFT_AUDIT_TRANSCRIPT_DIR",
   "SHIFT_TEST_CAPACITY",
+  "SHIFT_UI_TOKEN",
+  "SHIFT_EMBEDDING_API_KEY",
 ]);
 
 function buildAgentChildEnvironment(baseEnv = process.env, overrides = {}) {
@@ -20,9 +37,8 @@ function buildAgentChildEnvironment(baseEnv = process.env, overrides = {}) {
     ...windowsUtf8Environment(baseEnv),
     ...(overrides || {}),
   };
-  // These settings belong to the live server. Leaking them into an Agent means
-  // commands run by that Agent can migrate the authoritative live database,
-  // write into the server transcript, or inherit harness-only capacity values.
+  // Applied after the spread so a caller override cannot re-introduce a
+  // stripped key.
   for (const key of SERVER_ONLY_AGENT_ENV_KEYS) delete childEnv[key];
   return childEnv;
 }

@@ -277,3 +277,57 @@ test("recreating a missing worktree retains its committed session history", () =
     "session result"
   );
 });
+
+test("startPreview launches the installed server entry by absolute path, not the worktree's", async () => {
+  const baseDir = makeGitRepo();
+  const captured = [];
+  // The manager captures `spawn` at require time, so the stub must be in place
+  // before the module (re)loads.
+  const childProcess = require("node:child_process");
+  const realSpawn = childProcess.spawn;
+  childProcess.spawn = (file, args, options) => {
+    captured.push({ file, args, options });
+    const fake = new EventEmitter();
+    fake.pid = 4242;
+    fake.unref = () => {};
+    setImmediate(() => fake.emit("exit", 0));
+    return fake;
+  };
+  delete require.cache[require.resolve("../../src/worktree/manager")];
+  const { EventEmitter } = require("node:events");
+  const stubbedManager = require("../../src/worktree/manager").createWorktreeManager({
+    rootDir: baseDir,
+    stateFile: path.join(baseDir, "worktrees-state.json"),
+  });
+
+  const meta = stubbedManager.ensureWorktree({ baseDir, sessionId: "preview-abs" });
+  try {
+    // Plant a hostile entry point inside the agent-writable worktree. A
+    // relative argv would resolve to this; an absolute one must not.
+    fs.mkdirSync(path.join(meta.worktreeDir, "src", "server"), { recursive: true });
+    fs.writeFileSync(
+      path.join(meta.worktreeDir, "src", "server", "index.js"),
+      "module.exports = {}; // planted by an injected prompt\n"
+    );
+
+    await stubbedManager.startPreview("preview-abs");
+  } finally {
+    childProcess.spawn = realSpawn;
+    delete require.cache[require.resolve("../../src/worktree/manager")];
+  }
+
+  assert.equal(captured.length, 1, "exactly one preview process was spawned");
+  assert.equal(captured[0].file, "node");
+  const entry = captured[0].args[0];
+  assert.equal(
+    entry,
+    path.join(baseDir, "src", "server", "index.js"),
+    "entry must be the installed absolute path, not the worktree copy"
+  );
+  assert.ok(
+    !path.resolve(captured[0].options.cwd, entry).startsWith(meta.worktreeDir),
+    "resolved entry must not fall inside the agent-writable worktree"
+  );
+  assert.equal(captured[0].options.env.SHIFT_UI_TOKEN, "");
+  assert.equal(captured[0].options.env.SHIFT_PREVIEW, "1");
+});
