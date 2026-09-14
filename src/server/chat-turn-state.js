@@ -57,8 +57,15 @@ function resetTurnStateForEntry(turnRunState, { skillNames }) {
 
 /**
  * Build a context-health tracker from a window-like object. Every call site
- * previously spelled out the same window -> tracker field mapping; keeping it
+ * previously spelled out its own window -> tracker field mapping; keeping it
  * in one place is what keeps the two sides from drifting.
+ *
+ * Note the mapping is a superset of what every caller used to pass: the two
+ * `withBilling: false` sites (post-rotation and empty-emergency replay) now
+ * also carry inputChars / outputChars / contextUsedTokens /
+ * contextUsageSource from the window. Those are read-only context metrics,
+ * so the enrichment only makes the health snapshot more accurate on those
+ * two paths; it is the one non-rename change inside the tracker unification.
  *
  * `capacityFallback` / `reserveFallback` preserve each caller's original
  * fallback (agent defaults, rotate capacity, or the previous tracker) and may

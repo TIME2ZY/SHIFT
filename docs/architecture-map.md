@@ -645,13 +645,13 @@ Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 p
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat-worklist.js` 1663 → 851        | `chat-turn-state`（回合可变状态 + tracker）、`chat-prompt-assembly`（identity / 协作规则 / taskContext / digest）、`chat-invocation-starter`（启动 + 启动期 SSE 广播）、`chat-memory-inject`（bootstrap 与 a2a 共用 `memory_injected` 单一发射点）、`chat-seal-coordination`（pre-call rotate / post-turn soft seal / `sealContextWindow`）、`chat-terminal`（四个终态分支合一为 `closeTurnFailure`） |
 | `collab-task-registry.js` 1203 → 232 | `task-gate-recorder`（六个 submit/record 门禁走同一 `applyGateUpdate` 骨架）、`task-route-policy`（`PHASE_BY_INTENT` 映射表 + 三个路由阻断判定）、`task-permission`（权限与就绪查询）、`task-evidence-reset`（31 处 `delete task.artifacts.*` 收口为 `clearDownstreamEvidence(task, { from, keep })`，删除集合逐字不变）、`task-updates`（goal / progress）                                           |
-| `recall-service.js` 1073 → 112       | `recall-search`（FTS / vector 融合、候选收集与作用域解析）、`recall-inject-pack`（`retrieveForTurn` 的 recency / related / vector 三通道）、`recall-metrics`（指标与降级文案）                                                                                                                                                                                                                        |
+| `recall-service.js` 1072 → 112       | `recall-search`（FTS / vector 融合、候选收集与作用域解析）、`recall-inject-pack`（`retrieveForTurn` 的 recency / related / vector 三通道）、`recall-metrics`（指标与降级文案）                                                                                                                                                                                                                        |
 | `memory-service.js` 903 → 605        | `memory-read`（六个读查询 + `enrichMemory` 的 supersession 关联查询）、`memory-write-evidence`（锚定证据组装 + 内容哈希，`hashMemoryWriteContent` 随之迁入以保持单向依赖）                                                                                                                                                                                                                            |
 
 - facade 只保留组合与不属于任何兄弟的关注点；兄弟模块是工厂，接收 deps / core 句柄，
   依赖单向（inject-pack → search、memory-service → memory-write-evidence）以避免 require 环。
 - 产品记忆写入口仍是 `writeMemoryCandidate` → `createProduct` → `capture` → `captureOnce` →
-  `memories.create`。`capture` 保留为公开低层入口：`createProduct` 内部调用它，且 11 处测试
+  `memories.create`。`capture` 保留为公开低层入口：`createProduct` 内部调用它，且 12 处测试
   fixture 直接用它写入固定 id 的行；删除它会迫使 fixture 改走 `writeMemoryCandidate`，属于
   语义改写而非结构整理（B-4 的作用域拒绝守卫在三个入口上各自生效，未因拆分放松）。
 - `enrichMemory` 的逐行 supersession 查询仍按条目执行；拆分只把它集中到单一可见位置，
