@@ -42,6 +42,7 @@ const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
 const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
 const { assemblePrompt } = require("./chat-prompt-assembly");
+const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
 
 function generateMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -80,7 +81,6 @@ async function runChatWorklist(ctx) {
     res,
     sendSse,
     sessionId,
-    traceId,
     AGENTS,
     callbacks,
     contextHealth,
@@ -332,31 +332,22 @@ async function runChatWorklist(ctx) {
       turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
 
       // Start invocation only on the window that will actually run the provider.
-      const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
-      const startedAt = new Date().toISOString();
-      turnRunState.durableRun = durable.startInvocation({
-        session: turnRunState.session,
-        invocationId,
-        threadId: sessionId,
-        traceId,
-        agentId: agent,
+      const started = startInvocationAndAnnounce(ctx, turnRunState, {
+        agent,
         providerKey,
-        workspaceKey,
-        capacityTokens: turnRunState.healthTracker.capacityTokens,
-        reserveRatio: turnRunState.healthTracker.reserveRatio,
-        resumeSessionId: turnRunState.resumeSessionId,
-        startedAt,
         parentInvocationId,
         triggerMessageId,
         triggerType,
-        handoffId: queuedCause?.handoffId || null,
         dutyBinding,
+        resumeSessionId: turnRunState.resumeSessionId,
+        handoffId: queuedCause?.handoffId || null,
+        generationFallback: turnRunState.openWindow?.generation || 1,
+        capacityFallback: contextHealth.getAgentCapacity(agent),
       });
-      if (!turnRunState.durableRun) {
+      const { invocationId, callbackToken } = started;
+      if (!started.run) {
         throw new Error(`Failed to persist invocation start for ${invocationId}.`);
       }
-      turnRunState.activeInvocationId = invocationId;
-      threadCtx.currentDutyBinding = turnRunState.durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
       if (turnRunState.durableRun.window) {
         turnRunState.healthTracker = createTurnTracker(agent, turnRunState.durableRun.window, {
@@ -376,45 +367,6 @@ async function runChatWorklist(ctx) {
       });
       sealer.update(turnRunState.healthTracker.getFillRatio());
       threadCtx.sealer = sealer;
-      threadCtx.currentInvocationId = invocationId;
-      threadCtx.windowId = turnRunState.durableRun?.window?.id || null;
-      // Surface invocation identity together with its immutable Seat/Duty contract.
-      // A2A causality remains on window-meta and is joined by invocationId.
-      sendSse(res, "agent-start", {
-        agent,
-        invocationId,
-        seatId: turnRunState.durableRun.binding?.seatId || null,
-        duty: turnRunState.durableRun.binding?.duty || null,
-      });
-      sendSse(res, "window-meta", {
-        agent,
-        invocationId,
-        generation:
-          turnRunState.durableRun?.window?.generation || turnRunState.openWindow?.generation || 1,
-        preCallRotated: turnRunState.preCallRotated,
-        capacityTokens:
-          turnRunState.durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
-        workspaceKey,
-        worktree: Boolean(activeWorktree),
-        cwd: runWorkspace.worktreeDir,
-        baseDir: runWorkspace.baseDir,
-        parentInvocationId,
-        triggerMessageId,
-        triggerType,
-        seatId: turnRunState.durableRun.binding?.seatId || null,
-        duty: turnRunState.durableRun.binding?.duty || null,
-      });
-      // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
-      sendSse(res, "workspace-meta", {
-        agent,
-        invocationId,
-        workspaceKey,
-        cwd: runWorkspace.worktreeDir,
-        baseDir: runWorkspace.baseDir,
-        useWorktree: Boolean(activeWorktree),
-        branch: runWorkspace.branch || "",
-      });
-      runObs.noteInvocationStart({ agent, invocationId });
       const turnStartHeadSha =
         useWorktree && runWorkspace?.worktreeDir && deliveryVerifier?.getHeadSha
           ? deliveryVerifier.getHeadSha(runWorkspace.worktreeDir)
@@ -732,34 +684,26 @@ async function runChatWorklist(ctx) {
           turnRunState.contextSealedSseSent = false;
           turnRunState.contextWarned = false;
           turnRunState.sawUsageEvent = false;
-          const retry = callbacks.createInvocation(sessionId, agent);
-          const retryRun = durable.startInvocation({
-            session: turnRunState.session,
-            invocationId: retry.invocationId,
-            threadId: sessionId,
-            traceId,
-            agentId: agent,
+          const retried = startInvocationAndAnnounce(ctx, turnRunState, {
+            agent,
             providerKey,
-            workspaceKey,
-            capacityTokens: turnRunState.healthTracker.capacityTokens,
-            reserveRatio: turnRunState.healthTracker.reserveRatio,
-            resumeSessionId: "",
-            startedAt: new Date().toISOString(),
             parentInvocationId,
             triggerMessageId,
             triggerType,
             dutyBinding: turnRunState.durableRun.binding || dutyBinding,
+            resumeSessionId: "",
+            replay: true,
+            generationFallback: 2,
+            // Read before the tracker rebind below: the retry window may lack
+            // capacity, and the pre-retry tracker still holds the prior one.
+            capacityFallback: turnRunState.healthTracker.capacityTokens,
           });
-          if (!retryRun) break;
-          turnRunState.durableRun = retryRun;
-          turnRunState.activeInvocationId = retry.invocationId;
-          threadCtx.currentDutyBinding = retryRun.binding || dutyBinding;
-          invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
-          invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
+          if (!retried.run) break;
+          const retryInvocationId = retried.invocationId;
+          invocationEnv[ENV.INVOCATION_ID] = retryInvocationId;
+          invocationEnv[ENV.CALLBACK_TOKEN] = retried.callbackToken;
           invocationEnv.INVOKE_SESSION_ID = "";
-          threadCtx.currentInvocationId = retry.invocationId;
-          threadCtx.windowId = retryRun.window?.id || null;
-          turnRunState.healthTracker = createTurnTracker(agent, retryRun.window, {
+          turnRunState.healthTracker = createTurnTracker(agent, turnRunState.durableRun.window, {
             contextHealth,
             capacityFallback: turnRunState.healthTracker.capacityTokens,
             reserveFallback: turnRunState.healthTracker.reserveRatio,
@@ -767,44 +711,10 @@ async function runChatWorklist(ctx) {
           });
           turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
           turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
-          sendSse(res, "agent-start", {
-            agent,
-            invocationId: retry.invocationId,
-            seatId: retryRun.binding?.seatId || null,
-            duty: retryRun.binding?.duty || null,
-          });
-          sendSse(res, "window-meta", {
-            agent,
-            invocationId: retry.invocationId,
-            generation: retryRun.window?.generation || 2,
-            replay: true,
-            capacityTokens:
-              retryRun.window?.capacityTokens || turnRunState.healthTracker.capacityTokens,
-            workspaceKey,
-            worktree: Boolean(activeWorktree),
-            cwd: runWorkspace.worktreeDir,
-            baseDir: runWorkspace.baseDir,
-            parentInvocationId,
-            triggerMessageId,
-            triggerType,
-            seatId: retryRun.binding?.seatId || null,
-            duty: retryRun.binding?.duty || null,
-          });
-          sendSse(res, "workspace-meta", {
-            agent,
-            invocationId: retry.invocationId,
-            workspaceKey,
-            cwd: runWorkspace.worktreeDir,
-            baseDir: runWorkspace.baseDir,
-            useWorktree: Boolean(activeWorktree),
-            branch: runWorkspace.branch || "",
-            replay: true,
-          });
-          runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
           if (sessionBootstrap.buildDigest) {
             const recovery = await sessionBootstrap.buildDigest({
               ...turnRunState.recoveryContext,
-              generation: retryRun.window?.generation || 2,
+              generation: turnRunState.durableRun.window?.generation || 2,
             });
             turnRunState.promptForAgent += "\n\n" + recovery;
           }
