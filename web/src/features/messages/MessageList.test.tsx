@@ -81,6 +81,61 @@ describe("MessageList", () => {
     expect(screen.getByRole("button", { name: "跳到第 1 条你消息" })).toBeInTheDocument();
   });
 
+  it("holds the live region silent while an answer is streaming", () => {
+    const liveRun = {
+      sessionId: "s1",
+      status: "running" as const,
+      updatedAt: 1,
+      doneReceived: false,
+      liveMessages: {
+        "i-live": {
+          agentId: "codex",
+          invocationId: "i-live",
+          text: "实时回答",
+          status: "streaming" as const,
+        },
+      },
+      latestInvocationByAgent: { codex: "i-live" },
+      invocationOrder: ["i-live"],
+      notices: [],
+    };
+
+    const { rerender } = renderMessageList(
+      <MessageList
+        sessionId="s1"
+        messages={[{ id: "m1", role: "user", content: "开始" }]}
+        agents={[{ id: "codex", label: "Codex" }]}
+        run={liveRun}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("log")).toHaveAttribute("aria-busy", "true");
+
+    rerender(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <MessageList
+          sessionId="s1"
+          messages={[{ id: "m1", role: "user", content: "开始" }]}
+          agents={[{ id: "codex", label: "Codex" }]}
+          run={{
+            ...liveRun,
+            status: "done",
+            doneReceived: true,
+            liveMessages: { "i-live": { ...liveRun.liveMessages["i-live"], status: "done" } },
+          }}
+          isLoading={false}
+          error={null}
+          onRetry={vi.fn()}
+        />
+      </QueryClientProvider>
+    );
+    expect(screen.getByRole("log")).toHaveAttribute("aria-busy", "false");
+  });
+
   it("moves to the selected conversation bubble", async () => {
     const user = userEvent.setup();
     const scrollIntoView = vi.fn();

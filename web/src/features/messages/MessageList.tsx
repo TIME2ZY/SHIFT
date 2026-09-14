@@ -349,6 +349,12 @@ export function MessageList({
   const liveText = liveMessages
     .map((message) => `${message.text}${message.commentary || ""}${message.thinking || ""}`)
     .join("");
+  // The log mutates on every streaming delta; hold announcements until the live
+  // answer settles. Terminal and error frames are still delivered, and run
+  // errors additionally surface through the toast region.
+  const liveStreaming = liveMessages.some(
+    (message) => message.status === "thinking" || message.status === "streaming"
+  );
   const optimisticUserPersisted = Boolean(
     run?.optimisticUser &&
     visibleMessages.some(
@@ -558,6 +564,7 @@ export function MessageList({
         role="log"
         aria-live="polite"
         aria-atomic="false"
+        aria-busy={liveStreaming}
       >
         {empty ? (
           <section className="react-chat-empty">
