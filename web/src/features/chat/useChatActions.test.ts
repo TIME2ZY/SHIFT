@@ -94,6 +94,12 @@ it("resolves true once accepted, false when the start never reached the server",
   });
   expect(delivered).toBe(true);
 
+  // The first turn must reach a terminal frame before the next send is allowed.
+  (mocks.store as ReturnType<typeof createSessionRunStore>).dispatch({
+    type: "run/done",
+    sessionId: "s",
+  });
+
   mocks.start.mockRejectedValue(new Error("后端不可用"));
   await act(async () => {
     delivered = await result.current.send("s", "codex", "again", false, "turn-2");
@@ -103,6 +109,38 @@ it("resolves true once accepted, false when the start never reached the server",
     "后端不可用",
     expect.objectContaining({ variant: "error" })
   );
+});
+
+it("refuses a second send while an accepted run is still active", async () => {
+  let accept!: (value: { sessionId: string; traceId: string }) => void;
+  mocks.start.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        accept = resolve;
+      })
+  );
+  const { result } = renderHook(() => useChatActions());
+  let sent!: Promise<boolean>;
+  act(() => {
+    sent = result.current.send("s", "codex", "work", false, "turn");
+  });
+  await act(async () => {
+    accept({ sessionId: "s", traceId: "accepted" });
+    await sent;
+  });
+
+  // The stream never delivered a terminal frame, so the run is still live.
+  let delivered: boolean | undefined;
+  await act(async () => {
+    delivered = await result.current.send("s", "codex", "again", false, "turn-2");
+  });
+  expect(delivered).toBe(false);
+  expect(mocks.start).toHaveBeenCalledTimes(1);
+  expect(mocks.toast).toHaveBeenCalledWith("当前运行结束后可发送");
+  const runs = (mocks.store as ReturnType<typeof createSessionRunStore>).getSnapshot().runs;
+  expect(runs.s).toMatchObject({ traceId: "accepted", status: "connecting" });
+  // A refused send paints no optimistic user bubble.
+  expect(runs.s.optimisticUser).toBeUndefined();
 });
 
 it("resolves false when a Stop wins the race against a pending start", async () => {

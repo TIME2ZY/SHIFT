@@ -6,6 +6,7 @@ import { useToast } from "../notifications/ToastProvider";
 import { startRun, stopRun } from "../../runtime/run-api";
 import { subscribeRunEvents } from "../../runtime/run-event-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
+import { isTerminalUiRunStatus } from "../../shared/contracts/run-status";
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -30,6 +31,16 @@ export function useChatActions() {
     ): Promise<boolean> => {
       const content = prompt.trim();
       if (!content) return false;
+
+      // An accepted run is live on the server until the SSE stream sends a
+      // terminal frame; sending again would interleave two transcripts. A
+      // start still awaiting acceptance has no traceId yet and falls through
+      // to the supersede-abort below, so double sends keep today's behavior.
+      const activeRun = store.getSnapshot().runs[sessionId];
+      if (activeRun?.traceId && !isTerminalUiRunStatus(activeRun.status)) {
+        toast.show("当前运行结束后可发送");
+        return false;
+      }
 
       store.dispatch({
         type: "user/submitted",
