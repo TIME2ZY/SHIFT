@@ -95,7 +95,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 | ------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                              | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
 | 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor | `invocation_events`                                                                            |
-| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed）                                       | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-worklist 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed，字面量位于 chat-worklist，chat-routes 只读取终态做汇总）                                       | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
 | 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                             | 同上                                                                                           |
 | 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                         | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
 | 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                                                         | 避免长期 `active`                                                                              |
@@ -125,7 +125,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   重试耗尽仍显式上抛。
 - Invocation 的 SQLite active 行表示已 durable started，读模型不再按事件数量猜测阶段；无输出调用允许直接收口终态，终态不可覆写由 repository/recorder 保证。工具结束时间不得早于开始时间。
 - 用户主动停止（abort）意图贯穿子进程取消链，权威终态统一记为 `aborted`；非零退出码不能覆盖已知停止原因，Trace 终态按最终链路结果判定，不因前序成功误报 completed。
-- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`），禁止残留悬挂的 started 工具。
+- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`）。**已知缺口**：该闭环只在 chat-worklist 的进程内路径生效；SHIFT 进程崩溃后由 `reconcileThreadActive` → `forceTerminalInvocation` 兜底时只写 invocation 终态与 `invocation-end`，不补写 in-flight 工具的 `tool.finished`，历史库因此可能出现无配对 `tool.started`，Health 的 `span_missing_end` 会计数但无修复脚本。补写应与 invocation 终态同事务，另需离线修复脚本。
 - ACP 子 Agent 事件、文本缓冲与恢复身份按 provider session 隔离；子输出作为带 subagent 标记的 commentary.delta 路由，不进入父 Agent 正文及交接解析；extractSessionId 锁定 rootSessionId。
 
 ---
@@ -191,7 +191,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 | 类型                             | 入口                                                                     | 落点                                                                              | 调用方                                            |
 | -------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队                                                       | `shift_context` MCP → callback-routes 私有 bridge |
+| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `createProduct` → `capture` → `captureOnce` → `memories.create` | `memories` + embedding 入队                                                       | `shift_context` MCP → callback-routes 私有 bridge |
 | **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                                                                              | 服务内部                                          |
 | **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件**                                                | a2a-finalize                                      |
 | **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件（结构化续工包：goal/files/errors/next_action + 短 snapshot） | seal 路径；下一轮 bootstrap Digest 注入           |
@@ -576,8 +576,7 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-09-08。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
-PR 应明确说明原因。
+若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
 
@@ -617,3 +616,12 @@ Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans�
 Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 provider 调用前通过 event-store 写 context-restored（prompt_prepared、包 ID/hash、任务版本、输入 hash）。PRE、A2A 和 emergency retry 共用记录入口。封存读取最新已处理 workflow evidence；包优先保留目标、进度和 Git 工作区引用，封存写失败显式上抛。invocation repository 的定向恢复事件查询供 collaboration API 展示包和恢复证据，不扫描工具正文、不推断模型已理解。
 
 前端 TaskContextDetails 通过 collaboration API 展示需求、计划、进度、续工包及输入准备证据，类型来自 src/shared/task-context.d.ts。run-event-stream 在任务更新或恢复事件后刷新既有查询。MessageList 使用既有路由消息的 parentInvocationId/source 定位 callback 或最终回答原文；没有新增交接消费、审批或写入路径。
+
+---
+
+最后核对日期：2026-09-14，覆盖以上全部章节，含「运行修复补充（2026-09-09）」与
+Canonical JSONL 归档退役说明。核对确认本文件引用的代码锚点（路径、模块名、迁移编号）
+在当前实现中真实存在；被声明删除的旧入口（`role-contracts.js`、`/api/chat`、
+`mirrorLastMessage`、storage_outbox、transcript 模块）确实零残留。下列两处描述已按
+当前实现修正：产品终态 reason 字面量的归属（见 §3.1）与产品记忆写入链的中间层级
+（见 §3.4）。
