@@ -11,7 +11,7 @@ const {
   toolResultFromItem,
   isFailedItem,
   toolItemId,
-} = require("../tool-classification");
+} = require("../../shared/tool-classification");
 
 function buildCodexEnvironment(_options = {}, env = process.env) {
   const codexHome = String(env.INVOKE_CODEX_HOME || "").trim();
