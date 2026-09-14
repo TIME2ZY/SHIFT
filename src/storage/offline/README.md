@@ -11,3 +11,4 @@ Do not `require` them from `src/server`, `src/agents`, or other runtime modules.
 | ---------------------------------------------------------------- | ------------------------------------------------ |
 | `audit-storage`, `recovery-drill`, `clean-epoch`, `runtime-home` | SQLite audit / recovery / installation migration |
 | `memory-stabilization`, `memory-write-eval`                      | Offline memory audit and write eval gates        |
+| `dangling-tool-span-repair`                                      | Close tool spans left open by a crashed process  |

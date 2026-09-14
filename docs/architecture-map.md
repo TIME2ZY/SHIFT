@@ -125,7 +125,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   重试耗尽仍显式上抛。
 - Invocation 的 SQLite active 行表示已 durable started，读模型不再按事件数量猜测阶段；无输出调用允许直接收口终态，终态不可覆写由 repository/recorder 保证。工具结束时间不得早于开始时间。
 - 用户主动停止（abort）意图贯穿子进程取消链，权威终态统一记为 `aborted`；非零退出码不能覆盖已知停止原因，Trace 终态按最终链路结果判定，不因前序成功误报 completed。
-- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`）。**已知缺口**：该闭环只在 chat-worklist 的进程内路径生效；SHIFT 进程崩溃后由 `reconcileThreadActive` → `forceTerminalInvocation` 兜底时只写 invocation 终态与 `invocation-end`，不补写 in-flight 工具的 `tool.finished`，历史库因此可能出现无配对 `tool.started`，Health 的 `span_missing_end` 会计数但无修复脚本。补写应与 invocation 终态同事务，另需离线修复脚本。
+- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须闭环写入终态（`interrupted` / `cancelled`），不得残留无配对的 `tool.started`。三条路径共同保证：chat-worklist 的进程内 `closeOpenTools`（正常停止）、`forceTerminalInvocation` 在终态事务内补写 `tool.finished`（存活但 invocation 被强制终态化）、`reconcileStartup` 在启动 reconcile 前补写（SHIFT 进程崩溃后由下次启动兜底）。补写事件标记 `syntheticTerminal: true`，审计可区分 reconcile 闭环与 provider 上报。由更旧构建写入的历史库用 `scripts/repair-dangling-tool-spans.js` 离线修复；Health 的 `span_missing_end` 以此为可观测守卫。
 - ACP 子 Agent 事件、文本缓冲与恢复身份按 provider session 隔离；子输出作为带 subagent 标记的 commentary.delta 路由，不进入父 Agent 正文及交接解析；extractSessionId 锁定 rootSessionId。
 
 ---
@@ -443,12 +443,13 @@ Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `rec
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                         | 引用方              |
-| -------------------------------------------------- | ---------------------------- | ------------------- |
-| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁           | migrate-home script |
-| `clean-epoch.js`                                   | 新库 epoch                   | prepare script      |
-| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
-| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
+| 模块（均在 `src/storage/offline/`）                | 用途                          | 引用方              |
+| -------------------------------------------------- | ----------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁            | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                    | prepare script      |
+| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计  | drill/audit scripts |
+| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval           | scripts + tests     |
+| `dangling-tool-span-repair.js`                     | 修复崩溃残留的未闭环工具 span | repair script       |
 
 旧 sessions/invocations JSON、provider session-map 与 transcript 的导入、dual 对账、混合归档、
 清理执行器及其 fixture 已退役。`runtime-home` 仅迁移现存 `data/runtime/shift.sqlite` 安装，

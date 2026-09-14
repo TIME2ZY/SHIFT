@@ -31,9 +31,93 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
   }
 
   /**
-   * Best-effort terminal fail when a finish transaction cannot commit.
-   * Avoids leaving invocations stuck in DB state=active after stream end.
+   * Backfill `tool.finished` for tools that started but never reported a
+   * completion event.
+   *
+   * The in-process closure path (chat-worklist -> toolLifecycle.closeOpenTools)
+   * only fires while the SHIFT process is alive. When the process dies mid-run,
+   * the invocation is force-terminated on the next reconcile but its tool spans
+   * stay open forever, which is exactly what the `span_missing_end` health
+   * alert reports. Closing them inside the same transaction as the invocation
+   * terminal state keeps the two from diverging.
+   *
+   * The payload mirrors toolLifecycle.closeOpenTools so downstream projections
+   * (trace-span-projection, invocation-process, chat-usage) cannot tell the two
+   * apart, plus a `syntheticTerminal` marker for audits.
+   *
+   * @returns {number} synthetic tool.finished events appended
    */
+  function closeDanglingToolSpans(invocationId, record, options = {}) {
+    if (!storage || !invocationId) return 0;
+    if (typeof storage.invocations.listEvents !== "function") return 0;
+
+    const eventList = storage.invocations.listEvents(invocationId);
+    const open = new Map();
+    for (const event of eventList) {
+      const payload = event.payload || {};
+      const toolId = payload.toolId || payload.tool_id;
+      if (!toolId) continue;
+      if (event.kind === "tool.started") open.set(toolId, event);
+      else if (event.kind === "tool.finished") open.delete(toolId);
+    }
+    if (open.size === 0) return 0;
+
+    const cancelled = options.cancelled === true;
+    const status = cancelled ? "cancelled" : "interrupted";
+    const error =
+      typeof options.error === "string" && options.error
+        ? options.error
+        : cancelled
+          ? "Tool execution cancelled by invocation stop."
+          : "Provider run ended before the tool reported completion.";
+    const now = options.endedAt || record.endedAt || new Date().toISOString();
+
+    let closed = 0;
+    for (const started of open.values()) {
+      const payload = started.payload || {};
+      const toolId = payload.toolId || payload.tool_id;
+      // A finish must not precede its own start.
+      const finishedAt =
+        Date.parse(now) < Date.parse(started.createdAt || now) ? started.createdAt : now;
+      const result = events.append({
+        threadId: record.threadId,
+        invocationId,
+        kind: "tool.finished",
+        createdAt: finishedAt,
+        payload: {
+          agent: record.agentId,
+          invocationId,
+          toolName: payload.toolName || payload.tool_name || "tool",
+          toolId,
+          args: payload.args,
+          title: payload.title,
+          label: payload.label,
+          toolKind: payload.toolKind || payload.tool_kind,
+          sessionId: payload.sessionId,
+          subagentId: payload.subagentId || payload.subagent_id,
+          parentToolCallId: payload.parentToolCallId || payload.parent_tool_id,
+          status,
+          state: status,
+          error,
+          result: { error },
+          failureSource: "lifecycle-terminal",
+          failureReason: error,
+          syntheticTerminal: true,
+          ts: finishedAt,
+          createdAt: finishedAt,
+        },
+      });
+      if (result.sqlite === true) closed += 1;
+    }
+    if (closed) {
+      logger.warn?.(
+        `[sqlite-durable-write] closed ${closed} dangling tool span(s) ` +
+          `for invocation ${invocationId} (${status})`
+      );
+    }
+    return closed;
+  }
+
   /**
    * Force an open invocation to a terminal DB state (failed|aborted|completed).
    * @returns {object|null} finished invocation row, or null if already terminal / missing
@@ -67,6 +151,10 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
             });
             if (!record) return null;
             storage.handoffs?.completeByTargetInvocation(invocationId, record);
+            closeDanglingToolSpans(invocationId, record, {
+              cancelled: terminalState === "aborted",
+              endedAt: record.endedAt,
+            });
             events.append({
               threadId: record.threadId,
               invocationId,
@@ -722,6 +810,10 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           if (!record) continue;
           invocationCount += 1;
           storage.handoffs?.completeByTargetInvocation(invocation.id, record);
+          closeDanglingToolSpans(invocation.id, record, {
+            endedAt: at,
+            error: "SHIFT restarted while the tool was still running.",
+          });
           events.registerInvocation(invocation.id, invocation.threadId);
           events.append({
             threadId: invocation.threadId,
@@ -790,6 +882,7 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
     forceTerminalInvocation,
     forceFailInvocation,
     reconcileThreadActive,
+    closeDanglingToolSpans,
     listOpenInvocations,
     isInvocationOpen,
     bindProviderSession,
