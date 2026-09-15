@@ -201,12 +201,16 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 - 产品记忆写入固定 thread 作用域：`writeMemoryCandidate` / `createProduct` /
   `capture` 三个入口各自派生 `scope = "thread"`、`ownerThreadId`、`projectKey`，
-  收到 `scope: "project"` 立即拒绝；`memory-repository` 的写入面
-  （`getByCaptureKey` / `listActiveProductByTopic` / `retireActivePeers`）
-  已无 project 分支，无法再创建或替代 project 行。
+  收到 `scope: "project"` 立即拒绝。该约束落在**服务层**：
+  `memory-repository.create` 仍保留 project 分支，但生产写入全部经服务层入口
+  进入，该分支只被测试夹具用来插入历史 project 行（读取/审计面必须仍可见），
+  不构成第二条产品记忆写入口。仓储层其余 project 处理都是读或淘汰：
+  `getByCaptureKey` 显式纳入 "originated here" 的 project 行（UI 历史），
+  `listActiveProductByTopic` / `retireActivePeers` 只按 `ownerThreadId`
+  圈定 `scope = 'thread'` 行，无法创建或替代 project 行。
 - 读取面保留 project 兼容（`listActive` 的 `project` / `all` 模式、
-  `listForThread` 的 origin 归并、`enrichMemory` 的 related 查询），
-  仅为历史已 supersede 的 project 行提供审计可见性，不参与注入。
+  `listActiveByProject`、`listForThread` 的 origin 归并、`enrichMemory`
+  的 related 查询），仅为历史已 supersede 的 project 行提供审计可见性，不参与注入。
 - window-sealed 写入结构化续工包（goal / files / errors / next_action + 短 snapshot），由下一轮 `buildDigest` 注入；紧急密封也走平台拼包，不另调模型。
 - `createMemoryCapture` **拒绝** `memoryService` 参数（防半接线）。
 - composition root 只传 `eventStore`；注释标明产品记忆走 `writeMemoryCandidate`。
