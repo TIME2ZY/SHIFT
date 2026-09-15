@@ -33,7 +33,9 @@ scopeKey = thread:<ownerThreadId>
 ```
 
 - 所有 `decision` / `constraint` / `fact` 写入固定为 `scope = thread`。
-- `memory_write` 若传入 `scope: "project"` 必须 **rejected**（project Memory 已废除）。
+- 服务端写入路径（`writeMemoryCandidate` / `createProduct` / `capture`）自行派生
+  `scope`、`ownerThreadId` 与 `projectKey`，不信任调用方传入的作用域字段；任一入口
+  收到 `scope: "project"` 立即 **rejected**（project Memory 已废除）。
 - 替代只发生在同一 thread 的 `scopeKey + topic` 内，且不受 `kind` 变化影响。
 
 **跨会话的项目真相**不写入 `memory_entries`，而写入项目已有的仓库文档体系（例如
@@ -42,7 +44,9 @@ scopeKey = thread:<ownerThreadId>
 自动创建或覆盖该目录。Active Memory Card **不**自动注入项目文档。
 
 历史数据中可能仍存在 `scope = project` 的已 supersede 行，仅供审计；不得再作为
-active 产品记忆写入或注入。
+active 产品记忆写入或注入。写入路径已不再创建或替代任何 project 行，读取面
+（`listActive` 的 `project` / `all` 模式、`listForThread` 的 origin 归并）仅为
+这些历史行保留，供 UI 审计与清理。
 
 ## 3. 写入协议
 

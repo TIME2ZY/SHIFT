@@ -30,9 +30,7 @@ function auditMemoryDatabase(file) {
   const db = new Database(file, { readonly: true, fileMustExist: true });
   try {
     const table = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'"
-      )
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'")
       .get();
     if (!table) throw new Error("memory_entries table does not exist.");
     const memories = db

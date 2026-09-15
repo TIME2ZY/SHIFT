@@ -91,14 +91,14 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.1 Invocation 生命周期（start / event / finish）
 
-| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                                                               | 落库                                                                                           |
-| ------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                              | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
-| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor | `invocation_events`                                                                            |
-| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-routes 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed）                                       | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
-| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                             | 同上                                                                                           |
-| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                         | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
-| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                                                         | 避免长期 `active`                                                                              |
+| 步骤                | 意图上的权威写入口                                            | 实际调用方                                                                                                                                                                                                                                                                                                      | 落库                                                                                           |
+| ------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| start               | `durableRecorder.startInvocation`                             | **仅** `chat-worklist`（含 retry 再 start）                                                                                                                                                                                                                                                                     | 同事务写 `invocations` + 唯一 `invocation_duty_bindings` + `invocation-start` event            |
+| 流式事件            | `durableRecorder.appendInvocationEvent` / `eventStore.append` | worklist coalescer 与 callbacks；SQLite 提交成功后 chat-runtime 才唤醒 SSE 订阅者；GET `/events` 按 `invocation_events.id` 分页 replay，`snapshot.lastEventId` 是高水位不是已消费 cursor                                                                                                                        | `invocation_events`                                                                            |
+| **调度终态（B-1）** | **`durableRecorder.completeInvocation`**                      | **chat-worklist 全部产品终态**（`reason`: assistant-final / aborted / provider-failed / empty-under-seal / empty-emergency / stream-handler-failed；终态分支收口在 `chat-terminal.closeTurnFailure`，字面量随之落在该模块，`empty-emergency` 的空回答重放判定仍在 chat-worklist；chat-routes 只读取终态做汇总） | 有 `message` → 原子 finish+assistant-final（成功或失败/中止时已有正文）；无 `message` → 仅终态 |
+| 底层（模块私有）    | `finishInvocation` / `finishWithAssistantMessage`             | 仅 `completeInvocation` 内部                                                                                                                                                                                                                                                                                    | 同上                                                                                           |
+| 孤儿收口            | `reconcileThreadActive` → `forceTerminalInvocation`           | 后台 run 完成或 SHIFT 进程关闭；SSE 断线不得收口                                                                                                                                                                                                                                                                | 强制 `failed`/`aborted`（非产品成功路径）                                                      |
+| 写失败兜底          | `forceFailInvocation`                                         | durable-recorder 内部 / 调用约定                                                                                                                                                                                                                                                                                | 避免长期 `active`                                                                              |
 
 **结论（终态）— B-1 已落地（2026-08-07）：**
 
@@ -125,7 +125,7 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
   重试耗尽仍显式上抛。
 - Invocation 的 SQLite active 行表示已 durable started，读模型不再按事件数量猜测阶段；无输出调用允许直接收口终态，终态不可覆写由 repository/recorder 保证。工具结束时间不得早于开始时间。
 - 用户主动停止（abort）意图贯穿子进程取消链，权威终态统一记为 `aborted`；非零退出码不能覆盖已知停止原因，Trace 终态按最终链路结果判定，不因前序成功误报 completed。
-- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须由运行时或 worklist 闭环写入终态（`interrupted` / `cancelled`），禁止残留悬挂的 started 工具。
+- 子进程或 invocation 异常退出/中止时，未完成的 in-flight 工具必须闭环写入终态（`interrupted` / `cancelled`），不得残留无配对的 `tool.started`。三条路径共同保证：chat-worklist 的进程内 `closeOpenTools`（正常停止）、`forceTerminalInvocation` 在终态事务内补写 `tool.finished`（存活但 invocation 被强制终态化）、`reconcileStartup` 在启动 reconcile 前补写（SHIFT 进程崩溃后由下次启动兜底）。补写事件标记 `syntheticTerminal: true`，审计可区分 reconcile 闭环与 provider 上报。由更旧构建写入的历史库用 `scripts/repair-dangling-tool-spans.js` 离线修复；Health 的 `span_missing_end` 以此为可观测守卫。
 - ACP 子 Agent 事件、文本缓冲与恢复身份按 provider session 隔离；子输出作为带 subagent 标记的 commentary.delta 路由，不进入父 Agent 正文及交接解析；extractSessionId 锁定 rootSessionId。
 
 ---
@@ -189,16 +189,28 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 
 ### 3.4 Memory 写入
 
-| 类型                             | 入口                                                                     | 落点                                                                              | 调用方                                            |
-| -------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `captureOnce` → `memories.create` | `memories` + embedding 入队                                                       | `shift_context` MCP → callback-routes 私有 bridge |
-| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                  | 同上                                                                              | 服务内部                                          |
-| **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                           | **仅** `handoff-captured` **事件**                                                | a2a-finalize                                      |
-| **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                        | `window-sealed` 事件（结构化续工包：goal/files/errors/next_action + 短 snapshot） | seal 路径；下一轮 bootstrap Digest 注入           |
-| Recall / FTS / embedding         | 派生                                                                     | recall 表 / 向量                                                                  | 投影只读查询为主                                  |
+| 类型                             | 入口                                                                                                   | 落点                                                                              | 调用方                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **产品记忆**（decision/fact 等） | `memoryService.writeMemoryCandidate` → `createProduct` → `capture` → `captureOnce` → `memories.create` | `memories` + embedding 入队                                                       | `shift_context` MCP → callback-routes 私有 bridge |
+| **通用 capture API**             | `memoryService.capture` / `captureOnce`                                                                | 同上                                                                              | 服务内部                                          |
+| **Handoff 协作事件**             | `memoryCapture.captureHandoff`                                                                         | **仅** `handoff-captured` **事件**                                                | a2a-finalize                                      |
+| **Window seal 事件**             | `memoryCapture.captureWindowSeal`                                                                      | `window-sealed` 事件（结构化续工包：goal/files/errors/next_action + 短 snapshot） | seal 路径；下一轮 bootstrap Digest 注入           |
+| Recall / FTS / embedding         | 派生                                                                                                   | recall 表 / 向量                                                                  | 投影只读查询为主                                  |
 
 **结论（memory）— B-4 已落地（2026-08-07）：**
 
+- 产品记忆写入固定 thread 作用域：`writeMemoryCandidate` / `createProduct` /
+  `capture` 三个入口各自派生 `scope = "thread"`、`ownerThreadId`、`projectKey`，
+  收到 `scope: "project"` 立即拒绝。该约束落在**服务层**：
+  `memory-repository.create` 仍保留 project 分支，但生产写入全部经服务层入口
+  进入，该分支只被测试夹具用来插入历史 project 行（读取/审计面必须仍可见），
+  不构成第二条产品记忆写入口。仓储层其余 project 处理都是读或淘汰：
+  `getByCaptureKey` 显式纳入 "originated here" 的 project 行（UI 历史），
+  `listActiveProductByTopic` / `retireActivePeers` 只按 `ownerThreadId`
+  圈定 `scope = 'thread'` 行，无法创建或替代 project 行。
+- 读取面保留 project 兼容（`listActive` 的 `project` / `all` 模式、
+  `listActiveByProject`、`listForThread` 的 origin 归并、`enrichMemory`
+  的 related 查询），仅为历史已 supersede 的 project 行提供审计可见性，不参与注入。
 - window-sealed 写入结构化续工包（goal / files / errors / next_action + 短 snapshot），由下一轮 `buildDigest` 注入；紧急密封也走平台拼包，不另调模型。
 - `createMemoryCapture` **拒绝** `memoryService` 参数（防半接线）。
 - composition root 只传 `eventStore`；注释标明产品记忆走 `writeMemoryCandidate`。
@@ -384,20 +396,20 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 
 ## 4. 双路径 / 双语义清单
 
-| ID  | 主题                      | 当前结论                                                                                                                                                                                                                                                                                    | 状态   |
-| --- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立                                                                                                                                                                                                                                           | 已收口 |
-| D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态                                                                                                                                                                                                                                      | 接受   |
-| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize                                                                                                                                                                                                                                       | 接受   |
-| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted                                                                                                                                                                                                                                       | 已收口 |
-| D5  | 事件 sink 回退            | 无 transcript 热路径双写                                                                                                                                                                                                                                                                    | 已收口 |
-| D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                                                                                                                                                                                                                                                   | 已收口 |
-| D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线                                                                                                                                                                                                                                            | 已收口 |
-| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                                                                                                                                                                                                                                                  | 已收口 |
-| D9  | worktree 双地图           | session Map 与 manager 文件职责分离                                                                                                                                                                                                                                                         | 接受   |
-| D10 | POST /api/chat 流式热路径 | 已退出。控制面为 `POST /api/sessions/:id/runs` 与 Stop；观察面为 `GET /events` cursor SSE。关闭 SSE 不再 abort invocation。每个 session 只有一条观察订阅；提交运行不得再开第二条 SSE。测试只通过 `startAndCollect` / `startChat` 打新入口；唯一保留的 `/api/chat` 用例是生产 404 退役测试。 | 已收口 |
-| D11 | Seat/Duty vs 固定岗位语义 | 固定岗位合同、prompt、gate 与旧测试已删除；职责仅来自 DutyBinding                                                                                                                                                                                                                           | 已收口 |
-| D12 | Skill 投递双通道          | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2                                                                                                                                                                                                                                        | 过渡   |
+| ID  | 主题                      | 当前结论                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 状态   |
+| --- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| D1  | Invocation finish 多出口  | 收口为 `completeInvocation`；reconcile/force 独立                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 已收口 |
+| D2  | 规范状态 vs DB 状态       | ADR-002 规范态经 `resolveFinishDbState` 映射到 DB 状态                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 接受   |
+| D3  | Handoff 双触发            | chat end 与 callback post 均触发同一 durable finalize                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 接受   |
+| D4  | Handoff 幂等进程内        | Map 已删除；SQLite partial unique index 仲裁 accepted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 已收口 |
+| D5  | 事件 sink 回退            | 无 transcript 热路径双写                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 已收口 |
+| D6  | Message 双用例入口        | 两类用例共用 messageType 契约和物理写入口                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 已收口 |
+| D7  | Memory 双语义             | collaboration event ≠ product Memory；禁止半接线                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 已收口 |
+| D8  | Collab 任务 vs Handoff    | 两者分别为 SQLite 权威事实，不互相借表表达                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 已收口 |
+| D9  | worktree 双地图           | session Map 与 manager 文件职责分离                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 接受   |
+| D10 | POST /api/chat 流式热路径 | 已退出。控制面为 `POST /api/sessions/:id/runs` 与 Stop；观察面为 `GET /events` cursor SSE。关闭 SSE 不再 abort invocation。观察订阅按 session 广播：`runtime.subscribe` 是 best-effort fan-out（同 session 可有多个订阅者，单个订阅者抛错不影响其他订阅者，SQLite 始终是真相），多端打开同一 session 时各自从自己的 cursor 续传；真实不变量是控制面与观察面分离——提交运行不会开 SSE，关闭 SSE 不会 abort invocation，两侧各有用例。测试只通过 `startAndCollect` / `startChat` 打新入口；唯一保留的 `/api/chat` 用例是生产 404 退役测试。观察面降级契约：断线进入可观测的 `reconnecting`（指数退避 500ms→30s，UI 可读 `reconnectAttempt`/`reconnectDelayMs`）。订阅只在 401/403/404 或显式 unsubscribe（restore 清理）时停止；终态帧（`done` / `error` / `run.aborted`）只更新 store，observer 跨终态存活，同一会话的下一轮仍是 live（新 traceId 的 `agent-start` 在 `cursor > replayThrough` 时重新 `run/started`）。终态后断线仍从 cursor 重连，但 `run/reconnecting` 与 `run/connected` 在终态状态上 no-op，终态 UI 不翻回 `running`/`connecting`，直到新的 live `agent-start`。 | 已收口 |
+| D11 | Seat/Duty vs 固定岗位语义 | 固定岗位合同、prompt、gate 与旧测试已删除；职责仅来自 DutyBinding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 已收口 |
+| D12 | Skill 投递双通道          | 原生/MCP 为主；prompt 全文注入仅 fallback，见 §3.4.2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 过渡   |
 
 **已收敛（保护，勿回退）：**
 
@@ -405,6 +417,7 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 - A2A 业务 finalize = 单一 `finalizeA2ARoutes`；handoff lifecycle 由 SQLite repository 仲裁。
 - Message 物理 insert = 单一 `appendMessage`（热路径）。
 - Invocation 调度终态 = 单一 `completeInvocation`。
+- Secret 比较 = 单一 `shared/secret-compare` 的 `safeEqual`（恒定时间）。凭据生成一律 CSPRNG：UI token 与 callback token 均为 `crypto.randomBytes(32)`，且 invocation id 与 callback token 使用独立熵源——invocation id 经 SSE/URL/UI 广泛公开，若共用 `Math.random()` 生成器，观测到 id 即可恢复 PRNG 状态并预测配对凭据。
 - 产品记忆写 = `writeMemoryCandidate`；协作事件 = `memoryCapture`（无 memoryService）。
 
 ---
@@ -421,6 +434,10 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 | session  | bootstrap, health, sealer；旧 transcript 模块已删除                                                                                                                          |
 | worktree | manager, delivery-verifier                                                                                                                                                   |
 
+`chat-worklist`、`collab-task-registry`、`recall-service`、`memory-service` 仍是本表所列的
+热路径入口，但内部已按 facade + 兄弟模块拆分；边界与职责见
+「P2 结构拆分与前端守卫（2026-09-14）」。
+
 公开进程关闭入口是 `server.shutdown`（`src/server/index.js`）。`src/server/main.js`
 与 `src/server/recovery-verification.js` 必须 await 该入口；只 `server.close` 不会等待
 `chatRuntime.shutdown` 与 SQLite 释放。恢复演练的产品 API 核验走同一关闭合同。
@@ -433,22 +450,26 @@ Callback token 绑定在当前进程 active invocation 的生命周期中，只�
 Callback 的 recall 与 invocation evidence 读取只使用注入的 SQLite `recallService`，
 不再接受 transcript 作为在线回退读源。
 工作区物理健康检查与自动对齐：`worktreeManager.checkHealth` / `reconcileWorktree` 在服务启动、Session 状态和请求执行阶段检测物理目录与 git 分支一致性，物理删除或外部 prune 的孤儿记录安全清理，执行时自动重建或优雅回退。
+预览服务器入口必须是已安装目录的**绝对路径**（`rootDir/src/server/index.js`）。`startPreview` 的 `cwd` 是 agent 可自由写的隔离 worktree，相对入口会解析到该目录，被 prompt 注入的 agent 即可植入替代入口并以主服务器权限执行。预览进程同时清空 `SHIFT_UI_TOKEN`：它服务 agent 控制的工作区，继承操作者 token 会让工作区内任意命令以 UI 身份调用全部 `/api/*`。
+Agent 子进程环境是**拒绝名单**而非白名单（provider CLI 需要 PATH、HOME 与各自 API key）：`buildAgentChildEnvironment` 在 spread 之后删除 `SHIFT_HOME`、`SHIFT_MEMORY_DB`、`SHIFT_TRANSCRIPT_DIR`、`SHIFT_AUDIT_TRANSCRIPT_DIR`、`SHIFT_TEST_CAPACITY`、`SHIFT_UI_TOKEN`、`SHIFT_EMBEDDING_API_KEY`，顺序保证 caller override 无法重新引入这些 key。
 上下文恢复按 window seal 边界截断，`partitionInvocationsBySeal` 严格隔离密封前历史，防止跨窗口上下文膨胀。
 `createMemoryCapture` 只接受 EventStore；已删除 transcript 测试 sink、空转的
 `replayThread` 以及 Chat 启动时的 replay 等待。Bootstrap 的 invocation digest 也必须显式
 注入 SQLite-backed source，模块不再默认读取文件 transcript。Agent 的 product Memory
 写入说明固定为 thread scope，不再引导已退役的 project Memory 写入。
+发往第三方 LLM 的降级文案（Bootstrap Active Memory Card、recall 降级警告）**只允许固定文案与机读 `availability.reason` 常量**（`retrieve_failed` / `recency_failed` / `listActive_failed` 等）。better-sqlite3 的错误消息含 DB 绝对路径与 SQL 片段，禁止拼入 prompt；`error.message` 只进 `logger.error`。
 
 ### 5.2 离线 / 工具（应保持出热路径）
 
 下列模块由 scripts/tests 使用；当前 `src/server` 与 `src/agents` 禁止依赖：
 
-| 模块（均在 `src/storage/offline/`）                | 用途                         | 引用方              |
-| -------------------------------------------------- | ---------------------------- | ------------------- |
-| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁           | migrate-home script |
-| `clean-epoch.js`                                   | 新库 epoch                   | prepare script      |
-| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计 | drill/audit scripts |
-| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval          | scripts + tests     |
+| 模块（均在 `src/storage/offline/`）                | 用途                          | 引用方              |
+| -------------------------------------------------- | ----------------------------- | ------------------- |
+| `runtime-home.js` / `legacy-runtime-paths.js`      | 旧安装 SQLite 搬迁            | migrate-home script |
+| `clean-epoch.js`                                   | 新库 epoch                    | prepare script      |
+| `recovery-drill.js` / `audit-storage.js`           | SQLite 恢复演练 / 完整性审计  | drill/audit scripts |
+| `memory-stabilization.js` / `memory-write-eval.js` | 记忆离线审计与 eval           | scripts + tests     |
+| `dangling-tool-span-repair.js`                     | 修复崩溃残留的未闭环工具 span | repair script       |
 
 旧 sessions/invocations JSON、provider session-map 与 transcript 的导入、dual 对账、混合归档、
 清理执行器及其 fixture 已退役。`runtime-home` 仅迁移现存 `data/runtime/shift.sqlite` 安装，
@@ -576,8 +597,7 @@ grep audit-dual|legacy-cleanup|migrate-runtime  → src/server, src/agents
 # 预期：无匹配
 ```
 
-最后核对日期：2026-09-08。若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，
-PR 应明确说明原因。
+若代码改变上述映射，必须在同一 PR 中更新本文件；若不影响，PR 应明确说明原因。
 
 运行恢复与失败处理：观察帧 traceId 从 Invocation 派生，前端以 snapshot 高水位区分历史回放和 live start，忽略其他 Trace 的迟到终态。启动中的 Stop 保留响应并通过原 trace Stop API 确认；coalescer 定时写入错误保留到既有 stream-handler / post-stream 失败入口，不能继续成功收口。
 
@@ -617,3 +637,42 @@ Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans�
 Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 provider 调用前通过 event-store 写 context-restored（prompt_prepared、包 ID/hash、任务版本、输入 hash）。PRE、A2A 和 emergency retry 共用记录入口。封存读取最新已处理 workflow evidence；包优先保留目标、进度和 Git 工作区引用，封存写失败显式上抛。invocation repository 的定向恢复事件查询供 collaboration API 展示包和恢复证据，不扫描工具正文、不推断模型已理解。
 
 前端 TaskContextDetails 通过 collaboration API 展示需求、计划、进度、续工包及输入准备证据，类型来自 src/shared/task-context.d.ts。run-event-stream 在任务更新或恢复事件后刷新既有查询。MessageList 使用既有路由消息的 parentInvocationId/source 定位 callback 或最终回答原文；没有新增交接消费、审批或写入路径。
+
+---
+
+### P2 结构拆分与前端守卫（2026-09-14）
+
+三个越过 1000 行硬线的文件按「facade + 同目录兄弟模块」拆分，facade 对外方法集逐字不变，
+消费方（`a2a-finalize` / `handoff-policy` / `server/index.js` / callback-routes 等）零改动：
+
+| facade（拆分前后）                   | 兄弟模块与职责                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat-worklist.js` 1663 → 851        | `chat-turn-state`（回合可变状态 + tracker）、`chat-prompt-assembly`（identity / 协作规则 / taskContext / digest）、`chat-invocation-starter`（启动 + 启动期 SSE 广播）、`chat-memory-inject`（bootstrap 与 a2a 共用 `memory_injected` 单一发射点）、`chat-seal-coordination`（pre-call rotate / post-turn soft seal / `sealContextWindow`）、`chat-terminal`（四个终态分支合一为 `closeTurnFailure`） |
+| `collab-task-registry.js` 1203 → 232 | `task-gate-recorder`（六个 submit/record 门禁走同一 `applyGateUpdate` 骨架）、`task-route-policy`（`PHASE_BY_INTENT` 映射表 + 三个路由阻断判定）、`task-permission`（权限与就绪查询）、`task-evidence-reset`（31 处 `delete task.artifacts.*` 收口为 `clearDownstreamEvidence(task, { from, keep })`，删除集合逐字不变）、`task-updates`（goal / progress）                                           |
+| `recall-service.js` 1072 → 112       | `recall-search`（FTS / vector 融合、候选收集与作用域解析）、`recall-inject-pack`（`retrieveForTurn` 的 recency / related / vector 三通道）、`recall-metrics`（指标与降级文案）                                                                                                                                                                                                                        |
+| `memory-service.js` 903 → 605        | `memory-read`（六个读查询 + `enrichMemory` 的 supersession 关联查询）、`memory-write-evidence`（锚定证据组装 + 内容哈希，`hashMemoryWriteContent` 随之迁入以保持单向依赖）                                                                                                                                                                                                                            |
+
+- facade 只保留组合与不属于任何兄弟的关注点；兄弟模块是工厂，接收 deps / core 句柄，
+  依赖单向（inject-pack → search、memory-service → memory-write-evidence）以避免 require 环。
+- 产品记忆写入口仍是 `writeMemoryCandidate` → `createProduct` → `capture` → `captureOnce` →
+  `memories.create`。`capture` 保留为公开低层入口：`createProduct` 内部调用它，且 12 处测试
+  fixture 直接用它写入固定 id 的行；删除它会迫使 fixture 改走 `writeMemoryCandidate`，属于
+  语义改写而非结构整理（B-4 的作用域拒绝守卫在三个入口上各自生效，未因拆分放松）。
+- `enrichMemory` 的逐行 supersession 查询仍按条目执行；拆分只把它集中到单一可见位置，
+  批量化是独立的性能改动，未在本轮。
+- `src/agents/tool-classification.js` → `src/shared/tool-classification.js`（纯函数、零依赖）。
+  `storage/offline/audit-storage` 不再反向依赖 `agents`，跨层共享统一落 `src/shared/`；
+  §5.2 的「禁止从 server/agents require storage/offline/*」方向不变。
+- 前端并发与无障碍守卫：`useChatActions.send` 在已接受运行（有 `traceId` 且未到终态）未结束前
+  直接拒绝并提示，待接受的启动仍走 `startControllers` 的 supersede-abort，乐观链与
+  abort-on-supersede 语义不变；`MessageList` 的 `role="log"` 在流式期以 `aria-busy` 静默，
+  仅终态 / 错误帧播报，运行错误另经 toast 的 polite 区通知。
+
+---
+
+最后核对日期：2026-09-14，覆盖以上全部章节，含「运行修复补充（2026-09-09）」、
+Canonical JSONL 归档退役说明与「P2 结构拆分与前端守卫（2026-09-14）」。核对确认本文件
+引用的代码锚点（路径、模块名、迁移编号）在当前实现中真实存在；被声明删除的旧入口
+（`role-contracts.js`、`/api/chat`、`mirrorLastMessage`、storage_outbox、transcript 模块）
+确实零残留。下列三处描述已按当前实现修正：产品终态 reason 字面量的归属（见 §3.1）、
+产品记忆写入链的中间层级（见 §3.4）、三个 1000+ 行文件的模块边界（见本节）。

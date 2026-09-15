@@ -197,6 +197,18 @@ const MEMORY_FUNNEL_STATS_KEYS = Object.freeze([
 
 const COLLAB_TASK_STATES = Object.freeze(["discuss", "implement", "review", "deliver", "done"]);
 
+/**
+ * Phase names keyed by stage, for the registry and its extracted modules.
+ * Values are the same strings as COLLAB_TASK_STATES.
+ */
+const COLLAB_TASK_PHASE = Object.freeze({
+  DISCUSS: "discuss",
+  IMPLEMENT: "implement",
+  REVIEW: "review",
+  DELIVER: "deliver",
+  DONE: "done",
+});
+
 /** Machine-readable A2A intents. Phase and intent are deliberately separate. */
 const HANDOFF_INTENTS = Object.freeze([
   "discuss",
@@ -334,6 +346,7 @@ module.exports = {
   MEMORY_DROP_REASONS,
   MEMORY_FUNNEL_STATS_KEYS,
   COLLAB_TASK_STATES,
+  COLLAB_TASK_PHASE,
   HANDOFF_INTENTS,
   DUTIES,
   ROUTING_REASONS,

@@ -52,10 +52,7 @@ test("callback client fails on non-2xx HTTP responses", async () => {
 
 test("callback client validates required environment and arguments", () => {
   assert.throws(() => callbackClient.buildRequest("thread-context", {}, {}), /SHIFT_API_URL/);
-  assert.throws(
-    () => callbackClient.buildRequest("read-invocation", {}, ENV),
-    /requires --target/
-  );
+  assert.throws(() => callbackClient.buildRequest("read-invocation", {}, ENV), /requires --target/);
   assert.deepEqual(callbackClient.parseArgs(["post-message", "--content", "你好"]), {
     command: "post-message",
     options: { content: "你好" },

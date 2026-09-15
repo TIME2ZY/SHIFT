@@ -606,6 +606,66 @@ describe("TraceExplorer", () => {
     expect(document.querySelector(".trace-waterfall-track i[data-open='true']")).not.toBeNull();
     expect(screen.getByTitle("未结束")).toBeInTheDocument();
   });
+
+  it("reports a failed trace query instead of pretending the ledger is empty", async () => {
+    const traces: TraceSummary[] = [
+      {
+        ...base,
+        traceId: "trace-ok",
+        state: "completed",
+        outcome: {
+          terminalReason: "request-completed",
+          failureStage: null,
+          errorCode: null,
+          retryable: null,
+        },
+        invocations: [],
+      },
+    ];
+    let failed = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/api/storage/health")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ storage: { observability: { alerts: [] } } }))
+          );
+        }
+        if (/\/api\/sessions\/s1\/traces\/[^?]+/.test(url)) {
+          return Promise.resolve(new Response(JSON.stringify({ trace: traces[0] })));
+        }
+        if (url.includes("/api/sessions/") && url.includes("/traces")) {
+          if (failed) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ error: "存储不可用" }), {
+                status: 503,
+              })
+            );
+          }
+          return Promise.resolve(new Response(JSON.stringify({ traces, page: { total: 1 } })));
+        }
+        return Promise.resolve(new Response(JSON.stringify({})));
+      })
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <TraceExplorer traces={traces} sessionId="s1" agents={[{ id: "codex", label: "Codex" }]} />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("无法加载 Trace：存储不可用");
+    // The empty-ledger copy must not mask the failure.
+    expect(
+      screen.queryByText("运行一次任务后，这里会出现可追溯的协作航线。")
+    ).not.toBeInTheDocument();
+
+    failed = false;
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect((await screen.findAllByText("第 1 轮")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 function testInvocation(

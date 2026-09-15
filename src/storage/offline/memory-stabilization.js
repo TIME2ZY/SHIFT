@@ -58,11 +58,7 @@ function activeProductQualityIssues(memory) {
   if (!memorySlot(memory)) issues.push("missing_scope_target_or_topic");
   if (!String(memory.content || "").trim()) issues.push("missing_content");
   const anchors = Array.isArray(memory.anchors) ? memory.anchors : [];
-  if (
-    anchors.length === 0 &&
-    !memory.sourceMessageId &&
-    !memory.sourceInvocationId
-  ) {
+  if (anchors.length === 0 && !memory.sourceMessageId && !memory.sourceInvocationId) {
     issues.push("missing_evidence");
   }
   return issues;

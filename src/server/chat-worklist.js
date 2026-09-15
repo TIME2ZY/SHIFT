@@ -8,75 +8,32 @@ const {
   resolveCoalesceOptionsFromEnv,
 } = require("./stream-delta-coalescer");
 const { createRunLifecycle } = require("../agents/event-protocol");
-const { projectTaskContext } = require("../storage/collaboration-read-model");
 const { recordContextRestoration } = require("../session/context-restoration");
 const { ENV } = require("../shared/brand");
 const { observeAvailabilityEvent } = require("../agents/provider-availability");
-const {
-  deriveThreadParticipation,
-  renderCollaborationRules,
-} = require("../agents/collaboration-rules");
-const {
-  IMPLEMENTATION_GATE_STATUS,
-  renderImplementationGateBlock,
-  renderOutcomeEvidenceBlock,
-} = require("../agents/workflow-gates");
-const { processWorkflowEvidenceOutput } = require("../agents/workflow-evidence");
-const { finalizeA2ARoutes, isEffectiveHandoffHop } = require("../agents/a2a-finalize");
+const { IMPLEMENTATION_GATE_STATUS } = require("../agents/workflow-gates");
+const { finalizeA2ARoutes } = require("../agents/a2a-finalize");
 const { buildA2AInjectMetrics, logA2AInjectMetrics } = require("../agents/handoff-metrics");
-const { scanReplacementChars } = require("../shared/encoding-guard");
 const {
   emptyWriteStats,
   mergeWriteStats,
   buildMemoryWriteMetrics,
   logMemoryWriteMetrics,
-  buildMemoryInjectPayload,
-  collectInjectIdSets,
 } = require("../storage/memory-metrics");
 const { refreshDigest } = require("../storage/memory-digest");
-const {
-  projectTurnBudget,
-  shouldPreSealRotate,
-  shouldSoftSealAfterTurn,
-  shouldEmergencyStop,
-  charsToTokens,
-} = require("../session/context-budget");
-const {
-  resolveRotateCapacity,
-  buildSealMeta,
-  formatSealReason,
-} = require("../session/seal-lifecycle");
-const { DurableWriteError } = require("../storage/sqlite-retry");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
-
-function generateMessageId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function buildAssistantFinalMessage({
-  agent,
-  content,
-  code,
-  signal,
-  invocationId,
-  usage,
-  allowEmpty = false,
-}) {
-  if (!allowEmpty && !String(content || "").trim()) return null;
-  return {
-    id: generateMessageId(),
-    role: "assistant",
-    agent,
-    content,
-    exitCode: code,
-    signal,
-    invocationId,
-    usage,
-    messageType: "assistant-final",
-    createdAt: new Date().toISOString(),
-  };
-}
+const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
+const { assemblePrompt } = require("./chat-prompt-assembly");
+const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
+const { announceMemoryInject } = require("./chat-memory-inject");
+const { createSealCoordinator } = require("./chat-seal-coordination");
+const {
+  generateMessageId,
+  buildAssistantFinalMessage,
+  closeTurnFailure,
+  completeAssistantTurn,
+} = require("./chat-terminal");
 
 /**
  * @param {object} ctx shared chat run context (mutated: session, aborted)
@@ -87,16 +44,13 @@ async function runChatWorklist(ctx) {
     res,
     sendSse,
     sessionId,
-    traceId,
     AGENTS,
     callbacks,
     contextHealth,
-    sessionSealer,
     sessionBootstrap,
     recallService,
     memoryService,
     storage,
-    agentIdentity,
     agentHandoff,
     durable,
     events,
@@ -118,11 +72,7 @@ async function runChatWorklist(ctx) {
     userMessageId,
     turnPrompt,
     skillNames,
-    augmentedPrompt,
-    nativeSkillDelivery = false,
-    bootstrapPacket,
     bootstrapInject,
-    bootstrapRecovery = [],
     apiUrl,
     appendToSession,
     parseA2AMentions,
@@ -137,11 +87,7 @@ async function runChatWorklist(ctx) {
     runtime,
   } = ctx;
 
-  let session = ctx.session;
-  let aborted = false;
-  let previousInvocationId = null;
-  let ownedInvocationSlotAtCleanup = false;
-
+  const turnRunState = createTurnState(ctx);
   if (!Array.isArray(worklist) || worklist.length === 0) {
     throw new Error("runChatWorklist: worklist is empty or missing");
   }
@@ -152,7 +98,7 @@ async function runChatWorklist(ctx) {
   try {
     for (let i = 0; i < worklist.length; i++) {
       if (invocationController.signal.aborted) {
-        aborted = true;
+        turnRunState.aborted = true;
         break;
       }
       const agent = worklist[i];
@@ -160,7 +106,8 @@ async function runChatWorklist(ctx) {
       const providerId = agentConfig.providerId || "";
       const providerKey =
         providerId && agentConfig.model ? `${providerId}:${agentConfig.model}` : providerId;
-      let openWindow =
+      resetTurnStateForEntry(turnRunState, { skillNames });
+      turnRunState.openWindow =
         storage?.windows?.getOpen?.({
           threadId: sessionId,
           agentId: agent,
@@ -168,7 +115,7 @@ async function runChatWorklist(ctx) {
           workspaceKey,
         }) ||
         durable.ensureWindow({
-          session,
+          session: turnRunState.session,
           threadId: sessionId,
           agentId: agent,
           providerKey,
@@ -176,32 +123,20 @@ async function runChatWorklist(ctx) {
           capacityTokens: contextHealth.getAgentCapacity(agent),
           reserveRatio: contextHealth.getAgentReserveRatio(agent),
         });
-      let resumeSessionId = openWindow?.providerSessionId || "";
-      let assistantContent = "";
-      let observedProviderSessionId = "";
-      let contextWarned = false;
-      let contextSealedSseSent = false;
-      let contextSealHandled = false;
-      let emergencyStop = false;
-      let sealPending = false;
-      let preCallRotated = false;
-      let preCallSealedWindowId = null;
-      let preCallSealedGeneration = null;
-      let preCallSealedRatio = 0;
+      turnRunState.resumeSessionId = turnRunState.openWindow?.providerSessionId || "";
+      // Owns every seal decision for this entry; reads mutable state at call time.
+      const seals = createSealCoordinator(ctx, turnRunState, { agent, providerKey });
 
       const queuedCause = threadCtx.a2aCauses[i] || null;
       const dutyBinding = queuedCause?.dutyBinding || null;
       const parentInvocationId =
-        i === 0 ? null : queuedCause?.parentInvocationId || previousInvocationId;
+        i === 0 ? null : queuedCause?.parentInvocationId || turnRunState.previousInvocationId;
       const triggerType = i === 0 ? "user-message" : queuedCause?.triggerType || "a2a-handoff";
       const triggerMessageId =
         i === 0 ? userMessageId : queuedCause?.triggerMessageId || userMessageId;
 
-      let agentPrompt;
-      /** @type {string[]} */
-      let turnSkillNames = skillNames;
       if (i === 0) {
-        agentPrompt = turnPrompt;
+        turnRunState.agentPrompt = turnPrompt;
       } else {
         const prev = a2aHistory[a2aHistory.length - 1];
         const prevLabel = AGENTS[prev.agent]?.label || prev.agent;
@@ -247,8 +182,8 @@ async function runChatWorklist(ctx) {
           rawPrompt: receiveBundle.text,
           skillNames: activeSkillNames(dutyBinding),
         });
-        agentPrompt = a2aSkills.augmentedPrompt;
-        turnSkillNames = a2aSkills.skillNames;
+        turnRunState.agentPrompt = a2aSkills.augmentedPrompt;
+        turnRunState.turnSkillNames = a2aSkills.skillNames;
         // Stash for metrics after full prompt assembly (needs promptBytes).
         threadCtx._pendingA2AInject = {
           agent,
@@ -260,408 +195,63 @@ async function runChatWorklist(ctx) {
           },
         };
       }
-
-      // Prompt layout (top → bottom):
-      //   1. Agent identity (every turn, including A2A)
-      //   2. Collaboration rules (every turn: soft ban nested subagents; A2A uses compact)
-      //   3. Session bootstrap (first turn only: coords + digest + recall)
-      //   4. Light session header on later turns (correct agent label)
-      //   5. Task body (user/skills or Receive Bundle + current Duty Skills)
-      //   6. Callback instructions
-      const identityBlock = agentIdentity.renderIdentityBlock(agent, agentConfig);
-      const enabledProviderIds = new Set(
-        storage?.threadSeats?.listEnabledForThread?.(sessionId).map((seat) => seat.providerId) || [
-          agent,
-        ]
-      );
-      const enabledAgents = Object.fromEntries(
-        Object.entries(AGENTS).filter(
-          ([providerId]) =>
-            enabledProviderIds.has(providerId) &&
-            (!ctx.availability || ctx.availability.isRoutable(providerId))
-        )
-      );
-      const participation = deriveThreadParticipation({
-        bindings: storage?.invocationDutyBindings?.listForThread?.(sessionId) || [],
-        seats: storage?.threadSeats?.listForThread?.(sessionId) || [],
-        invocations: storage?.invocations?.listForThread?.(sessionId) || [],
-        agents: AGENTS,
-        current: {
-          seatId: dutyBinding?.seatId || null,
-          providerId: agent,
-          label: agentConfig.label || agent,
-          duty: dutyBinding?.duty || null,
-        },
+      await assemblePrompt(ctx, turnRunState, {
+        agent,
+        agentConfig,
+        i,
+        dutyBinding,
+        parentInvocationId,
+        triggerType,
       });
-      const collaborationBlock = renderCollaborationRules(agent, enabledAgents, participation);
-      const outcomeEvidenceBlock = renderOutcomeEvidenceBlock(
-        dutyBinding?.duty,
-        collabTaskRegistry?.getTask(sessionId) || null,
-        {
-          branch: runWorkspace.branch || "",
-          modelId: agentConfig.model || "",
-        }
-      );
-      const enforcesImplementationPermission =
-        dutyBinding?.enforcementLevel === "enforced" &&
-        agentConfig.runtimeCapabilities?.permissionCallbacks === true;
-      let implementationPermission = null;
-      if (enforcesImplementationPermission) {
-        if (
-          collabTaskRegistry &&
-          typeof collabTaskRegistry.ensureImplementationPlanRequired === "function"
-        ) {
-          const existing = collabTaskRegistry.implementationPermission(sessionId);
-          collabTaskRegistry.ensureImplementationPlanRequired(sessionId, {
-            requestedBy: parentInvocationId ? null : "user",
-            force: triggerType === "user-message" && existing.allowed,
-          });
-          implementationPermission = collabTaskRegistry.implementationPermission(sessionId);
-        } else {
-          implementationPermission = {
-            allowed: false,
-            status: IMPLEMENTATION_GATE_STATUS.REQUIRED,
-            planHash: null,
-            gate: { status: IMPLEMENTATION_GATE_STATUS.REQUIRED },
-          };
-        }
-      }
-      const taskSnapshot = collabTaskRegistry?.getTask(sessionId);
-      const recoveryGoal =
-        taskSnapshot?.goal ||
-        session.messages?.find((m) => m.role === "user")?.content ||
-        turnPrompt;
-      const taskContext = sessionBootstrap.renderTaskContext(
-        projectTaskContext(taskSnapshot, dutyBinding)
-      );
-      const recoveryEvidence = i === 0 ? [...bootstrapRecovery] : [];
-      const recoveryContext = {
-        recoveryEvidence,
-        threadId: sessionId,
-        sessionId,
-        agentId: agent,
-        agent: agentConfig,
-        workspaceKey,
-        invocationSource: recallService,
-        digestSource: storage?.digests,
-        windowSealSource: storage,
-        logger: log,
-      };
-      const promptParts = [
-        identityBlock,
-        collaborationBlock,
-        outcomeEvidenceBlock,
-        taskContext,
-      ].filter(Boolean);
-      if (i === 0) {
-        promptParts.push(bootstrapPacket, augmentedPrompt);
-      } else {
-        if (!resumeSessionId && sessionBootstrap.buildDigest) {
-          promptParts.push(
-            await sessionBootstrap.buildDigest({
-              ...recoveryContext,
-              generation: openWindow?.generation || 1,
-            })
-          );
-        } else {
-          promptParts.push(
-            sessionBootstrap.buildIdentity({
-              threadId: sessionId,
-              sessionId,
-              agent: agentConfig,
-              generation: openWindow?.generation || 1,
-            })
-          );
-        }
-        promptParts.push(agentPrompt);
-        if (turnSkillNames.length > 0) {
-          sendSse(res, "skills-active", { skills: turnSkillNames, agent, a2a: true });
-        }
-      }
-      if (implementationPermission) {
-        promptParts.push(
-          renderImplementationGateBlock(
-            implementationPermission.gate || {
-              status: implementationPermission.status,
-              planHash: implementationPermission.planHash,
-              approvedPlanHash: implementationPermission.allowed
-                ? implementationPermission.planHash
-                : null,
-            }
-          )
-        );
-      }
-      promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
-      let promptForAgent = promptParts.filter(Boolean).join("\n\n");
-      if (i === 0 && nativeSkillDelivery) {
-        log.info?.(
-          `[skills] native worktree delivery at ${runWorkspace.worktreeDir}; prompt fallback skipped`
-        );
-      }
 
       // Tracker from open window *before* this prompt (for PRE projection).
-      let healthTracker = contextHealth.makeTracker(agent, {
-        capacityTokens: openWindow?.capacityTokens || contextHealth.getAgentCapacity(agent),
-        inputChars: openWindow?.inputChars,
-        outputChars: openWindow?.outputChars,
-        reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-        contextUsedTokens: openWindow?.contextUsedTokens,
-        contextUsageSource: openWindow?.contextUsageSource,
-        billingInputTokens: openWindow?.billingInputTokens,
-        billingCachedInputTokens: openWindow?.billingCachedInputTokens,
-        billingOutputTokens: openWindow?.billingOutputTokens,
-        billingReasoningTokens: openWindow?.billingReasoningTokens,
-        billingTotalTokens: openWindow?.billingTotalTokens,
-        billingCostUsd: openWindow?.billingCostUsd,
-        billingComplete: openWindow?.billingComplete,
+      turnRunState.healthTracker = createTurnTracker(agent, turnRunState.openWindow, {
+        contextHealth,
+        capacityFallback: contextHealth.getAgentCapacity(agent),
+        reserveFallback: contextHealth.getAgentReserveRatio(agent),
       });
-      const usedBeforePrompt = healthTracker.getUsedTokens();
-      const promptTokens = charsToTokens(promptForAgent.length);
-      const preBudget = projectTurnBudget({
-        currentContextTokens: usedBeforePrompt,
-        estimatedFullPromptTokens: promptTokens,
-      });
-      if (
-        shouldPreSealRotate({
-          usableContextTokens: healthTracker.usableContextTokens,
-          projected: preBudget.projected,
-        })
-      ) {
-        const ratio0 = healthTracker.getFillRatio();
-        const rotateCapacity = resolveRotateCapacity({
-          agentId: agent,
-          getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity: healthTracker.capacityTokens,
-        });
-        const preSealReason = formatSealReason("pre-call-projected", true);
-        const rotated = durable.sealAndRotateWindow({
-          session,
-          threadId: sessionId,
-          agentId: agent,
-          providerKey,
-          workspaceKey,
-          capacityTokens: rotateCapacity,
-          reserveRatio: healthTracker.reserveRatio,
-          windowId: openWindow?.id || null,
-          reason: preSealReason,
-        });
-        if (rotated?.next || rotated?.sealed) {
-          preCallRotated = true;
-          preCallSealedWindowId = openWindow?.id || rotated?.sealed?.id || null;
-          preCallSealedGeneration = openWindow?.generation || rotated?.sealed?.generation || null;
-          preCallSealedRatio = ratio0;
-          const sealMeta = buildSealMeta({
-            partial: true,
-            reason: "pre-call-projected",
-            ratio: ratio0,
-            workspaceKey,
-            generation: preCallSealedGeneration,
-            nextCapacityTokens: rotateCapacity,
-            missingFields: ["assistantContent"],
-          });
-          sendSse(res, "sealed", {
-            agent,
-            ratio: ratio0,
-            reason: "pre-call-projected",
-            projected: preBudget.projected,
-            usable: healthTracker.usableContextTokens,
-            ...sealMeta,
-            nextCapacityTokens: rotateCapacity,
-            workspaceKey,
-          });
-          contextSealedSseSent = true;
-          // Capture after startInvocation (needs a real invocation id for SQLite FK).
-          openWindow =
-            rotated?.next ||
-            storage?.windows?.getOpen?.({
-              threadId: sessionId,
-              agentId: agent,
-              providerKey,
-              workspaceKey,
-            });
-          resumeSessionId = "";
-          healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens: openWindow?.capacityTokens || rotateCapacity,
-            inputChars: openWindow?.inputChars,
-            outputChars: openWindow?.outputChars,
-            reserveRatio: openWindow?.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-            contextUsedTokens: openWindow?.contextUsedTokens,
-            contextUsageSource: openWindow?.contextUsageSource,
-          });
-          if (sessionBootstrap.buildDigest)
-            promptParts.push(
-              await sessionBootstrap.buildDigest({
-                ...recoveryContext,
-                generation: openWindow?.generation || 2,
-              })
-            );
-          promptForAgent = promptParts.filter(Boolean).join("\n\n");
-        }
-      }
-      healthTracker.addInput(promptForAgent.length);
+      // PRE-call rotation, if the projected budget overflows the usable window.
+      await seals.preCallRotateIfNeeded();
+      turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
 
       // Start invocation only on the window that will actually run the provider.
-      const { invocationId, callbackToken } = callbacks.createInvocation(sessionId, agent);
-      const startedAt = new Date().toISOString();
-      let durableRun = durable.startInvocation({
-        session,
-        invocationId,
-        threadId: sessionId,
-        traceId,
-        agentId: agent,
+      const started = startInvocationAndAnnounce(ctx, turnRunState, {
+        agent,
         providerKey,
-        workspaceKey,
-        capacityTokens: healthTracker.capacityTokens,
-        reserveRatio: healthTracker.reserveRatio,
-        resumeSessionId,
-        startedAt,
         parentInvocationId,
         triggerMessageId,
         triggerType,
-        handoffId: queuedCause?.handoffId || null,
         dutyBinding,
+        resumeSessionId: turnRunState.resumeSessionId,
+        handoffId: queuedCause?.handoffId || null,
+        generationFallback: turnRunState.openWindow?.generation || 1,
+        capacityFallback: contextHealth.getAgentCapacity(agent),
       });
-      if (!durableRun) {
+      const { invocationId, callbackToken } = started;
+      if (!started.run) {
         throw new Error(`Failed to persist invocation start for ${invocationId}.`);
       }
-      let activeInvocationId = invocationId;
-      threadCtx.currentDutyBinding = durableRun.binding || dutyBinding;
       // Prefer tracker bound to the durable window snapshot when present.
-      if (durableRun.window) {
-        healthTracker = contextHealth.makeTracker(agent, {
-          capacityTokens: durableRun.window.capacityTokens,
-          inputChars: durableRun.window.inputChars,
-          outputChars: durableRun.window.outputChars,
-          reserveRatio: durableRun.window.reserveRatio,
-          contextUsedTokens: durableRun.window.contextUsedTokens,
-          contextUsageSource: durableRun.window.contextUsageSource,
-          billingInputTokens: durableRun.window.billingInputTokens,
-          billingCachedInputTokens: durableRun.window.billingCachedInputTokens,
-          billingOutputTokens: durableRun.window.billingOutputTokens,
-          billingReasoningTokens: durableRun.window.billingReasoningTokens,
-          billingTotalTokens: durableRun.window.billingTotalTokens,
-          billingCostUsd: durableRun.window.billingCostUsd,
-          billingComplete: durableRun.window.billingComplete,
+      if (turnRunState.durableRun.window) {
+        turnRunState.healthTracker = createTurnTracker(agent, turnRunState.durableRun.window, {
+          contextHealth,
         });
-        healthTracker.addInput(promptForAgent.length);
+        turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
       }
-      let billingAtStart = { ...healthTracker.snapshot().billing };
-      const sealBudget = contextHealth.getAgentSealThresholds(agent, {
-        capacityTokens: healthTracker.capacityTokens,
-        reserveRatio: healthTracker.reserveRatio,
-      });
-      const sealer = sessionSealer.makeSealer({
-        warnThreshold: sealBudget.usable.sealer.warn,
-        actionThreshold: sealBudget.usable.sealer.action,
-        recoveryThreshold: sealBudget.usable.sealer.recovery,
-      });
-      sealer.update(healthTracker.getFillRatio());
-      threadCtx.sealer = sealer;
-      threadCtx.currentInvocationId = invocationId;
-      threadCtx.windowId = durableRun?.window?.id || null;
-      // Surface invocation identity together with its immutable Seat/Duty contract.
-      // A2A causality remains on window-meta and is joined by invocationId.
-      sendSse(res, "agent-start", {
-        agent,
-        invocationId,
-        seatId: durableRun.binding?.seatId || null,
-        duty: durableRun.binding?.duty || null,
-      });
-      sendSse(res, "window-meta", {
-        agent,
-        invocationId,
-        generation: durableRun?.window?.generation || openWindow?.generation || 1,
-        preCallRotated,
-        capacityTokens: durableRun?.window?.capacityTokens || contextHealth.getAgentCapacity(agent),
-        workspaceKey,
-        worktree: Boolean(activeWorktree),
-        cwd: runWorkspace.worktreeDir,
-        baseDir: runWorkspace.baseDir,
-        parentInvocationId,
-        triggerMessageId,
-        triggerType,
-        seatId: durableRun.binding?.seatId || null,
-        duty: durableRun.binding?.duty || null,
-      });
-      // Explicit workspace signal for providers that do not stream tool.cwd (e.g. Grok).
-      sendSse(res, "workspace-meta", {
-        agent,
-        invocationId,
-        workspaceKey,
-        cwd: runWorkspace.worktreeDir,
-        baseDir: runWorkspace.baseDir,
-        useWorktree: Boolean(activeWorktree),
-        branch: runWorkspace.branch || "",
-      });
-      runObs.noteInvocationStart({ agent, invocationId });
+      turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
+      seals.bindSealer();
       const turnStartHeadSha =
         useWorktree && runWorkspace?.worktreeDir && deliveryVerifier?.getHeadSha
           ? deliveryVerifier.getHeadSha(runWorkspace.worktreeDir)
           : null;
       threadCtx.turnStartHeadSha = turnStartHeadSha;
-      if (preCallRotated && preCallSealedWindowId) {
-        const capture = memories.captureWindowSeal({
-          threadId: sessionId,
-          invocationId,
-          windowId: preCallSealedWindowId,
-          agentId: agent,
-          generation: preCallSealedGeneration,
-          ratio: preCallSealedRatio,
-          reason: "pre-call-projected",
-          assistantContent: "",
-          invocationState: "pre-call-rotate",
-          workspaceKey,
-          userGoal: recoveryGoal,
-          task: collabTaskRegistry?.getTask(sessionId),
-          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
-            available: false,
-            cwd: runWorkspace.worktreeDir,
-          },
-          events:
-            typeof storage?.invocations?.listEvents === "function"
-              ? storage.invocations.listEvents(invocationId)
-              : [],
-        });
-        if (capture?.captured) {
-          sendSse(res, "window-sealed", capture.event);
-        }
-        if (capture?.captured && sessionBootstrap.buildDigest) {
-          const recovery = await sessionBootstrap.buildDigest(recoveryContext);
-          promptForAgent += "\n\n" + recovery;
-          healthTracker.addInput(recovery.length + 2);
-        }
-        // Pre-call sealed the *previous* generation; the active durableRun window is fresh.
-      }
+      // Capture the pre-call seal now that an invocation id exists for the SQLite FK.
+      await seals.capturePreCallSeal();
       if (i === 0) {
-        const injectPayload = buildMemoryInjectPayload({
-          sessionId,
-          agent,
+        announceMemoryInject(ctx, turnRunState, {
           source: "bootstrap",
-          items: bootstrapInject.deliveredItems || bootstrapInject.items,
-          stats: bootstrapInject.stats,
-        });
-        const injectIds = collectInjectIdSets(bootstrapInject, injectPayload.items);
-        sendSse(res, "memory-inject", injectPayload);
-        storage?.memoryEvents?.recordSafe?.({
-          eventType: "memory_injected",
-          threadId: sessionId,
-          invocationId,
-          agentId: agent,
-          operationKey: `inject:${invocationId}:bootstrap`,
-          payloadVersion: 1,
-          payload: {
-            source: "bootstrap",
-            selectedIds: injectIds.selectedIds,
-            deliveredIds: injectIds.deliveredIds,
-            droppedIds: injectIds.droppedIds,
-            memoryIds: injectIds.deliveredIds,
-            renderedIds: injectIds.deliveredIds,
-            availability: injectPayload.availability,
-            funnel: injectPayload.funnel,
-            delivered: Number(injectPayload.funnel?.delivered || injectIds.deliveredIds.length),
-            selected: Number(injectPayload.funnel?.selected || injectIds.selectedIds.length),
-            truncated: Boolean(injectPayload.funnel?.truncated),
-          },
+          agent,
+          inject: bootstrapInject,
         });
       }
 
@@ -675,45 +265,20 @@ async function runChatWorklist(ctx) {
           threadId: sessionId,
           invocationId,
           memoryCard: pending.memoryCard,
-          promptBytes: promptForAgent.length,
+          promptBytes: turnRunState.promptForAgent.length,
         });
         logA2AInjectMetrics(injectMetrics, log);
         sendSse(res, "handoff-metrics", injectMetrics);
         if (pending.inject) {
-          const a2aInject = buildMemoryInjectPayload({
-            sessionId,
-            agent: pending.agent,
+          announceMemoryInject(ctx, turnRunState, {
             source: "a2a",
-            items: pending.inject.deliveredItems || pending.inject.items,
-            stats: pending.inject.stats,
-          });
-          const a2aIds = collectInjectIdSets(pending.inject, a2aInject.items);
-          sendSse(res, "memory-inject", a2aInject);
-          storage?.memoryEvents?.recordSafe?.({
-            eventType: "memory_injected",
-            threadId: sessionId,
-            invocationId,
-            agentId: pending.agent,
-            operationKey: `inject:${invocationId}:a2a`,
-            payloadVersion: 1,
-            payload: {
-              source: "a2a",
-              selectedIds: a2aIds.selectedIds,
-              deliveredIds: a2aIds.deliveredIds,
-              droppedIds: a2aIds.droppedIds,
-              memoryIds: a2aIds.deliveredIds,
-              renderedIds: a2aIds.deliveredIds,
-              availability: a2aInject.availability,
-              funnel: a2aInject.funnel,
-              delivered: Number(a2aInject.funnel?.delivered || a2aIds.deliveredIds.length),
-              selected: Number(a2aInject.funnel?.selected || a2aIds.selectedIds.length),
-              truncated: Boolean(a2aInject.funnel?.truncated),
-            },
+            agent: pending.agent,
+            inject: pending.inject,
           });
         }
       }
       threadCtx.currentInvocationId = invocationId;
-      threadCtx.windowId = durableRun?.window?.id || null;
+      threadCtx.windowId = turnRunState.durableRun?.window?.id || null;
       threadCtx.parentInvocationId = parentInvocationId;
       threadCtx.triggerMessageId = triggerMessageId;
       const invocationEnv = {
@@ -725,17 +290,17 @@ async function runChatWorklist(ctx) {
         [ENV.BASE_DIR]: runWorkspace.baseDir,
         [ENV.WORKTREE_DIR]: runWorkspace.worktreeDir,
         [ENV.BRANCH]: runWorkspace.branch || "",
-        ...(enforcesImplementationPermission
+        ...(turnRunState.enforcesImplementationPermission
           ? {
-              [ENV.IMPLEMENTATION_GATE]: implementationPermission?.allowed
+              [ENV.IMPLEMENTATION_GATE]: turnRunState.implementationPermission?.allowed
                 ? IMPLEMENTATION_GATE_STATUS.APPROVED
                 : IMPLEMENTATION_GATE_STATUS.REQUIRED,
-              [ENV.APPROVED_PLAN_HASH]: implementationPermission?.allowed
-                ? implementationPermission.planHash || ""
+              [ENV.APPROVED_PLAN_HASH]: turnRunState.implementationPermission?.allowed
+                ? turnRunState.implementationPermission.planHash || ""
                 : "",
             }
           : {}),
-        INVOKE_SESSION_ID: resumeSessionId,
+        INVOKE_SESSION_ID: turnRunState.resumeSessionId,
         INVOKE_WORKSPACE_KEY: workspaceKey,
       };
 
@@ -748,9 +313,9 @@ async function runChatWorklist(ctx) {
           const createdAt = payload?.createdAt || payload?.ts || new Date().toISOString();
           events.append({
             threadId: sessionId,
-            invocationId: activeInvocationId,
+            invocationId: turnRunState.activeInvocationId,
             kind,
-            payload: { ...payload, agent, invocationId: activeInvocationId },
+            payload: { ...payload, agent, invocationId: turnRunState.activeInvocationId },
             createdAt,
           });
         } catch (error) {
@@ -762,234 +327,76 @@ async function runChatWorklist(ctx) {
         ...resolveCoalesceOptionsFromEnv(),
         write: persistDurableEvent,
       });
-      const sealContextWindow = (ratio, reason = "post-turn-soft", opts = {}) => {
-        if (contextSealHandled) return null;
-        contextSealHandled = true;
-        durableCoalescer.flushAll();
-        // Mid-stream / emergency → partial; completed post-turn soft seal → complete.
-        const partial =
-          opts.partial !== undefined
-            ? Boolean(opts.partial)
-            : /physical-ceiling|emergency|mid-stream|pre-call/i.test(String(reason));
-        const rotateCapacity = resolveRotateCapacity({
-          agentId: agent,
-          getAgentCapacity: contextHealth.getAgentCapacity,
-          previousCapacity: durableRun?.window?.capacityTokens || healthTracker.capacityTokens,
-          explicitCapacity: opts.capacityTokens,
-        });
-        const sealReason = formatSealReason(reason, partial);
-        const sealedWindowId = durableRun?.window?.id || null;
-        const sealedGeneration = durableRun?.window?.generation || null;
-        let rotated = null;
-        if (durableRun?.window?.id) {
-          rotated = durable.sealAndRotateWindow({
-            session,
-            threadId: sessionId,
-            agentId: agent,
-            providerKey,
-            workspaceKey,
-            capacityTokens: rotateCapacity,
-            reserveRatio:
-              durableRun.window.reserveRatio ?? contextHealth.getAgentReserveRatio(agent),
-            windowId: durableRun.window.id,
-            reason: sealReason,
-          });
-          if (!rotated) {
-            durable.sealWindow(durableRun.window.id, sealReason);
-          } else if (rotated.next) {
-            // Keep runtime tracker aligned with new generation capacity.
-            durableRun = {
-              ...durableRun,
-              window: rotated.next,
-            };
-            healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: rotated.next.capacityTokens || rotateCapacity,
-              reserveRatio: rotated.next.reserveRatio,
-            });
-          }
-        }
-        const sealMeta = buildSealMeta({
-          partial,
-          reason,
-          ratio,
-          workspaceKey,
-          generation: sealedGeneration,
-          nextCapacityTokens: rotateCapacity,
-          missingFields:
-            partial && !String(assistantContent || "").trim() ? ["assistantContent"] : [],
-        });
-        const capture = memories.captureWindowSeal({
-          threadId: sessionId,
-          invocationId: activeInvocationId,
-          windowId: sealedWindowId,
-          agentId: agent,
-          generation: sealedGeneration,
-          ratio,
-          reason: sealReason,
-          assistantContent,
-          partial,
-          invocationState: partial ? "sealed-partial" : "sealed-complete",
-          sealMeta,
-          userGoal: recoveryGoal,
-          task: collabTaskRegistry?.getTask(sessionId),
-          workspace: deliveryVerifier?.getWorkspaceState?.(runWorkspace.worktreeDir) || {
-            available: false,
-            cwd: runWorkspace.worktreeDir,
-          },
-          events:
-            typeof storage?.invocations?.listEvents === "function"
-              ? storage.invocations.listEvents(activeInvocationId)
-              : [],
-        });
-        if (capture?.captured) {
-          sendSse(res, "window-sealed", capture.event);
-        }
-        return { rotated, sealMeta, rotateCapacity };
-      };
-      const noteContextPressure = () => {
-        const usableRatio = healthTracker.getFillRatio();
-        sealer.update(usableRatio);
-        if (usableRatio >= sealer.thresholds.warn && !contextWarned) {
-          sendSse(res, "context-warning", {
-            agent,
-            ratio: usableRatio,
-            threshold: sealer.thresholds.warn,
-          });
-          contextWarned = true;
-          sealPending = true;
-        }
-        const emergency = shouldEmergencyStop({
-          physicalContextTokens: healthTracker.capacityTokens,
-          usedTokens: healthTracker.getUsedTokens(),
-          physicalKillRatio: 0.98,
-        });
-        // A character estimate is useful for warnings and turn-boundary rotation,
-        // but it is not authoritative enough to kill a live provider process.
-        if (emergency.stop && healthTracker.snapshot().contextUsageSource === "provider_exact") {
-          emergencyStop = true;
-          if (!contextSealedSseSent) {
-            sendSse(res, "sealed", {
-              agent,
-              ratio: usableRatio,
-              physicalRatio: healthTracker.getPhysicalFillRatio(),
-              reason: emergency.reason || "physical-ceiling",
-            });
-            contextSealedSseSent = true;
-          }
-        }
-      };
-      const addObservedContext = (charCount) => {
-        healthTracker.addOutput(charCount);
-        noteContextPressure();
-      };
-
+      // Published so the seal coordinator can flush pending deltas before a seal.
+      turnRunState.durableCoalescer = durableCoalescer;
       // Replay loop: at most one automatic re-run after empty emergency stop.
-      let code = 0;
-      let signal = null;
-      let streamFailure = null;
-      let streamStopped = false;
-      let streamStopReason = null;
-      let replayedAfterEmpty = false;
-      let sawUsageEvent = false;
+      turnRunState.code = 0;
+      turnRunState.signal = null;
+      turnRunState.streamFailure = null;
+      turnRunState.streamStopped = false;
+      turnRunState.streamStopReason = null;
+      turnRunState.replayedAfterEmpty = false;
+      turnRunState.sawUsageEvent = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (attempt > 0) {
           // New window after empty emergency — start a fresh invocation.
-          assistantContent = "";
-          observedProviderSessionId = "";
-          emergencyStop = false;
-          sealPending = false;
-          contextSealHandled = false;
-          contextSealedSseSent = false;
-          contextWarned = false;
-          sawUsageEvent = false;
-          const retry = callbacks.createInvocation(sessionId, agent);
-          const retryRun = durable.startInvocation({
-            session,
-            invocationId: retry.invocationId,
-            threadId: sessionId,
-            traceId,
-            agentId: agent,
+          turnRunState.assistantContent = "";
+          turnRunState.observedProviderSessionId = "";
+          turnRunState.emergencyStop = false;
+          turnRunState.sealPending = false;
+          turnRunState.contextSealHandled = false;
+          turnRunState.contextSealedSseSent = false;
+          turnRunState.contextWarned = false;
+          turnRunState.sawUsageEvent = false;
+          const retried = startInvocationAndAnnounce(ctx, turnRunState, {
+            agent,
             providerKey,
-            workspaceKey,
-            capacityTokens: healthTracker.capacityTokens,
-            reserveRatio: healthTracker.reserveRatio,
+            parentInvocationId,
+            triggerMessageId,
+            triggerType,
+            dutyBinding: turnRunState.durableRun.binding || dutyBinding,
             resumeSessionId: "",
-            startedAt: new Date().toISOString(),
-            parentInvocationId,
-            triggerMessageId,
-            triggerType,
-            dutyBinding: durableRun.binding || dutyBinding,
+            replay: true,
+            generationFallback: 2,
+            // Read before the tracker rebind below: the retry window may lack
+            // capacity, and the pre-retry tracker still holds the prior one.
+            capacityFallback: turnRunState.healthTracker.capacityTokens,
           });
-          if (!retryRun) break;
-          durableRun = retryRun;
-          activeInvocationId = retry.invocationId;
-          threadCtx.currentDutyBinding = retryRun.binding || dutyBinding;
-          invocationEnv[ENV.INVOCATION_ID] = retry.invocationId;
-          invocationEnv[ENV.CALLBACK_TOKEN] = retry.callbackToken;
+          if (!retried.run) break;
+          const retryInvocationId = retried.invocationId;
+          invocationEnv[ENV.INVOCATION_ID] = retryInvocationId;
+          invocationEnv[ENV.CALLBACK_TOKEN] = retried.callbackToken;
           invocationEnv.INVOKE_SESSION_ID = "";
-          threadCtx.currentInvocationId = retry.invocationId;
-          threadCtx.windowId = retryRun.window?.id || null;
-          healthTracker = contextHealth.makeTracker(agent, {
-            capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
-            reserveRatio: retryRun.window?.reserveRatio ?? healthTracker.reserveRatio,
+          turnRunState.healthTracker = createTurnTracker(agent, turnRunState.durableRun.window, {
+            contextHealth,
+            capacityFallback: turnRunState.healthTracker.capacityTokens,
+            reserveFallback: turnRunState.healthTracker.reserveRatio,
+            withBilling: false,
           });
-          healthTracker.addInput(promptForAgent.length);
-          billingAtStart = { ...healthTracker.snapshot().billing };
-          sendSse(res, "agent-start", {
-            agent,
-            invocationId: retry.invocationId,
-            seatId: retryRun.binding?.seatId || null,
-            duty: retryRun.binding?.duty || null,
-          });
-          sendSse(res, "window-meta", {
-            agent,
-            invocationId: retry.invocationId,
-            generation: retryRun.window?.generation || 2,
-            replay: true,
-            capacityTokens: retryRun.window?.capacityTokens || healthTracker.capacityTokens,
-            workspaceKey,
-            worktree: Boolean(activeWorktree),
-            cwd: runWorkspace.worktreeDir,
-            baseDir: runWorkspace.baseDir,
-            parentInvocationId,
-            triggerMessageId,
-            triggerType,
-            seatId: retryRun.binding?.seatId || null,
-            duty: retryRun.binding?.duty || null,
-          });
-          sendSse(res, "workspace-meta", {
-            agent,
-            invocationId: retry.invocationId,
-            workspaceKey,
-            cwd: runWorkspace.worktreeDir,
-            baseDir: runWorkspace.baseDir,
-            useWorktree: Boolean(activeWorktree),
-            branch: runWorkspace.branch || "",
-            replay: true,
-          });
-          runObs.noteInvocationStart({ agent, invocationId: retry.invocationId });
+          turnRunState.healthTracker.addInput(turnRunState.promptForAgent.length);
+          turnRunState.billingAtStart = { ...turnRunState.healthTracker.snapshot().billing };
           if (sessionBootstrap.buildDigest) {
             const recovery = await sessionBootstrap.buildDigest({
-              ...recoveryContext,
-              generation: retryRun.window?.generation || 2,
+              ...turnRunState.recoveryContext,
+              generation: turnRunState.durableRun.window?.generation || 2,
             });
-            promptForAgent += "\n\n" + recovery;
+            turnRunState.promptForAgent += "\n\n" + recovery;
           }
-          replayedAfterEmpty = true;
+          turnRunState.replayedAfterEmpty = true;
         }
 
         const toolLifecycle = createRunLifecycle();
         recordContextRestoration({
           eventStore: events,
           threadId: sessionId,
-          invocationId: activeInvocationId,
-          prompt: promptForAgent,
-          seals: recoveryEvidence,
-          taskVersion: taskSnapshot?.version,
+          invocationId: turnRunState.activeInvocationId,
+          prompt: turnRunState.promptForAgent,
+          seals: turnRunState.recoveryEvidence,
+          taskVersion: turnRunState.taskSnapshot?.version,
         });
         const streamResult = await runChildStream({
           spawnRunner,
-          args: buildChatArgs(agent, agentPrompt, promptForAgent),
+          args: buildChatArgs(agent, turnRunState.agentPrompt, turnRunState.promptForAgent),
           cwd: runWorkspace.worktreeDir,
           killGraceMs: options.killGraceMs,
           timeoutMs: options.timeoutMs,
@@ -1017,14 +424,14 @@ async function runChatWorklist(ctx) {
               typeof event.sessionId === "string" &&
               event.sessionId &&
               !event.subagentId &&
-              durableRun?.window?.id
+              turnRunState.durableRun?.window?.id
             ) {
-              observedProviderSessionId = event.sessionId;
-              durable.bindProviderSession(durableRun.window.id, event.sessionId);
+              turnRunState.observedProviderSessionId = event.sessionId;
+              durable.bindProviderSession(turnRunState.durableRun.window.id, event.sessionId);
             }
             if (event.type === "text.delta" && !event.subagentId) {
               const text = typeof event.text === "string" ? event.text : "";
-              assistantContent += text;
+              turnRunState.assistantContent += text;
               sendSse(res, "message", { agent, role: "assistant", text });
             }
             if (event.type === "tool.started" || event.type === "tool.finished") {
@@ -1033,15 +440,18 @@ async function runChatWorklist(ctx) {
             }
             sendSse(res, "agent-event", event);
             if (event.type === "usage.update" && !event.subagentId) {
-              sawUsageEvent = true;
-              healthTracker.applyUsage(event);
-              if (durableRun?.window?.id) {
-                durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+              turnRunState.sawUsageEvent = true;
+              turnRunState.healthTracker.applyUsage(event);
+              if (turnRunState.durableRun?.window?.id) {
+                durable.setWindowUsageSnapshot?.(
+                  turnRunState.durableRun.window.id,
+                  turnRunState.healthTracker.snapshot()
+                );
               }
-              noteContextPressure();
+              seals.noteContextPressure();
             }
             const contextChars = contextCharsFromEvent(event);
-            if (contextChars > 0) addObservedContext(contextChars);
+            if (contextChars > 0) seals.addObservedContext(contextChars);
             durableCoalescer.accept(event);
           },
           onStderr(text) {
@@ -1058,7 +468,7 @@ async function runChatWorklist(ctx) {
             if (payload.first) {
               sendSse(res, "encoding-warning", {
                 agent,
-                invocationId: activeInvocationId,
+                invocationId: turnRunState.activeInvocationId,
                 channel: payload.channel,
                 count: payload.count,
                 total: payload.total,
@@ -1069,33 +479,37 @@ async function runChatWorklist(ctx) {
               });
             }
           },
-          onHealth: addObservedContext,
+          onHealth: seals.addObservedContext,
           // Only physical/emergency stop mid-stream — never soft usable seal.
-          shouldStop: () => emergencyStop,
+          shouldStop: () => turnRunState.emergencyStop,
         });
-        code = streamResult.code;
-        signal = streamResult.signal;
-        streamFailure =
+        turnRunState.code = streamResult.code;
+        turnRunState.signal = streamResult.signal;
+        turnRunState.streamFailure =
           streamResult.streamError ||
           (streamResult.timedOut
             ? { message: streamResult.stopReason, code: "provider_timeout" }
             : null);
-        streamStopped = Boolean(streamResult.stopped);
-        streamStopReason = streamResult.stopReason || null;
+        turnRunState.streamStopped = Boolean(streamResult.stopped);
+        turnRunState.streamStopReason = streamResult.stopReason || null;
         if (streamResult.encoding?.total > 0) {
           runObs.noteDegraded("encoding_in_stream");
         }
         if (toolLifecycle.openToolCount > 0) {
           const isAbortedRun = Boolean(
             invocationController.signal.aborted ||
-            streamStopped ||
+            turnRunState.streamStopped ||
             threadCtx?.controller?.signal?.aborted ||
             runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
             invocationController.stopReason === "explicit-stop"
           );
           for (const toolFinished of toolLifecycle.closeOpenTools(
-            { agent, invocationId: activeInvocationId },
-            { cancelled: isAbortedRun, ok: code === 0, error: streamFailure?.message }
+            { agent, invocationId: turnRunState.activeInvocationId },
+            {
+              cancelled: isAbortedRun,
+              ok: turnRunState.code === 0,
+              error: turnRunState.streamFailure?.message,
+            }
           )) {
             const toolId = toolFinished.toolId;
             try {
@@ -1106,51 +520,59 @@ async function runChatWorklist(ctx) {
               log.error?.(
                 `[chat-worklist] failed to emit interrupted tool.finished for ${toolId}: ${err.message}`
               );
-              streamFailure ||= err;
+              turnRunState.streamFailure ||= err;
             }
           }
         }
-        if (streamFailure) {
+        if (turnRunState.streamFailure) {
           // Handler failure must not retry persist or empty-emergency replay.
           durableCoalescer.cancelAll();
           break;
         }
         try {
           durableCoalescer.flushAll();
-          if (!sawUsageEvent && agent === "codex") {
-            healthTracker.markBillingIncomplete();
+          if (!turnRunState.sawUsageEvent && agent === "codex") {
+            turnRunState.healthTracker.markBillingIncomplete();
           }
-          if (durableRun) {
-            durable.addWindowUsage(durableRun.window.id, {
-              inputChars: promptForAgent.length,
-              outputChars: assistantContent.length,
+          if (turnRunState.durableRun) {
+            durable.addWindowUsage(turnRunState.durableRun.window.id, {
+              inputChars: turnRunState.promptForAgent.length,
+              outputChars: turnRunState.assistantContent.length,
             });
-            durable.setWindowUsageSnapshot?.(durableRun.window.id, healthTracker.snapshot());
+            durable.setWindowUsageSnapshot?.(
+              turnRunState.durableRun.window.id,
+              turnRunState.healthTracker.snapshot()
+            );
           }
         } catch (error) {
-          streamFailure = {
+          turnRunState.streamFailure = {
             origin: "event persistence",
             message: error instanceof Error ? error.message : String(error),
           };
-          log.error?.(`[event-store] post-stream persist failed: ${streamFailure.message}`);
+          log.error?.(
+            `[event-store] post-stream persist failed: ${turnRunState.streamFailure.message}`
+          );
           break;
         }
 
-        const hasText = Boolean(String(assistantContent || "").trim());
-        if (!hasText && emergencyStop && attempt === 0) {
+        const hasText = Boolean(String(turnRunState.assistantContent || "").trim());
+        if (!hasText && turnRunState.emergencyStop && attempt === 0) {
           // The scheduler-facing terminal write owns invocation completion. Finish
           // the old invocation before rotation, whose orphan cleanup must never
           // race the normal terminal path.
-          const ratio = healthTracker.getFillRatio();
+          const ratio = turnRunState.healthTracker.getFillRatio();
           durable.completeInvocation({
-            invocationId: activeInvocationId,
-            code,
-            signal,
+            invocationId: turnRunState.activeInvocationId,
+            code: turnRunState.code,
+            signal: turnRunState.signal,
             reason: "empty-emergency",
             endPayload: {
               agent,
               contentBytes: 0,
-              usage: invocationUsageDelta(healthTracker.snapshot().billing, billingAtStart),
+              usage: invocationUsageDelta(
+                turnRunState.healthTracker.snapshot().billing,
+                turnRunState.billingAtStart
+              ),
               fillRatioAtEnd: ratio,
               sealerState: "sealed",
               emptyEmergency: true,
@@ -1160,9 +582,9 @@ async function runChatWorklist(ctx) {
               retryable: true,
             },
           });
-          callbacks.retireInvocation?.(sessionId, activeInvocationId);
-          if (!contextSealHandled) {
-            sealContextWindow(ratio, "physical-ceiling-empty");
+          callbacks.retireInvocation?.(sessionId, turnRunState.activeInvocationId);
+          if (!turnRunState.contextSealHandled) {
+            seals.sealContextWindow(ratio, "physical-ceiling-empty");
           }
           const nextWin = storage?.windows?.getOpen?.({
             threadId: sessionId,
@@ -1171,9 +593,9 @@ async function runChatWorklist(ctx) {
             workspaceKey,
           });
           if (nextWin) {
-            healthTracker = contextHealth.makeTracker(agent, {
-              capacityTokens: nextWin.capacityTokens,
-              reserveRatio: nextWin.reserveRatio,
+            turnRunState.healthTracker = createTurnTracker(agent, nextWin, {
+              contextHealth,
+              withBilling: false,
             });
             continue;
           }
@@ -1182,334 +604,96 @@ async function runChatWorklist(ctx) {
       }
 
       const invocationUsage = invocationUsageDelta(
-        healthTracker.snapshot().billing,
-        billingAtStart
+        turnRunState.healthTracker.snapshot().billing,
+        turnRunState.billingAtStart
       );
       const endPayload = {
         agent,
-        contentBytes: assistantContent.length,
+        contentBytes: turnRunState.assistantContent.length,
         usage: invocationUsage,
-        fillRatioAtEnd: healthTracker.getFillRatio(),
-        sealerState: sealer.getState(),
-        emergencyStop,
-        sealPending,
-        preCallRotated,
-        replayedAfterEmpty,
+        fillRatioAtEnd: turnRunState.healthTracker.getFillRatio(),
+        sealerState: turnRunState.sealer.getState(),
+        emergencyStop: turnRunState.emergencyStop,
+        sealPending: turnRunState.sealPending,
+        preCallRotated: turnRunState.preCallRotated,
+        replayedAfterEmpty: turnRunState.replayedAfterEmpty,
       };
 
-      if (streamFailure) {
+      if (turnRunState.streamFailure) {
         // Handler or persist failure: one failed terminal, no silent retry.
-        const failedInvocationId = threadCtx.currentInvocationId || invocationId;
-        const failedMessage = buildAssistantFinalMessage({
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "stream-failure",
           agent,
-          content: assistantContent,
-          code,
-          signal,
-          invocationId: failedInvocationId,
+          invocationId: threadCtx.currentInvocationId || invocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        durable.completeInvocation({
-          invocationId: failedInvocationId,
-          code,
-          signal,
-          reason:
-            streamFailure.code === "provider_timeout"
-              ? "provider-timeout"
-              : "stream-handler-failed",
-          endPayload: {
-            ...endPayload,
-            terminalState: "failed",
-            failureStage:
-              streamFailure.code === "provider_timeout" ? "provider_run" : "stream_handler",
-            errorCode: streamFailure.code || "stream_handler_failed",
-            retryable: true,
-            streamErrorOrigin: streamFailure.origin,
-            streamErrorMessage: streamFailure.message,
-          },
-          session,
-          windowId: durableRun?.window?.id || null,
-          message: failedMessage || undefined,
-        });
-        callbacks.retireInvocation?.(sessionId, failedInvocationId);
-        sendSse(res, "error", {
-          message: "Agent stream failed while handling events; invocation closed as failed.",
-          retryable: true,
-          agent,
-          reason: streamFailure.origin,
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code,
-          signal,
-          invocationId: failedInvocationId,
-          usage: invocationUsage,
-        });
-        previousInvocationId = failedInvocationId;
-        aborted = false;
         break;
       }
 
       const isAborted = Boolean(
         invocationController.signal.aborted ||
-        streamStopped ||
+        turnRunState.streamStopped ||
         threadCtx?.controller?.signal?.aborted ||
         runtime?.getRun?.(sessionId)?.stopReason === "explicit-stop" ||
         invocationController.stopReason === "explicit-stop"
       );
 
       if (isAborted) {
-        const abortInvId = threadCtx.currentInvocationId || invocationId;
-        const abortMessage = buildAssistantFinalMessage({
-          agent,
-          content: assistantContent,
-          code,
-          signal,
-          invocationId: abortInvId,
-          usage: invocationUsage,
-        });
         // Single terminal write entry (Phase B-1); hop close stays in the scheduler.
-        durable.completeInvocation({
-          invocationId: abortInvId,
-          code,
-          signal,
-          reason: "aborted",
-          endPayload: {
-            ...endPayload,
-            terminalState: "aborted",
-            terminalReason: "aborted",
-            errorCode: "invocation_aborted",
-            failureStage: "request",
-            retryable: false,
-            stopReason: streamStopReason || invocationController.stopReason || null,
-            supersededByClientTurnId: invocationController.supersededByClientTurnId || null,
-          },
-          session,
-          windowId: durableRun?.window?.id || null,
-          message: abortMessage || undefined,
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "aborted",
+          agent,
+          invocationId: threadCtx.currentInvocationId || invocationId,
+          usage: invocationUsage,
+          endPayload,
         });
-        callbacks.retireInvocation?.(sessionId, abortInvId);
-        aborted = true;
-        previousInvocationId = abortInvId;
         break;
       }
 
       const finalInvocationId = threadCtx.currentInvocationId || invocationId;
-      const hasAssistantText = Boolean(String(assistantContent || "").trim());
+      const hasAssistantText = Boolean(String(turnRunState.assistantContent || "").trim());
 
       // Under seal pressure, never treat empty content as a completed reply.
       // Clean zero-output exits (legacy mocks / silent success) may still persist "".
-      const sealPressure = emergencyStop || sealPending || preCallRotated || contextSealedSseSent;
+      const sealPressure =
+        turnRunState.emergencyStop ||
+        turnRunState.sealPending ||
+        turnRunState.preCallRotated ||
+        turnRunState.contextSealedSseSent;
       if (!hasAssistantText && sealPressure) {
-        durable.completeInvocation({
-          invocationId: finalInvocationId,
-          code,
-          signal,
-          reason: "empty-under-seal",
-          endPayload: {
-            ...endPayload,
-            emptyAssistant: true,
-            terminalState: "failed",
-            failureStage: "seal",
-            errorCode: "empty_under_seal",
-            retryable: true,
-          },
-        });
-        callbacks.retireInvocation?.(sessionId, finalInvocationId);
-        sendSse(res, "error", {
-          message: "Assistant produced no content after context pressure; request not completed.",
-          retryable: true,
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "empty-under-seal",
           agent,
-          reason: emergencyStop ? "physical-ceiling" : "empty-assistant",
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code,
-          signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        previousInvocationId = finalInvocationId;
-        aborted = true;
         break;
       }
 
-      if (code !== 0 || signal) {
-        const failedMessage = buildAssistantFinalMessage({
+      if (turnRunState.code !== 0 || turnRunState.signal) {
+        closeTurnFailure(ctx, turnRunState, {
+          kind: "provider-failed",
           agent,
-          content: assistantContent,
-          code,
-          signal,
           invocationId: finalInvocationId,
           usage: invocationUsage,
+          endPayload,
         });
-        durable.completeInvocation({
-          invocationId: finalInvocationId,
-          code,
-          signal,
-          reason: "provider-failed",
-          endPayload: {
-            ...endPayload,
-            terminalState: "failed",
-            failureStage: "provider_run",
-            retryable: false,
-          },
-          session,
-          windowId: durableRun?.window?.id || null,
-          message: failedMessage || undefined,
-        });
-        callbacks.retireInvocation?.(sessionId, finalInvocationId);
-        sendSse(res, "error", {
-          message: "Agent process exited without a successful durable result.",
-          retryable: false,
-          agent,
-          code,
-          signal,
-        });
-        sendSse(res, "agent-exit", {
-          agent,
-          code,
-          signal,
-          invocationId: finalInvocationId,
-          usage: invocationUsage,
-        });
-        previousInvocationId = finalInvocationId;
         break;
       }
 
-      const assistantMessage = buildAssistantFinalMessage({
+      const { workflowEvidenceEvents } = completeAssistantTurn(ctx, turnRunState, {
         agent,
-        content: assistantContent,
-        code,
-        signal,
         invocationId: finalInvocationId,
         usage: invocationUsage,
-        allowEmpty: true,
+        endPayload,
+        dutyBinding,
       });
 
-      const completed =
-        durable.enabled && typeof durable.completeInvocation === "function"
-          ? durable.completeInvocation({
-              invocationId: finalInvocationId,
-              code,
-              signal,
-              reason: "assistant-final",
-              endPayload,
-              session,
-              windowId: durableRun?.window?.id || null,
-              message: assistantMessage,
-            })
-          : null;
-      callbacks.retireInvocation?.(sessionId, finalInvocationId);
-
-      if (completed?.message?.id) assistantMessage.id = completed.message.id;
-
-      if (completed) {
-        session = {
-          ...session,
-          messages: [...(session.messages || []), assistantMessage],
-        };
-      } else {
-        throw new DurableWriteError(
-          `Failed to atomically persist completion for ${finalInvocationId}.`,
-          {
-            code: "durable_write_failed",
-            invocationId: finalInvocationId,
-            retryable: true,
-          }
-        );
-      }
-      previousInvocationId = finalInvocationId;
-      // Final text scan (in case deltas were clean but concat/store introduced issues).
-      const finalEnc = scanReplacementChars(assistantContent);
-      if (!finalEnc.ok) {
-        runObs.noteEncoding(finalEnc.count);
-        sendSse(res, "encoding-warning", {
-          agent,
-          invocationId: finalInvocationId,
-          channel: "assistant-final",
-          count: finalEnc.count,
-          samples: finalEnc.samples,
-          message: "Replacement character U+FFFD in final assistant text.",
-        });
-      }
-      runObs.noteInvocationEnd(finalInvocationId, {
-        exitCode: code,
-        usage: invocationUsage,
-        encodingWarnings: finalEnc.count || 0,
-      });
-      sendSse(res, "agent-exit", {
-        agent,
-        code,
-        signal,
-        invocationId: finalInvocationId,
-        usage: invocationUsage,
-      });
-
-      const hop = storage?.handoffs?.getByTargetInvocation?.(finalInvocationId);
-      if (hop) {
-        sendSse(res, "a2a-hop-complete", {
-          handoffId: hop.handoffId,
-          sourceInvocationId: hop.sourceInvocationId,
-          targetInvocationId: hop.targetInvocationId,
-          completeStatus: hop.completeStatus,
-          routeStatus: hop.routeStatus,
-          effective: isEffectiveHandoffHop(hop),
-        });
-      }
-
-      const workflowEvidenceEvents = processWorkflowEvidenceOutput({
-        seatId: dutyBinding?.seatId,
-        invocationId: finalInvocationId,
-        progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),
-        agent,
-        duty: dutyBinding?.duty,
-        content: assistantContent,
-        threadId: sessionId,
-        registry: collabTaskRegistry,
-        deliveryVerifier,
-        cwd: runWorkspace.worktreeDir,
-        branch: runWorkspace.branch || "",
-      });
-      for (const workflowEvent of workflowEvidenceEvents) {
-        sendSse(res, workflowEvent.event, {
-          agent,
-          invocationId: finalInvocationId,
-          ...workflowEvent.payload,
-        });
-      }
-
-      // POST soft seal after a complete answer (never mid-stream kill path).
-      const postSoft = shouldSoftSealAfterTurn({
-        usableContextTokens: healthTracker.usableContextTokens,
-        usedTokens: healthTracker.getUsedTokens(),
-        softRatio: sealBudget.usable.softRatio,
-      });
-      if ((sealPending || postSoft.seal || emergencyStop) && !contextSealHandled) {
-        const ratio = healthTracker.getFillRatio();
-        const reason = emergencyStop
-          ? "physical-ceiling"
-          : postSoft.reason
-            ? `post-turn-${postSoft.reason}`
-            : "post-turn-soft";
-        // Emergency mid-stream remains partial; normal post-turn soft seal is complete.
-        const partial = Boolean(emergencyStop);
-        if (!contextSealedSseSent) {
-          sendSse(res, "sealed", {
-            agent,
-            ratio,
-            reason,
-            partial,
-            complete: !partial,
-            workspaceKey,
-          });
-          contextSealedSseSent = true;
-        }
-        sealContextWindow(ratio, reason, { partial });
-      } else if (durableRun && !contextSealHandled) {
-        const persistedProviderSessionId =
-          observedProviderSessionId || durableRun.window.providerSessionId || "";
-        durable.bindProviderSession(durableRun.window.id, persistedProviderSessionId);
-      }
+      // POST soft seal after a complete answer, or provider-session bind if it
+      // is not warranted (never the mid-stream kill path).
+      seals.finalizeTurnSeal();
 
       const loopEvidence = workflowEvidenceEvents.find(
         (e) =>
@@ -1541,7 +725,7 @@ async function runChatWorklist(ctx) {
       }
 
       // Parse structured handoff once per turn (soft — never blocks routing).
-      const primaryHandoff = agentHandoff.extractPrimaryHandoff(assistantContent, {
+      const primaryHandoff = agentHandoff.extractPrimaryHandoff(turnRunState.assistantContent, {
         currentAgentId: agent,
       });
       const primaryQuality = agentHandoff.evaluateHandoff(primaryHandoff);
@@ -1550,7 +734,7 @@ async function runChatWorklist(ctx) {
 
       a2aHistory.push({
         agent,
-        content: assistantContent,
+        content: turnRunState.assistantContent,
         handoff: primaryHandoff,
         handoffQuality: primaryQuality,
         handoffByTarget,
@@ -1566,12 +750,12 @@ async function runChatWorklist(ctx) {
           Object.entries(AGENTS).map(([id, config]) => [id, config.label || id])
         );
         const finalized = finalizeA2ARoutes({
-          text: assistantContent,
+          text: turnRunState.assistantContent,
           fromAgent: agent,
           threadId: sessionId,
           sessionId,
           invocationId: finalInvocationId,
-          windowId: durableRun?.window?.id || null,
+          windowId: turnRunState.durableRun?.window?.id || null,
           useWorktree: Boolean(useWorktree),
           worktreeDir: runWorkspace?.worktreeDir || "",
           worktreeBranch: runWorkspace?.branch || "",
@@ -1646,8 +830,9 @@ async function runChatWorklist(ctx) {
       }
     }
   } finally {
-    ownedInvocationSlotAtCleanup = activeInvocations.get(sessionId) === invocationController;
-    if (ownedInvocationSlotAtCleanup) {
+    turnRunState.ownedInvocationSlotAtCleanup =
+      activeInvocations.get(sessionId) === invocationController;
+    if (turnRunState.ownedInvocationSlotAtCleanup) {
       activeInvocations.delete(sessionId);
     }
     if (callbacks.getThread(sessionId) === threadCtx) {
@@ -1655,9 +840,12 @@ async function runChatWorklist(ctx) {
     }
   }
 
-  ctx.session = session;
-  ctx.aborted = aborted;
-  return { aborted, ownedInvocationSlotAtCleanup };
+  ctx.session = turnRunState.session;
+  ctx.aborted = turnRunState.aborted;
+  return {
+    aborted: turnRunState.aborted,
+    ownedInvocationSlotAtCleanup: turnRunState.ownedInvocationSlotAtCleanup,
+  };
 }
 
 module.exports = { runChatWorklist, generateMessageId, buildAssistantFinalMessage };

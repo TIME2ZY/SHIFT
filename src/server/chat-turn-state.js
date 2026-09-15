@@ -1,0 +1,108 @@
+/**
+ * Turn state for the chat worklist runner.
+ *
+ * The extracted phases reach mutable turn state through the single
+ * turnRunState handle this module creates rather than through long parameter
+ * lists. Two lifetimes: run-scoped fields (session / aborted /
+ * previousInvocationId / ownedInvocationSlotAtCleanup) survive across
+ * worklist entries and are read in the finally block and the return tail;
+ * entry-scoped fields are reset at the top of every entry. openWindow and
+ * resumeSessionId are deliberately not reset — they are recomputed from
+ * storage per entry.
+ */
+
+/**
+ * Run-scoped state. Entry-scoped fields are assigned per entry by
+ * resetTurnStateForEntry and the callers that compute them.
+ *
+ * @param {object} ctx shared chat run context
+ * @returns {object} mutable turn state handle
+ */
+function createTurnState(ctx) {
+  return {
+    session: ctx.session,
+    aborted: false,
+    previousInvocationId: null,
+    ownedInvocationSlotAtCleanup: false,
+  };
+}
+
+/**
+ * Reset the entry-scoped constants. `openWindow` and `resumeSessionId` are
+ * deliberately NOT touched: they are computed from storage at the top of each
+ * entry rather than reset to a constant.
+ *
+ * @param {object} turnRunState mutable turn state handle
+ * @param {{ skillNames: string[] }} entry shared skill names for this entry
+ */
+function resetTurnStateForEntry(turnRunState, { skillNames }) {
+  turnRunState.assistantContent = "";
+  turnRunState.observedProviderSessionId = "";
+  turnRunState.contextWarned = false;
+  turnRunState.contextSealedSseSent = false;
+  turnRunState.contextSealHandled = false;
+  turnRunState.emergencyStop = false;
+  turnRunState.sealPending = false;
+  turnRunState.preCallRotated = false;
+  turnRunState.preCallSealedWindowId = null;
+  turnRunState.preCallSealedGeneration = null;
+  turnRunState.preCallSealedRatio = 0;
+  turnRunState.agentPrompt = undefined;
+  /** @type {string[]} */
+  turnRunState.turnSkillNames = skillNames;
+}
+
+/**
+ * Build a context-health tracker from a window-like object. Every call site
+ * previously spelled out its own window -> tracker field mapping; keeping it
+ * in one place is what keeps the two sides from drifting.
+ *
+ * Note the mapping is a superset of what every caller used to pass: the two
+ * `withBilling: false` sites (post-rotation and empty-emergency replay) now
+ * also carry inputChars / outputChars / contextUsedTokens /
+ * contextUsageSource from the window. Those are read-only context metrics,
+ * so the enrichment only makes the health snapshot more accurate on those
+ * two paths; it is the one non-rename change inside the tracker unification.
+ *
+ * `capacityFallback` / `reserveFallback` preserve each caller's original
+ * fallback (agent defaults, rotate capacity, or the previous tracker) and may
+ * be undefined when the caller had none.
+ *
+ * @param {string} agentId agent whose tracker is being built
+ * @param {object|null|undefined} window window-like source (open window,
+ *   durableRun.window, or a rotation result)
+ * @param {object} options
+ * @param {object} options.contextHealth context-health service
+ * @param {number} [options.capacityFallback] used when the window has no capacity
+ * @param {number} [options.reserveFallback] used when the window has no reserve ratio
+ * @param {boolean} [options.withBilling] include the billing snapshot fields
+ * @returns {object} context-health tracker
+ */
+function createTurnTracker(agentId, window, options) {
+  const { contextHealth, capacityFallback, reserveFallback, withBilling = true } = options || {};
+  return contextHealth.makeTracker(agentId, {
+    capacityTokens: window?.capacityTokens || capacityFallback,
+    inputChars: window?.inputChars,
+    outputChars: window?.outputChars,
+    reserveRatio: window?.reserveRatio ?? reserveFallback,
+    contextUsedTokens: window?.contextUsedTokens,
+    contextUsageSource: window?.contextUsageSource,
+    ...(withBilling
+      ? {
+          billingInputTokens: window?.billingInputTokens,
+          billingCachedInputTokens: window?.billingCachedInputTokens,
+          billingOutputTokens: window?.billingOutputTokens,
+          billingReasoningTokens: window?.billingReasoningTokens,
+          billingTotalTokens: window?.billingTotalTokens,
+          billingCostUsd: window?.billingCostUsd,
+          billingComplete: window?.billingComplete,
+        }
+      : {}),
+  });
+}
+
+module.exports = {
+  createTurnState,
+  resetTurnStateForEntry,
+  createTurnTracker,
+};

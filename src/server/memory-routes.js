@@ -1,4 +1,4 @@
-const { isValidOpaqueId } = require("./id-policy");
+const { isValidOpaqueId } = require("../shared/id-policy");
 const { PRODUCT_KINDS } = require("../storage/memory-keys");
 
 /**

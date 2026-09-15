@@ -48,6 +48,39 @@ test("closeSession ends only that session's subscribers", () => {
   assert.equal(closed, 1);
 });
 
+test("publish fans out to every subscriber and isolates a failing observer", () => {
+  const eventStore = {
+    __runPublisherAttached: false,
+    append(input) {
+      return { ok: true, event: { id: 7, kind: "text.delta" }, input };
+    },
+  };
+  const runtime = createChatRuntime({ eventStore });
+
+  const received = [];
+  runtime.subscribe("s1", { onEvent: (event) => received.push(["first", event.id]) });
+  runtime.subscribe("s1", {
+    onEvent: () => {
+      throw new Error("observer crashed");
+    },
+  });
+  runtime.subscribe("s1", { onEvent: (event) => received.push(["third", event.id]) });
+  runtime.subscribe("s2", { onEvent: (event) => received.push(["other-session", event.id]) });
+
+  const result = eventStore.append({ threadId: "s1", kind: "text.delta", payload: {} });
+  assert.equal(result.ok, true);
+  assert.deepEqual(received, [
+    ["first", 7],
+    ["third", 7],
+  ]);
+
+  // An unsubscribed observer stops receiving; SQLite remains the truth either way.
+  received.length = 0;
+  runtime.subscribe("s1", { onEvent: () => received.push("late") });
+  eventStore.append({ threadId: "s3", kind: "text.delta", payload: {} });
+  assert.deepEqual(received, []);
+});
+
 test("shutdown waits for attached promises even when they reject", async () => {
   const runtime = createChatRuntime();
   runtime.claim("s1", { traceId: "t1", controller: new AbortController() });

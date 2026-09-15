@@ -201,7 +201,10 @@ test("embedding model change backfills a building generation before atomic activ
     try {
       assert.ok(nextRuntime.buildingIndex);
       assert.equal(storage.embeddings.getActiveIndex().generation, oldGeneration);
-      assert.equal((await nextRuntime.search("authority", ["thread:thread-switch"])).reason, "index_building");
+      assert.equal(
+        (await nextRuntime.search("authority", ["thread:thread-switch"])).reason,
+        "index_building"
+      );
 
       assert.equal((await nextRuntime.runOnce()).ready, 1);
       const activated = await nextRuntime.runOnce();
@@ -328,10 +331,7 @@ test("embedding task failure rolls back the authoritative memory write", async (
         }),
       /projection write failed/
     );
-    assert.equal(
-      storage.db.prepare("SELECT COUNT(*) AS count FROM memory_entries").get().count,
-      0
-    );
+    assert.equal(storage.db.prepare("SELECT COUNT(*) AS count FROM memory_entries").get().count, 0);
   } finally {
     storage.embeddings.enqueue = originalEnqueue;
     await runtime.close();

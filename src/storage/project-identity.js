@@ -21,7 +21,9 @@ function resolveProjectIdentity(projectDir, options = {}) {
   let resolved = path.resolve(raw);
   let realpathFailed = false;
   try {
-    resolved = fs.realpathSync.native ? fs.realpathSync.native(resolved) : fs.realpathSync(resolved);
+    resolved = fs.realpathSync.native
+      ? fs.realpathSync.native(resolved)
+      : fs.realpathSync(resolved);
   } catch {
     realpathFailed = true;
   }

@@ -1,5 +1,5 @@
 const path = require("node:path");
-const { assertValidOpaqueId } = require("./id-policy");
+const { assertValidOpaqueId } = require("../shared/id-policy");
 const { ENV } = require("../shared/brand");
 const { createRunObservability } = require("../agents/run-observability");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");

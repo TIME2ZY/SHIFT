@@ -12,20 +12,20 @@
 
 ## 验收结果
 
-| 检查项 | 结果 |
-| --- | --- |
-| 在线 SQLite backup 到空目录 | 通过，备份 1,863,680 bytes |
-| storage epoch | 一致，schema version 13，active clean epoch |
-| 权威 source rows | 12 个表逐表行数和 SHA-256 内容指纹一致 |
-| SQLite integrity / foreign key | `integrity_check=ok`，0 foreign-key errors |
-| 业务因果关系 | 10 类跨表/序列检查均为 0 violations |
-| SQLite storage audit | 0 errors，0 warnings |
-| recall / FTS 重建 | 248 / 248，一致 |
-| memory search / FTS 重建 | 4 / 4，一致 |
-| thread digest 重建 | 2 / 2，一致 |
-| SQLite-only 产品启动 | 随机端口启动成功，未占用 8787 |
-| 产品 API | health、sessions、messages、memories/context 均通过 |
-| legacy fallback | 未创建 sessions、invocations 或 session-map 文件 |
+| 检查项                         | 结果                                                |
+| ------------------------------ | --------------------------------------------------- |
+| 在线 SQLite backup 到空目录    | 通过，备份 1,863,680 bytes                          |
+| storage epoch                  | 一致，schema version 13，active clean epoch         |
+| 权威 source rows               | 12 个表逐表行数和 SHA-256 内容指纹一致              |
+| SQLite integrity / foreign key | `integrity_check=ok`，0 foreign-key errors          |
+| 业务因果关系                   | 10 类跨表/序列检查均为 0 violations                 |
+| SQLite storage audit           | 0 errors，0 warnings                                |
+| recall / FTS 重建              | 248 / 248，一致                                     |
+| memory search / FTS 重建       | 4 / 4，一致                                         |
+| thread digest 重建             | 2 / 2，一致                                         |
+| SQLite-only 产品启动           | 随机端口启动成功，未占用 8787                       |
+| 产品 API                       | health、sessions、messages、memories/context 均通过 |
+| legacy fallback                | 未创建 sessions、invocations 或 session-map 文件    |
 
 API/context 验证选择信息最完整的恢复会话，准确恢复：
 

@@ -37,10 +37,9 @@ export function subagentTypeLabel(args?: Record<string, unknown>): string {
  * Primary heading for a tool card.
  * Prefer human title, then label + description/type, then stable toolName.
  */
-export function formatToolPrimaryTitle(tool: Pick<
-  InvocationTool,
-  "toolName" | "title" | "label" | "toolKind" | "input"
->): string {
+export function formatToolPrimaryTitle(
+  tool: Pick<InvocationTool, "toolName" | "title" | "label" | "toolKind" | "input">
+): string {
   const name = tool.toolName || "tool";
   const title = typeof tool.title === "string" ? tool.title.trim() : "";
   if (title && title !== name) return title;

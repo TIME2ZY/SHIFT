@@ -37,10 +37,7 @@ function createEmbeddingWorker(options = {}) {
         failed: 0,
       };
     }
-    if (
-      index.model !== provider.model ||
-      index.dimensions !== provider.dimensions
-    ) {
+    if (index.model !== provider.model || index.dimensions !== provider.dimensions) {
       return {
         state: "degraded",
         reason: "provider_index_mismatch",

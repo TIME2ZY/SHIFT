@@ -1,6 +1,6 @@
 const { DEFAULT_MEMORY_DB_FILE } = require("../../shared/runtime-paths");
 const { eventPlainText } = require("../event-plain-text");
-const { classifyShellOutcome } = require("../../agents/tool-classification");
+const { classifyShellOutcome } = require("../../shared/tool-classification");
 const {
   integrityCheck,
   rebuildThreadRecall,

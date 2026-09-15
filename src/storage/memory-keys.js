@@ -58,7 +58,9 @@ function parseSupersessionKey(value) {
 function buildProductCaptureKey(kind, topic, idFactory) {
   const supersessionKey = buildSupersessionKey(kind, topic);
   const unique =
-    typeof idFactory === "function" ? String(idFactory()).replace(/-/g, "").slice(0, 12) : String(Date.now());
+    typeof idFactory === "function"
+      ? String(idFactory()).replace(/-/g, "").slice(0, 12)
+      : String(Date.now());
   return `product:${supersessionKey}:${unique}`;
 }
 

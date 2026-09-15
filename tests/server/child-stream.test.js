@@ -7,7 +7,7 @@ const {
   filterBenignStderr,
 } = require("../../src/server/child-stream");
 
-test("agent child environment excludes server-owned storage and harness settings", () => {
+test("agent child environment excludes server-owned storage, harness settings and secrets", () => {
   const env = buildAgentChildEnvironment(
     {
       PATH: "base-path",
@@ -16,11 +16,14 @@ test("agent child environment excludes server-owned storage and harness settings
       SHIFT_TRANSCRIPT_DIR: "server-transcripts",
       SHIFT_AUDIT_TRANSCRIPT_DIR: "server-audit",
       SHIFT_TEST_CAPACITY: "48000",
+      SHIFT_UI_TOKEN: "operator-token",
+      SHIFT_EMBEDDING_API_KEY: "embedding-key",
     },
     {
       SHIFT_API_URL: "http://127.0.0.1:61223",
       SHIFT_MEMORY_DB: "override.sqlite",
       SHIFT_HOME: "override-home",
+      SHIFT_UI_TOKEN: "override-token",
     }
   );
 
@@ -31,6 +34,10 @@ test("agent child environment excludes server-owned storage and harness settings
   assert.equal(env.SHIFT_TRANSCRIPT_DIR, undefined);
   assert.equal(env.SHIFT_AUDIT_TRANSCRIPT_DIR, undefined);
   assert.equal(env.SHIFT_TEST_CAPACITY, undefined);
+  // The UI token authorizes every /api/* route as the operator, including
+  // destructive ones — an Agent must never hold it.
+  assert.equal(env.SHIFT_UI_TOKEN, undefined, "override must not re-introduce the UI token");
+  assert.equal(env.SHIFT_EMBEDDING_API_KEY, undefined);
 });
 
 test("child stream does not stop on response close", async () => {

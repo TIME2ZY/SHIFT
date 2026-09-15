@@ -1,8 +1,6 @@
 function evaluateMemoryWritePredictions(cases = [], predictions = []) {
   const predictionById = new Map(
-    predictions
-      .filter((item) => item && typeof item.id === "string")
-      .map((item) => [item.id, item])
+    predictions.filter((item) => item && typeof item.id === "string").map((item) => [item.id, item])
   );
   const counts = { tp: 0, fp: 0, fn: 0, tn: 0 };
   const fieldTotals = { kind: 0, scope: 0, topic: 0, atomic: 0 };

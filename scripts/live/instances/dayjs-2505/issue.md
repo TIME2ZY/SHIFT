@@ -5,10 +5,10 @@
 After a zero offset is set while keeping local time the clones I get with the `dayjs` constructor are not the same.
 
 ```js
-var d1 = dayjs('2023-10-23 14:00:00').utcOffset(0, true)
-var d2 = dayjs(d1)
-d1.format() // '2023-10-23T14:00:00Z'
-d2.format() // '2023-10-23T11:00:00Z'
+var d1 = dayjs("2023-10-23 14:00:00").utcOffset(0, true);
+var d2 = dayjs(d1);
+d1.format(); // '2023-10-23T14:00:00Z'
+d2.format(); // '2023-10-23T11:00:00Z'
 ```
 
 ## Expected behavior

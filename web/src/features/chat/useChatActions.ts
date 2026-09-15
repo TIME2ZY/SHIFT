@@ -6,6 +6,7 @@ import { useToast } from "../notifications/ToastProvider";
 import { startRun, stopRun } from "../../runtime/run-api";
 import { subscribeRunEvents } from "../../runtime/run-event-stream";
 import { useSessionRunStore } from "../../runtime/session-run-provider";
+import { isTerminalUiRunStatus } from "../../shared/contracts/run-status";
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -27,9 +28,19 @@ export function useChatActions() {
       prompt: string,
       useWorktree: boolean,
       clientTurnId: string
-    ) => {
+    ): Promise<boolean> => {
       const content = prompt.trim();
-      if (!content) return;
+      if (!content) return false;
+
+      // An accepted run is live on the server until the SSE stream sends a
+      // terminal frame; sending again would interleave two transcripts. A
+      // start still awaiting acceptance has no traceId yet and falls through
+      // to the supersede-abort below, so double sends keep today's behavior.
+      const activeRun = store.getSnapshot().runs[sessionId];
+      if (activeRun?.traceId && !isTerminalUiRunStatus(activeRun.status)) {
+        toast.show("当前运行结束后可发送");
+        return false;
+      }
 
       store.dispatch({
         type: "user/submitted",
@@ -67,14 +78,17 @@ export function useChatActions() {
             store.abort(sessionId);
             toast.show("已停止当前运行。");
           }
-          return;
+          // The start raced with a Stop: nothing was ever delivered to an agent.
+          return false;
         }
       } catch (error) {
-        if (startControllersRef.current.get(sessionId) !== startController) return;
-        if (isAbortError(error)) return;
+        if (startControllersRef.current.get(sessionId) !== startController) return false;
+        if (isAbortError(error)) return false;
         const message = error instanceof Error ? error.message : "启动运行失败。";
         if (!accepted) store.dispatch({ type: "run/failed", sessionId, error: message });
         toast.show(message, { variant: "error", ttl: 7000 });
+        // A failure after acceptance still means the turn reached the server.
+        return accepted;
       } finally {
         if (startControllersRef.current.get(sessionId) === startController) {
           startControllersRef.current.delete(sessionId);
@@ -93,6 +107,7 @@ export function useChatActions() {
         ]);
         store.dispatch({ type: "run/synced", sessionId });
       }
+      return true;
     },
     [queryClient, store, toast]
   );

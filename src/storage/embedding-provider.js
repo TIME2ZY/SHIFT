@@ -121,10 +121,7 @@ function validateEmbeddingProvider(provider) {
   if (!Number.isInteger(provider.dimensions) || provider.dimensions < 1) {
     throw new Error("Embedding provider dimensions must be a positive integer.");
   }
-  if (
-    typeof provider.embedDocuments !== "function" ||
-    typeof provider.embedQuery !== "function"
-  ) {
+  if (typeof provider.embedDocuments !== "function" || typeof provider.embedQuery !== "function") {
     throw new Error("Embedding provider must implement document and query embedding.");
   }
   return provider;

@@ -27,11 +27,6 @@ body {
   scrollbar-color: var(--border) transparent;
 }
 
-:root[data-density="compact"] body {
-  font-size: 14px;
-  line-height: 1.55;
-}
-
 pre,
 code,
 kbd,
@@ -193,13 +188,6 @@ button {
   height: 25px;
 }
 
-/* Only invert monochrome brand marks in dark mode */
-:root[data-theme="dark"] .agent-avatar[data-agent-brand="codex"] img,
-:root[data-theme="dark"] .agent-avatar[data-agent-brand="openai"] img,
-:root[data-theme="dark"] .agent-avatar[data-agent-brand="opencode"] img {
-  filter: invert(1);
-}
-
 /* User: soft indigo disk + refined outline person icon */
 .user-avatar {
   overflow: hidden;
@@ -214,17 +202,6 @@ button {
       color-mix(in srgb, var(--accent) 10%, #dfe4fb)
     );
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent);
-}
-
-:root[data-theme="dark"] .user-avatar {
-  background:
-    radial-gradient(circle at 32% 28%, color-mix(in srgb, #fff 12%, transparent), transparent 55%),
-    linear-gradient(
-      155deg,
-      color-mix(in srgb, var(--accent) 28%, #1c1f2e),
-      color-mix(in srgb, var(--accent) 12%, #151822)
-    );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
 }
 
 .user-avatar svg {

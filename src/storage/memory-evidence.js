@@ -28,9 +28,7 @@ function summarizeMemoryEvidenceEvent(event) {
 
 function describeMemoryEvidenceEvent(event) {
   if (!isSuccessfulMemoryEvidenceEvent(event)) return null;
-  const eventNo = Number.isInteger(event.eventNo)
-    ? event.eventNo
-    : event.sequenceNo;
+  const eventNo = Number.isInteger(event.eventNo) ? event.eventNo : event.sequenceNo;
   if (!Number.isInteger(eventNo) || eventNo < 0) return null;
   return {
     eventNo,

@@ -164,7 +164,9 @@ test("legacy active project memory is not durable-searchable from sibling thread
       "sibling must not retrieve legacy project product memory"
     );
     assert.equal(
-      agentB.hits.some((hit) => hit.metadata?.trust === "durable-memory" && hit.metadata?.scope === "project"),
+      agentB.hits.some(
+        (hit) => hit.metadata?.trust === "durable-memory" && hit.metadata?.scope === "project"
+      ),
       false
     );
 
@@ -173,7 +175,9 @@ test("legacy active project memory is not durable-searchable from sibling thread
       memoryScope: "all",
     });
     assert.equal(
-      sessionB.hits.some((hit) => hit.memoryId === "legacy-project-mem" || hit.sourceId === "legacy-project-mem"),
+      sessionB.hits.some(
+        (hit) => hit.memoryId === "legacy-project-mem" || hit.sourceId === "legacy-project-mem"
+      ),
       false
     );
   } finally {

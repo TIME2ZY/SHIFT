@@ -474,6 +474,35 @@ export function sessionRunReducer(
         updatedAt: now,
       }));
 
+    case "run/reconnecting":
+      // The stream dropped but the server-side run may still be active. Stay
+      // observable instead of silently pretending the run is still live.
+      return updateRun(state, action.sessionId, (run) => {
+        if (isTerminalRunStatus(run.status)) return run;
+        return {
+          ...run,
+          status: "reconnecting",
+          reconnectAttempt: action.attempt,
+          reconnectDelayMs: action.delayMs,
+          updatedAt: now,
+        };
+      });
+
+    case "run/connected":
+      return updateRun(state, action.sessionId, (run) => {
+        if (run.status !== "reconnecting") return run;
+        const hasLive = Object.keys(run.liveMessages || {}).length > 0;
+        return {
+          ...run,
+          // The server is the authority: the replayed snapshot and live frames
+          // decide the real status from here.
+          status: hasLive ? "running" : "connecting",
+          reconnectAttempt: 0,
+          reconnectDelayMs: 0,
+          updatedAt: now,
+        };
+      });
+
     case "run/synced":
       // Messages are now in the persisted transcript. Drop live answer text so
       // MessageList cannot paint the same body via live timeline + content.

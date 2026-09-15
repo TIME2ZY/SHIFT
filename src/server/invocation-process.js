@@ -1,5 +1,5 @@
 const toolStatuses = require("../shared/tool-status.json");
-const { classifyShellOutcome } = require("../agents/tool-classification");
+const { classifyShellOutcome } = require("../shared/tool-classification");
 const { formatToolResultForDisplay } = require("../agents/tool-result-format");
 
 const MAX_TOOL_DETAIL_CHARS = 40 * 1024;

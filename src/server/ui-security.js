@@ -1,16 +1,11 @@
 const crypto = require("node:crypto");
 const { UI_TOKEN_HEADER, ENV } = require("../shared/brand");
+const { safeEqual } = require("../shared/secret-compare");
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 function createUiToken(explicitToken) {
   return explicitToken || process.env[ENV.UI_TOKEN] || crypto.randomBytes(32).toString("base64url");
-}
-
-function safeEqual(left, right) {
-  const a = Buffer.from(String(left || ""));
-  const b = Buffer.from(String(right || ""));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function validateLocalRequestSource(req) {
@@ -33,7 +28,10 @@ function validateLocalRequestSource(req) {
     } catch {
       return { ok: false, status: 403, error: "Invalid Origin header." };
     }
-    if (originUrl.host.toLowerCase() !== hostHeader || !["http:", "https:"].includes(originUrl.protocol)) {
+    if (
+      originUrl.host.toLowerCase() !== hostHeader ||
+      !["http:", "https:"].includes(originUrl.protocol)
+    ) {
       return { ok: false, status: 403, error: "Origin is not allowed." };
     }
   }

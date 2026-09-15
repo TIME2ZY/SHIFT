@@ -66,11 +66,7 @@ function searchVector(db, input = {}) {
 function deleteVector(db, input = {}) {
   const tableName = normalizeVectorTableName(input.tableName);
   const itemId = normalizeItemId(input.itemId);
-  return (
-    db
-      .prepare(`DELETE FROM ${tableName} WHERE embedding_item_id = ?`)
-      .run(itemId).changes > 0
-  );
+  return db.prepare(`DELETE FROM ${tableName} WHERE embedding_item_id = ?`).run(itemId).changes > 0;
 }
 
 function normalizeVectorTableName(value) {
@@ -115,9 +111,7 @@ function normalizeScopeKeys(value) {
   if (!Array.isArray(value) || value.length < 1) {
     throw new Error("At least one vector scope key is required.");
   }
-  const keys = Array.from(
-    new Set(value.map((item) => requiredString(item, "vector scope key")))
-  );
+  const keys = Array.from(new Set(value.map((item) => requiredString(item, "vector scope key"))));
   if (keys.some((key) => !/^(thread|project):.+/.test(key))) {
     throw new Error("Vector scope keys must use thread: or project: prefixes.");
   }

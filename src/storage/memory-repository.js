@@ -19,11 +19,6 @@ function createMemoryRepository(db) {
     WHERE scope = 'thread' AND owner_thread_id = ? AND capture_key = ?
     LIMIT 1
   `);
-  const findByCaptureProject = db.prepare(`
-    SELECT * FROM memory_entries
-    WHERE scope = 'project' AND project_key = ? AND capture_key = ?
-    LIMIT 1
-  `);
   const listByOwnerThread = db.prepare(`
     SELECT * FROM memory_entries
     WHERE scope = 'thread' AND owner_thread_id = ?
@@ -41,12 +36,6 @@ function createMemoryRepository(db) {
   const listActiveByThreadSupersession = db.prepare(`
     SELECT * FROM memory_entries
     WHERE scope = 'thread' AND owner_thread_id = ? AND supersession_key = ?
-      AND status = 'active'
-    ORDER BY created_at DESC, id DESC
-  `);
-  const listActiveByProjectSupersession = db.prepare(`
-    SELECT * FROM memory_entries
-    WHERE scope = 'project' AND project_key = ? AND supersession_key = ?
       AND status = 'active'
     ORDER BY created_at DESC, id DESC
   `);
@@ -171,12 +160,8 @@ function createMemoryRepository(db) {
       return mapMemory(findById.get(id));
     },
 
-    getByCaptureKey(owner, captureKey, options = {}) {
+    getByCaptureKey(owner, captureKey) {
       if (!owner || !captureKey) return null;
-      const scope = options.scope === "project" ? "project" : "thread";
-      if (scope === "project") {
-        return mapMemory(findByCaptureProject.get(owner, captureKey));
-      }
       return mapMemory(findByCaptureThread.get(owner, captureKey));
     },
 
@@ -233,38 +218,15 @@ function createMemoryRepository(db) {
       return listActiveByThreadSupersession.all(threadId, supersessionKey).map(mapMemory);
     },
 
-    listActiveByProjectSupersessionKey(projectKey, supersessionKey) {
-      if (!projectKey || !supersessionKey) return [];
-      return listActiveByProjectSupersession.all(projectKey, supersessionKey).map(mapMemory);
-    },
-
     /**
      * Active product rows (any kind) whose supersession topic segment matches.
-     * Used so decision:X and fact:X cannot both stay active.
+     * Used so decision:X and fact:X cannot both stay active. Product Memory is
+     * thread-only, so the lookup is keyed on the owning thread.
      */
-    listActiveProductByTopic({ scope, ownerThreadId, projectKey, topic }) {
+    listActiveProductByTopic({ ownerThreadId, topic }) {
       if (!topic) return [];
       const productKinds = ["decision", "constraint", "fact"];
       const kindClause = `AND kind IN (${productKinds.map(() => "?").join(", ")})`;
-      if (scope === "project") {
-        if (!projectKey) return [];
-        const rows = db
-          .prepare(
-            `
-            SELECT * FROM memory_entries
-            WHERE scope = 'project' AND project_key = ?
-              AND status = 'active'
-              ${kindClause}
-              AND (
-                supersession_key LIKE ?
-                OR json_extract(metadata_json, '$.topic') = ?
-              )
-            ORDER BY created_at DESC, id DESC
-          `
-          )
-          .all(projectKey, ...productKinds, `%:${topic}`, topic);
-        return rows.map(mapMemory).filter((m) => topicSegment(m) === topic);
-      }
       if (!ownerThreadId) return [];
       const rows = db
         .prepare(
@@ -287,21 +249,16 @@ function createMemoryRepository(db) {
     /**
      * Retire active peers before insert (UNIQUE-safe). supersededBy filled later.
      */
-    retireActivePeers({ scope, ownerThreadId, projectKey, supersessionKey, topic, metadataPatch }) {
+    retireActivePeers({ ownerThreadId, supersessionKey, topic, metadataPatch }) {
       const byKey = new Map();
       if (supersessionKey) {
-        const peers =
-          scope === "project"
-            ? this.listActiveByProjectSupersessionKey(projectKey, supersessionKey)
-            : this.listActiveBySupersessionKey(ownerThreadId, supersessionKey);
+        const peers = this.listActiveBySupersessionKey(ownerThreadId, supersessionKey);
         for (const peer of peers) byKey.set(peer.id, peer);
       }
       // Cross-kind same topic (decision vs fact) — one active product topic only.
       if (topic) {
         const topicPeers = this.listActiveProductByTopic({
-          scope,
           ownerThreadId,
-          projectKey,
           topic,
         });
         for (const peer of topicPeers) byKey.set(peer.id, peer);

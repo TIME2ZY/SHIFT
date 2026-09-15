@@ -1,8 +1,4 @@
-const RETRIEVABLE_MEMORY_KINDS = Object.freeze([
-  "decision",
-  "constraint",
-  "fact",
-]);
+const RETRIEVABLE_MEMORY_KINDS = Object.freeze(["decision", "constraint", "fact"]);
 const ACTIVE_MEMORY_STATUSES = Object.freeze(["active"]);
 const RETIRED_MEMORY_STATUSES = Object.freeze(["superseded"]);
 const MEMORY_RETRIEVAL_CONTRACT_VERSION = "product-memory-v2";

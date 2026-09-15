@@ -24,7 +24,12 @@ const { DEFAULT_MEMORY_DB_FILE, ROOT } = require("../src/shared/runtime-paths");
 
 const PRODUCT_KINDS = new Set(["decision", "constraint", "fact"]);
 const BATCH_ID = `memory-thread-only-${new Date().toISOString().slice(0, 10)}`;
-const DEFAULT_EXPORT_PATH = path.join(ROOT, "archive", "memory-exports", "legacy-from-memory-auth.md");
+const DEFAULT_EXPORT_PATH = path.join(
+  ROOT,
+  "archive",
+  "memory-exports",
+  "legacy-from-memory-auth.md"
+);
 
 function parseArgs(argv) {
   const options = {
@@ -209,9 +214,7 @@ async function main() {
   const db = new Database(dbFile);
   try {
     const table = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'"
-      )
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_entries'")
       .get();
     if (!table) throw new Error("memory_entries table missing.");
 

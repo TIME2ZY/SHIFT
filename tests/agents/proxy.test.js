@@ -9,7 +9,10 @@ const {
 
 test("resolveProxy prefers explicit option over env", () => {
   assert.equal(
-    resolveProxy({ proxy: "http://opt:1" }, { INVOKE_CLI_PROXY: "http://env:1", HTTPS_PROXY: "http://https:1" }),
+    resolveProxy(
+      { proxy: "http://opt:1" },
+      { INVOKE_CLI_PROXY: "http://env:1", HTTPS_PROXY: "http://https:1" }
+    ),
     "http://opt:1"
   );
 });
@@ -32,7 +35,10 @@ test("resolveProxy returns empty when nothing set", () => {
 });
 
 test("resolveGrokOnlyProxy reads GROK_PROXY family only", () => {
-  assert.equal(resolveGrokOnlyProxy({ GROK_PROXY: "http://grok:1", HTTPS_PROXY: "http://https:1" }), "http://grok:1");
+  assert.equal(
+    resolveGrokOnlyProxy({ GROK_PROXY: "http://grok:1", HTTPS_PROXY: "http://https:1" }),
+    "http://grok:1"
+  );
   assert.equal(resolveGrokOnlyProxy({ INVOKE_GROK_PROXY: "http://ig:1" }), "http://ig:1");
   assert.equal(resolveGrokOnlyProxy({ GROK_HTTP_PROXY: "http://gh:1" }), "http://gh:1");
   assert.equal(resolveGrokOnlyProxy({ HTTPS_PROXY: "http://https:1" }), "");
@@ -40,11 +46,15 @@ test("resolveGrokOnlyProxy reads GROK_PROXY family only", () => {
 
 test("resolveProviderProxy: grok prefers GROK_PROXY over global", () => {
   assert.equal(
-    resolveProviderProxy("grok", {}, {
-      GROK_PROXY: "http://grok:1",
-      INVOKE_CLI_PROXY: "http://all:1",
-      HTTPS_PROXY: "http://https:1",
-    }),
+    resolveProviderProxy(
+      "grok",
+      {},
+      {
+        GROK_PROXY: "http://grok:1",
+        INVOKE_CLI_PROXY: "http://all:1",
+        HTTPS_PROXY: "http://https:1",
+      }
+    ),
     "http://grok:1"
   );
 });
@@ -58,15 +68,20 @@ test("resolveProviderProxy: grok falls back to global when GROK_PROXY unset", ()
 
 test("resolveProviderProxy: codex/opencode ignore GROK_PROXY", () => {
   assert.equal(
-    resolveProviderProxy("codex", {}, { GROK_PROXY: "http://grok:1", HTTPS_PROXY: "http://https:1" }),
+    resolveProviderProxy(
+      "codex",
+      {},
+      { GROK_PROXY: "http://grok:1", HTTPS_PROXY: "http://https:1" }
+    ),
     "http://https:1"
   );
+  assert.equal(resolveProviderProxy("opencode", {}, { GROK_PROXY: "http://grok:1" }), "");
   assert.equal(
-    resolveProviderProxy("opencode", {}, { GROK_PROXY: "http://grok:1" }),
-    ""
-  );
-  assert.equal(
-    resolveProviderProxy("opencode", {}, { GROK_PROXY: "http://grok:1", INVOKE_CLI_PROXY: "http://all:1" }),
+    resolveProviderProxy(
+      "opencode",
+      {},
+      { GROK_PROXY: "http://grok:1", INVOKE_CLI_PROXY: "http://all:1" }
+    ),
     "http://all:1"
   );
 });

@@ -5,7 +5,7 @@ import { Composer } from "./Composer";
 
 describe("Composer", () => {
   it("sends a trimmed prompt and clears the draft", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn().mockResolvedValue(true);
     render(
       <Composer
         sessionId="s1"
@@ -43,7 +43,7 @@ describe("Composer", () => {
   });
 
   it("sends in worktree mode only after the user enables code changes", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn().mockResolvedValue(true);
     render(
       <Composer
         sessionId="s1"
@@ -135,10 +135,7 @@ describe("Composer", () => {
     expect(toggle).not.toBeChecked();
 
     rerender(
-      <Composer
-        {...props}
-        draftSeed={{ id: 2, text: "重构推荐提示", useWorktree: true }}
-      />
+      <Composer {...props} draftSeed={{ id: 2, text: "重构推荐提示", useWorktree: true }} />
     );
     expect(toggle).toBeChecked();
 
@@ -147,7 +144,7 @@ describe("Composer", () => {
   });
 
   it("offers @Agent completion without changing the default target", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = vi.fn().mockResolvedValue(true);
     render(
       <Composer
         sessionId="s1"
@@ -170,19 +167,15 @@ describe("Composer", () => {
     await userEvent.type(input, "review this");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSend).toHaveBeenCalledWith(
-      "@Gemini review this",
-      false,
-      expect.any(String)
-    );
+    expect(onSend).toHaveBeenCalledWith("@Gemini review this", false, expect.any(String));
   });
 
   it("locks synchronous duplicate submissions until the active send settles", async () => {
     let finishSend: (() => void) | undefined;
     const onSend = vi.fn(
       () =>
-        new Promise<void>((resolve) => {
-          finishSend = resolve;
+        new Promise<boolean>((resolve) => {
+          finishSend = () => resolve(true);
         })
     );
     render(
@@ -200,5 +193,59 @@ describe("Composer", () => {
     await userEvent.dblClick(screen.getByRole("button", { name: "发送" }));
     expect(onSend).toHaveBeenCalledOnce();
     finishSend?.();
+  });
+
+  it("restores the draft and worktree mode when the send never reached the server", async () => {
+    const onSend = vi.fn().mockResolvedValue(false);
+    render(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    );
+
+    const input = screen.getByRole("textbox", { name: "消息" });
+    const toggle = screen.getByRole("checkbox", { name: "隔离改代码" });
+    await userEvent.click(toggle);
+    await userEvent.type(input, "重要的提示");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(onSend).toHaveBeenCalledWith("重要的提示", true, expect.any(String));
+    expect(input).toHaveValue("重要的提示");
+    expect(toggle).toBeChecked();
+  });
+
+  it("does not clobber text typed while a failing send was in flight", async () => {
+    let finishSend: ((delivered: boolean) => void) | undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishSend = resolve;
+        })
+    );
+    render(
+      <Composer
+        sessionId="s1"
+        agents={[{ id: "codex", label: "Codex" }]}
+        selectedAgentId="codex"
+        running={false}
+        onSend={onSend}
+        onStop={vi.fn()}
+      />
+    );
+
+    const input = screen.getByRole("textbox", { name: "消息" });
+    await userEvent.type(input, "第一次");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect(input).toHaveValue("");
+    // The user retypes while the failed start is still settling.
+    await userEvent.type(input, "第二次");
+    finishSend?.(false);
+
+    expect(input).toHaveValue("第二次");
   });
 });

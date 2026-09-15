@@ -128,10 +128,7 @@ test("supersession only retires active memories with the same explicit topic key
         .sort(),
       ["login-v2", "parallel-a", "parallel-b"].sort()
     );
-    assert.equal(
-      storage.memories.getSearchProjection("login-v1").metadata.status,
-      "superseded"
-    );
+    assert.equal(storage.memories.getSearchProjection("login-v1").metadata.status, "superseded");
   } finally {
     storage.close();
   }
@@ -152,9 +149,10 @@ test("same-topic replacement is the only retirement path", () => {
     });
     assert.equal(storage.memories.get("first").status, "superseded");
     assert.equal(storage.memories.get("replacement").status, "active");
-    assert.deepEqual(storage.memory.listActive("thread-1").map((item) => item.id), [
-      "replacement",
-    ]);
+    assert.deepEqual(
+      storage.memory.listActive("thread-1").map((item) => item.id),
+      ["replacement"]
+    );
   } finally {
     storage.close();
   }
@@ -182,9 +180,7 @@ test("same-topic replacement retires the superseded Memory embedding", () => {
       writeChannel: "agent",
     });
     const embedding = storage.db
-      .prepare(
-        "SELECT * FROM embedding_items WHERE source_kind = 'memory' AND source_id = ?"
-      )
+      .prepare("SELECT * FROM embedding_items WHERE source_kind = 'memory' AND source_id = ?")
       .get(first.memory.id);
     assert.ok(embedding);
 
@@ -635,6 +631,62 @@ test("createProduct rejects cross-kind supersession keys and cross-thread source
   }
 });
 
+test("capture rejects retired project scope and stores writes thread-only", () => {
+  const storage = createFixture();
+  try {
+    assert.throws(
+      () => capture(storage, { id: "project-write", scope: "project" }),
+      /Project-scoped memory is retired/
+    );
+
+    // A caller-supplied project key cannot smuggle a project row in either:
+    // the write path fixes scope/owner, not the caller.
+    const written = capture(storage, {
+      id: "thread-write",
+      projectKey: "caller-project-key",
+    });
+    assert.equal(written.created, true);
+    assert.equal(written.memory.scope, "thread");
+    assert.equal(written.memory.projectKey, null);
+    assert.equal(written.memory.ownerThreadId, "thread-1");
+    assert.equal(storage.memories.listActiveByProject("caller-project-key").length, 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("writeMemoryCandidate rejects project scope on the server side", () => {
+  const storage = createFixture();
+  storage.invocations.start({
+    id: "invocation-scope",
+    threadId: "thread-1",
+    windowId: "window-1",
+    agentId: "codex",
+  });
+  try {
+    assert.throws(
+      () =>
+        storage.memory.writeMemoryCandidate(
+          {
+            kind: "fact",
+            topic: "runtime.database",
+            content: "SQLite is available at runtime.",
+            scope: "project",
+          },
+          {
+            threadId: "thread-1",
+            invocationId: "invocation-scope",
+            agentId: "codex",
+          }
+        ),
+      /Project-scoped memory is retired/
+    );
+    assert.equal(storage.memory.listActive("thread-1").length, 0);
+  } finally {
+    storage.close();
+  }
+});
+
 test("capture rolls back new memory and supersession when projection fails", () => {
   const storage = createFixture();
   try {
@@ -662,10 +714,7 @@ test("capture rolls back new memory and supersession when projection fails", () 
     assert.equal(storage.memories.get("login-v1").status, "active");
     assert.equal(storage.memories.get("login-v1").supersededBy, null);
     assert.equal(storage.memories.getSearchProjection("login-v2"), null);
-    assert.equal(
-      storage.memories.getSearchProjection("login-v1").metadata.status,
-      "active"
-    );
+    assert.equal(storage.memories.getSearchProjection("login-v1").metadata.status, "active");
   } finally {
     storage.close();
   }

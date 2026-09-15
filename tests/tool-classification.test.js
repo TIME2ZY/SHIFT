@@ -11,7 +11,7 @@ const {
   exitCodeFromItem,
   classifyShellOutcome,
   shellOutputLooksFailed,
-} = require("../src/agents/tool-classification");
+} = require("../src/shared/tool-classification");
 
 test("isSubagentTool detects spawn/task/wait style tools", () => {
   assert.equal(isSubagentTool("spawn_agent", { prompt: "x" }), true);
@@ -32,7 +32,7 @@ test("tool helpers parse common item shapes", () => {
 });
 
 test("summarizeTask prefers description over long prompt", () => {
-  const { summarizeTask: sumTask } = require("../src/agents/tool-classification");
+  const { summarizeTask: sumTask } = require("../src/shared/tool-classification");
   assert.equal(
     sumTask({
       description: "查看git状态和最近提交",
@@ -113,7 +113,7 @@ test("classifyShellOutcome recognizes only strong shell failure signatures", () 
 });
 
 test("summarizeResult strips OpenCode task XML wrappers", () => {
-  const { summarizeResult: sumRes, cleanToolOutput } = require("../src/agents/tool-classification");
+  const { summarizeResult: sumRes, cleanToolOutput } = require("../src/shared/tool-classification");
   const raw = `<task id="ses_x" state="completed"><task_result>
 ## Git status
 On branch codex/structured-cli-events

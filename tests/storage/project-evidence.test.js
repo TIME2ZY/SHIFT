@@ -18,9 +18,14 @@ function writeProjectFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shift-pe-"));
   fs.writeFileSync(
     path.join(root, "README.md"),
-    ["# Demo", "", "Use worktree isolation for code changes.", "", "## Skills", "See skills/."].join(
-      "\n"
-    ),
+    [
+      "# Demo",
+      "",
+      "Use worktree isolation for code changes.",
+      "",
+      "## Skills",
+      "See skills/.",
+    ].join("\n"),
     "utf8"
   );
   fs.mkdirSync(path.join(root, "skills"));
@@ -251,7 +256,9 @@ test("deleted allowlisted file is removed on reindex", () => {
   try {
     storage.threads.create({ id: "thread-1", projectDir: root });
     storage.reindexProjectEvidence("thread-1");
-    const before = storage.projectEvidence.listDocuments(storage.threads.get("thread-1").projectKey);
+    const before = storage.projectEvidence.listDocuments(
+      storage.threads.get("thread-1").projectKey
+    );
     assert.ok(before.some((d) => d.path.includes("docs/")));
 
     fs.rmSync(path.join(root, "docs"), { recursive: true, force: true });

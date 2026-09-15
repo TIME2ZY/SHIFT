@@ -4,9 +4,17 @@ const { parseSkillFrontmatter } = require("../../src/shared/frontmatter");
 
 test("parseSkillFrontmatter extracts meta and body", () => {
   const parsed = parseSkillFrontmatter(
-    ["---", 'name: "demo"', "triggers:", "- foo", "- bar", "always: false", "---", "", "Hello body"].join(
-      "\n"
-    )
+    [
+      "---",
+      'name: "demo"',
+      "triggers:",
+      "- foo",
+      "- bar",
+      "always: false",
+      "---",
+      "",
+      "Hello body",
+    ].join("\n")
   );
   assert.ok(parsed);
   assert.equal(parsed.meta.name, "demo");

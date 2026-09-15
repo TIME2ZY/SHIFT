@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
+import { isDegradedUiRunStatus } from "../../shared/contracts/run-status";
 import {
   MESSAGE_TYPES,
   isAssistantCallbackMessage,
@@ -348,6 +349,12 @@ export function MessageList({
   const liveText = liveMessages
     .map((message) => `${message.text}${message.commentary || ""}${message.thinking || ""}`)
     .join("");
+  // The log mutates on every streaming delta; hold announcements until the live
+  // answer settles. Terminal and error frames are still delivered, and run
+  // errors additionally surface through the toast region.
+  const liveStreaming = liveMessages.some(
+    (message) => message.status === "thinking" || message.status === "streaming"
+  );
   const optimisticUserPersisted = Boolean(
     run?.optimisticUser &&
     visibleMessages.some(
@@ -557,6 +564,7 @@ export function MessageList({
         role="log"
         aria-live="polite"
         aria-atomic="false"
+        aria-busy={liveStreaming}
       >
         {empty ? (
           <section className="react-chat-empty">
@@ -755,6 +763,14 @@ export function MessageList({
             </MessageRow>
           );
         })}
+
+        {run && isDegradedUiRunStatus(run.status) ? (
+          <div className="react-run-notice" role="status">
+            连接已断开，正在重连（第 {run.reconnectAttempt} 次，约{" "}
+            {Math.max(1, Math.round((run.reconnectDelayMs ?? 0) / 1000))}{" "}
+            秒后重试）。服务端运行不会中断。
+          </div>
+        ) : null}
 
         {run?.status === "error" && run.error ? (
           <div className="react-run-error" role="alert">

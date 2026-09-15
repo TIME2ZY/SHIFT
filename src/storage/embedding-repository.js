@@ -49,17 +49,13 @@ function createEmbeddingRepository(db, options = {}) {
 
   function getIndex(generation) {
     return mapIndex(
-      db
-        .prepare("SELECT * FROM embedding_indexes WHERE generation = ?")
-        .get(generation)
+      db.prepare("SELECT * FROM embedding_indexes WHERE generation = ?").get(generation)
     );
   }
 
   function getActiveIndex() {
     return mapIndex(
-      db
-        .prepare("SELECT * FROM embedding_indexes WHERE status = 'active' LIMIT 1")
-        .get()
+      db.prepare("SELECT * FROM embedding_indexes WHERE status = 'active' LIMIT 1").get()
     );
   }
 
@@ -145,10 +141,7 @@ function createEmbeddingRepository(db, options = {}) {
 
   function claimBatch(input = {}) {
     const workerId = requiredString(input.workerId, "embedding worker id");
-    const indexGeneration = requiredString(
-      input.indexGeneration,
-      "embedding index generation"
-    );
+    const indexGeneration = requiredString(input.indexGeneration, "embedding index generation");
     const limit = Math.max(1, Math.min(Number(input.limit) || 20, 100));
     const now = input.now ? iso(input.now) : iso(clock());
     const leaseMs = Math.max(1000, Number(input.leaseMs) || 30000);
@@ -263,13 +256,7 @@ function createEmbeddingRepository(db, options = {}) {
             AND model = ?
         `
         )
-        .get(
-          input.sourceKind,
-          input.sourceId,
-          input.sourceVersion,
-          input.chunkIndex,
-          input.model
-        )
+        .get(input.sourceKind, input.sourceId, input.sourceVersion, input.chunkIndex, input.model)
     );
   }
 
@@ -318,9 +305,9 @@ function createEmbeddingRepository(db, options = {}) {
         .get(tableName);
       if (!exists) continue;
       try {
-        db.prepare(
-          `DELETE FROM ${tableName} WHERE embedding_item_id IN (${placeholders})`
-        ).run(...ids);
+        db.prepare(`DELETE FROM ${tableName} WHERE embedding_item_id IN (${placeholders})`).run(
+          ...ids
+        );
       } catch {
         // The vec0 extension may not be loaded during an offline migration.
         // pruneStaleVectors retries after the runtime loads sqlite-vec.
@@ -356,9 +343,7 @@ function createEmbeddingRepository(db, options = {}) {
         .map(mapItem);
     },
     get(id) {
-      return mapItem(
-        db.prepare("SELECT * FROM embedding_items WHERE id = ?").get(id)
-      );
+      return mapItem(db.prepare("SELECT * FROM embedding_items WHERE id = ?").get(id));
     },
   };
 }
@@ -367,8 +352,7 @@ function normalizeItem(input, clock) {
   const scope = input.scope === "project" ? "project" : "thread";
   const ownerThreadId =
     scope === "thread" ? requiredString(input.ownerThreadId, "owner thread id") : null;
-  const projectKey =
-    scope === "project" ? requiredString(input.projectKey, "project key") : null;
+  const projectKey = scope === "project" ? requiredString(input.projectKey, "project key") : null;
   const now = iso(clock());
   return {
     sourceKind: requiredString(input.sourceKind, "embedding source kind"),

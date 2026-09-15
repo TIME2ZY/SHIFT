@@ -1,4 +1,4 @@
-const { classifyShellOutcome } = require("./tool-classification");
+const { classifyShellOutcome } = require("../shared/tool-classification");
 const { makeEvent } = require("./event-protocol");
 const { makeUsageEvent } = require("./usage");
 

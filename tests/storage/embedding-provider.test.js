@@ -82,10 +82,7 @@ test("OpenAI-compatible provider batches documents and validates dimensions", as
 test("disabled embedding provider fails without affecting recall availability", async () => {
   const provider = createDisabledEmbeddingProvider();
   await assert.rejects(() => provider.embedQuery("query"), EmbeddingUnavailableError);
-  await assert.rejects(
-    () => provider.embedDocuments(["document"]),
-    /Embedding is disabled/
-  );
+  await assert.rejects(() => provider.embedDocuments(["document"]), /Embedding is disabled/);
 });
 
 test("embedding provider validation rejects malformed vector batches", () => {
@@ -97,12 +94,8 @@ test("embedding provider validation rejects malformed vector batches", () => {
     async embedQuery() {},
   };
   assert.equal(validateEmbeddingProvider(provider), provider);
-  assert.deepEqual(
-    assertEmbeddingBatch([new Float32Array([1, 0, 0])], 1, 3),
-    [new Float32Array([1, 0, 0])]
-  );
-  assert.throws(
-    () => assertEmbeddingBatch([new Float32Array([1, 0])], 1, 3),
-    /invalid vector/
-  );
+  assert.deepEqual(assertEmbeddingBatch([new Float32Array([1, 0, 0])], 1, 3), [
+    new Float32Array([1, 0, 0]),
+  ]);
+  assert.throws(() => assertEmbeddingBatch([new Float32Array([1, 0])], 1, 3), /invalid vector/);
 });

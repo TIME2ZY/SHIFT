@@ -271,7 +271,11 @@ test("buildActiveMemoryCard degrades to an empty card when SQLite read fails", a
 
   assert.match(pack.rendered, /Active Memories \(unavailable\)/);
   assert.match(pack.rendered, /记忆系统暂时不可用/);
+  // The card is sent to a third-party LLM. The SQLite error message carries the
+  // DB path and SQL — it must stay in server logs, not the prompt.
+  assert.ok(!pack.rendered.includes("database offline"));
   assert.equal(pack.stats.availability.state, "unavailable");
+  assert.equal(pack.stats.availability.reason, "retrieve_failed");
   assert.match(errors[0], /listActive failed: database offline/);
 });
 
@@ -302,6 +306,32 @@ test("buildActiveMemoryCard prefers retrieveForTurn when available", async () =>
   assert.match(calls[0].prompt, /JWT/);
   assert.match(pack.rendered, /JWT/);
   assert.equal(pack.items[0].id, "m1");
+});
+
+test("buildActiveMemoryCard keeps retrieveForTurn failures out of the prompt", async () => {
+  const errors = [];
+  const pack = await buildActiveMemoryCard({
+    threadId: "thread-memory",
+    prompt: "继续完成 JWT 过期处理",
+    retrieveSource: {
+      retrieveForTurn() {
+        throw new Error("SQLITE_CONSTRAINT: no such table: C:/shift/data/shift.sqlite.memories");
+      },
+    },
+    logger: {
+      error(message) {
+        errors.push(message);
+      },
+    },
+  });
+
+  assert.match(pack.rendered, /Active Memories \(unavailable\)/);
+  // The error carries an absolute DB path and SQL — the LLM must never see it.
+  assert.ok(!pack.rendered.includes("SQLITE_CONSTRAINT"), "SQL fragment leaked into prompt");
+  assert.ok(!pack.rendered.includes("C:/shift/data"), "DB path leaked into prompt");
+  assert.equal(pack.stats.availability.reason, "retrieve_failed");
+  assert.equal(pack.items.length, 0);
+  assert.match(errors[0], /retrieveForTurn failed: SQLITE_CONSTRAINT/);
 });
 
 // ── buildBootstrapPacket ───────────────────────────────────────

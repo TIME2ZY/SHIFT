@@ -133,6 +133,94 @@ describe("sessionRunReducer", () => {
     expect(state.runs.s1.doneReceived).toBe(true);
   });
 
+  it("marks a live run as reconnecting and resumes it on connect", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    state = sessionRunReducer(state, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, {
+      type: "run/reconnecting",
+      sessionId: "s1",
+      attempt: 2,
+      delayMs: 2000,
+    });
+    expect(state.runs.s1).toMatchObject({
+      status: "reconnecting",
+      reconnectAttempt: 2,
+      reconnectDelayMs: 2000,
+    });
+    // The in-flight invocation stays observable while the stream is down.
+    expect(state.runs.s1.liveMessages.i1.status).toBe("thinking");
+
+    state = sessionRunReducer(state, { type: "run/connected", sessionId: "s1" });
+    expect(state.runs.s1).toMatchObject({
+      status: "running",
+      reconnectAttempt: 0,
+      reconnectDelayMs: 0,
+    });
+  });
+
+  it("reconnects through connecting when no invocation is live yet", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    state = sessionRunReducer(state, {
+      type: "run/reconnecting",
+      sessionId: "s1",
+      attempt: 1,
+      delayMs: 500,
+    });
+    expect(state.runs.s1.status).toBe("reconnecting");
+    state = sessionRunReducer(state, { type: "run/connected", sessionId: "s1" });
+    expect(state.runs.s1.status).toBe("connecting");
+  });
+
+  it("does not let reconnecting or run/connected revive a terminal run", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/hydrated",
+      sessionId: "s1",
+      traceId: "t-done",
+      runStatus: "completed",
+    });
+    expect(state.runs.s1.status).toBe("done");
+    state = sessionRunReducer(state, {
+      type: "run/reconnecting",
+      sessionId: "s1",
+      attempt: 3,
+      delayMs: 4000,
+    });
+    expect(state.runs.s1.status).toBe("done");
+    expect(state.runs.s1.reconnectAttempt).toBeUndefined();
+    state = sessionRunReducer(state, { type: "run/connected", sessionId: "s1" });
+    expect(state.runs.s1.status).toBe("done");
+  });
+
+  it("ignores run/connected when the stream was never dropped", () => {
+    let state = sessionRunReducer(initialSessionRunState, {
+      type: "run/started",
+      sessionId: "s1",
+      startedAt: 10,
+    });
+    state = sessionRunReducer(state, {
+      type: "agent/started",
+      sessionId: "s1",
+      agentId: "codex",
+      invocationId: "i1",
+    });
+    state = sessionRunReducer(state, { type: "run/connected", sessionId: "s1" });
+    expect(state.runs.s1.status).toBe("running");
+    expect(state.runs.s1.reconnectAttempt).toBeUndefined();
+  });
+
   it("terminalizes open invocations when a run fails or is aborted", () => {
     let failed = sessionRunReducer(initialSessionRunState, {
       type: "agent/started",

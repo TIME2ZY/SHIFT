@@ -15,11 +15,7 @@ function renderProcess(process: InvocationProcess, content?: string) {
 
   const rendered = render(
     <QueryClientProvider client={client}>
-      <MessageProcessDetails
-        sessionId="s1"
-        invocationId="i1"
-        content={content}
-      />
+      <MessageProcessDetails sessionId="s1" invocationId="i1" content={content} />
     </QueryClientProvider>
   );
   return rendered;

@@ -303,15 +303,35 @@ export function applyRunEventFrame(
   return cursor != null && Number.isFinite(cursor) ? cursor : null;
 }
 
+export const RECONNECT_BASE_DELAY_MS = 500;
+export const RECONNECT_MAX_DELAY_MS = 30_000;
+
+/**
+ * Delay for the nth reconnect attempt: 500ms, 1s, 2s, 4s ... capped at 30s.
+ * The cap is a simplicity bound, not load spreading: a session may have
+ * several subscribers (see architecture-map D10), and they reconnect
+ * independently on their own cursors.
+ */
+export function reconnectDelay(
+  attempt: number,
+  baseDelayMs = RECONNECT_BASE_DELAY_MS,
+  maxDelayMs = RECONNECT_MAX_DELAY_MS
+): number {
+  const grown = baseDelayMs * 2 ** Math.max(0, attempt - 1);
+  return Math.min(grown, maxDelayMs);
+}
+
 export async function subscribeRunEvents(
   sessionId: string,
   store: SessionRunStore,
   controller: AbortController,
-  events: RunStreamEvents = {}
+  events: RunStreamEvents = {},
+  { baseDelayMs = RECONNECT_BASE_DELAY_MS, maxDelayMs = RECONNECT_MAX_DELAY_MS } = {}
 ): Promise<{ malformedFrames: number }> {
   let malformedFrames = 0;
   const seenIds = new Set<number>();
   let cursor = store.getSnapshot().runs[sessionId]?.cursor ?? 0;
+  let attempt = 0;
 
   while (!controller.signal.aborted) {
     try {
@@ -334,6 +354,11 @@ export async function subscribeRunEvents(
       }
       if (!response.body) throw new Error("服务器没有返回可读取的消息流。");
 
+      if (attempt > 0) {
+        attempt = 0;
+        store.dispatch({ type: "run/connected", sessionId });
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -354,9 +379,21 @@ export async function subscribeRunEvents(
         error instanceof ApiError &&
         (error.status === 401 || error.status === 403 || error.status === 404)
       ) {
+        // 401/403: the UI token is gone — retrying cannot fix it, and the run
+        // would otherwise sit in a fake "running" state forever. 404: the
+        // session no longer exists. Both are terminal for this subscriber.
+        const message =
+          error.status === 404
+            ? "会话不存在或已被删除，无法继续接收运行事件。"
+            : "鉴权失败，无法接收运行事件；请重新打开页面。";
+        store.dispatch({ type: "run/failed", sessionId, error: message });
+        events.onRunError?.(message, sessionId);
         break;
       }
-      await sleep(500, controller.signal).catch(() => {});
+      attempt += 1;
+      const delayMs = reconnectDelay(attempt, baseDelayMs, maxDelayMs);
+      store.dispatch({ type: "run/reconnecting", sessionId, attempt, delayMs });
+      await sleep(delayMs, controller.signal).catch(() => {});
     }
   }
 

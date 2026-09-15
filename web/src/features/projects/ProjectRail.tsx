@@ -64,9 +64,7 @@ export function ProjectRail({
       if (event.key === "Escape") {
         setMenuOpen(false);
         setShowArchived(false);
-        switcherRef.current
-          ?.querySelector<HTMLButtonElement>(".react-project-trigger")
-          ?.focus();
+        switcherRef.current?.querySelector<HTMLButtonElement>(".react-project-trigger")?.focus();
       }
     }
 

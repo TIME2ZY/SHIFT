@@ -12,7 +12,7 @@ const {
   classifyShellOutcome,
   summarizeResult,
   toolItemId,
-} = require("../tool-classification");
+} = require("../../shared/tool-classification");
 
 /**
  * OpenCode CLI provider — one runtime for all models.

@@ -66,7 +66,9 @@ test("command and raw diagnostic text use their dedicated limits", () => {
 });
 
 test("large structured results retain a bounded preview and size metadata", () => {
-  const result = { rows: Array.from({ length: 10000 }, (_, index) => ({ index, value: "数".repeat(20) })) };
+  const result = {
+    rows: Array.from({ length: 10000 }, (_, index) => ({ index, value: "数".repeat(20) })),
+  };
   const serialized = JSON.stringify(result);
   const limited = limitCanonicalEvent({ type: "tool.finished", result });
 
