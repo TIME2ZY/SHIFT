@@ -1,15 +1,9 @@
 /**
- * Read-only permission queries for the collaboration task registry (Phase C-8
- * extract from collab-task-registry).
+ * Read-only permission queries for the collaboration task registry.
  *
- * Two questions are asked of a task without mutating it: may this agent
- * implement now, and is acceptance ready. Both were defined inside
- * createCollabTaskRegistry next to the gate writers that also answer write
- * requests, so a reader could not tell which entry points were safe to call
- * from a routing decision (which must not persist).
- *
- * createPermissionQueries returns exactly those two. They read through the
- * core handle because the task store may be SQLite-backed.
+ * Two questions asked of a task without mutating it: may this agent implement
+ * now, and is acceptance ready. They are separate from the gate writers so a
+ * routing decision can answer them without persisting.
  */
 
 "use strict";

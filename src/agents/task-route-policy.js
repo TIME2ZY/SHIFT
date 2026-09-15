@@ -1,19 +1,11 @@
 /**
- * A2A route policy for the collaboration task registry (Phase C-8 extract from
- * collab-task-registry).
+ * A2A route policy for the collaboration task registry.
  *
- * Four routing decisions were defined inside createCollabTaskRegistry, mixed
- * in with the gate writers: what phase an accepted route moves the task to,
- * whether evidence routing should be skipped for want of prerequisites,
- * whether implementation routing should be skipped for want of an approved
- * plan, and whether a review would just repeat one already recorded. Between
- * them they duplicated the phase ladder as an eight-branch if/else chain and
- * re-derived the evidence hash in two places.
- *
- * createRoutePolicy owns all four. The phase ladder is PHASE_BY_INTENT with an
- * explicit default, and the two hash derivations now share one helper.
- * Route decisions read but never persist; noteAcceptedRoute is the exception
- * and is the only one that writes.
+ * Four routing decisions: which phase an accepted route moves the task to,
+ * and whether evidence routing, implementation routing, or a review would be
+ * redundant. The phase ladder is PHASE_BY_INTENT with an explicit default.
+ * Route decisions read but never persist; noteAcceptedRoute is the sole
+ * exception and the only writer here.
  */
 
 "use strict";

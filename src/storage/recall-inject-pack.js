@@ -1,15 +1,11 @@
 /**
- * Passive memory pack assembly (Phase C-9 extract from recall-service).
+ * Passive memory pack assembly.
  *
  * retrieveForTurn builds the memory card injected into every bootstrap and
  * A2A prompt: three channels (recency, related, vector) collapse into one
- * ranked, deduplicated, budget-capped pack. It shared a closure with the
- * active search path and re-derived the scope and candidate collection the
- * search module already owned.
- *
- * createRecallInjectPack reads scope resolution and candidate collection from
- * the search core rather than duplicating them. The pack is memory-only by
- * default — project truth lives in docs/project-doc, not in product memory.
+ * ranked, deduplicated, budget-capped pack. Scope resolution and candidate
+ * collection come from the search core. The pack is memory-only by default —
+ * project truth lives in docs/project-doc, not in product memory.
  */
 
 "use strict";

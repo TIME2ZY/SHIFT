@@ -1,13 +1,9 @@
 /**
- * Recall observability and availability rendering (Phase C-9 extract from
- * recall-service).
+ * Recall observability and availability rendering.
  *
- * Three concerns that the search and inject-pack paths both need, and that
- * recall-service carried as closure functions plus two module-level helpers:
- * the one-line search metric log, the two per-layer hit tallies the MCP
- * bridge reports, and the two availability cards an unavailable or degraded
- * memory system renders into the prompt.
- *
+ * The search and inject-pack paths both need the one-line search metric log,
+ * the per-layer hit tallies the MCP bridge reports, and the availability
+ * cards an unavailable or degraded memory system renders into the prompt.
  * Every function here is pure: callers pass the logger where needed, so the
  * module holds no service state and can be unit-tested without storage.
  */

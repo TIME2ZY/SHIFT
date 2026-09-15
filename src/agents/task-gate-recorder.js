@@ -1,23 +1,14 @@
 /**
- * Gate recording for the collaboration task registry (Phase C-8 extract from
- * collab-task-registry).
+ * Gate recording for the collaboration task registry.
  *
- * Six entry points record one piece of outcome evidence each — a solution
- * baseline, a code review, delivery evidence, a final acceptance, an
- * implementation plan, or a plan approval. Every one of them repeated the same
- * plumbing: reject a missing thread or task, normalize the acting seat, load
- * the task, decide whether this evidence was already recorded, mutate the
- * task, persist exactly one event, and wrap the result. The differences
- * between them are real (which duty may submit, which evidence hashes identify
- * a repeat, which downstream evidence a fresh record invalidates) and were
- * interleaved with that plumbing at six call sites, so the persist call and
- * the invalidation cut points had drifted apart between gates.
- *
- * applyGateUpdate is the single skeleton: it owns the thread/task guards, the
- * actor normalization, and the one persist call. Each gate supplies
- * validate / detect / mutate, where detect may end the update early (including
- * the loop-detection and reuse cases that persist their own record) and mutate
- * may bail out without persisting when it finds nothing new to record.
+ * Six entry points record one piece of outcome evidence each — solution
+ * baseline, code review, delivery, final acceptance, implementation plan,
+ * plan approval. applyGateUpdate owns the shared spine (thread and task
+ * guards, actor normalization, and exactly one persist call); each gate
+ * supplies validate / detect / mutate, where detect may end the update early
+ * and mutate may bail without persisting. Keeping the persist call in one
+ * place is what keeps the invalidation cut points from drifting between
+ * gates.
  */
 
 "use strict";

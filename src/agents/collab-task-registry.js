@@ -1,15 +1,12 @@
 /**
- * Collaboration task registry (Phase C-8 facade).
+ * Collaboration task registry facade.
  *
- * The four concerns that used to live inside createCollabTaskRegistry — gate
- * recording, route policy, permission queries, and evidence invalidation — are
- * now sibling modules under src/agents/. This file keeps the task store (the
- * only piece every one of them needs wired the same way, whether in-memory or
- * SQLite-backed) plus the shared task primitives, and composes them into the
- * registry callers already hold.
- *
- * The exported shape is unchanged: createCollabTaskRegistry returns the same
- * method set, and the module still re-exports the primitives.
+ * Keeps the task store — the one piece gate recording, route policy,
+ * permission queries, and evidence invalidation all need wired the same way,
+ * whether in-memory or SQLite-backed — plus the shared task primitives, and
+ * composes those sibling modules into the registry callers already hold. The
+ * exported method set and the re-exports are the contract: changing them
+ * means changing every consumer of createCollabTaskRegistry.
  */
 
 "use strict";

@@ -1,15 +1,12 @@
 /**
- * Prompt assembly for the chat worklist runner (Phase C-2 extract from
- * chat-worklist).
+ * Prompt assembly for the chat worklist runner.
  *
- * One turn's prompt is built from six layers (identity, collaboration
- * rules, bootstrap/digest, task body, implementation gate, callback
- * instructions). The layer list is stable but which layers apply depends
- * on the turn index and the implementation gate, so this module owns that
- * branching and publishes five byproducts (recovery context / goal /
- * evidence, task snapshot, gate enforcement flag) onto turnRunState —
- * the seal and retry paths later in the same entry read them through the
- * shared state handle.
+ * A turn's prompt is six layers — identity, collaboration rules, bootstrap or
+ * digest, task body, implementation gate, callback instructions — and which
+ * layers apply depends on the turn index and the gate state. This module owns
+ * that branching and publishes the byproducts the seal and retry paths read
+ * later in the same entry (recovery context, goal and evidence, task
+ * snapshot, gate enforcement flag) onto turnRunState.
  */
 
 const {

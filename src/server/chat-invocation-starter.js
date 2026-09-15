@@ -1,18 +1,14 @@
 /**
- * Invocation start + announcement for the chat worklist runner (Phase C-2
- * extract from chat-worklist).
+ * Invocation start and announcement for the chat worklist runner.
  *
- * Two sites create a durable invocation for one agent turn: the first start
- * after prompt assembly, and the replay-after-empty-output retry inside the
- * stream loop. Both do the same six things — allocate an invocation id,
- * persist the start, publish it onto threadCtx, broadcast agent-start /
- * window-meta / workspace-meta, and note it in runObs — and both spelled
- * those six out separately, drifting in which fallbacks they used.
- *
- * startInvocationAndAnnounce is the single place those six happen. Callers
- * keep the parts that genuinely differ: which window the tracker binds to,
- * whether the run is a replay, and the seal/emit work that follows only the
- * first start.
+ * Two sites create a durable invocation for one turn — the first start after
+ * prompt assembly and the replay-after-empty retry inside the stream loop —
+ * and both must do the same six things: allocate the id, persist the start,
+ * publish it onto threadCtx, broadcast agent-start / window-meta /
+ * workspace-meta, and note it in runObs. startInvocationAndAnnounce is the
+ * single place those happen; callers keep what genuinely differs (which
+ * window the tracker binds to, whether this is a replay, and the seal and
+ * emit work that follows only the first start).
  */
 
 /**

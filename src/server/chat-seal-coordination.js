@@ -1,25 +1,13 @@
 /**
- * Context-seal coordination for the chat worklist runner (Phase C-2 extract
- * from chat-worklist).
+ * Context-seal coordination for the chat worklist runner.
  *
- * One entry's seal lifecycle has four decision points, and they were spread
- * across runChatWorklist in three non-adjacent regions: a PRE-call rotation
- * taken from a projected budget before the invocation starts; the capture of
- * that pre-call seal once an invocation id exists to key it on; a mid-stream
- * pressure evaluator consulted on every observed chunk; and the POST-turn soft
- * seal taken once the answer is complete. Between them those regions read and
- * wrote eleven turnRunState flags (preCallRotated, preCallSealedWindowId /
- * Generation / Ratio, contextSealHandled, contextSealedSseSent, contextWarned,
- * sealPending, emergencyStop) plus the live tracker, the durable run, and the
- * sealer — and no single place showed which flag was whose.
- *
- * createSealCoordinator is the single owner of those decisions. It closes over
- * the per-entry constants (agent, providerKey) and reads every mutable value
- * through turnRunState at call time, because the tracker and the durable run
- * are rebound underneath it by rotation. Callers keep what genuinely differs:
- * where the pre-call projection sits relative to prompt assembly, and the
- * stream machinery (the delta coalescer, published to
- * turnRunState.durableCoalescer, is created after the coordinator).
+ * An entry's seal lifecycle has four decision points: pre-call rotation from
+ * a projected budget, capturing that seal once an invocation id exists to key
+ * it on, the mid-stream pressure evaluator consulted per chunk, and the
+ * post-turn soft seal. createSealCoordinator owns all four and the
+ * turnRunState flags they toggle — callers must not touch those flags
+ * directly. Every mutable value is read at call time because the tracker and
+ * the durable run are rebound underneath the coordinator by rotation.
  */
 
 const {

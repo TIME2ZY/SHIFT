@@ -1,16 +1,11 @@
 /**
- * Active recall search core (Phase C-9 extract from recall-service).
+ * Active recall search core.
  *
- * searchSession and its search machinery — layer candidate collection, the
- * SQLite projection that fans out to four layers, the recency-only path for
- * weak queries, and the vector channel — were one third of recall-service,
- * interleaved with the passive inject pack and the metric log so that a
- * change to one ranking rule had to be read past two unrelated concerns.
- *
- * createRecallSearch owns the search path end to end and exposes the pieces
- * the inject pack needs (scope resolution, candidate collection, vector
- * hits) rather than duplicating them. Search reads storage and the embedding
- * runtime; it never writes.
+ * Owns searchSession end to end: layer candidate collection, the SQLite
+ * projection that fans out to four layers, the recency-only path for weak
+ * queries, and the vector channel. The inject pack takes scope resolution and
+ * candidate collection from here rather than duplicating them. Search reads
+ * storage and the embedding runtime; it never writes.
  */
 
 "use strict";

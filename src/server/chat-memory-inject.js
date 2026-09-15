@@ -1,19 +1,12 @@
 /**
- * Memory-inject announcement for the chat worklist runner (Phase C-2 extract
- * from chat-worklist).
+ * Memory-inject announcement for the chat worklist runner.
  *
- * Two sites announce recalled memory for one turn: the bootstrap turn emits the
- * memory injected alongside the first prompt, and an A2A handoff emits the
- * bundle the previous agent attached. Both built the same payload, collected
- * the same id sets, sent the same SSE, and recorded the same memory event —
- * differing only in source label, owning agent, and which inject bundle they
- * read — yet spelled all four out separately, so the recorded payload fields
- * drifted apart (the bootstrap branch grew availability/funnel nesting the A2A
- * branch copied by hand).
- *
- * announceMemoryInject is the single emission point. Callers keep the parts
- * that genuinely differ: whether this is the bootstrap turn, and the handoff
- * metrics that only the A2A path reports.
+ * Two sites announce recalled memory for one turn — the bootstrap turn emits
+ * the bundle alongside the first prompt, and an A2A handoff emits the bundle
+ * the previous agent attached. announceMemoryInject is the single emission
+ * point so the recorded payload fields cannot drift between the two; callers
+ * keep whether this is the bootstrap turn and the handoff metrics only the
+ * A2A path reports.
  */
 
 const { buildMemoryInjectPayload, collectInjectIdSets } = require("../storage/memory-metrics");

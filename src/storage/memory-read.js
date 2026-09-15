@@ -1,13 +1,10 @@
 /**
- * Product Memory read queries (Phase C-10 extract from memory-service).
+ * Product Memory read queries.
  *
- * Six read shapes lived inside createMemoryService next to the write path:
- * listActive (with its scope fan-out and budget cap), the two turn variants,
- * the full list with kind/status filters, the single get, and the
- * thread-access predicate. Each read goes through enrichMemory, which issues
- * one supersession-related query per memory — visible as a per-item cost in a
- * list, and now isolated in one place rather than mixed into the write path.
- *
+ * Six read shapes — listActive with its scope fan-out and budget cap, the two
+ * turn variants, the full list with kind and status filters, the single get,
+ * and the thread-access predicate — all go through enrichMemory, which issues
+ * one supersession-related query per memory and so costs per item in a list.
  * createMemoryRead reads storage only; it never writes.
  */
 

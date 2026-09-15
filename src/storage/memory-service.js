@@ -1,22 +1,20 @@
 /**
- * Product Memory write service (Phase D-2 boundary, Phase C-10 facade).
+ * Product Memory write service.
  *
- * The write path and the read queries this module used to carry in one 903-line
- * closure are now sibling modules: memory-read owns the six read shapes,
- * memory-write-evidence owns anchor resolution. This file keeps the write path
- * itself — capture, captureOnce, createProduct, writeMemoryCandidate — because
- * those four share one transaction and one idempotency contract, and composes
- * the reads into the service callers already hold.
+ * The write path — capture, captureOnce, createProduct, writeMemoryCandidate —
+ * stays in one module because those four share one transaction and one
+ * idempotency contract. Reads live in memory-read and evidence anchoring in
+ * memory-write-evidence. Product Memory is thread-only (ADR-005): every write
+ * entry point fixes `scope = "thread"` and rejects `scope: "project"`; legacy
+ * project rows stay readable for audit but cannot be created or superseded
+ * through the service entries.
  *
- * The exported shape is unchanged: createMemoryService returns the same method
- * set, and the module still re-exports deriveWriteFields, resolveProductScope,
- * recordMemoryLifecycleEvents and the scope constants.
+ * The exported method set plus deriveWriteFields / resolveProductScope /
+ * recordMemoryLifecycleEvents and the scope constants are this module's
+ * contract with its consumers.
  *
  * Online roles:
  * - Write path: this module (`writeMemoryCandidate` / captureOnce) → memory-repository.
- *   Product Memory is thread-only (ADR-005): every write entry point fixes
- *   `scope = "thread"` and rejects `scope: "project"`. Legacy project rows stay
- *   readable for audit but can no longer be created or superseded.
  * - Read/list: memory-read + memory-repository
  * - Inject into prompts: memory-inject + memory-funnel (ranking/budget)
  * - Evidence anchoring: memory-write-evidence + memory-evidence

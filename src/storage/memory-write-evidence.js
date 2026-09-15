@@ -1,18 +1,13 @@
 /**
- * Product Memory write evidence anchoring (Phase C-10 extract from
- * memory-service).
+ * Product Memory write evidence anchoring.
  *
- * A write is only as trustworthy as what it points at. resolveMemoryWriteEvidence
- * decides which anchor grounds a memory: an explicit invocation event the agent
- * named, otherwise the source message, otherwise the invocation itself. It was
- * a module-level function inside memory-service, sitting between the write
- * path's validation and its persistence, so a change to anchor shape had to be
- * read past forty lines of unrelated capture logic.
- *
- * The function is pure with respect to memory state: it reads invocation and
- * message records and returns the anchor set. hashMemoryWriteContent lives here
- * because every anchor label and the write's own content hash are the same
- * operation, and memory-service imports it rather than re-deriving it.
+ * A write is only as trustworthy as what it points at:
+ * resolveMemoryWriteEvidence picks the explicit invocation event the agent
+ * named, else the source message, else the invocation itself. It is pure with
+ * respect to memory state — it reads invocation and message records and
+ * returns the anchor set. hashMemoryWriteContent lives here because anchor
+ * labels and the write's own content hash are the same operation;
+ * memory-service imports it rather than re-deriving it.
  */
 
 "use strict";

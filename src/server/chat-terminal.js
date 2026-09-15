@@ -1,23 +1,14 @@
 /**
- * Turn terminal handling for the chat worklist runner (Phase C-2 extract from
- * chat-worklist).
+ * Turn terminal handling for the chat worklist runner.
  *
- * One entry ends in exactly one of five ways: the stream handler failed, the
+ * One entry ends in exactly one of five ways — the stream handler failed, the
  * client aborted, the assistant stayed empty under context pressure, the
- * provider process exited non-zero, or the answer completed and was persisted.
- * Those were spelled out as four near-identical failure branches plus a
- * success block, each repeating the same six steps — build the final message,
- * completeInvocation, retire the invocation, emit error/exit SSE, record the
- * invocation id for the next entry, set the aborted flag — with the
- * differences (reason, endPayload fields, whether a message is attached at
- * all) scattered between them.
- *
- * closeTurnFailure is the single writer for all four failure terminals; the
- * per-kind reason/payload mapping lives next to it in resolveFailureTerminal.
- * completeAssistantTurn owns the success terminal. Both read mutable state
- * through turnRunState because the seal coordinator may have rebound the
- * tracker and the durable run earlier in the turn. Neither decides control
- * flow — the caller still breaks or throws.
+ * provider exited non-zero, or the answer completed and was persisted.
+ * closeTurnFailure is the single writer for the four failure terminals and
+ * completeAssistantTurn owns the success one. Both read mutable state through
+ * turnRunState because the seal coordinator rebinds the tracker and the
+ * durable run earlier in the turn. Neither decides control flow — the caller
+ * still breaks or throws.
  */
 
 const { DurableWriteError } = require("../storage/sqlite-retry");

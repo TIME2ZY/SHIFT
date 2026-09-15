@@ -1,16 +1,11 @@
 /**
- * Recall service facade (Phase C-9).
+ * Recall service facade.
  *
- * The search core, the passive memory pack, and the metric/availability
- * helpers that recall-service carried for 1072 lines now live in sibling
- * modules under src/storage/. This file keeps the two concerns that do not
- * belong to any of them — invocation reads (listInvocationsWithMeta /
- * readInvocationPage) and the construction rules that decide the service's
- * recall mode — and composes the three into the service callers already hold.
- *
- * The exported shape is unchanged: createRecallService returns the same method
- * set, and every consumer still takes only createRecallService from this
- * module.
+ * Keeps the two concerns that belong to none of the sibling modules —
+ * invocation reads and the construction rules that decide the service's recall
+ * mode — and composes search, inject pack, and metrics into the service
+ * callers already hold. Every consumer takes only createRecallService from
+ * this module; the exported method set is the contract.
  */
 
 "use strict";

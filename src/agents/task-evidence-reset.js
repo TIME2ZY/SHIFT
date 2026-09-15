@@ -1,20 +1,10 @@
 /**
- * Outcome-evidence invalidation for the collaboration task registry (Phase C-8
- * extract from collab-task-registry).
+ * Outcome-evidence invalidation for the collaboration task registry.
  *
- * Downstream evidence accumulates along a fixed lifecycle — goal, solution
- * baseline, implementation plan, progress, code review, delivery, final
- * acceptance, acceptance decision — and every gate transition must drop a
- * specific suffix of that chain. Those suffixes were spelled out as
- * thirty-one `delete task.artifacts.X` lines across six non-adjacent sites
- * (require-plan, submit-plan, code review, delivery, solution revision, and
- * the phase-transition invalidator), each with a slightly different cut
- * point, so a new gate could easily clear too much or too little.
- *
- * clearDownstreamEvidence(task, { from, keep }) states the cut point once:
- * from is the index into DOWNSTREAM_ARTIFACTS where deletion starts, keep is
- * the set of names a transition must preserve. Every site's deletion set is
- * preserved verbatim — only the spelling changed.
+ * Evidence accumulates along a fixed lifecycle and every gate transition must
+ * drop a specific suffix of it. clearDownstreamEvidence(task, { from, keep })
+ * states that cut point once; callers must not delete task.artifacts fields
+ * directly, or a new gate will clear too much or too little.
  */
 
 "use strict";

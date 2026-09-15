@@ -1,17 +1,14 @@
 /**
- * Turn state for the chat worklist runner (Phase C-2 extract from
- * chat-worklist).
+ * Turn state for the chat worklist runner.
  *
- * runChatWorklist shares mutable state across blocks and closures
- * (sealContextWindow, persistDurableEvent, noteContextPressure). Those all
- * reach through the single `turnRunState` handle this module creates, so a
- * phase can be extracted without threading 30 parameters.
- *
- * Two lifetimes:
- *   - run-scoped fields (session / aborted / previousInvocationId /
- *     ownedInvocationSlotAtCleanup) survive across worklist entries and are
- *     read in the finally block and the return tail.
- *   - entry-scoped fields are reset at the top of every worklist entry.
+ * The extracted phases reach mutable turn state through the single
+ * turnRunState handle this module creates rather than through long parameter
+ * lists. Two lifetimes: run-scoped fields (session / aborted /
+ * previousInvocationId / ownedInvocationSlotAtCleanup) survive across
+ * worklist entries and are read in the finally block and the return tail;
+ * entry-scoped fields are reset at the top of every entry. openWindow and
+ * resumeSessionId are deliberately not reset — they are recomputed from
+ * storage per entry.
  */
 
 /**
