@@ -1,6 +1,6 @@
 import { projectToolStatus } from "../shared/contracts/tool-status";
 import { ApiError, authenticatedFetch } from "../shared/api/client";
-import { agentExitIndicatesFailure, isTerminalUiRunStatus } from "../shared/contracts/run-status";
+import { agentExitIndicatesFailure } from "../shared/contracts/run-status";
 import { formatToolResultForDisplay } from "./chat-stream";
 import { parseSseChunk, type SseFrame } from "./sse-parser";
 import type { SessionRunStore } from "./session-run-store";
@@ -308,8 +308,9 @@ export const RECONNECT_MAX_DELAY_MS = 30_000;
 
 /**
  * Delay for the nth reconnect attempt: 500ms, 1s, 2s, 4s ... capped at 30s.
- * Full jitter would spread load; a deterministic cap is enough here because
- * only one client subscribes per session.
+ * The cap is a simplicity bound, not load spreading: a session may have
+ * several subscribers (see architecture-map D10), and they reconnect
+ * independently on their own cursors.
  */
 export function reconnectDelay(
   attempt: number,
@@ -371,13 +372,6 @@ export async function subscribeRunEvents(
         });
         buffer = parsed.rest;
         malformedFrames += parsed.malformed;
-        // A terminal frame ends the run: there is nothing left to observe, so
-        // stop instead of reconnecting into a closed stream.
-        const status = store.getSnapshot().runs[sessionId]?.status;
-        if (isTerminalUiRunStatus(status)) {
-          controller.abort();
-          break;
-        }
       }
     } catch (error) {
       if (controller.signal.aborted) break;

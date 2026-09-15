@@ -44,6 +44,63 @@ function okResponse(chunks: string[]): Response {
   return { ok: true, status: 200, body: sseBody(chunks) } as unknown as Response;
 }
 
+/**
+ * A body that stays open until `controller` aborts. Aborting errors the
+ * stream the way aborting a real fetch errors its body reader, so the
+ * subscriber loop unsticks instead of hanging on a read.
+ */
+function openBody(controller: AbortController): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(streamController) {
+      controller.signal.addEventListener(
+        "abort",
+        () =>
+          streamController.error(
+            controller.signal.reason || new DOMException("Aborted", "AbortError")
+          ),
+        { once: true }
+      );
+    },
+  });
+}
+
+function okResponseLive(controller: AbortController): Response {
+  return { ok: true, status: 200, body: openBody(controller) } as unknown as Response;
+}
+
+/**
+ * A response the test can push frames into after the read has started, and
+ * then reset to exercise the reconnect path.
+ */
+function liveResponse(controller: AbortController): {
+  response: Response;
+  emit: (chunk: string) => void;
+  drop: () => void;
+} {
+  let emit!: (chunk: string) => void;
+  let drop!: () => void;
+  const body = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      const encoder = new TextEncoder();
+      emit = (chunk: string) => streamController.enqueue(encoder.encode(chunk));
+      drop = () => streamController.error(new Error("connection reset"));
+      controller.signal.addEventListener(
+        "abort",
+        () =>
+          streamController.error(
+            controller.signal.reason || new DOMException("Aborted", "AbortError")
+          ),
+        { once: true }
+      );
+    },
+  });
+  return {
+    response: { ok: true, status: 200, body } as unknown as Response,
+    emit,
+    drop,
+  };
+}
+
 function frame(event: string, id: number | null, data: Record<string, unknown>): string {
   const lines = [`event: ${event}`];
   if (id != null) lines.push(`id: ${id}`);
@@ -285,7 +342,10 @@ describe("subscribeRunEvents reconnect", () => {
       // First drop: network failure.
       .mockRejectedValueOnce(new Error("network down"))
       .mockRejectedValueOnce(new Error("network down"))
-      .mockResolvedValueOnce(okResponse([frame("done", 2, {})]));
+      .mockResolvedValueOnce(okResponse([frame("done", 2, {})]))
+      // The session stream outlives the run it just reported done; hold the
+      // next connection open until the test aborts the subscriber.
+      .mockResolvedValueOnce(okResponseLive(controller) as unknown as Response);
 
     const promise = subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
     const observed: Array<{ attempt: number; delay: number }> = [];
@@ -296,7 +356,8 @@ describe("subscribeRunEvents reconnect", () => {
       }
     });
 
-    await promise;
+    // Let both failures and the recovery land.
+    await new Promise((resolve) => setTimeout(resolve, 60));
     unsubscribe();
 
     // Two failures -> attempt 1 then 2, delay doubling each time.
@@ -305,6 +366,9 @@ describe("subscribeRunEvents reconnect", () => {
     const final = store.getSnapshot().runs.s1;
     expect(final.status).toBe("done");
     expect(final.cursor).toBe(2);
+
+    controller.abort();
+    await promise.catch(() => {});
   });
 
   it("keeps the run visible as reconnecting rather than fake-running", async () => {
@@ -362,15 +426,64 @@ describe("subscribeRunEvents reconnect", () => {
     expect(run.error).toContain("会话不存在");
   });
 
-  it("does not reconnect after the run already reached a terminal state", async () => {
-    fetchMock.mockResolvedValue(okResponse([frame("done", 1, {})]));
+  it("keeps the session observer alive past a terminal frame", async () => {
+    // The event stream is session-scoped, not run-scoped: a terminal frame
+    // ends the run, not the connection. Stopping here would strand every
+    // later invocation on this session — invisible in the transcript, and
+    // once the concurrent-send guard lands, unsendable — until a refresh.
+    const { response, emit } = liveResponse(controller);
+    fetchMock.mockResolvedValueOnce(response);
 
-    await subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
+    const promise = subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
 
-    // The done frame terminalized the run and the loop stopped: no reconnect
-    // attempt was ever recorded.
+    emit(frame("done", 1, {}));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(store.getSnapshot().runs.s1.status).toBe("done");
-    expect(store.getSnapshot().runs.s1.status).not.toBe("reconnecting");
-    expect(store.getSnapshot().runs.s1.reconnectAttempt).toBeUndefined();
+    expect(controller.signal.aborted).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The next run on this session is still picked up by the same subscriber.
+    emit(frame("agent-start", 2, { agent: "grok", traceId: "trace-2", invocationId: "inv-2" }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = store.getSnapshot().runs.s1;
+    expect(second.traceId).toBe("trace-2");
+    expect(second.status).toBe("running");
+    expect(Object.keys(second.liveMessages)).toContain("inv-2");
+    expect(second.cursor).toBe(2);
+
+    controller.abort();
+    await promise.catch(() => {});
+  });
+
+  it("reconnects when the connection drops after a terminal frame", async () => {
+    // The run is over but the session is not: a dropped connection still
+    // reconnects on the stored cursor instead of idling until a refresh.
+    const first = liveResponse(controller);
+    fetchMock
+      .mockResolvedValueOnce(first.response)
+      .mockResolvedValueOnce(okResponseLive(controller));
+
+    const promise = subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
+
+    first.emit(frame("done", 1, {}));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(store.getSnapshot().runs.s1.status).toBe("done");
+
+    // Simulate a connection reset mid-read.
+    first.drop();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/sessions/s1/events?after=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "Last-Event-ID": "1" }),
+      })
+    );
+    // A terminal run is not redrawn as reconnecting; the cursor resume is what
+    // proves the loop came back for more frames.
+    expect(store.getSnapshot().runs.s1.status).toBe("done");
+
+    controller.abort();
+    await promise.catch(() => {});
   });
 });
