@@ -14,7 +14,6 @@ npm-debug.log*
 *.jks
 *.keystore
 credentials*
-*secret*
 
 # Local runtime data (created on demand; never commit)
 data/
