@@ -10,6 +10,7 @@ const {
   createOpencodeShiftContextConfig,
   createAcpShiftContextServer,
   ensureAntigravityShiftContextConfig,
+  createClaudeShiftContextArg,
 } = require("../../src/agents/shift-context-mcp-config");
 
 test("shared Shift MCP descriptor exposes one server and the trusted environment", () => {
@@ -58,6 +59,15 @@ test("Antigravity registration preserves other servers and stores no invocation 
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("Claude inline MCP config registers the server without snapshotting secrets", () => {
+  const raw = createClaudeShiftContextArg();
+  const config = JSON.parse(raw);
+  assert.equal(config.mcpServers.shift_context.command, process.execPath);
+  assert.match(config.mcpServers.shift_context.args[0], /shift-context-mcp\.js$/);
+  assert.equal(config.mcpServers.shift_context.env, undefined);
+  assert.doesNotMatch(raw, /SHIFT_CALLBACK_TOKEN/);
 });
 
 test("ACP descriptor carries current invocation credentials without persistence", () => {

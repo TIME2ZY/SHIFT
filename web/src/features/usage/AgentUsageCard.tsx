@@ -18,6 +18,8 @@ interface AgentUsageCardProps {
   status: AgentActivityStatus;
   selected: boolean;
   disabled?: boolean;
+  /** Roving tabindex: 0 on the seat holding the tab stop, -1 on the rest. */
+  rosterTabIndex: 0 | -1;
   onSelect(agentId: string): void;
   onRefresh?(): void;
   refreshing?: boolean;
@@ -38,6 +40,7 @@ export function AgentUsageCard({
   status,
   selected,
   disabled,
+  rosterTabIndex,
   onSelect,
   onRefresh,
   refreshing = false,
@@ -82,7 +85,8 @@ export function AgentUsageCard({
         aria-checked={selected}
         aria-disabled={disabled || undefined}
         aria-label={`${agent.label}${model ? `，${model}` : ""}，${STATUS_LABELS[status]}${unavailable ? "，不可用" : ""}`}
-        tabIndex={disabled ? -1 : 0}
+        data-agent-id={agent.id}
+        tabIndex={rosterTabIndex}
         onClick={select}
         onKeyDown={handleKeyDown}
       >

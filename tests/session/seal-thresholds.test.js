@@ -55,7 +55,7 @@ test("resolveSealThresholds: usable-ratio profiles for Grok-style 85%", () => {
 });
 
 test("catalog profiles: every agent yields valid sealer thresholds", () => {
-  for (const agentId of ["codex", "gemini", "grok", "opencode"]) {
+  for (const agentId of ["codex", "gemini", "grok", "opencode", "claude"]) {
     const budget = getAgentSealThresholds(agentId);
     const sealer = makeSealer({
       warnThreshold: budget.usable.sealer.warn,
@@ -96,8 +96,13 @@ test("catalog: Codex 258400 @ 90%, OpenCode native 980k, Grok 85%", () => {
   const gemini36 = getModelProfile("antigravity", "gemini-3.6-flash");
   assert.equal(gemini36.sealActionTokens, 300_000);
 
+  const claude = getAgentModelProfile("claude");
+  assert.equal(claude.id, "sonnet");
+  assert.equal(claude.contextTokens, 256_000);
+  assert.deepEqual(claude.reasoning.levels, ["low", "medium", "high", "xhigh", "max"]);
+
   const providers = new Set(MODEL_PROFILES.map((profile) => profile.providerId));
-  assert.deepEqual([...providers].sort(), ["antigravity", "codex", "grok", "opencode"]);
+  assert.deepEqual([...providers].sort(), ["antigravity", "claude", "codex", "grok", "opencode"]);
 });
 
 test("shouldSoftSealAfterTurn respects Gemini softRatio ~0.34 usable", () => {

@@ -29,6 +29,9 @@ test("code defaults bind Codex, Grok, and Gemini to the current runtime models",
   assert.equal(DEFAULT_AGENTS.gemini.model, "gemini-3.8-flash");
   assert.equal(DEFAULT_AGENTS.gemini.reasoningEffort, "high");
   assert.equal(AGENTS.gemini.model, "gemini-3.8-flash");
+  assert.equal(DEFAULT_AGENTS.claude.model, "sonnet");
+  assert.equal(getModelProfile("claude", "sonnet").contextTokens, 256_000);
+  assert.equal(resolveModelProfile("claude", "Atria-Dawn-Preview").contextTokens, 256_000);
 });
 
 test("known model profiles stay exact; unknown models inherit provider seal data", () => {
@@ -48,14 +51,21 @@ test("known model profiles stay exact; unknown models inherit provider seal data
 test("bindings overlay defaults without adding providers", () => {
   const merged = mergeAgentCatalog({
     gemini: { model: "gemini-3.7-flash", reasoningEffort: "medium" },
+    claude: { model: "Atria-Dawn-Preview", capacityTokens: 256000 },
   });
   assert.equal(merged.gemini.model, "gemini-3.7-flash");
   assert.equal(merged.gemini.reasoningEffort, "medium");
+  assert.equal(merged.claude.model, "Atria-Dawn-Preview");
+  assert.equal(merged.claude.capacityTokens, 256000);
   assert.equal(merged.codex.model, DEFAULT_AGENTS.codex.model);
-  assert.throws(() => mergeAgentCatalog({ claude: { model: "opus" } }), /Unknown agent "claude"/);
+  assert.throws(() => mergeAgentCatalog({ cursor: { model: "x" } }), /Unknown agent "cursor"/);
   assert.throws(
     () => mergeAgentCatalog({ gemini: { model: "x", transport: "cli" } }),
     /Unknown binding fields for "gemini"/
+  );
+  assert.throws(
+    () => mergeAgentCatalog({ claude: { capacityTokens: 0 } }),
+    /capacityTokens" must be a positive number/
   );
 });
 

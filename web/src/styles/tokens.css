@@ -110,6 +110,9 @@
   --space-10: 40px;
 
   /* Sizing */
+  /* Single measure for the chat column: the message list and the composer must
+     share one width or the reading column and the input visually diverge. */
+  --chat-measure: 1040px;
   --sidebar-w: 268px;
   --sidebar-w-narrow: 200px;
   --instrument-w: 330px;

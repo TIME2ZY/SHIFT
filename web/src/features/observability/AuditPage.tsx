@@ -78,7 +78,7 @@ export function AuditPage({
           <header className="audit-column-heading">
             <h2 id="audit-traces-title">航线</h2>
           </header>
-          <div className="audit-column-body" tabIndex={0} aria-label="航线内容">
+          <div className="audit-column-body">
             <TraceExplorer agents={agents} sessionId={sessionId} />
           </div>
         </section>
@@ -88,7 +88,7 @@ export function AuditPage({
             <h2 id="audit-memory-title">Memory</h2>
             <small>{activeCount} 条有效</small>
           </header>
-          <div className="audit-column-body" tabIndex={0} aria-label="记忆与对照内容">
+          <div className="audit-column-body">
             {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
             {memories.isPending && sessionId ? (
               <p className="react-panel-empty">正在读取 Memory…</p>

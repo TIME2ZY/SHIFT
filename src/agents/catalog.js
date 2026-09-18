@@ -12,12 +12,13 @@ const DEFAULT_SEAL_SOFT_GAP = 0.04;
 /** Physical points between recovery and soft (sealer hysteresis). */
 const DEFAULT_SEAL_RECOVERY_GAP = 0.05;
 
-const AGENT_BINDING_FIELDS = new Set(["model", "reasoningEffort"]);
+const AGENT_BINDING_FIELDS = new Set(["model", "reasoningEffort", "capacityTokens"]);
 const PROVIDER_VENDOR = Object.freeze({
   codex: "openai",
   grok: "xai",
   antigravity: "google",
   opencode: "opencode",
+  claude: "anthropic",
 });
 
 function model(providerId, modelId, vendorId, options = {}) {
@@ -66,7 +67,7 @@ function model(providerId, modelId, vendorId, options = {}) {
 }
 
 /**
- * Known model profiles used by the four active agents.
+ * Known model profiles used by the five active agents.
  *
  * This is not a startup whitelist. Unknown model IDs inherit the provider's
  * measured window/seal via resolveModelProfile().
@@ -119,6 +120,16 @@ const MODEL_PROFILES = [
     sealSoftTokens: 270_000,
     sealActionTokens: 300_000,
     reasoning: { supported: true, levels: ["low", "medium", "high"] },
+  }),
+  model("claude", "sonnet", "anthropic", {
+    // `sonnet` is the Claude Code family alias; the CLI maps it via local settings.
+    // Physical window is 256k; override with agents.json capacityTokens.
+    contextTokens: 256_000,
+    capacitySource: "manual",
+    nativeCompactRatio: 0.85,
+    sealSoftUsableRatio: 0.95,
+    sealActionUsableRatio: 1.0,
+    reasoning: { supported: true, levels: ["low", "medium", "high", "xhigh", "max"] },
   }),
 ];
 
@@ -186,6 +197,16 @@ const DEFAULT_AGENTS = Object.freeze({
       "deepseek-v4-flash",
       "OpenCode CLI runtime。支持代码工具、推理流与结构化使用量事件。",
       { reasoningEffort: "max" }
+    )
+  ),
+  claude: Object.freeze(
+    agent(
+      "claude",
+      "Claude",
+      "claude",
+      "sonnet",
+      "Claude Code CLI runtime。支持代码工具、思考流与结构化使用量事件。",
+      { reasoningEffort: "high" }
     )
   ),
 });
@@ -307,6 +328,13 @@ function mergeAgentCatalog(bindings = {}) {
         throw new Error(`Agent binding "${id}.reasoningEffort" must be a non-empty string.`);
       }
       next[id].reasoningEffort = effort;
+    }
+    if (override.capacityTokens !== undefined) {
+      const tokens = Number(override.capacityTokens);
+      if (!Number.isFinite(tokens) || tokens <= 0) {
+        throw new Error(`Agent binding "${id}.capacityTokens" must be a positive number.`);
+      }
+      next[id].capacityTokens = Math.floor(tokens);
     }
   }
   return next;

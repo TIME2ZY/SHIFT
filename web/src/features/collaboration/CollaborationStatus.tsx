@@ -81,7 +81,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
             </div>
             <div>
               <dt>审查方式</dt>
-              <dd>{REVIEW_MODE_LABELS[snapshot.reviewMode] || snapshot.reviewMode}</dd>
+              <dd>{REVIEW_MODE_LABELS[snapshot.reviewMode] || "未知"}</dd>
             </div>
           </dl>
           {snapshot.chain && snapshot.chain.length > 0 ? (
@@ -92,7 +92,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
                   <li key={step.invocationId || `${step.seatId}-${idx}`} data-status={step.status}>
                     <span>{step.label || step.providerId || step.seatId}</span>
                     {step.duty ? <span> ({DUTY_LABELS[step.duty] || step.duty})</span> : null}
-                    <em> · {step.status}</em>
+                    <em> · {STATUS_LABELS[step.status] || "未知"}</em>
                   </li>
                 ))}
               </ol>
@@ -157,20 +157,14 @@ function AcceptanceCardView({ card }: { card: AcceptanceCard }) {
       <dl>
         <AcceptanceFact label="目标" value={shortHash(card.goalHash)} />
         <AcceptanceFact label="方案" value={shortHash(card.planHash)} />
-        <AcceptanceFact label="分支" value={card.branch || "unknown"} />
+        <AcceptanceFact label="分支" value={card.branch || "未知"} />
         <AcceptanceFact
           label="Commit"
-          value={card.commitSha ? shortSha(card.commitSha) : "unknown"}
+          value={card.commitSha ? shortSha(card.commitSha) : "未核验"}
         />
-        <AcceptanceFact label="PR" value={card.prUrl ? "已核验" : "unknown"} />
-        <AcceptanceFact
-          label="CI"
-          value={card.ciStatus === "unknown" ? "unknown" : ciLabel(card.ciStatus)}
-        />
-        <AcceptanceFact
-          label="审查"
-          value={REVIEW_MODE_LABELS[card.reviewMode] || card.reviewMode}
-        />
+        <AcceptanceFact label="PR" value={card.prUrl ? "已核验" : "未核验"} />
+        <AcceptanceFact label="CI" value={ciLabel(card.ciStatus)} />
+        <AcceptanceFact label="审查" value={REVIEW_MODE_LABELS[card.reviewMode] || "未知"} />
         <AcceptanceFact label="结论" value={reviewVerdictLabel(card.reviewVerdict)} />
       </dl>
       {card.reason && card.verdict !== "accepted" ? (
@@ -200,7 +194,7 @@ function Evidence({ label, value }: { label: string; value: string }) {
 
 function statusLabel(snapshot: CollaborationSnapshot | null) {
   if (!snapshot) return "未开始";
-  return STATUS_LABELS[snapshot.status] || snapshot.status;
+  return STATUS_LABELS[snapshot.status] || "未知";
 }
 
 function seatLabel(snapshot: CollaborationSnapshot) {
@@ -210,9 +204,7 @@ function seatLabel(snapshot: CollaborationSnapshot) {
 
 function dutyAndSkillLabel(snapshot: CollaborationSnapshot) {
   if (!snapshot.currentDuty && !snapshot.currentSkill) return "尚未分配";
-  const duty = snapshot.currentDuty
-    ? DUTY_LABELS[snapshot.currentDuty] || snapshot.currentDuty
-    : "未知职责";
+  const duty = snapshot.currentDuty ? DUTY_LABELS[snapshot.currentDuty] || "未知职责" : "未知职责";
   return snapshot.currentSkill ? `${duty} · ${snapshot.currentSkill}` : duty;
 }
 
@@ -224,7 +216,7 @@ function blockerTypeLabel(type: string) {
     provider_unavailable: "执行器不可用",
     execution_failed: "执行失败",
   };
-  return labels[type] || type;
+  return labels[type] || "未知";
 }
 
 function dirtyFilesLabel(count: number | null) {
@@ -244,11 +236,11 @@ function ciLabel(status: string | null) {
     pending: "进行中",
     unknown: "未知",
   };
-  return labels[status] || status;
+  return labels[status] || "未知";
 }
 
 function shortHash(value: string | null) {
-  return value ? value.slice(0, 12) : "unknown";
+  return value ? value.slice(0, 12) : "未知";
 }
 
 function acceptanceVerdictLabel(verdict: AcceptanceCard["verdict"]) {
@@ -264,7 +256,7 @@ function reviewVerdictLabel(verdict: AcceptanceCard["reviewVerdict"]) {
   const labels: Record<AcceptanceCard["reviewVerdict"], string> = {
     approved: "通过",
     changes_requested: "需修改",
-    unknown: "unknown",
+    unknown: "未知",
   };
   return labels[verdict];
 }

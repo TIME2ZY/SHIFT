@@ -232,12 +232,13 @@ assistant-final。`recovery-drill` 将 `trace_runs` 纳入权威表快照并检�
 所有 Provider 共用 `agents/shift-context-mcp-config.js` 中的 stdio descriptor，凭据只由当前
 invocation 的 `SHIFT_*` 环境传入：
 
-| Provider    | 唯一接入方式                                                    | 配置生命周期                                     |
-| ----------- | --------------------------------------------------------------- | ------------------------------------------------ |
-| Codex       | CLI `mcp_servers.shift_context.*` 参数                          | invocation                                       |
-| OpenCode    | `OPENCODE_CONFIG_CONTENT.mcp.shift_context`                     | invocation                                       |
-| Grok ACP    | `session/new` / `session/load` 的 `mcpServers` stdio descriptor | invocation                                       |
-| Antigravity | `~/.gemini/config/mcp_config.json` 的 `shift_context` 注册      | 持久注册；不落 token，子进程继承 invocation 环境 |
+| Provider    | 唯一接入方式                                                                         | 配置生命周期                                     |
+| ----------- | ------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| Codex       | CLI `mcp_servers.shift_context.*` 参数                                               | invocation                                       |
+| OpenCode    | `OPENCODE_CONFIG_CONTENT.mcp.shift_context`                                          | invocation                                       |
+| Grok ACP    | `session/new` / `session/load` 的 `mcpServers` stdio descriptor                      | invocation                                       |
+| Antigravity | `~/.gemini/config/mcp_config.json` 的 `shift_context` 注册                           | 持久注册；不落 token，子进程继承 invocation 环境 |
+| Claude      | `--mcp-config` 内联 JSON（command/args；不落 token，MCP 子进程继承 invocation 环境） | invocation                                       |
 
 Grok 只使用 `--no-leader` 专属 ACP 进程，每次新建或恢复 session 都注入当前 invocation 的
 `SHIFT_*` 凭据。streaming-json CLI 适配器已删除。旧 `--plugin-dir` 与仓库内 Grok MCP 插件
@@ -379,11 +380,14 @@ Codex 已在 turn.completed 输出最终文本时，进程 finish 不再误报�
 OpenCode/Antigravity 的 Provider 错误通过规范 stderr 保留原因，供真实观测与探测共同使用。
 
 Seat 绑定的模型 ID 不是 Provider 适配层。代码默认在 `src/agents/catalog.js`；本机覆盖为
-`SHIFT_HOME/agents.json`（可重建绑定，不是 SQLite 真相）。`createServer` 与 `invoke-cli`
+`SHIFT_HOME/agents.json`（可重建绑定，不是 SQLite 真相；允许 `model` /
+`reasoningEffort` / `capacityTokens`）。`createServer` 与 `invoke-cli`
 进程入口通过 `loadAgentCatalogFromHome` 套用绑定，公开启动路径仍是 catalog →
 `validateProviderConfig` → adapter。未知模型不再拒绝启动：`resolveModelProfile` 继承该
 Provider 已测档案的窗口/seal，并标记 `capacitySource=fallback`。不得再把模型名写成
-adapter fallback，也不得把模型列表写入 SQLite。
+adapter fallback，也不得把模型列表写入 SQLite。不得读取 `~/.claude/settings.json`。
+Claude 默认传 Claude Code 别名 `sonnet`（由 CLI 映射到本机模型），catalog 窗口 256k；
+子进程仅在未设置时注入 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`。
 
 `role-contracts.js` 已删除；catalog、identity、handoff policy 与证据门禁不再保存固定岗位。
 `plan` / `implement` / `fix` 的写权限等级由当前 Duty 与 Provider 的 `permissionCallbacks`

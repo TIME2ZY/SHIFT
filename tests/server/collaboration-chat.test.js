@@ -146,7 +146,7 @@ test("each Provider persists plan Duty output through the chat API", async () =>
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   try {
-    for (const agent of ["codex", "gemini", "grok", "opencode"]) {
+    for (const agent of ["codex", "gemini", "grok", "opencode", "claude"]) {
       const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
         method: "POST",
         body: JSON.stringify({ projectKey }),

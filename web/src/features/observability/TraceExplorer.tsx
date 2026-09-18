@@ -542,8 +542,18 @@ export function TraceExplorer({
                 </button>
               </div>
             ) : null}
-            {!tracesFailed && !visible.length ? (
+            {!tracesFailed && filtered.isPending && !visible.length ? (
+              <p className="react-panel-empty" role="status">
+                正在加载 Trace…
+              </p>
+            ) : null}
+            {!tracesFailed && !filtered.isPending && !visible.length ? (
               <p className="react-panel-empty">运行一次任务后，这里会出现可追溯的协作航线。</p>
+            ) : null}
+            {filtered.isFetching && visible.length ? (
+              <p className="trace-ledger-refreshing" role="status">
+                更新中…
+              </p>
             ) : null}
             {visible.map((trace) => (
               <button
@@ -579,7 +589,6 @@ export function TraceExplorer({
               ref={routeRef}
               className="trace-route"
               data-state={selected.state}
-              tabIndex={0}
             >
               <header>
                 <div>

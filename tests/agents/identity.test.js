@@ -49,17 +49,16 @@ test("renderIdentityBlock includes provider identity without a fixed workflow ro
 });
 
 test("identity packs stay provider-only without Duty playbooks", () => {
-  const codex = renderIdentityBlock("codex");
-  const gemini = renderIdentityBlock("gemini");
-  const grok = renderIdentityBlock("grok");
-  const opencode = renderIdentityBlock("opencode");
+  const blocks = ["codex", "gemini", "grok", "opencode", "claude"].map((id) =>
+    renderIdentityBlock(id)
+  );
 
-  for (const block of [codex, gemini, grok, opencode]) {
+  for (const block of blocks) {
     assert.match(block, /不承担固定岗位/);
     assert.match(block, /Duty Skill/);
   }
 
-  for (const block of [codex, gemini, grok, opencode]) {
+  for (const block of blocks) {
     assert.doesNotMatch(block, /```implementation_plan/);
     assert.doesNotMatch(block, /```solution_baseline/);
     assert.doesNotMatch(block, /```final_acceptance/);
