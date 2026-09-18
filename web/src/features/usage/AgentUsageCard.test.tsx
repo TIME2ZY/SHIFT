@@ -25,6 +25,7 @@ describe("AgentUsageCard", () => {
         disabled
         selected={false}
         status="idle"
+        rosterTabIndex={-1}
         onSelect={select}
         onRefresh={refresh}
       />
@@ -57,6 +58,7 @@ describe("AgentUsageCard", () => {
         agent={{ id: "codex", label: "Codex", description: "负责实现。" }}
         status="running"
         selected
+        rosterTabIndex={0}
         onSelect={() => undefined}
         usage={{
           agentId: "codex",
@@ -95,6 +97,7 @@ describe("AgentUsageCard", () => {
         agent={{ id: "codex", label: "Codex", description: "负责实现。" }}
         status="error"
         selected
+        rosterTabIndex={0}
         onSelect={() => undefined}
         usage={{ agentId: "codex", billingComplete: false, billing: { totalTokens: 100 } }}
       />
@@ -108,6 +111,7 @@ describe("AgentUsageCard", () => {
         agent={{ id: "codex", label: "Codex", description: "负责实现。" }}
         status="idle"
         selected
+        rosterTabIndex={0}
         onSelect={() => undefined}
         usage={{
           agentId: "codex",

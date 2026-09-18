@@ -330,7 +330,7 @@ export function App() {
                 </svg>
               </button>
               <div className="react-chat-title">
-                <strong title={activeSessionTitle}>{activeSessionTitle}</strong>
+                <h1 title={activeSessionTitle}>{activeSessionTitle}</h1>
                 {activeParticipantIds.length ? (
                   <span
                     className="react-chat-agent react-agent-stack"

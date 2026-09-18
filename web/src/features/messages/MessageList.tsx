@@ -69,7 +69,7 @@ function roleLabel(
     resolveAgent(message.agentId, message.agent, agents)?.label ||
     message.agent ||
     message.agentId ||
-    "Agent"
+    "智能体"
   );
 }
 
@@ -92,11 +92,21 @@ function isAssistantFinal(message: PersistedMessage): boolean {
 function liveMessageStatusLabel(
   status: NonNullable<SessionRun>["liveMessages"][string]["status"]
 ): string {
-  if (status === "thinking") return "思考中";
-  if (status === "streaming") return "输出中";
-  if (status === "done") return "已完成";
-  if (status === "aborted") return "已停止";
-  return "运行失败";
+  switch (status) {
+    case "thinking":
+      return "思考中";
+    case "streaming":
+      return "输出中";
+    case "done":
+      return "已完成";
+    case "aborted":
+      return "已停止";
+    case "error":
+      return "运行失败";
+    default:
+      // A status the contract has not taught the UI yet must not read as failure.
+      return "未知状态";
+  }
 }
 
 /**
@@ -584,7 +594,7 @@ export function MessageList({
                 <path d="M18 12h.01" />
               </svg>
             </div>
-            <h1>开启多智能体协同控制台</h1>
+            <h2>开启多智能体协同控制台</h2>
             <p>
               输入你的任务需求，或使用 <code>@Agent</code> 指定专属 AI
               角色。需要修改代码时，随时开启<b>「隔离改代码」</b>以保护主分支。

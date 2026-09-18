@@ -110,7 +110,9 @@ describe("CollaborationStatus", () => {
     const card = screen.getByRole("region", { name: "验收卡" });
     expect(card).toHaveTextContent("1234567890ab");
     expect(card).toHaveTextContent("当前席位自审");
-    expect(card).toHaveTextContent("unknown");
+    expect(card).toHaveTextContent("未知");
+    expect(card).toHaveTextContent("未核验");
+    expect(card).not.toHaveTextContent("unknown");
     expect(screen.queryByRole("button", { name: "对照目标验收" })).not.toBeInTheDocument();
   });
 
@@ -141,6 +143,20 @@ describe("CollaborationStatus", () => {
     expect(screen.queryByText("尚未审查")).not.toBeInTheDocument();
     expect(screen.getByText("通过")).toBeInTheDocument();
     expect(screen.getByText("请补充 commit、PR 和 CI 交付证据。")).toBeInTheDocument();
+  });
+
+  it("does not leak an unknown reviewMode into the task card", () => {
+    render(
+      <CollaborationStatus
+        loading={false}
+        error={null}
+        snapshot={snapshot({
+          reviewMode: "legacy_mode" as CollaborationSnapshot["reviewMode"],
+        })}
+      />
+    );
+    expect(screen.getByText("审查方式").closest("div")).toHaveTextContent("未知");
+    expect(screen.queryByText("legacy_mode")).not.toBeInTheDocument();
   });
 
   it("shows a rejected Seat verdict explicitly", () => {
