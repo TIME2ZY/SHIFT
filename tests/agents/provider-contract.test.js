@@ -30,6 +30,7 @@ const CONFIGS = {
     model: "gemini-3.8-flash",
     reasoningEffort: "high",
   },
+  claude: { providerId: "claude", model: "sonnet", reasoningEffort: "high" },
 };
 
 test("every provider implements the complete adapter contract", () => {
@@ -65,8 +66,8 @@ test("all active providers advertise canonical usage support", () => {
 
 test("unknown providers fail fast instead of falling through to Codex", () => {
   assert.throws(
-    () => buildProviderInvocation({ providerId: "claude", model: "x" }, "hello"),
-    /Unsupported provider "claude"/
+    () => buildProviderInvocation({ providerId: "nonexistent", model: "x" }, "hello"),
+    /Unsupported provider "nonexistent"/
   );
 });
 

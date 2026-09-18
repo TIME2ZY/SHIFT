@@ -1,6 +1,6 @@
 # SHIFT · 交班台
 
-本机已经装着 Codex、Gemini、Grok、OpenCode，可是同一件事还是要来回粘贴上下文，做没做完也只能听 Agent 自己说。SHIFT 不提供模型，只把这些本机 CLI 编进**同一条任务线程**：讨论、实现、审查、交付都留在会话里，刷新或重启后还能接上。
+本机已经装着 Codex、Gemini、Grok、OpenCode、Claude Code，可是同一件事还是要来回粘贴上下文，做没做完也只能听 Agent 自己说。SHIFT 不提供模型，只把这些本机 CLI 编进**同一条任务线程**：讨论、实现、审查、交付都留在会话里，刷新或重启后还能接上。
 
 ![SHIFT 控制台](assets/shift-console.png)
 
@@ -23,7 +23,7 @@
 4. 审查通过后由交付席位提交 PR；平台核验真实 commit、PR 和 CI。
 5. 对照最初目标验收。证据齐了才写入完成，缺了会明确标成未完成。
 
-默认席位是本机的 Codex、Gemini、Grok、OpenCode。模型可以在本机改，SHIFT 不打包这些 CLI，也不管账号。
+默认席位是本机的 Codex、Gemini、Grok、OpenCode、Claude Code。模型可以在本机改，SHIFT 不打包这些 CLI，也不管账号。
 
 ## 上手
 

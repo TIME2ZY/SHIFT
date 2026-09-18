@@ -2,6 +2,7 @@ const { codexProvider } = require("./codex");
 const { opencodeProvider } = require("./opencode");
 const { grokProvider } = require("./grok");
 const { antigravityProvider } = require("./antigravity");
+const { claudeProvider } = require("./claude");
 const { resolveModelProfile } = require("../catalog");
 const {
   assertCanonicalEvent,
@@ -48,10 +49,12 @@ function assertProviderAdapter(adapter) {
 }
 
 const PROVIDERS = Object.fromEntries(
-  [codexProvider, opencodeProvider, grokProvider, antigravityProvider].map((adapter) => {
-    assertProviderAdapter(adapter);
-    return [adapter.id, adapter];
-  })
+  [codexProvider, opencodeProvider, grokProvider, antigravityProvider, claudeProvider].map(
+    (adapter) => {
+      assertProviderAdapter(adapter);
+      return [adapter.id, adapter];
+    }
+  )
 );
 function getProviderAdapter(providerId) {
   const adapter = PROVIDERS[providerId];
@@ -328,7 +331,7 @@ function buildProviderEnvironment(config, options = {}, env = process.env) {
     ...proxyEnvVars(runOptions.proxy),
   };
   if (typeof adapter.buildEnvironment === "function") {
-    Object.assign(patch, adapter.buildEnvironment(runOptions, env) || {});
+    Object.assign(patch, adapter.buildEnvironment(runOptions, env, config) || {});
   }
   return { env: { ...env, ...patch }, proxy: runOptions.proxy, runOptions };
 }

@@ -188,6 +188,11 @@ button {
   height: 25px;
 }
 
+.agent-avatar[data-agent-brand="claude"] img {
+  width: 24px;
+  height: 24px;
+}
+
 /* User: soft indigo disk + refined outline person icon */
 .user-avatar {
   overflow: hidden;

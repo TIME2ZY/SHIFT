@@ -299,7 +299,7 @@ test("exports invoke function", () => {
 });
 
 test("exports the fixed agents", () => {
-  assert.deepEqual(Object.keys(AGENTS).sort(), ["codex", "gemini", "grok", "opencode"]);
+  assert.deepEqual(Object.keys(AGENTS).sort(), ["claude", "codex", "gemini", "grok", "opencode"]);
   assert.equal(AGENTS.codex.model, "gpt-5.6-sol");
   assert.equal(AGENTS.codex.reasoningEffort, "medium");
   assert.equal(AGENTS.codex.label, "Codex");
@@ -313,6 +313,10 @@ test("exports the fixed agents", () => {
   assert.equal(AGENTS.opencode.reasoningEffort, "max");
   assert.equal(AGENTS.opencode.label, "OpenCode");
   assert.equal(AGENTS.opencode.providerId, "opencode");
+  assert.equal(AGENTS.claude.model, "sonnet");
+  assert.equal(AGENTS.claude.reasoningEffort, "high");
+  assert.equal(AGENTS.claude.label, "Claude");
+  assert.equal(AGENTS.claude.providerId, "claude");
   for (const agent of Object.values(AGENTS)) {
     assert.equal("workflowRole" in agent, false);
     assert.equal("workflowCapabilities" in agent, false);
@@ -1159,9 +1163,15 @@ test("opencode runtime maps reasoning events (from --thinking) to thinking.delta
   assert.deepEqual(empty, []);
 });
 
-test("provider registry lists codex, grok, opencode, and antigravity", () => {
+test("provider registry lists codex, grok, opencode, antigravity, and claude", () => {
   const { listSupportedProviders, createProviderRuntime } = require("../../src/agents/providers");
-  assert.deepEqual(listSupportedProviders().sort(), ["antigravity", "codex", "grok", "opencode"]);
+  assert.deepEqual(listSupportedProviders().sort(), [
+    "antigravity",
+    "claude",
+    "codex",
+    "grok",
+    "opencode",
+  ]);
   assert.ok(createProviderRuntime({ providerId: "codex" }));
   assert.ok(createProviderRuntime({ providerId: "grok", model: "grok-4.6" }));
   assert.ok(

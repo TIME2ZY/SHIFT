@@ -265,7 +265,7 @@ async function main() {
 
   if (!parsed.prompt) {
     console.error(
-      'Usage: node src/agents/invoke-cli.js [--agent codex|gemini|grok|opencode] [--timeout-ms ms] "你好，请用一句话介绍自己"'
+      'Usage: node src/agents/invoke-cli.js [--agent codex|gemini|grok|opencode|claude] [--timeout-ms ms] "你好，请用一句话介绍自己"'
     );
     process.exit(1);
   }

@@ -1,4 +1,5 @@
 import type { AgentSummary } from "./types";
+import claudeLogo from "../../assets/agent-logos/claude.svg";
 import geminiLogo from "../../assets/agent-logos/gemini.svg";
 import grokLogo from "../../assets/agent-logos/grok.svg";
 import openaiLogo from "../../assets/agent-logos/openai.svg";
@@ -9,6 +10,7 @@ const KNOWN_AGENT_SLOTS: Record<string, number> = {
   gemini: 2,
   grok: 3,
   opencode: 4,
+  claude: 5,
 };
 
 export function agentColorSlot(agentId: string): number {
@@ -49,6 +51,7 @@ const BRAND_LOGOS: Record<string, { name: string; src: string }> = {
   gemini: { name: "Google Gemini", src: geminiLogo },
   grok: { name: "Grok", src: grokLogo },
   opencode: { name: "OpenCode", src: opencodeLogo },
+  claude: { name: "Claude", src: claudeLogo },
 };
 
 export function AgentAvatar({ agentId, label, compact, prominent }: AgentAvatarProps) {

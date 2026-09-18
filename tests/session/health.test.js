@@ -92,7 +92,8 @@ test("agent model capacities match the configured manual limits", () => {
   assert.equal(contextHealth.getAgentCapacity("gemini"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("opencode"), 1_000_000);
   assert.equal(contextHealth.getAgentCapacity("grok"), 500_000);
-  for (const agent of ["codex", "gemini", "opencode", "grok"]) {
+  assert.equal(contextHealth.getAgentCapacity("claude"), 256_000);
+  for (const agent of ["codex", "gemini", "opencode", "grok", "claude"]) {
     assert.equal(contextHealth.getAgentReserveRatio(agent), 0.2);
   }
 });

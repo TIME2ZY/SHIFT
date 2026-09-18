@@ -137,6 +137,23 @@ function ensureAntigravityShiftContextConfig(env = process.env) {
   return file;
 }
 
+/**
+ * Claude CLI's --mcp-config is one argv entry. Omit env so SHIFT_* secrets
+ * stay out of process listings; the MCP child inherits invocation env.
+ */
+function createClaudeShiftContextArg() {
+  const descriptor = createShiftContextStdioDescriptor();
+  const config = {
+    mcpServers: {
+      [descriptor.name]: {
+        command: descriptor.command,
+        args: descriptor.args,
+      },
+    },
+  };
+  return JSON.stringify(config);
+}
+
 module.exports = {
   SHIFT_CONTEXT_SERVER_NAME,
   SHIFT_CONTEXT_TOOLS,
@@ -148,4 +165,5 @@ module.exports = {
   createAcpShiftContextServer,
   antigravityMcpConfigPath,
   ensureAntigravityShiftContextConfig,
+  createClaudeShiftContextArg,
 };

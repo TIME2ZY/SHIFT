@@ -183,7 +183,7 @@ test("availability refresh preserves seats and never creates business runs", asy
       const getSeats = () =>
         fetch(`${baseUrl}/api/sessions/${sessionId}/collaboration`).then((res) => res.json());
       const before = await getSeats();
-      assert.equal(before.seats.length, 4);
+      assert.equal(before.seats.length, 5);
       const unavailable = await fetch(`${baseUrl}/api/agents`).then((res) => res.json());
       assert.equal(
         unavailable.agents.every((agent) => agent.routable === false),
@@ -205,7 +205,7 @@ test("availability refresh preserves seats and never creates business runs", asy
         res.json()
       );
       assert.equal(restored.session.messages.length, 0);
-      assert.equal(probes, 5);
+      assert.equal(probes, 6);
     }
   );
 });
@@ -218,7 +218,7 @@ test("serves fixed agent list", async () => {
     assert.equal(response.status, 200);
     assert.deepEqual(
       body.agents.map((agent) => agent.id),
-      ["codex", "gemini", "grok", "opencode"]
+      ["codex", "gemini", "grok", "opencode", "claude"]
     );
     // Every agent must surface a non-empty description so the UI can show it.
     for (const agent of body.agents) {
@@ -2479,7 +2479,7 @@ test("callbacks.postMessage persists, broadcasts, and enqueues A2A targets", () 
   callbacks.unregisterThread(sessionId);
 });
 
-for (const provider of ["codex", "gemini", "grok", "opencode"]) {
+for (const provider of ["codex", "gemini", "grok", "opencode", "claude"]) {
   test(`${provider} callback persists a concrete plan regardless of permission capability`, () => {
     const sessionId = `session-cb-${provider}-plan`;
     const invocationId = `invocation-cb-${provider}-plan`;

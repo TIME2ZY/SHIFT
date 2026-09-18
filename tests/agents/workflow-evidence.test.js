@@ -21,7 +21,7 @@ test("a missing implementation plan emits a required event without writing evide
   assert.equal(registry.getTask("thread-1"), null);
 });
 
-for (const agent of ["codex", "gemini", "grok", "opencode"]) {
+for (const agent of ["codex", "gemini", "grok", "opencode", "claude"]) {
   test(`${agent} submits and revises plan evidence independently of permission callbacks`, () => {
     const registry = createCollabTaskRegistry();
     const content = [
