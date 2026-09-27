@@ -354,24 +354,29 @@ export async function subscribeRunEvents(
       }
       if (!response.body) throw new Error("服务器没有返回可读取的消息流。");
 
-      if (attempt > 0) {
-        attempt = 0;
-        store.dispatch({ type: "run/connected", sessionId });
-      }
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      while (!controller.signal.aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = parseSseChunk(buffer, (frame) => {
-          const next = applyRunEventFrame(sessionId, frame, store, events, seenIds);
-          if (next != null) cursor = Math.max(cursor, next);
-        });
-        buffer = parsed.rest;
-        malformedFrames += parsed.malformed;
+      let receivedFrame = false;
+      try {
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) throw new Error("服务器关闭了消息流。");
+          buffer += decoder.decode(value, { stream: true });
+          const parsed = parseSseChunk(buffer, (frame) => {
+            if (!receivedFrame) {
+              receivedFrame = true;
+              if (attempt > 0) store.dispatch({ type: "run/connected", sessionId });
+              attempt = 0;
+            }
+            const next = applyRunEventFrame(sessionId, frame, store, events, seenIds);
+            if (next != null) cursor = Math.max(cursor, next);
+          });
+          buffer = parsed.rest;
+          malformedFrames += parsed.malformed;
+        }
+      } finally {
+        reader.releaseLock();
       }
     } catch (error) {
       if (controller.signal.aborted) break;

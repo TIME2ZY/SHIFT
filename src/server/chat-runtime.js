@@ -51,6 +51,8 @@ function toSseFrame(event) {
 
 function createChatRuntime({ eventStore } = {}) {
   const runs = new Map();
+  // Waiters include superseded runs and preparation, not just the current Seat run.
+  const pending = new Set();
   const subscribers = new Map();
   let executor = null;
   let closing = false;
@@ -122,17 +124,23 @@ function createChatRuntime({ eventStore } = {}) {
   function attachPromise(sessionId, promise) {
     const record = runs.get(sessionId);
     if (!record) return promise;
-    record.promise = Promise.resolve(promise)
-      .catch(() => {
-        // Stored waiter only; startRun callers still observe the original promise.
-      })
-      .finally(() => {
-        const current = runs.get(sessionId);
-        if (current && current.controller === record.controller) {
-          runs.delete(sessionId);
-        }
-      });
+    record.promise = track(promise).finally(() => {
+      const current = runs.get(sessionId);
+      if (current && current.controller === record.controller) {
+        runs.delete(sessionId);
+      }
+    });
     return record.promise;
+  }
+
+  function track(promise) {
+    const waiter = Promise.resolve(promise)
+      .catch(() => {
+        // Shutdown waiter only; callers handle failure and persist the terminal.
+      })
+      .finally(() => pending.delete(waiter));
+    pending.add(waiter);
+    return waiter;
   }
 
   function getRun(sessionId) {
@@ -185,7 +193,6 @@ function createChatRuntime({ eventStore } = {}) {
 
   async function shutdown() {
     closing = true;
-    const pending = [];
     for (const record of runs.values()) {
       record.stopReason = "server-shutdown";
       try {
@@ -193,9 +200,9 @@ function createChatRuntime({ eventStore } = {}) {
       } catch {
         // already aborted
       }
-      if (record.promise) pending.push(record.promise.catch(() => {}));
     }
-    await Promise.all(pending);
+    // Preparation may attach a background run while shutdown is awaiting it.
+    while (pending.size) await Promise.all([...pending]);
     closeSubscribers();
   }
 
@@ -210,7 +217,22 @@ function createChatRuntime({ eventStore } = {}) {
     if (!executor || typeof executor.startRun !== "function") {
       throw new Error("chat runtime executor is not attached");
     }
-    return executor.startRun(input);
+    const previous = runs.get(input?.body?.sessionId);
+    const preparation = executor.startRun(input);
+    // The executor claims synchronously, before its first asynchronous preparation.
+    const record = runs.get(input?.body?.sessionId);
+    const completion = Promise.resolve(preparation).finally(() => {
+      if (
+        record &&
+        record !== previous &&
+        !record.promise &&
+        runs.get(record.sessionId) === record
+      ) {
+        runs.delete(record.sessionId);
+      }
+    });
+    track(completion);
+    return completion;
   }
 
   return {

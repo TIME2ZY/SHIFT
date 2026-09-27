@@ -360,8 +360,8 @@ describe("subscribeRunEvents reconnect", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     unsubscribe();
 
-    // Two failures -> attempt 1 then 2, delay doubling each time.
-    expect(observed.map((entry) => entry.attempt)).toEqual([1, 2]);
+    // EOF and two network failures share the same backoff schedule.
+    expect(observed.map((entry) => entry.attempt)).toEqual([1, 2, 3]);
     expect(observed[1].delay).toBeGreaterThan(observed[0].delay);
     const final = store.getSnapshot().runs.s1;
     expect(final.status).toBe("done");
@@ -372,6 +372,7 @@ describe("subscribeRunEvents reconnect", () => {
   });
 
   it("keeps the run visible as reconnecting rather than fake-running", async () => {
+    store.dispatch({ type: "run/started", sessionId: "s1", startedAt: 10 });
     let resolveLater!: (response: Response) => void;
     fetchMock.mockImplementationOnce(
       () =>
@@ -393,6 +394,47 @@ describe("subscribeRunEvents reconnect", () => {
 
     controller.abort();
     await done.catch(() => {});
+  });
+
+  it("backs off repeated clean EOF and cancels the pending retry on unsubscribe", async () => {
+    vi.useFakeTimers();
+    store.dispatch({ type: "run/started", sessionId: "s1", startedAt: 10 });
+    fetchMock.mockImplementation(() => Promise.resolve(okResponse([])));
+    const promise = subscribeRunEvents("s1", store, controller);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().runs.s1).toMatchObject({
+      status: "reconnecting",
+      reconnectAttempt: 1,
+    });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().runs.s1.reconnectAttempt).toBe(2);
+    controller.abort();
+    await promise;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an idle session available for sending while its observer reconnects", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        okResponse([
+          frame("snapshot", null, { sessionId: "s1", runStatus: "idle", lastEventId: 0 }),
+        ])
+      )
+    );
+    const promise = subscribeRunEvents("s1", store, controller);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot().runs.s1.status).toBe("idle");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().runs.s1.status).toBe("idle");
+    controller.abort();
+    await promise;
   });
 
   it("terminalizes on auth failure instead of silently stopping", async () => {

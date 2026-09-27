@@ -446,6 +446,19 @@ Recovery drill 已把两张新权威表纳入快照，并检查 binding 与 invo
 与 `src/server/recovery-verification.js` 必须 await 该入口；只 `server.close` 不会等待
 `chatRuntime.shutdown` 与 SQLite 释放。恢复演练的产品 API 核验走同一关闭合同。
 
+Runtime 的 `runs` 仅索引每个 session 当前运行；私有 pending waiter 集合覆盖启动准备和
+所有未完成后台运行（包括已被 supersede 的旧运行）。`shutdown` abort 当前控制器后持续
+等待该集合清空，再关闭观察订阅与 SQLite；准备期间新附加的执行 Promise 也必须等待。
+准备失败或中止时仅释放该请求自己的 runtime 记录，不删除其他请求的当前运行。
+
+`run-event-routes` 的历史重放与实时发送共用背压写入：每帧一次 `res.write`，返回 false
+则等待 drain/close/error；每 500 条重放后让出事件循环，断开后停止分页读取。重放期间
+与实时阶段共用有界待发送队列（最多 500 条，另有当前发送页），超限关闭慢观察连接，
+由客户端从已应用 cursor 恢复，Agent 不受影响；重放/实时交界按事件 ID 去重。
+前端 `run-event-stream` 的正常 EOF 与异常断流共用退避；仅收到有效 SSE 帧后重置退避
+并恢复连接状态，避免只收到 HTTP 200 就反复立即重连。空闲/终态会话在观察重连期间保留
+原运行状态，不锁住发送入口；鉴权失败和 session 缺失仍终止订阅。
+
 在线 composition root 必须为 Chat 显式注入 `durableRecorder`、`eventStore` 和
 `memoryCapture`；缺失时启动即失败，不再用 NOOP sink 静默绕过 SQLite 持久化。
 Bootstrap 与 Active Memory Card 分别只接受结构化 `{ packet, inject }` 和
