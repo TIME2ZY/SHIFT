@@ -3,7 +3,7 @@ title: "ADR-002: Multi-Agent Reliability and Trace Contracts"
 status: accepted
 decision_id: ADR-002
 created: 2026-07-28
-amended: 2026-09-09
+amended: 2026-09-20
 scope: trace identity, invocation lifecycle, A2A handoff hops, metric eligibility, memory funnel, and observability boundaries
 supersedes: []
 related:
@@ -14,6 +14,18 @@ related:
 ---
 
 # ADR-002：多 Agent 可靠性与 Trace 契约
+
+## 2026-09-20：运行收尾与观察面可靠性补充
+
+- `server.shutdown` 必须等待已接收请求的启动准备与所有未完成后台运行收尾，包含被新请求
+  supersede、已收到 abort 但尚未结束的旧运行；之后才能关闭 SQLite。当前运行索引不能
+  代替完整的未完成任务集合。终态仍通过既有 durable recorder 写入，不增加状态或权威入口。
+- SSE 的 EOF 与网络错误均进入可取消的重连退避；收到有效帧才恢复连接状态并重置退避。
+  终态事件不结束 session 观察订阅，恢复位置仍为客户端实际应用的事件 cursor。空闲会话
+  的观察重连不创建运行态、不锁住发送入口；已有运行的断流仍展示重连状态。
+- SSE 重放与实时发送均遵守 socket 背压，重放按页让出事件循环，观察连接关闭后停止读库。
+  慢观察者的待发送事件队列必须有界；超限断开该观察连接，客户端从已应用 cursor 重放
+  SQLite 规范事件，不停止 Agent、不改变业务终态。无持久 ID 的诊断通知仍为 best-effort。
 
 ## 2026-09-09：JSON 归档退役修订
 

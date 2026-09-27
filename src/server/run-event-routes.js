@@ -3,6 +3,7 @@
 const { ENV } = require("../shared/brand");
 const { assertValidOpaqueId } = require("../shared/id-policy");
 const { toSseFrame } = require("./chat-runtime");
+const { setImmediate: yieldToIo } = require("node:timers/promises");
 
 const REPLAY_PAGE_SIZE = 500;
 
@@ -14,31 +15,51 @@ function parseCursor(url, req) {
   return Number.isFinite(cursor) && cursor >= 0 ? cursor : 0;
 }
 
-function writeSse(res, eventName, data, id) {
+async function writeSse(res, eventName, data, id) {
   if (!res || res.destroyed || res.writableEnded) return;
-  if (id != null && id !== "") res.write(`id: ${id}\n`);
-  res.write(`event: ${eventName}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const prefix = id != null && id !== "" ? `id: ${id}\n` : "";
+  if (res.write(`${prefix}event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`)) return;
+  await new Promise((resolve, reject) => {
+    function cleanup() {
+      res.off("drain", drained);
+      res.off("close", drained);
+      res.off("error", failed);
+    }
+    function drained() {
+      cleanup();
+      resolve();
+    }
+    function failed(error) {
+      cleanup();
+      reject(error);
+    }
+    res.once("drain", drained);
+    res.once("close", drained);
+    res.once("error", failed);
+  });
 }
 
 function writeFrame(res, event) {
   if (!res || res.destroyed || res.writableEnded) return;
   const frame = toSseFrame(event);
   if (!frame) return;
-  writeSse(res, frame.event, frame.data, frame.id);
+  return writeSse(res, frame.event, frame.data, frame.id);
 }
 
-function replayEventsAfter(storage, sessionId, after, onEvent) {
+async function replayEventsAfter(storage, sessionId, after, res) {
   if (typeof storage?.invocations?.listEventsAfter !== "function") return after;
   let cursor = after;
   for (;;) {
+    if (res.destroyed || res.writableEnded) break;
     const page = storage.invocations.listEventsAfter(sessionId, cursor, REPLAY_PAGE_SIZE);
     if (!page.length) break;
     for (const event of page) {
-      onEvent(event);
+      if (res.destroyed || res.writableEnded) return cursor;
+      await writeFrame(res, event);
       if (typeof event.id === "number") cursor = event.id;
     }
     if (page.length < REPLAY_PAGE_SIZE) break;
+    await yieldToIo();
   }
   return cursor;
 }
@@ -105,14 +126,39 @@ function createRunEventRoutes({ runtime, storage, getSession, sendJson, readJson
 
       const buffered = [];
       let replaying = true;
+      let flushing = false;
+      let lastId = after;
+      async function flushBuffered() {
+        if (replaying || flushing) return;
+        flushing = true;
+        try {
+          while (buffered.length && !res.destroyed && !res.writableEnded) {
+            const page = buffered.splice(0, REPLAY_PAGE_SIZE);
+            for (const event of page) {
+              if (res.destroyed || res.writableEnded) return;
+              if (typeof event.id === "number" && event.id <= lastId) continue;
+              await writeFrame(res, event);
+              if (typeof event.id === "number") lastId = event.id;
+            }
+            await yieldToIo();
+          }
+        } catch (error) {
+          // Closing only the observer makes the client resume from its applied cursor.
+          res.destroy(error);
+        } finally {
+          flushing = false;
+        }
+      }
       const unsubscribe = runtime.subscribe(sessionId, {
         onEvent(event) {
           if (res.destroyed || res.writableEnded) return;
-          if (replaying) {
-            buffered.push(event);
+          if (buffered.length >= REPLAY_PAGE_SIZE) {
+            // Bound live backlog during replay/drain; durable events remain replayable.
+            res.destroy();
             return;
           }
-          writeFrame(res, event);
+          buffered.push(event);
+          void flushBuffered();
         },
         close() {
           unsubscribe();
@@ -121,20 +167,20 @@ function createRunEventRoutes({ runtime, storage, getSession, sendJson, readJson
       });
       res.once("close", () => {
         unsubscribe();
+        buffered.length = 0;
       });
 
       const snapshot =
         typeof storage?.executions?.runSnapshot === "function"
           ? storage.executions.runSnapshot(sessionId)
           : { sessionId, lastEventId: after, runStatus: "idle", traceId: null };
-      writeSse(res, "snapshot", snapshot);
-
-      const lastId = replayEventsAfter(storage, sessionId, after, (event) => {
-        writeFrame(res, event);
-      });
-      replaying = false;
-      for (const event of buffered) {
-        if (typeof event.id !== "number" || event.id > lastId) writeFrame(res, event);
+      try {
+        await writeSse(res, "snapshot", snapshot);
+        lastId = await replayEventsAfter(storage, sessionId, after, res);
+        replaying = false;
+        await flushBuffered();
+      } catch (error) {
+        res.destroy(error);
       }
       return true;
     }

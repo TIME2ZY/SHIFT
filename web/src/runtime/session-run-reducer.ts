@@ -478,7 +478,8 @@ export function sessionRunReducer(
       // The stream dropped but the server-side run may still be active. Stay
       // observable instead of silently pretending the run is still live.
       return updateRun(state, action.sessionId, (run) => {
-        if (isTerminalRunStatus(run.status)) return run;
+        // An idle observer reconnecting must not invent an active run and lock the composer.
+        if (run.status === "idle" || isTerminalRunStatus(run.status)) return run;
         return {
           ...run,
           status: "reconnecting",
