@@ -1847,6 +1847,114 @@ body {
   font: 12px/1 var(--font-ui);
 }
 
+/* Handoff fence as a readable contract, not a source listing */
+.react-handoff-packet {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--surface-inset);
+}
+
+.react-handoff-packet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.react-handoff-packet-intent {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.react-handoff-packet-route {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.react-handoff-packet-fields {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.react-handoff-packet-field {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.react-handoff-packet-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.react-handoff-packet-value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.react-handoff-packet-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.react-handoff-packet-long > summary {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+  cursor: pointer;
+  list-style: none;
+}
+
+.react-handoff-packet-long > summary::-webkit-details-marker {
+  display: none;
+}
+
+.react-handoff-packet-preview {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-handoff-packet-long > summary::after {
+  content: "展开";
+  grid-column: 2;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.react-handoff-packet-long[open] > summary::after {
+  content: "收起";
+}
+
+.react-handoff-packet-body {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .react-run-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   color: var(--danger);

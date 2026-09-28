@@ -1,5 +1,6 @@
 import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 import { TaskContextDetails } from "./TaskContextDetails";
+import { DUTY_LABELS } from "../../shared/contracts/handoff-fence";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "推进中",
@@ -21,17 +22,6 @@ const CHAIN_STATUS_LABELS: Record<string, string> = {
   failed: "失败",
   cancelled: "已停止",
   aborted: "已停止",
-};
-
-const DUTY_LABELS: Record<string, string> = {
-  discuss: "讨论",
-  plan: "规划",
-  implement: "实现",
-  fix: "修复",
-  review: "审查",
-  deliver: "交付",
-  accept: "验收",
-  recall: "回忆",
 };
 
 const BLOCKER_LABELS: Record<string, string> = {
