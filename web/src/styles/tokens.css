@@ -27,19 +27,11 @@
   --border-subtle: light-dark(#e2e8f0, #222636);
   --border-hard: light-dark(#94a3b8, #475569);
 
-  /* Primary CTA / focus (electric violet-indigo gradient accent) */
+  /* One accent for CTA, focus and selection — nothing competes with it */
   --accent: light-dark(#6366f1, #818cf8);
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   --accent-hover: light-dark(#4f46e5, #a5b4fc);
   --accent-text: light-dark(#ffffff, #0f172a);
   --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
-
-  /* Nav selection (left rail — cooler, does not compete with CTA) */
-  --accent-nav: light-dark(#4f46e5, #818cf8);
-  --accent-nav-bg: light-dark(
-    color-mix(in srgb, #6366f1 12%, var(--surface-rail)),
-    color-mix(in srgb, #818cf8 14%, var(--surface-rail))
-  );
 
   /* Semantic */
   --danger: light-dark(#dc2626, #f87171);

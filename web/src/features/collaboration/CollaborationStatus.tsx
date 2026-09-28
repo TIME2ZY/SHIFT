@@ -97,14 +97,24 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
               <small>待处理交接</small>
               {snapshot.pendingHandoffs.map((h) => (
                 <p key={h.handoffId}>
-                  {h.sourceAgent || "当前席位"} ➔ {h.targetAgent || "下一席位"}
+                  {h.sourceAgent || "当前席位"} <span aria-hidden="true">→</span>{" "}
+                  {h.targetAgent || "下一席位"}
                   {h.reason ? ` (${h.reason})` : ""}
                 </p>
               ))}
             </div>
           ) : null}
           {snapshot.blocker ? (
-            <div className="react-collab-blocker" role="status">
+            <div
+              className="react-collab-blocker"
+              role="status"
+              data-tone={
+                snapshot.blocker.type === "execution_failed" ||
+                snapshot.blocker.type === "provider_unavailable"
+                  ? "danger"
+                  : "warning"
+              }
+            >
               <small>{blockerTypeLabel(snapshot.blocker.type)}</small>
               <strong>{blockerReasonLabel(snapshot.blocker.reason)}</strong>
             </div>

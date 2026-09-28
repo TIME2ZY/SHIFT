@@ -544,8 +544,8 @@ body {
 }
 
 .react-app-nav button[data-active] {
-  color: var(--accent-nav);
-  background: var(--accent-nav-bg);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
   font-weight: 600;
 }
 
@@ -2463,7 +2463,7 @@ body {
 
 .react-mention-menu button:hover,
 .react-mention-menu button[data-active] {
-  background: var(--accent-nav-bg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
 }
 
 .react-mention-info {
@@ -3666,17 +3666,23 @@ body {
   white-space: nowrap;
 }
 
+/* Status colour follows severity: waiting is amber, failure is red */
 .react-collab-blocker {
   display: grid;
   gap: 3px;
   padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-inline-start: 2px solid currentColor;
   background: var(--badge-thinking-bg);
   color: var(--badge-thinking-fg);
 }
 
+.react-collab-blocker[data-tone="danger"] {
+  background: var(--badge-error-bg);
+  color: var(--badge-error-fg);
+}
+
 .react-collab-blocker strong {
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -5019,12 +5025,12 @@ body {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--accent-nav);
+  color: var(--accent);
   font: inherit;
   cursor: pointer;
 }
 .react-agent-availability button:hover:not(:disabled) {
-  background: var(--accent-nav-bg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
 }
 .react-agent-availability button:focus-visible {
   outline: 2px solid var(--accent);

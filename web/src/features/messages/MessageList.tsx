@@ -600,7 +600,7 @@ export function MessageList({
               角色。需要修改代码时，随时开启<b>「隔离改代码」</b>以保护主分支。
             </p>
             <div className="react-chat-quick-prompts">
-              <span>💡 推荐开始：</span>
+              <span>推荐开始</span>
               <div className="react-prompt-grid">
                 {EMPTY_CHAT_QUICK_PROMPTS.map((item) => (
                   <button
