@@ -569,7 +569,13 @@ describe("TraceExplorer", () => {
     expect(await screen.findByText("7 次调用 · 6 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
     expect(screen.getByText("2 个 Agent · 6 次交接")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "启动注入 2 条 · 写入 1 条" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "中间 4 次已完成调用 · 展开" })).toBeInTheDocument();
+    expect(timelineSequence()).toEqual(["Codex", "Grok", "Codex"]);
+    expect(screen.queryByRole("button", { name: /复制交接记录/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "来自 Grok · 完成" }));
+    expect(screen.getByRole("button", { name: /复制交接记录/ })).toHaveAttribute("title", "h6");
+
+    await userEvent.click(screen.getByRole("button", { name: "展开全部交接与调用" }));
     expect(
       screen.getByRole("button", { name: "交接注入 2 条 · 检索命中 3 条" })
     ).toBeInTheDocument();
@@ -595,14 +601,9 @@ describe("TraceExplorer", () => {
     await userEvent.click(screen.getByRole("button", { name: /同一来源两条交接/ }));
     expect(screen.getByText("3 次调用 · 3 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接 1 失败")).toBeInTheDocument();
-    expect(timelineSequence()).toEqual([
-      "Codex",
-      "Codex → Grok",
-      "Grok",
-      "Codex → Codex",
-      "Codex",
-      "Codex → Grok",
-    ]);
+    expect(timelineSequence()).toEqual(["Codex", "Grok", "Codex", "Codex → Grok"]);
+    await userEvent.click(screen.getByRole("button", { name: "Codex → Grok" }));
+    expect(screen.getByRole("button", { name: /复制交接记录/ })).toHaveAttribute("title", "hf3");
 
     await userEvent.click(screen.getByRole("button", { name: /仍在执行/ }));
     expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
@@ -666,7 +667,7 @@ describe("TraceExplorer", () => {
 
     failed = false;
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect((await screen.findAllByText("第 1 轮")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("第 1 次请求")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
@@ -759,7 +760,7 @@ function timelineSequence() {
     ) || []),
   ].map((node) => {
     if (node.classList.contains("trace-waterfall-hop")) {
-      return node.querySelector("span")?.textContent?.replace(/\s+/g, " ").trim() || "";
+      return node.querySelector("button")?.textContent?.replace(/\s+/g, " ").trim() || "";
     }
     return node.querySelector("strong")?.textContent || "";
   });

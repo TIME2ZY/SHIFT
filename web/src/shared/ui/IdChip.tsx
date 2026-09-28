@@ -13,32 +13,38 @@ export function IdChip({
   label?: string;
   digits?: number;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   if (!value) return null;
   const short = value.length > digits ? value.slice(-digits) : value;
 
-  const copy = () => {
-    void navigator.clipboard?.writeText(value).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
-      },
-      () => undefined
-    );
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.setTimeout(() => setCopyState("idle"), 1200);
   };
 
   return (
-    <button
-      type="button"
-      className="react-id-chip"
-      title={value}
-      aria-label={label ? `复制${label} ${short}` : `复制标识 ${short}`}
-      onClick={copy}
-    >
-      <code>{short}</code>
-      <span className="react-id-chip-state" aria-hidden="true">
-        {copied ? "已复制" : "复制"}
+    <span className="react-id-chip-wrap">
+      <button
+        type="button"
+        className="react-id-chip"
+        title={value}
+        aria-label={label ? `复制${label} ${short}` : `复制标识 ${short}`}
+        onClick={() => void copy()}
+      >
+        <code>{short}</code>
+        <span className="react-id-chip-state" aria-hidden="true">
+          {copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : "复制"}
+        </span>
+      </button>
+      <span className="sr-only" role="status">
+        {copyState === "copied" ? "已复制完整标识" : copyState === "failed" ? "复制失败" : ""}
       </span>
-    </button>
+    </span>
   );
 }

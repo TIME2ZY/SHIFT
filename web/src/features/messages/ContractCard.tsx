@@ -48,6 +48,10 @@ export function ContractCard({ card }: { card: ContractCardData }) {
           </div>
         ))}
       </div>
+      <details className="react-contract-card-source">
+        <summary>查看合同原文</summary>
+        <pre>{card.rawBody}</pre>
+      </details>
     </section>
   );
 }

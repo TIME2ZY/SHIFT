@@ -4,7 +4,7 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* ── Base surfaces (modern translucent / rich surfaces) ── */
   --surface: #f1f3f9;
@@ -179,6 +179,7 @@
    instead: data-theme="dark" for an explicit choice, or the OS media query when
    following the system. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --surface: #13151f;
   --surface-raised: #1b1e2b;
   --surface-inset: #0d0e16;
@@ -215,6 +216,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --surface: #13151f;
     --surface-raised: #1b1e2b;
     --surface-inset: #0d0e16;

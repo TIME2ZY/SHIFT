@@ -106,6 +106,20 @@ describe("splitContractFences", () => {
     expect(segments[0].kind).toBe("markdown");
   });
 
+  it("keeps a contract example inside an outer code fence as source", () => {
+    const source =
+      "````markdown\n```solution_baseline\nuser_goal_hash: abc\nsummary: 示例方案\n```\n````";
+    expect(splitContractFences(source)).toEqual([{ kind: "markdown", text: source, card: null }]);
+  });
+
+  it("retains new fields in the original packet without adding them to a known list", () => {
+    const body =
+      "verdict: changes_requested\nsummary: 需要修复\nfindings:\n  - 缺少边界检查\nimpact: 高风险";
+    const card = parseContractFence("code_review", body);
+    expect(card?.lists[0].items).toEqual(["缺少边界检查"]);
+    expect(card?.rawBody).toContain("impact: 高风险");
+  });
+
   it("maps known duties to Chinese", () => {
     expect(dutyLabel("implement")).toBe("实现");
   });

@@ -7,6 +7,7 @@
  * module only describes how a packet is read back into the UI; it decides
  * nothing and must not drift from those skills.
  */
+import MarkdownIt from "markdown-it";
 
 export const DUTY_LABELS: Record<string, string> = {
   discuss: "讨论",
@@ -60,6 +61,7 @@ export interface ContractList {
 export interface ContractCard {
   id: string;
   title: string;
+  rawBody: string;
   /** Shown on the card head, e.g. the handoff route. */
   badge: string | null;
   fields: ContractField[];
@@ -277,6 +279,10 @@ export function parseContractFence(lang: string, body: string, id?: string): Con
           }
           continue;
         }
+        // The display grammar may lag an agent-authored packet. Do not fold a
+        // new top-level field into the preceding known list or scalar.
+        flush();
+        continue;
       }
 
       if (!current) continue;
@@ -331,34 +337,42 @@ export function parseContractFence(lang: string, body: string, id?: string): Con
   return {
     id: id ?? `${spec.lang}-${body.length}`,
     title: spec.title,
+    rawBody: body,
     badge,
     fields,
     lists,
   };
 }
 
-/** Build a fence matcher that yields each structured packet in a message body. */
+const fenceScanner = new MarkdownIt({ html: false });
+
+/** Only top-level Markdown fences are display contracts. An example inside a
+ * longer fence (or a nested list) remains source text. */
 export function splitContractFences(content: string): {
   kind: "markdown" | "contract";
   text: string;
   card: ContractCard | null;
 }[] {
   const segments: { kind: "markdown" | "contract"; text: string; card: ContractCard | null }[] = [];
-  const pattern = new RegExp(
-    "```(" + CONTRACT_FENCE_LANGS.join("|") + ")\\s*\\r?\\n([\\s\\S]*?)```",
-    "gi"
-  );
+  const lineOffsets = [0];
+  for (let i = 0; i < content.length; i += 1) {
+    if (content[i] === "\n") lineOffsets.push(i + 1);
+  }
   let cursor = 0;
   let index = 0;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(content)) !== null) {
-    const card = parseContractFence(match[1], match[2].trim(), `${match[1]}-${index}`);
+  for (const token of fenceScanner.parse(content, {})) {
+    if (token.type !== "fence" || token.level !== 0 || !token.map) continue;
+    const lang = token.info.trim().toLowerCase();
+    if (!contractFenceSpec(lang)) continue;
+    const card = parseContractFence(lang, token.content.trim(), `${lang}-${index}`);
     if (!card) continue;
-    if (match.index > cursor) {
-      segments.push({ kind: "markdown", text: content.slice(cursor, match.index), card: null });
+    const start = lineOffsets[token.map[0]] ?? content.length;
+    const end = lineOffsets[token.map[1]] ?? content.length;
+    if (start > cursor) {
+      segments.push({ kind: "markdown", text: content.slice(cursor, start), card: null });
     }
     segments.push({ kind: "contract", text: "", card });
-    cursor = match.index + match[0].length;
+    cursor = end;
     index += 1;
   }
   if (cursor < content.length) {

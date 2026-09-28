@@ -37,6 +37,11 @@ function routePreview(trace: TraceSummary) {
   return `${agents} 个 Agent · ${handoffs} 次交接`;
 }
 
+function requestLabel(trace: TraceSummary) {
+  const request = trace.request ? `第 ${trace.request.turnNumber} 次请求` : "未关联用户请求";
+  return trace.requestAttempt > 1 ? `${request} · 尝试 ${trace.requestAttempt}` : request;
+}
+
 function formatTick(ms: number) {
   if (ms < 1000) return "0s";
   const seconds = Math.round(ms / 1000);
@@ -83,6 +88,87 @@ function groupHandoffs(handoffs: ExecutionHandoff[], invocationIds: Set<string>)
     leftover.push(handoff);
   }
   return { incoming, dangling, leftover };
+}
+
+function isRoutineHandoff(handoff: ExecutionHandoff) {
+  return (
+    handoff.completeStatus === "completed" &&
+    Boolean(handoff.targetInvocationId) &&
+    handoff.routeStatus === "accepted" &&
+    handoff.receiveStatus === "started" &&
+    !handoff.duplicateOf &&
+    !handoff.repairOf
+  );
+}
+
+type TimelineEntry =
+  { kind: "invocation"; invocation: ExecutionInvocation } | { kind: "collapsed"; count: number };
+
+function timelineEntries(
+  invocations: ExecutionInvocation[],
+  handoffs: ExecutionHandoff[],
+  spans: TraceSpan[],
+  expanded: boolean
+): TimelineEntry[] {
+  if (expanded || invocations.length <= 6) {
+    return invocations.map((invocation) => ({ kind: "invocation", invocation }));
+  }
+
+  const pinned = new Set<string>();
+  pinned.add(invocations[0].invocationId);
+  for (const invocation of invocations.slice(-2)) pinned.add(invocation.invocationId);
+
+  const incoming = new Map<string, number>();
+  const outgoing = new Map<string, number>();
+  for (const handoff of handoffs) {
+    outgoing.set(handoff.sourceInvocationId, (outgoing.get(handoff.sourceInvocationId) || 0) + 1);
+    if (handoff.targetInvocationId) {
+      incoming.set(handoff.targetInvocationId, (incoming.get(handoff.targetInvocationId) || 0) + 1);
+    }
+    if (!isRoutineHandoff(handoff)) {
+      pinned.add(handoff.sourceInvocationId);
+      if (handoff.targetInvocationId) pinned.add(handoff.targetInvocationId);
+    }
+  }
+  for (const invocation of invocations) {
+    if (!incoming.has(invocation.invocationId)) pinned.add(invocation.invocationId);
+  }
+  for (const handoff of handoffs) {
+    if (
+      (outgoing.get(handoff.sourceInvocationId) || 0) > 1 ||
+      (handoff.targetInvocationId && (incoming.get(handoff.targetInvocationId) || 0) > 1)
+    ) {
+      pinned.add(handoff.sourceInvocationId);
+      if (handoff.targetInvocationId) pinned.add(handoff.targetInvocationId);
+    }
+  }
+  for (const span of spans) {
+    if (
+      span.state === "failed" ||
+      span.state === "orphaned" ||
+      span.attributes?.outcome === "rejected"
+    ) {
+      pinned.add(span.invocationId);
+    }
+  }
+
+  const entries: TimelineEntry[] = [];
+  let collapsed = 0;
+  for (const invocation of invocations) {
+    const hide =
+      !pinned.has(invocation.invocationId) &&
+      invocation.state === "completed" &&
+      Boolean(invocation.endedAt);
+    if (hide) {
+      collapsed += 1;
+      continue;
+    }
+    if (collapsed) entries.push({ kind: "collapsed", count: collapsed });
+    collapsed = 0;
+    entries.push({ kind: "invocation", invocation });
+  }
+  if (collapsed) entries.push({ kind: "collapsed", count: collapsed });
+  return entries;
 }
 
 function scopeStatus(input: {
@@ -177,6 +263,32 @@ function memoryEventCopy(span: TraceSpan) {
   };
 }
 
+function HandoffFacts({ handoff }: { handoff: ExecutionHandoff }) {
+  return (
+    <section className="trace-handoff-facts" aria-label="交接详情">
+      <dl>
+        <div>
+          <dt>交接记录</dt>
+          <dd>
+            <IdChip value={handoff.handoffId} label="交接记录" />
+          </dd>
+        </div>
+        <div>
+          <dt>路由 / 接收 / 结果</dt>
+          <dd>
+            {handoffStatusLabel(handoff.routeStatus)} / {handoffStatusLabel(handoff.receiveStatus)}{" "}
+            / {handoffStatusLabel(handoff.completeStatus)}
+          </dd>
+        </div>
+        <div>
+          <dt>原因</dt>
+          <dd>{handoff.reason || "未记录"}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
 function HandoffHop({
   handoff,
   label,
@@ -186,20 +298,14 @@ function HandoffHop({
   label(id: string): string;
   position(value: string | null): number;
 }) {
+  const [open, setOpen] = useState(false);
   const markAt = handoff.startedAt || handoff.createdAt;
   return (
-    <li
-      className="trace-waterfall-hop"
-      data-state={handoff.completeStatus}
-      title={`${handoff.reason || "未记录原因"} · 路由 ${handoffStatusLabel(handoff.routeStatus)} / 接收 ${handoffStatusLabel(handoff.receiveStatus)} / 结果 ${handoffStatusLabel(handoff.completeStatus)}`}
-    >
+    <li className="trace-waterfall-hop" data-state={handoff.completeStatus}>
       <div className="trace-waterfall-label">
-        <span>
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {label(handoff.sourceAgent)} → {label(handoff.targetAgent)}
-        </span>
-        <small>
-          <IdChip value={handoff.handoffId} label="交接记录" />
-        </small>
+        </button>
       </div>
       <div className="trace-waterfall-track" aria-hidden="true">
         {markAt ? (
@@ -207,6 +313,7 @@ function HandoffHop({
         ) : null}
       </div>
       <small>{handoffStatusLabel(handoff.completeStatus)}</small>
+      {open ? <HandoffFacts handoff={handoff} /> : null}
     </li>
   );
 }
@@ -260,17 +367,20 @@ function RecallBlock({
 
 function TraceWaterfall({
   invocations,
-  recallSpans,
+  spans,
   handoffs,
   label,
   statusLine,
 }: {
   invocations: ExecutionInvocation[];
-  recallSpans: TraceSpan[];
+  spans: TraceSpan[];
   handoffs: ExecutionHandoff[];
   label(id: string): string;
   statusLine: string;
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const [selectedHandoffId, setSelectedHandoffId] = useState<string | null>(null);
+  const recallSpans = spans.filter((span) => span.kind === "recall");
   const times = [
     ...invocations.map((invocation) => parsedTime(invocation.startedAt)),
     ...invocations.map((invocation) => parsedTime(invocation.endedAt)),
@@ -294,15 +404,37 @@ function TraceWaterfall({
   };
   const invocationIds = new Set(invocations.map((item) => item.invocationId));
   const grouped = groupHandoffs(handoffs, invocationIds);
+  const entries = timelineEntries(invocations, handoffs, spans, showAll);
+  const canExpand =
+    entries.some((entry) => entry.kind === "collapsed") ||
+    handoffs.some(
+      (handoff) =>
+        isRoutineHandoff(handoff) &&
+        Boolean(handoff.targetInvocationId && invocationIds.has(handoff.targetInvocationId))
+    );
   const ticks = timeTicks(total);
 
   return (
     <section className="trace-waterfall" aria-label="执行时间轴">
       <header>
         <strong>执行时间轴</strong>
-        <small>
-          {invocations.length} 次调用 · {handoffs.length} 次交接
-        </small>
+        <div className="trace-waterfall-actions">
+          <small>
+            {invocations.length} 次调用 · {handoffs.length} 次交接
+          </small>
+          {canExpand || showAll ? (
+            <button
+              type="button"
+              aria-expanded={showAll}
+              onClick={() => {
+                setShowAll((value) => !value);
+                setSelectedHandoffId(null);
+              }}
+            >
+              {showAll ? "收起成功链" : "展开全部交接与调用"}
+            </button>
+          ) : null}
+        </div>
       </header>
       <p className="trace-waterfall-status">{statusLine}</p>
       <ol>
@@ -316,21 +448,35 @@ function TraceWaterfall({
             ))}
           </div>
         </li>
-        {invocations.map((invocation) => {
+        {entries.map((entry, index) => {
+          if (entry.kind === "collapsed") {
+            return (
+              <li className="trace-waterfall-collapsed" key={`collapsed-${index}`}>
+                <button type="button" onClick={() => setShowAll(true)}>
+                  中间 {entry.count} 次已完成调用 · 展开
+                </button>
+              </li>
+            );
+          }
+          const invocation = entry.invocation;
+          const incoming = grouped.incoming.get(invocation.invocationId) || [];
+          const inlineHandoffs = showAll ? [] : incoming.filter(isRoutineHandoff);
           const children = recallSpans.filter(
             (span) => span.invocationId === invocation.invocationId
           );
           const open = invocation.state === "active" || !invocation.endedAt;
           return (
             <Fragment key={invocation.invocationId}>
-              {(grouped.incoming.get(invocation.invocationId) || []).map((handoff) => (
-                <HandoffHop
-                  key={handoff.handoffId}
-                  handoff={handoff}
-                  label={label}
-                  position={position}
-                />
-              ))}
+              {incoming
+                .filter((handoff) => showAll || !isRoutineHandoff(handoff))
+                .map((handoff) => (
+                  <HandoffHop
+                    key={handoff.handoffId}
+                    handoff={handoff}
+                    label={label}
+                    position={position}
+                  />
+                ))}
               <li
                 className="trace-waterfall-row"
                 data-kind="generation"
@@ -338,7 +484,26 @@ function TraceWaterfall({
               >
                 <div className="trace-waterfall-label">
                   <strong>{label(invocation.agentId)}</strong>
-                  <small>{triggerTypeLabel(invocation.triggerType)}</small>
+                  {inlineHandoffs.length ? (
+                    inlineHandoffs.map((handoff) => (
+                      <button
+                        className="trace-waterfall-inline-handoff"
+                        type="button"
+                        key={handoff.handoffId}
+                        aria-expanded={selectedHandoffId === handoff.handoffId}
+                        onClick={() =>
+                          setSelectedHandoffId((current) =>
+                            current === handoff.handoffId ? null : handoff.handoffId
+                          )
+                        }
+                      >
+                        来自 {label(handoff.sourceAgent)} ·{" "}
+                        {handoffStatusLabel(handoff.completeStatus)}
+                      </button>
+                    ))
+                  ) : (
+                    <small>{triggerTypeLabel(invocation.triggerType)}</small>
+                  )}
                 </div>
                 <div className="trace-waterfall-track">
                   <i
@@ -358,6 +523,11 @@ function TraceWaterfall({
                     {errorCodeLabel(invocation.outcome.errorCode)}
                   </b>
                 ) : null}
+                {inlineHandoffs
+                  .filter((handoff) => handoff.handoffId === selectedHandoffId)
+                  .map((handoff) => (
+                    <HandoffFacts key={handoff.handoffId} handoff={handoff} />
+                  ))}
               </li>
               <RecallBlock spans={children} position={position} />
               {(grouped.dangling.get(invocation.invocationId) || []).map((handoff) => (
@@ -573,11 +743,7 @@ export function TraceExplorer({
               >
                 <span className="trace-ledger-mark" aria-hidden="true" />
                 <span className="trace-ledger-turn">
-                  <strong>
-                    {trace.request
-                      ? `第 ${trace.request.turnNumber} 轮`
-                      : `请求 #${trace.requestAttempt}`}
-                  </strong>
+                  <strong>{requestLabel(trace)}</strong>
                   <small>{stateLabel(trace.state)}</small>
                 </span>
                 <span className="trace-ledger-preview">
@@ -600,11 +766,7 @@ export function TraceExplorer({
             >
               <header>
                 <div>
-                  <span>
-                    {selected.request
-                      ? `第 ${selected.request.turnNumber} 轮`
-                      : `请求 #${selected.requestAttempt}`}
-                  </span>
+                  <span>{requestLabel(selected)}</span>
                   {selected.request ? <p>{selected.request.preview}</p> : null}
                 </div>
                 <div>
@@ -642,7 +804,7 @@ export function TraceExplorer({
               ) : null}
               <TraceWaterfall
                 invocations={selectedInvocations}
-                recallSpans={selectedSpans.filter((span) => span.kind === "recall")}
+                spans={selectedSpans}
                 handoffs={selectedHandoffs}
                 label={label}
                 statusLine={scopeStatus({

@@ -55,4 +55,16 @@ describe("MarkdownContent", () => {
     expect(container.querySelector("pre code")).toHaveTextContent("verdict: changes_requested");
     expect(screen.queryByRole("region", { name: "交接" })).not.toBeInTheDocument();
   });
+
+  it("keeps unfamiliar contract fields available in the source disclosure", () => {
+    const { container } = render(
+      <MarkdownContent
+        content={"```code_review\nverdict: approve\nsummary: 通过\nimpact: 高风险\n```"}
+      />
+    );
+    expect(container.querySelector(".react-contract-card-source")).not.toHaveAttribute("open");
+    expect(container.querySelector(".react-contract-card-source pre")).toHaveTextContent(
+      "impact: 高风险"
+    );
+  });
 });

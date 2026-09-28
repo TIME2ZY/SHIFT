@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="shift-ui-token" content="__SHIFT_UI_TOKEN__" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      try {
+        const theme = localStorage.getItem("shift.theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {
+        // Storage access can be disabled; the system preference remains usable.
+      }
+    </script>
     <title>SHIFT AGENTS · 交班台</title>
   </head>
   <body>
