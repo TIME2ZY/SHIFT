@@ -578,44 +578,30 @@ export function MessageList({
       >
         {empty ? (
           <section className="react-chat-empty">
-            <div className="react-chat-empty-badge">
-              <svg
-                viewBox="0 0 24 24"
-                width="28"
-                height="28"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z" />
-                <path d="M12 8v4l3 3" />
-                <path d="M18 12h.01" />
-              </svg>
-            </div>
-            <h2>开启多智能体协同控制台</h2>
+            <h2>开始一个任务</h2>
             <p>
-              输入你的任务需求，或使用 <code>@Agent</code> 指定专属 AI
-              角色。需要修改代码时，随时开启<b>「隔离改代码」</b>以保护主分支。
+              在下面说清目标，用 <code>@席位</code> 点名接手的角色。要改代码时打开
+              <b>「隔离改代码」</b>
+              ，实现发生在本会话的 worktree，不动你正在看的目录。
             </p>
             <div className="react-chat-quick-prompts">
-              <span>推荐开始</span>
-              <div className="react-prompt-grid">
+              <span>开局</span>
+              <ul>
                 {EMPTY_CHAT_QUICK_PROMPTS.map((item) => (
-                  <button
-                    type="button"
-                    className="react-prompt-card"
-                    key={item.title}
-                    disabled={!onUsePrompt}
-                    onClick={() => onUsePrompt?.(item)}
-                    aria-label={`使用推荐提示：${item.title}`}
-                  >
-                    <strong>{item.title}</strong>
-                    <small>{item.description}</small>
-                  </button>
+                  <li key={item.title}>
+                    <button
+                      type="button"
+                      className="react-prompt-card"
+                      disabled={!onUsePrompt}
+                      onClick={() => onUsePrompt?.(item)}
+                      aria-label={`使用推荐提示：${item.title}`}
+                    >
+                      <strong>{item.title}</strong>
+                      <small>{item.description}</small>
+                    </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           </section>
         ) : null}

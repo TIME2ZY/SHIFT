@@ -31,7 +31,6 @@
   --accent: #6366f1;
   --accent-hover: #4f46e5;
   --accent-text: #ffffff;
-  --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
 
   /* Semantic */
   --danger: #dc2626;
