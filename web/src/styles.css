@@ -482,6 +482,35 @@ body {
   color: var(--accent);
 }
 
+.react-theme-toggle {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.react-theme-toggle:hover {
+  color: var(--text-primary);
+  background: var(--surface-raised);
+}
+
+.react-theme-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .react-brand-mark svg {
   width: 19px;
   height: 19px;
