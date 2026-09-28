@@ -19,8 +19,8 @@ body {
   background: var(--surface-inset);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   scrollbar-width: thin;

@@ -815,9 +815,10 @@ body {
   gap: 4px;
 }
 
+/* Relative dates are CJK prose ("21 天前"), not identifiers */
 .react-session-item small {
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.3 var(--font-ui);
 }
 
 .react-sidebar-message {
@@ -869,8 +870,8 @@ body {
   max-width: min(60vw, 720px);
   margin: 0;
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-ui);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1012,21 +1013,22 @@ body {
   box-shadow: 0 8px 24px -4px var(--accent-glow);
 }
 
+/* CJK headings: 600 and no negative tracking — 700/-0.02em turns into a smear */
 .react-chat-empty h2 {
   font-family: var(--font-brand);
-  font-size: clamp(22px, 2.6vw, 30px);
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-size: clamp(var(--text-title), 2.4vw, var(--text-display));
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
   color: var(--text-primary);
 }
 
 .react-chat-empty > p {
-  max-width: 56ch;
+  max-width: 42ch;
   margin: 0 auto;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-ui);
+  line-height: var(--leading-body);
 }
 
 .react-chat-empty code {
@@ -1260,7 +1262,7 @@ body {
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
-  line-height: 1.6;
+  line-height: var(--leading-body);
 }
 
 .react-markdown {
@@ -1285,8 +1287,9 @@ body {
 .react-markdown pre,
 .react-markdown blockquote,
 .react-markdown table {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-4);
   max-width: 100%;
+  line-height: var(--leading-body);
 }
 
 .react-markdown h1,
@@ -1497,10 +1500,11 @@ body {
   white-space: nowrap;
 }
 
+/* Process summaries are Chinese sentences, not log lines */
 .react-process-summary > summary small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2509,8 +2513,9 @@ body {
 
 .react-panel-title span {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
-  text-transform: uppercase;
+  font: var(--text-meta)/1.3 var(--font-ui);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .trace-explorer {
@@ -3474,9 +3479,9 @@ body {
 
 .react-collab-status header span {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: var(--text-meta)/1.3 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .react-task-goal {
@@ -3512,8 +3517,8 @@ body {
   overflow: hidden;
   overflow-wrap: anywhere;
   margin-top: 4px;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
 }
 
 .react-task-goal[open] .react-task-goal-preview {
@@ -3522,8 +3527,8 @@ body {
 
 .react-task-goal p {
   margin: var(--space-2) 0 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3664,11 +3669,12 @@ body {
   font-size: 12px;
 }
 
+/* Acceptance facts mix hashes with Chinese verdicts; read in the UI face */
 .react-acceptance-card dd {
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3969,8 +3975,8 @@ body {
 .react-agent-details > p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--text-ui);
+  line-height: var(--leading-ui);
 }
 
 .react-agent-meta {
@@ -4029,11 +4035,16 @@ body {
   font-size: 13px;
 }
 
-.react-agent-card code,
+/* Model names are identifiers; memory kind and recall counts are prose */
+.react-agent-card code {
+  color: var(--text-tertiary);
+  font: var(--text-meta)/1.3 var(--font-mono);
+}
+
 .react-memory-list small,
 .react-memory-list header span {
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
 }
 
 .react-agent-card > p,
@@ -4296,8 +4307,9 @@ body {
 .audit-page-header h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 620;
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .audit-page-chip {
@@ -4365,13 +4377,14 @@ body {
 
 .audit-column-heading h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 620;
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .audit-column-heading small {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
+  font: var(--text-meta)/1.3 var(--font-ui);
 }
 
 .audit-page-actions {
@@ -4967,12 +4980,15 @@ body {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+/* Sealed context is prose, not source: read it in the UI face */
 .react-task-context pre {
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  line-height: var(--leading-body);
   padding: 8px;
   background: var(--surface-inset);
 }

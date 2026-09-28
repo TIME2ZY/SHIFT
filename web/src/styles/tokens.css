@@ -98,6 +98,19 @@
   --text-code: 13px;
   --text-code-line: 1.65;
 
+  /* Type scale — one step per role, so hierarchy comes from size, not weight */
+  --text-micro: 11px;
+  --text-meta: 12px;
+  --text-ui: 13px;
+  --text-body: 15px;
+  --text-section: 18px;
+  --text-title: 22px;
+  --text-display: 28px;
+
+  /* CJK needs more leading than Latin to keep dense lines readable */
+  --leading-ui: 1.55;
+  --leading-body: 1.75;
+
   /* Spacing scale (8px base) */
   --space-1: 4px;
   --space-2: 8px;
@@ -111,8 +124,9 @@
 
   /* Sizing */
   /* Single measure for the chat column: the message list and the composer must
-     share one width or the reading column and the input visually diverge. */
-  --chat-measure: 1040px;
+     share one width or the reading column and the input visually diverge.
+     Kept near 60 full-width CJK glyphs so long agent prose stays readable. */
+  --chat-measure: 880px;
   --sidebar-w: 268px;
   --sidebar-w-narrow: 200px;
   --instrument-w: 330px;
