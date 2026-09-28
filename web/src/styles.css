@@ -3213,24 +3213,6 @@ body {
   color: var(--text-tertiary);
   font: 12px/1 var(--font-mono);
 }
-.trace-waterfall-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-.trace-waterfall-actions button,
-.trace-waterfall-collapsed button {
-  padding: 2px 0;
-  color: var(--accent);
-  font-size: var(--text-meta);
-  text-align: left;
-}
-.trace-waterfall-actions button:hover,
-.trace-waterfall-collapsed button:hover {
-  text-decoration: underline;
-}
 .trace-waterfall-status {
   margin: 0;
   color: var(--text-tertiary);
@@ -3275,53 +3257,10 @@ body {
   font: 12px/1.2 var(--font-mono);
 }
 .trace-waterfall-hop .trace-waterfall-label {
-  display: block;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
 }
-.trace-waterfall-hop .trace-waterfall-label button,
-.trace-waterfall-inline-handoff {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--text-meta);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.trace-waterfall-hop .trace-waterfall-label button:hover,
-.trace-waterfall-inline-handoff:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-.trace-waterfall-inline-handoff {
-  font-size: var(--text-micro);
-}
-.trace-waterfall-collapsed {
-  padding: var(--space-2) 0;
-  border-block: 1px dashed var(--border-subtle);
-}
-.trace-handoff-facts {
-  grid-column: 1 / -1;
-  padding: var(--space-2) var(--space-3);
-  border-inline-start: 2px solid var(--accent);
-  background: var(--surface-inset);
-}
-.trace-handoff-facts dl {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-}
-.trace-handoff-facts dt {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-.trace-handoff-facts dd {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--text-meta);
-}
-.trace-waterfall-hop[data-state="failed"] > small,
-.trace-waterfall-hop[data-state="aborted"] > small,
+.trace-waterfall-hop[data-state="failed"] span,
 .trace-waterfall-row[data-state="failed"] > small {
   color: var(--danger);
 }

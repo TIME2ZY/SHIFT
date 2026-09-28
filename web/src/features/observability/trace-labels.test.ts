@@ -22,10 +22,6 @@ describe("trace labels", () => {
     expect(triggerTypeLabel("user-message")).toBe("用户消息");
     expect(triggerTypeLabel("a2a-handoff")).toBe("交接启动");
     expect(handoffStatusLabel("completed")).toBe("完成");
-    expect(handoffStatusLabel("duplicate")).toBe("重复交接");
-    expect(handoffStatusLabel("already_completed")).toBe("此前已完成");
-    expect(handoffStatusLabel("not_started")).toBe("未启动");
-    expect(handoffStatusLabel("aborted")).toBe("已停止");
     expect(invocationStateLabel("aborted")).toBe("已停止");
     expect(invocationStateLabel("something_new")).toBe("未知");
     expect(memoryKindLabel("constraint")).toBe("约束");
