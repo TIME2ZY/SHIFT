@@ -9,6 +9,8 @@ import type {
 } from "./types";
 import { useObservabilityHealthQuery, useSessionTracesQuery, useTraceDetailQuery } from "./queries";
 import { exportSessionTrace } from "./api";
+import { errorCodeLabel, handoffStatusLabel, triggerTypeLabel } from "./trace-labels";
+import { IdChip } from "../../shared/ui/IdChip";
 
 function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
@@ -189,20 +191,22 @@ function HandoffHop({
     <li
       className="trace-waterfall-hop"
       data-state={handoff.completeStatus}
-      title={`${handoff.reason || "未记录原因"} · ${handoff.routeStatus} / ${handoff.receiveStatus} / ${handoff.completeStatus}`}
+      title={`${handoff.reason || "未记录原因"} · 路由 ${handoffStatusLabel(handoff.routeStatus)} / 接收 ${handoffStatusLabel(handoff.receiveStatus)} / 结果 ${handoffStatusLabel(handoff.completeStatus)}`}
     >
       <div className="trace-waterfall-label">
-        <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
         <span>
           {label(handoff.sourceAgent)} → {label(handoff.targetAgent)}
         </span>
+        <small>
+          <IdChip value={handoff.handoffId} label="交接记录" />
+        </small>
       </div>
       <div className="trace-waterfall-track" aria-hidden="true">
         {markAt ? (
           <i data-kind="handoff" data-point="true" style={{ left: `${position(markAt)}%` }} />
         ) : null}
       </div>
-      <small>{handoff.completeStatus}</small>
+      <small>{handoffStatusLabel(handoff.completeStatus)}</small>
     </li>
   );
 }
@@ -297,7 +301,7 @@ function TraceWaterfall({
       <header>
         <strong>执行时间轴</strong>
         <small>
-          {invocations.length} Invocation · {handoffs.length} Handoff
+          {invocations.length} 次调用 · {handoffs.length} 次交接
         </small>
       </header>
       <p className="trace-waterfall-status">{statusLine}</p>
@@ -334,7 +338,7 @@ function TraceWaterfall({
               >
                 <div className="trace-waterfall-label">
                   <strong>{label(invocation.agentId)}</strong>
-                  <small>{invocation.triggerType || "invocation"}</small>
+                  <small>{triggerTypeLabel(invocation.triggerType)}</small>
                 </div>
                 <div className="trace-waterfall-track">
                   <i
@@ -349,7 +353,11 @@ function TraceWaterfall({
                   />
                 </div>
                 <small>{elapsed(invocation.startedAt, invocation.endedAt)}</small>
-                {invocation.outcome.errorCode ? <b>{invocation.outcome.errorCode}</b> : null}
+                {invocation.outcome.errorCode ? (
+                  <b title={invocation.outcome.errorCode}>
+                    {errorCodeLabel(invocation.outcome.errorCode)}
+                  </b>
+                ) : null}
               </li>
               <RecallBlock spans={children} position={position} />
               {(grouped.dangling.get(invocation.invocationId) || []).map((handoff) => (
@@ -623,8 +631,13 @@ export function TraceExplorer({
               {selected.outcome.errorCode ? (
                 <div className="trace-breakpoint">
                   <span>异常</span>
-                  <strong>{selected.outcome.errorCode}</strong>
-                  <small>{selected.outcome.failureStage || selected.outcome.terminalReason}</small>
+                  <strong>{errorCodeLabel(selected.outcome.errorCode)}</strong>
+                  <small>
+                    <code title={selected.outcome.errorCode}>{selected.outcome.errorCode}</code>
+                    {selected.outcome.failureStage || selected.outcome.terminalReason
+                      ? ` · ${selected.outcome.failureStage || selected.outcome.terminalReason}`
+                      : ""}
+                  </small>
                 </div>
               ) : null}
               <TraceWaterfall

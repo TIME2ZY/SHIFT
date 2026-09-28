@@ -109,7 +109,10 @@ export function TaskContextDetails({
               <small>
                 {packet.createdAt} · {packet.metadata.reason || "原因未记录"}
               </small>
-              <pre aria-label="续工包内容">{packet.content}</pre>
+              <details className="react-recovery-body">
+                <summary>查看封存原文</summary>
+                <pre aria-label="续工包内容">{packet.content}</pre>
+              </details>
               {packet.restorations.map((restore) => (
                 <p key={restore.invocationId}>
                   已加入调用 {restore.invocationId}，任务版本 {restore.taskVersion ?? "未记录"}。

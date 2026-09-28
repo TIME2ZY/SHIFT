@@ -7,15 +7,13 @@ import { ObservabilityContrast } from "./ObservabilityContrast";
 import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
+import { evidenceKindLabel, memoryKindLabel, memoryTitle } from "./trace-labels";
+import { IdChip } from "../../shared/ui/IdChip";
 
 function formatMemoryDate(value: string | number | undefined) {
   if (value == null) return "时间未记录";
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : "时间未记录";
-}
-
-function shortId(value: string) {
-  return value.length > 12 ? value.slice(-8) : value;
 }
 
 function usageEvidence(
@@ -49,11 +47,7 @@ export function AuditPage({
     <main id="main-content" className="audit-page">
       <header className="audit-page-header">
         <h1>{sessionTitle}</h1>
-        {sessionId ? (
-          <span className="audit-page-chip audit-page-chip-id" title={sessionId}>
-            {shortId(sessionId)}
-          </span>
-        ) : null}
+        {sessionId ? <IdChip value={sessionId} label="会话" /> : null}
         {summary.data ? (
           <span className="audit-page-chip">
             {formatMemoryDate(summary.data.execution.lastActivityAt)}
@@ -130,11 +124,11 @@ function MemoryCard({
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <strong>{memory.topic || "未命名记忆"}</strong>
+        <strong title={memory.topic || undefined}>{memoryTitle(memory)}</strong>
         <svg className="audit-memory-chevron" viewBox="0 0 16 16" aria-hidden="true">
           <path d="m6 3 5 5-5 5" />
         </svg>
-        <span>{memory.kind || "memory"}</span>
+        <span>{memoryKindLabel(memory.kind)}</span>
         <small>{usageEvidence(usage)}</small>
       </button>
       {expanded ? (
@@ -147,14 +141,18 @@ function MemoryCard({
             </div>
             {memory.sourceInvocationId ? (
               <div>
-                <dt>来源 Invocation</dt>
-                <dd title={memory.sourceInvocationId}>{shortId(memory.sourceInvocationId)}</dd>
+                <dt>来源调用</dt>
+                <dd>
+                  <IdChip value={memory.sourceInvocationId} label="来源调用" />
+                </dd>
               </div>
             ) : null}
             {memory.sourceMessageId ? (
               <div>
                 <dt>来源消息</dt>
-                <dd title={memory.sourceMessageId}>{shortId(memory.sourceMessageId)}</dd>
+                <dd>
+                  <IdChip value={memory.sourceMessageId} label="来源消息" />
+                </dd>
               </div>
             ) : null}
             {memory.createdBy ? (
@@ -166,7 +164,9 @@ function MemoryCard({
             {typeof memory.metadata?.evidenceKind === "string" ? (
               <div>
                 <dt>证据类型</dt>
-                <dd>{memory.metadata.evidenceKind}</dd>
+                <dd title={memory.metadata.evidenceKind}>
+                  {evidenceKindLabel(memory.metadata.evidenceKind)}
+                </dd>
               </div>
             ) : null}
             <div>
@@ -176,7 +176,9 @@ function MemoryCard({
             {memory.supersededBy ? (
               <div>
                 <dt>被替代为</dt>
-                <dd title={memory.supersededBy}>{shortId(memory.supersededBy)}</dd>
+                <dd>
+                  <IdChip value={memory.supersededBy} label="替代记录" />
+                </dd>
               </div>
             ) : null}
           </dl>

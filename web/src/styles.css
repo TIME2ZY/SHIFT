@@ -1955,6 +1955,59 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Identifiers are provenance chips, not words in the sentence */
+.react-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+  color: var(--text-tertiary);
+  font: inherit;
+  vertical-align: baseline;
+  cursor: copy;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.react-id-chip:hover,
+.react-id-chip:focus-visible {
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+}
+
+.react-id-chip code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.react-id-chip-state {
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.react-id-chip:hover .react-id-chip-state,
+.react-id-chip:focus-visible .react-id-chip-state {
+  opacity: 1;
+}
+
+.react-recovery-body > summary {
+  margin-top: var(--space-2);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.react-recovery-body > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .react-run-error {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   color: var(--danger);

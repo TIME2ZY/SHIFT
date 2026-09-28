@@ -195,11 +195,11 @@ describe("AuditPage", () => {
     );
 
     expect(screen.queryByText("SQLite 是唯一真相源。")).not.toBeInTheDocument();
-    expect(screen.queryByText("来源 Invocation")).not.toBeInTheDocument();
+    expect(screen.queryByText("来源调用")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /存储/ }));
     expect(screen.getByText("SQLite 是唯一真相源。")).toBeInTheDocument();
-    expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
+    expect(screen.getByText("来源调用")).toBeInTheDocument();
     expect(screen.getByText("assistant-output")).toBeInTheDocument();
   });
 });

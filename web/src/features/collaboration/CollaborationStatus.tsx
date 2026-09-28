@@ -1,27 +1,13 @@
 import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 import { TaskContextDetails } from "./TaskContextDetails";
 import { DUTY_LABELS } from "../../shared/contracts/handoff-fence";
+import { invocationStateLabel } from "../../shared/contracts/invocation-state";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "推进中",
   waiting_human: "等待用户",
   accepted: "已验收",
   rejected: "已拒绝",
-};
-
-/* Chain steps carry invocation states (see shared/collab-contracts), not task states. */
-const CHAIN_STATUS_LABELS: Record<string, string> = {
-  created: "排队中",
-  started: "进行中",
-  running: "进行中",
-  streaming: "进行中",
-  active: "进行中",
-  pending: "等待中",
-  completed: "完成",
-  sealed: "完成",
-  failed: "失败",
-  cancelled: "已停止",
-  aborted: "已停止",
 };
 
 const BLOCKER_LABELS: Record<string, string> = {
@@ -110,7 +96,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
                   <li key={step.invocationId || `${step.seatId}-${idx}`} data-status={step.status}>
                     <span>{step.label || step.providerId || step.seatId}</span>
                     {step.duty ? <span> ({DUTY_LABELS[step.duty] || step.duty})</span> : null}
-                    <em> · {CHAIN_STATUS_LABELS[step.status] || "未知"}</em>
+                    <em> · {invocationStateLabel(step.status)}</em>
                   </li>
                 ))}
               </ol>

@@ -405,10 +405,12 @@ describe("TraceExplorer", () => {
     expect(screen.queryByText("Memory 漏斗诊断")).not.toBeInTheDocument();
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /失败/ }));
-    expect(screen.getAllByText("provider_exit_7").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("执行出错").length).toBeGreaterThanOrEqual(2);
+    const breakpointCode = document.querySelector(".trace-breakpoint code");
+    expect(breakpointCode?.textContent).toBe("provider_exit_7");
     expect(screen.getAllByText("Grok").length).toBeGreaterThan(0);
     expect(screen.getByText("执行时间轴")).toBeInTheDocument();
-    expect(screen.getByText("1 Invocation · 0 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("1 次调用 · 0 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行 1 失败 · 交接无失败 · 工具 1 失败 · 1 孤儿")).toBeInTheDocument();
     expect(screen.queryByText("无失败")).not.toBeInTheDocument();
     expect(screen.getByText("工具执行")).toBeInTheDocument();
@@ -429,11 +431,12 @@ describe("TraceExplorer", () => {
     expect(screen.getByText("failed-tool")).toBeInTheDocument();
     expect(screen.getByText("orphan-tool")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
-    expect(screen.getByText("3 Invocation · 0 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("3 次调用 · 0 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
     expect(screen.getByText("2 个 Agent · 0 次交接")).toBeInTheDocument();
     expect(screen.queryByText("Codex → Grok → Codex")).not.toBeInTheDocument();
-    expect(screen.getAllByText("handoff").length).toBe(2);
+    expect(screen.getAllByText("交接启动").length).toBe(2);
+    expect(screen.queryByText("handoff")).not.toBeInTheDocument();
   });
 
   it("places every handoff before its target and keeps fan-out hops", async () => {
@@ -563,7 +566,7 @@ describe("TraceExplorer", () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText("7 Invocation · 6 Handoff")).toBeInTheDocument();
+    expect(await screen.findByText("7 次调用 · 6 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
     expect(screen.getByText("2 个 Agent · 6 次交接")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "启动注入 2 条 · 写入 1 条" })).toBeInTheDocument();
@@ -590,7 +593,7 @@ describe("TraceExplorer", () => {
     ]);
 
     await userEvent.click(screen.getByRole("button", { name: /同一来源两条交接/ }));
-    expect(screen.getByText("3 Invocation · 3 Handoff")).toBeInTheDocument();
+    expect(screen.getByText("3 次调用 · 3 次交接")).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接 1 失败")).toBeInTheDocument();
     expect(timelineSequence()).toEqual([
       "Codex",
