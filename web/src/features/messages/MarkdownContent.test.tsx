@@ -36,9 +36,9 @@ describe("MarkdownContent", () => {
       />
     );
 
-    const card = screen.getByRole("region", { name: "交接报文" });
+    const card = screen.getByRole("region", { name: "交接" });
     expect(card).toHaveTextContent("修复");
-    expect(card).toHaveTextContent("→ Grok");
+    expect(card).toHaveTextContent("Grok · 修复");
     expect(card).toHaveTextContent("目标");
     expect(card).toHaveTextContent("修正 slow mock");
     expect(card).toHaveTextContent("下一步");
@@ -53,6 +53,6 @@ describe("MarkdownContent", () => {
       <MarkdownContent content={"```yaml\nverdict: changes_requested\n```"} />
     );
     expect(container.querySelector("pre code")).toHaveTextContent("verdict: changes_requested");
-    expect(screen.queryByRole("region", { name: "交接报文" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "交接" })).not.toBeInTheDocument();
   });
 });

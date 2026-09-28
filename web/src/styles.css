@@ -1852,7 +1852,7 @@ body {
 }
 
 /* Handoff fence as a readable contract, not a source listing */
-.react-handoff-packet {
+.react-contract-card {
   display: grid;
   gap: var(--space-2);
   margin: var(--space-3) 0;
@@ -1861,42 +1861,42 @@ body {
   background: var(--surface-inset);
 }
 
-.react-handoff-packet-head {
+.react-contract-card-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
 }
 
-.react-handoff-packet-intent {
+.react-contract-card-title {
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
 }
 
-.react-handoff-packet-route {
+.react-contract-card-badge {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 
-.react-handoff-packet-fields {
+.react-contract-card-fields {
   display: grid;
   gap: var(--space-2);
 }
 
-.react-handoff-packet-field {
+.react-contract-card-field {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   gap: var(--space-2);
   align-items: baseline;
 }
 
-.react-handoff-packet-label {
+.react-contract-card-label {
   color: var(--text-tertiary);
   font-size: 12px;
 }
 
-.react-handoff-packet-value {
+.react-contract-card-value {
   margin: 0;
   color: var(--text-primary);
   font-size: 13px;
@@ -1905,7 +1905,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-.react-handoff-packet-list {
+.react-contract-card-list {
   display: grid;
   gap: 3px;
   margin: 0;
@@ -1915,7 +1915,7 @@ body {
   line-height: 1.55;
 }
 
-.react-handoff-packet-long > summary {
+.react-contract-card-long > summary {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   gap: var(--space-2);
@@ -1924,11 +1924,11 @@ body {
   list-style: none;
 }
 
-.react-handoff-packet-long > summary::-webkit-details-marker {
+.react-contract-card-long > summary::-webkit-details-marker {
   display: none;
 }
 
-.react-handoff-packet-preview {
+.react-contract-card-preview {
   overflow: hidden;
   color: var(--text-primary);
   font-size: 13px;
@@ -1936,18 +1936,18 @@ body {
   white-space: nowrap;
 }
 
-.react-handoff-packet-long > summary::after {
+.react-contract-card-long > summary::after {
   content: "展开";
   grid-column: 2;
   color: var(--accent);
   font-size: 12px;
 }
 
-.react-handoff-packet-long[open] > summary::after {
+.react-contract-card-long[open] > summary::after {
   content: "收起";
 }
 
-.react-handoff-packet-body {
+.react-contract-card-body {
   margin: var(--space-2) 0 0;
   padding: var(--space-2) 0 0;
   border-top: 1px solid var(--border-subtle);

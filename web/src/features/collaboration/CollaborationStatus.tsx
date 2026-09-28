@@ -1,6 +1,6 @@
 import type { AcceptanceCard, CollaborationSnapshot } from "./types";
 import { TaskContextDetails } from "./TaskContextDetails";
-import { DUTY_LABELS } from "../../shared/contracts/handoff-fence";
+import { DUTY_LABELS } from "../../shared/contracts/contract-fence";
 import { invocationStateLabel } from "../../shared/contracts/invocation-state";
 
 const STATUS_LABELS: Record<string, string> = {

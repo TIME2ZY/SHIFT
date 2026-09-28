@@ -1,12 +1,8 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import { Fragment, memo, useMemo } from "react";
-import {
-  HANDOFF_FENCE_LANG,
-  parseHandoffFence,
-  type HandoffPacket,
-} from "../../shared/contracts/handoff-fence";
-import { HandoffPacket as HandoffPacketView } from "./HandoffPacket";
+import { splitContractFences, type ContractCard } from "../../shared/contracts/contract-fence";
+import { ContractCard as ContractCardView } from "./ContractCard";
 
 const markdown = new MarkdownIt({
   html: false,
@@ -31,36 +27,7 @@ interface MarkdownContentProps {
   content: string;
 }
 
-type Segment = { kind: "markdown"; text: string } | { kind: "handoff"; packet: HandoffPacket };
-
-/**
- * Handoff fences are contract blocks, not source listings. Split them out so
- * the message body renders prose while the packet renders as a structured card.
- * Matches the fence shape consumed by `src/agents/handoff-parse.js`.
- */
-const FENCE_RE = new RegExp("```" + HANDOFF_FENCE_LANG + "\\s*\\r?\\n([\\s\\S]*?)```", "gi");
-
-export function splitHandoffSegments(content: string): Segment[] {
-  const segments: Segment[] = [];
-  let cursor = 0;
-  let index = 0;
-  FENCE_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = FENCE_RE.exec(content)) !== null) {
-    const packet = parseHandoffFence(match[1].trim(), `handoff-${index}`);
-    if (!packet) continue;
-    if (match.index > cursor) {
-      segments.push({ kind: "markdown", text: content.slice(cursor, match.index) });
-    }
-    segments.push({ kind: "handoff", packet });
-    cursor = match.index + match[0].length;
-    index += 1;
-  }
-  if (cursor < content.length) {
-    segments.push({ kind: "markdown", text: content.slice(cursor) });
-  }
-  return segments.length ? segments : [{ kind: "markdown", text: content }];
-}
+type Segment = { kind: "markdown"; text: string } | { kind: "contract"; card: ContractCard };
 
 function MarkdownHtml({ text }: { text: string }) {
   const html = useMemo(
@@ -74,13 +41,21 @@ function MarkdownHtml({ text }: { text: string }) {
 }
 
 export const MarkdownContent = memo(function MarkdownContent({ content }: MarkdownContentProps) {
-  const segments = useMemo(() => splitHandoffSegments(content), [content]);
+  const segments = useMemo(
+    () =>
+      splitContractFences(content).map((segment): Segment =>
+        segment.kind === "contract" && segment.card
+          ? { kind: "contract", card: segment.card }
+          : { kind: "markdown", text: segment.text }
+      ),
+    [content]
+  );
 
   return (
     <>
       {segments.map((segment, index) =>
-        segment.kind === "handoff" ? (
-          <HandoffPacketView key={segment.packet.id} packet={segment.packet} />
+        segment.kind === "contract" ? (
+          <ContractCardView key={segment.card.id} card={segment.card} />
         ) : (
           <Fragment key={`md-${index}`}>
             <MarkdownHtml text={segment.text} />
