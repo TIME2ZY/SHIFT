@@ -665,15 +665,13 @@ body {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: var(--radius-md);
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-instrument-raised));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-rail));
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
   transition:
     color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+    border-color var(--duration-fast) var(--ease-out);
 }
 
 .react-new-session:hover:not(:disabled) {
@@ -687,18 +685,14 @@ body {
   opacity: 0.6;
 }
 
-/* Elevated session row */
+/* Session row: surface tone + selection bar, not a bordered card */
 .react-session-row {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 .react-session-row:hover,
@@ -709,11 +703,8 @@ body {
 .react-session-row[data-active],
 .react-session-row[data-active]:hover,
 .react-session-row[data-active]:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-instrument-raised));
-  box-shadow:
-    inset 3px 0 var(--accent),
-    0 2px 8px -2px color-mix(in srgb, var(--accent) 15%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 .react-session-item {
@@ -1067,27 +1058,26 @@ body {
   gap: var(--space-3);
 }
 
+/* Flat tile: surface tone carries the boundary, no card chrome */
 .react-prompt-card {
   display: grid;
   gap: 4px;
   padding: 14px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-instrument-raised);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition:
-    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .react-prompt-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow:
-    var(--shadow-md),
-    0 0 16px -4px var(--accent-glow);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-raised));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 .react-prompt-card:focus-visible {
@@ -1214,17 +1204,16 @@ body {
   font-size: 12px;
 }
 
-/* Bubble styling & Horizontal Overflow Prevention */
+/* Bubble: surface tone for the user turn, rule for the assistant turn */
 .react-message-bubble {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
   padding: 12px 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-sm);
-  transition: border-color var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
   overflow-wrap: break-word;
   word-break: break-word;
 }
@@ -1241,11 +1230,9 @@ body {
 
 .react-message[data-role="user"] .react-message-bubble {
   justify-self: end;
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
   border-top-right-radius: 4px;
-  border-top-left-radius: var(--radius-lg);
+  border-top-left-radius: var(--radius-md);
   background: var(--user-bg);
-  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .react-message[data-role="system"] .react-message-bubble {
@@ -1256,16 +1243,15 @@ body {
   box-shadow: none;
 }
 
+/* A live turn reads as an active rule, not a glow */
 .react-message[data-live] .react-message-bubble {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border-subtle));
-  box-shadow: 0 0 16px -4px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--user-bg));
 }
 
 .react-message[data-role="assistant"][data-live] .react-message-bubble {
-  border: 0;
-  border-inline-start: 2px solid
-    color-mix(in srgb, var(--agent-color, var(--accent)) 68%, var(--border-subtle));
+  background: transparent;
   box-shadow: none;
+  border-inline-start-color: var(--agent-color, var(--accent));
 }
 
 .react-message-content {
@@ -1820,10 +1806,9 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: 6px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-inset);
-  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -2173,6 +2158,7 @@ body {
   opacity: 0.55;
 }
 
+/* Composer is a control: it keeps an edge, but not card chrome */
 .react-composer-row {
   position: relative;
   display: grid;
@@ -2181,17 +2167,15 @@ body {
   gap: var(--space-3);
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
 .react-composer-row:focus-within {
   border-color: var(--accent);
-  box-shadow:
-    var(--shadow-md),
-    0 0 0 3px var(--accent-glow);
+  box-shadow: var(--focus-ring), var(--shadow-sm);
 }
 
 .react-composer-row textarea {
@@ -2410,10 +2394,11 @@ body {
   display: grid;
   flex: 0 0 auto;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 3px solid var(--danger);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 .trace-alert-center > button,
 .trace-alert-center li {
@@ -2466,10 +2451,11 @@ body {
 .trace-metrics {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .trace-metrics dl {
@@ -2563,10 +2549,11 @@ body {
 }
 
 .handoff-funnel {
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .handoff-funnel > header {
@@ -2654,9 +2641,10 @@ body {
 }
 
 .memory-diagnostics {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .memory-diagnostics > header {
@@ -2936,8 +2924,9 @@ body {
   gap: var(--space-2);
   align-items: center;
   padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 0;
   background: color-mix(in srgb, var(--accent) 5%, var(--surface-inset));
 }
 .trace-request-evidence span,
@@ -2975,8 +2964,9 @@ body {
   gap: 6px;
   margin-top: var(--space-2);
   padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
+  border-radius: 0;
   background: var(--surface-inset);
 }
 .trace-tool-summary > header {
@@ -3181,9 +3171,10 @@ body {
 }
 
 .trace-metrics-panel {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 .trace-metrics-panel > summary {
   display: flex;
@@ -3218,15 +3209,15 @@ body {
 .trace-metrics-panel .trace-metrics,
 .trace-metrics-panel .trace-offline-eval {
   border: 0;
-  border-top: 1px solid var(--border-subtle);
   border-radius: 0;
   background: transparent;
 }
 
 .audit-memory-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 .audit-memory-card-summary {
   display: grid;
@@ -3296,15 +3287,17 @@ body {
   height: calc(100% - 52px);
 }
 
+/* Task block sits on the panel surface; rules separate its sections */
 .react-collab-status {
   display: grid;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-sm);
+  padding: var(--space-1) 0 var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .react-collab-status header {
@@ -3435,11 +3428,13 @@ body {
 .react-task-evidence {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
+  gap: 0;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--border-subtle);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .react-task-evidence span {
@@ -3447,8 +3442,11 @@ body {
   gap: 3px;
   min-width: 0;
   padding: 7px 5px;
-  background: var(--surface-instrument);
   text-align: center;
+}
+
+.react-task-evidence span + span {
+  border-inline-start: 1px solid var(--border-subtle);
 }
 
 .react-task-evidence strong {
@@ -3470,9 +3468,10 @@ body {
 .react-acceptance-card {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
+  border-radius: 0;
   background: var(--surface-instrument);
 }
 
@@ -3710,28 +3709,31 @@ body {
   }
 }
 
+/* Flat list: rows divided by hairlines, selection is a tinted surface + bar */
 .react-agent-cards,
 .react-memory-list {
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
 }
 
 .react-agent-card,
 .react-memory-list article {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-instrument-raised);
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
   overflow: hidden;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.react-agent-card:first-child,
+.react-memory-list article:first-child {
+  border-top: 0;
 }
 
 .react-agent-card:hover:not([aria-disabled="true"]):not([data-unavailable]) {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border));
-  box-shadow: var(--shadow-md);
+  background: var(--surface-raised);
 }
 
 .react-agent-card[aria-disabled="true"] {
@@ -3745,15 +3747,8 @@ body {
 }
 
 .react-agent-card[data-selected] {
-  border-color: var(--agent-color, var(--accent));
-  background: color-mix(
-    in srgb,
-    var(--agent-color, var(--accent)) 8%,
-    var(--surface-instrument-raised)
-  );
-  box-shadow:
-    0 4px 14px -2px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent),
-    inset 3px 0 var(--agent-color, var(--accent));
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface-instrument));
+  box-shadow: inset 2px 0 var(--agent-color, var(--accent));
 }
 
 .react-agent-select {
@@ -3804,10 +3799,9 @@ body {
 }
 
 .react-agent-details {
-  padding: 0 var(--space-3) var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3);
   padding-top: var(--space-3);
-  margin: 0 var(--space-1) var(--space-1);
+  border-top: 1px solid var(--border-subtle);
   cursor: default;
 }
 
@@ -3834,9 +3828,9 @@ body {
 
 .react-memory-inject {
   margin-bottom: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-instrument));
   color: var(--text-secondary);
   font-size: 12px;
@@ -4020,7 +4014,7 @@ body {
 }
 
 .react-memory-list article {
-  border-left: 2px solid var(--border-hard);
+  padding-left: var(--space-1);
 }
 
 .react-memory-list header {
@@ -4030,16 +4024,16 @@ body {
 .react-panel-empty,
 .react-panel-error {
   margin: 0;
-  padding: var(--space-3);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
   color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .react-panel-error {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-inline-start-color: color-mix(in srgb, var(--danger) 60%, var(--border));
   color: var(--danger);
 }
 
