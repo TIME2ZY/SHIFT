@@ -217,9 +217,37 @@ describe("CollaborationStatus", () => {
       />
     );
     const chain = screen.getByLabelText("协作链");
-    expect(chain).toHaveTextContent("Codex (讨论) · 完成");
-    expect(chain).toHaveTextContent("Grok (修复) · 失败");
+    expect(chain).toHaveTextContent("Codex (讨论)");
+    expect(chain).toHaveTextContent("Grok (修复)");
+    expect(chain).toHaveTextContent("完成");
+    expect(chain).toHaveTextContent("失败");
     expect(chain).not.toHaveTextContent("未知");
+    expect(chain).toHaveTextContent("2 跳 · 1 完成 · 1 失败");
+  });
+
+  it("shows the chain tail and reveals earlier hops on demand", async () => {
+    const chain = Array.from({ length: 6 }, (_, idx) => ({
+      seatId: `seat-${idx}`,
+      providerId: "codex",
+      label: `跳${idx}`,
+      duty: "implement",
+      skillName: null,
+      enforcementLevel: null,
+      invocationId: `inv-${idx}`,
+      status: "completed",
+      startedAt: null,
+      endedAt: null,
+      terminalReason: null,
+    }));
+    render(<CollaborationStatus loading={false} error={null} snapshot={snapshot({ chain })} />);
+    const view = screen.getByLabelText("协作链");
+    expect(view).toHaveTextContent("6 跳 · 6 完成");
+    expect(view).toHaveTextContent("跳5");
+    expect(view).not.toHaveTextContent("跳0");
+    await userEvent.click(screen.getByRole("button", { name: /展开更早的 2 跳/ }));
+    expect(screen.getByLabelText("协作链")).toHaveTextContent("跳0");
+    await userEvent.click(screen.getByRole("button", { name: "只看最近几跳" }));
+    expect(screen.getByLabelText("协作链")).not.toHaveTextContent("跳0");
   });
 
   it("never prints a raw blocker reason code", () => {

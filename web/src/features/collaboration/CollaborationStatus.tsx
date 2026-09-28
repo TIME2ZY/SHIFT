@@ -1,4 +1,5 @@
-import type { AcceptanceCard, CollaborationSnapshot } from "./types";
+import { useState } from "react";
+import type { AcceptanceCard, CollaborationChainStep, CollaborationSnapshot } from "./types";
 import { TaskContextDetails } from "./TaskContextDetails";
 import { DUTY_LABELS } from "../../shared/contracts/contract-fence";
 import { invocationStateLabel } from "../../shared/contracts/invocation-state";
@@ -89,18 +90,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
             </div>
           </dl>
           {snapshot.chain && snapshot.chain.length > 0 ? (
-            <div className="react-task-chain" aria-label="协作链">
-              <small>协作链路</small>
-              <ol className="react-task-chain-steps">
-                {snapshot.chain.map((step, idx) => (
-                  <li key={step.invocationId || `${step.seatId}-${idx}`} data-status={step.status}>
-                    <span>{step.label || step.providerId || step.seatId}</span>
-                    {step.duty ? <span> ({DUTY_LABELS[step.duty] || step.duty})</span> : null}
-                    <em> · {invocationStateLabel(step.status)}</em>
-                  </li>
-                ))}
-              </ol>
-            </div>
+            <ChainView chain={snapshot.chain} />
           ) : null}
           {snapshot.pendingHandoffs && snapshot.pendingHandoffs.length > 0 ? (
             <div className="react-task-pending-handoffs" role="status">
@@ -148,6 +138,59 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
         </>
       ) : null}
     </section>
+  );
+}
+
+/** The tail of the chain is what the reader acts on; the head is history. */
+const CHAIN_TAIL = 4;
+
+function ChainView({ chain }: { chain: CollaborationChainStep[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const hidden = Math.max(0, chain.length - CHAIN_TAIL);
+  const steps = showAll ? chain : chain.slice(hidden);
+
+  const counts = chain.reduce<Record<string, number>>((acc, step) => {
+    const label = invocationStateLabel(step.status);
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+  const summary = Object.entries(counts)
+    .map(([label, count]) => `${count} ${label}`)
+    .join(" · ");
+
+  return (
+    <div className="react-task-chain" aria-label="协作链">
+      <header className="react-task-chain-head">
+        <small>协作链路</small>
+        <span>
+          {chain.length} 跳 · {summary}
+        </span>
+      </header>
+      <ol className="react-task-chain-steps">
+        {steps.map((step, idx) => {
+          const absolute = showAll ? idx : hidden + idx;
+          return (
+            <li key={step.invocationId || `${step.seatId}-${absolute}`} data-status={step.status}>
+              <i className="react-task-chain-dot" aria-hidden="true" />
+              <span className="react-task-chain-who">
+                {step.label || step.providerId || step.seatId}
+                {step.duty ? ` (${DUTY_LABELS[step.duty] || step.duty})` : ""}
+              </span>
+              <em>{invocationStateLabel(step.status)}</em>
+            </li>
+          );
+        })}
+      </ol>
+      {hidden > 0 || showAll ? (
+        <button
+          type="button"
+          className="react-task-chain-toggle"
+          onClick={() => setShowAll((value) => !value)}
+        >
+          {showAll ? "只看最近几跳" : `展开更早的 ${hidden} 跳`}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

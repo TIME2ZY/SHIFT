@@ -3547,6 +3547,96 @@ body {
   margin: 0;
 }
 
+/* Chain: the tail is a live handover rail, not a 17-row numbered dump */
+.react-task-chain {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.react-task-chain-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-task-chain-head small {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.react-task-chain-head span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-steps {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.react-task-chain-steps li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 3px 0;
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
+
+.react-task-chain-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-hard);
+}
+
+.react-task-chain-steps li[data-status="completed"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="sealed"] .react-task-chain-dot {
+  background: var(--success);
+}
+
+.react-task-chain-steps li[data-status="failed"] .react-task-chain-dot {
+  background: var(--danger);
+}
+
+.react-task-chain-steps li[data-status="active"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="running"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="started"] .react-task-chain-dot {
+  background: var(--accent);
+}
+
+.react-task-chain-who {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-task-chain-steps em {
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-toggle {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-toggle:hover {
+  text-decoration: underline;
+}
+
 .react-task-acceptance-details > summary {
   padding: var(--space-2) 0;
   color: var(--text-secondary);
