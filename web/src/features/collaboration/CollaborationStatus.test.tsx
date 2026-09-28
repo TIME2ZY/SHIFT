@@ -178,4 +178,78 @@ describe("CollaborationStatus", () => {
     expect(screen.getByRole("region", { name: "验收卡" })).toHaveTextContent("已拒绝");
     expect(screen.getByText("验收席位已拒绝本次交付。")).toBeInTheDocument();
   });
+
+  it("labels chain steps by invocation state, not task state", () => {
+    render(
+      <CollaborationStatus
+        loading={false}
+        error={null}
+        snapshot={snapshot({
+          chain: [
+            {
+              seatId: "seat-codex",
+              providerId: "codex",
+              label: "Codex",
+              duty: "discuss",
+              skillName: null,
+              enforcementLevel: null,
+              invocationId: "inv-1",
+              status: "completed",
+              startedAt: null,
+              endedAt: null,
+              terminalReason: null,
+            },
+            {
+              seatId: "seat-grok",
+              providerId: "grok",
+              label: "Grok",
+              duty: "fix",
+              skillName: null,
+              enforcementLevel: null,
+              invocationId: "inv-2",
+              status: "failed",
+              startedAt: null,
+              endedAt: null,
+              terminalReason: null,
+            },
+          ],
+        })}
+      />
+    );
+    const chain = screen.getByLabelText("协作链");
+    expect(chain).toHaveTextContent("Codex (讨论) · 完成");
+    expect(chain).toHaveTextContent("Grok (修复) · 失败");
+    expect(chain).not.toHaveTextContent("未知");
+  });
+
+  it("never prints a raw blocker reason code", () => {
+    render(
+      <CollaborationStatus
+        loading={false}
+        error={null}
+        snapshot={snapshot({
+          blocker: {
+            type: "execution_failed",
+            reason: "some_internal_code_we_have_not_mapped",
+          },
+        })}
+      />
+    );
+    expect(screen.queryByText("some_internal_code_we_have_not_mapped")).not.toBeInTheDocument();
+    expect(screen.getByText("推进受阻，请展开审计页查看本次执行的完整记录。")).toBeInTheDocument();
+  });
+
+  it("translates known provider failure reasons", () => {
+    render(
+      <CollaborationStatus
+        loading={false}
+        error={null}
+        snapshot={snapshot({
+          blocker: { type: "execution_failed", reason: "provider-failed" },
+        })}
+      />
+    );
+    expect(screen.queryByText("provider-failed")).not.toBeInTheDocument();
+    expect(screen.getByText("执行器未正常返回，请重试或换一个席位")).toBeInTheDocument();
+  });
 });

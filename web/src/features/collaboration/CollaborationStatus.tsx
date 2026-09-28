@@ -8,6 +8,21 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "已拒绝",
 };
 
+/* Chain steps carry invocation states (see shared/collab-contracts), not task states. */
+const CHAIN_STATUS_LABELS: Record<string, string> = {
+  created: "排队中",
+  started: "进行中",
+  running: "进行中",
+  streaming: "进行中",
+  active: "进行中",
+  pending: "等待中",
+  completed: "完成",
+  sealed: "完成",
+  failed: "失败",
+  cancelled: "已停止",
+  aborted: "已停止",
+};
+
 const DUTY_LABELS: Record<string, string> = {
   discuss: "讨论",
   plan: "规划",
@@ -36,7 +51,20 @@ const BLOCKER_LABELS: Record<string, string> = {
   invocation_failed: "上一轮执行失败，请排查原因后重试",
   invocation_aborted: "执行已被用户停止",
   handoff_rejected: "交接请求未满足门禁条件",
+  provider_failed: "执行器未正常返回，请重试或换一个席位",
+  "provider-failed": "执行器未正常返回，请重试或换一个席位",
+  provider_unavailable: "执行器当前不可用，请确认 CLI 已登录后重试",
+  "provider-unavailable": "执行器当前不可用，请确认 CLI 已登录后重试",
+  provider_timeout: "执行器响应超时，请重试",
+  "provider-timeout": "执行器响应超时，请重试",
 };
+
+/** Fallback for reason codes we have not mapped yet: never print the raw code. */
+function blockerReasonLabel(reason: string) {
+  const known = BLOCKER_LABELS[reason];
+  if (known) return known;
+  return "推进受阻，请展开审计页查看本次执行的完整记录。";
+}
 
 const REVIEW_MODE_LABELS: Record<string, string> = {
   same_seat: "当前席位自审",
@@ -76,7 +104,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
               <dd>{seatLabel(snapshot)}</dd>
             </div>
             <div>
-              <dt>职责 / Skill</dt>
+              <dt>职责</dt>
               <dd title={snapshot.currentSkill || undefined}>{dutyAndSkillLabel(snapshot)}</dd>
             </div>
             <div>
@@ -92,7 +120,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
                   <li key={step.invocationId || `${step.seatId}-${idx}`} data-status={step.status}>
                     <span>{step.label || step.providerId || step.seatId}</span>
                     {step.duty ? <span> ({DUTY_LABELS[step.duty] || step.duty})</span> : null}
-                    <em> · {STATUS_LABELS[step.status] || "未知"}</em>
+                    <em> · {CHAIN_STATUS_LABELS[step.status] || "未知"}</em>
                   </li>
                 ))}
               </ol>
@@ -112,7 +140,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
           {snapshot.blocker ? (
             <div className="react-collab-blocker" role="status">
               <small>{blockerTypeLabel(snapshot.blocker.type)}</small>
-              <strong>{BLOCKER_LABELS[snapshot.blocker.reason] || snapshot.blocker.reason}</strong>
+              <strong>{blockerReasonLabel(snapshot.blocker.reason)}</strong>
             </div>
           ) : null}
           <details className="react-task-goal" key={snapshot.goalOriginal}>
@@ -127,8 +155,8 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
             <p>{snapshot.goalOriginal || "目标尚未记录"}</p>
           </details>
           <div className="react-task-evidence" aria-label="完成证据">
-            <Evidence label="脏文件" value={dirtyFilesLabel(snapshot.evidence.dirtyFileCount)} />
-            <Evidence label="HEAD" value={shortSha(snapshot.evidence.headSha)} />
+            <Evidence label="未提交" value={dirtyFilesLabel(snapshot.evidence.dirtyFileCount)} />
+            <Evidence label="当前提交" value={shortSha(snapshot.evidence.headSha)} />
             <Evidence label="PR" value={snapshot.evidence.prUrl ? "已记录" : "—"} />
             <Evidence label="CI" value={ciLabel(snapshot.evidence.ciStatus)} />
           </div>
@@ -279,5 +307,5 @@ function acceptanceReasonLabel(reason: string) {
     ci_not_successful: "CI 尚未通过。",
     final_acceptance_not_bound_to_outcome: "Agent 验收证据未与当前目标、方案和提交绑定。",
   };
-  return labels[reason] || reason;
+  return labels[reason] || "验收未通过，完整原因见审计页。";
 }
