@@ -1964,14 +1964,17 @@ body {
 
 .react-contract-card-body {
   margin: var(--space-2) 0 0;
-  padding: var(--space-2) 0 0;
-  border-top: 1px solid var(--border-subtle);
   color: var(--text-primary);
   font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.65;
+  font-size: var(--text-ui);
+  line-height: var(--leading-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Blank lines separate paragraphs: a wall of CJK has no rhythm otherwise */
+.react-contract-card-body + .react-contract-card-body {
+  margin-top: var(--space-3);
 }
 
 .react-contract-card-source > summary {
@@ -2537,6 +2540,28 @@ body {
 
 .react-panel-title strong {
   font-size: 13px;
+}
+
+.react-panel-action {
+  margin-inline-start: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.react-panel-action:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.react-panel-action:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .react-panel-title span {
@@ -3503,6 +3528,29 @@ body {
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+/* Group header states the kind once; the rows carry only what varies */
+.audit-memory-group {
+  display: grid;
+  gap: 0;
+  margin-top: var(--space-3);
+}
+
+.audit-memory-group > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.audit-memory-group > h3 small {
+  color: var(--text-tertiary);
+  font: 400 var(--text-micro)/1 var(--font-mono);
 }
 
 .audit-memory-card {
@@ -5154,6 +5202,17 @@ body {
   color: var(--accent);
   font: inherit;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+/* The roster has one "recheck all" action; this is the per-seat escape hatch */
+.react-agent-card:hover .react-agent-availability button,
+.react-agent-availability button:focus-visible,
+.react-agent-availability[data-unavailable] button {
+  opacity: 1;
+  pointer-events: auto;
 }
 .react-agent-availability button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));

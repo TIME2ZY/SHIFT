@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { MemoryItem } from "../memory/queries";
@@ -42,6 +42,17 @@ export function AuditPage({
   const summary = useSessionAuditSummaryQuery(sessionId);
   const usageOf = (id: string) => memoryUsage.data?.[id];
   const activeCount = memories.data?.memories.length ?? summary.data?.memory.active ?? 0;
+  const groupedMemories = useMemo(() => {
+    const groups = new Map<string, MemoryItem[]>();
+    for (const memory of memories.data?.memories ?? []) {
+      const kind = memoryKindLabel(memory.kind);
+      const list = groups.get(kind) ?? [];
+      list.push(memory);
+      groups.set(kind, list);
+    }
+    // Largest kind first: the composition of the session's memory is the point.
+    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [memories.data]);
 
   return (
     <main id="main-content" className="audit-page">
@@ -95,11 +106,21 @@ export function AuditPage({
             {memories.data?.memories.length === 0 ? (
               <p className="react-panel-empty">当前会话没有有效 Memory。</p>
             ) : null}
-            <div className="react-memory-list">
-              {memories.data?.memories.map((memory) => (
-                <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
-              ))}
-            </div>
+            {/* Grouped by kind: "11 约束 + 2 决策" is a fact worth reading at a
+                glance, and a flat list of thirteen identical rows is not. */}
+            {groupedMemories.map(([kind, list]) => (
+              <section key={kind} className="audit-memory-group">
+                <h3>
+                  {kind}
+                  <small>{list.length}</small>
+                </h3>
+                <div className="react-memory-list">
+                  {list.map((memory) => (
+                    <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
+                  ))}
+                </div>
+              </section>
+            ))}
             <ObservabilityContrast sessionId={sessionId} />
           </div>
         </aside>
@@ -128,7 +149,6 @@ function MemoryCard({
         <svg className="audit-memory-chevron" viewBox="0 0 16 16" aria-hidden="true">
           <path d="m6 3 5 5-5 5" />
         </svg>
-        <span>{memoryKindLabel(memory.kind)}</span>
         <small>{usageEvidence(usage)}</small>
       </button>
       {expanded ? (

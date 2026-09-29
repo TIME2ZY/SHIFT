@@ -2,6 +2,32 @@ import type { ContractCard as ContractCardData } from "../../shared/contracts/co
 import { IdChip } from "../../shared/ui/IdChip";
 
 /**
+ * CJK prose inside a packet still needs paragraph rhythm. Blank lines separate
+ * paragraphs; a single line break is meaningful inside a field like `what: |`
+ * (one statement per line) so it is kept as a break rather than folded away.
+ */
+function Prose({ value }: { value: string }) {
+  return (
+    <>
+      {value
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean)
+        .map((paragraph, index) => (
+          <p key={index} className="react-contract-card-body">
+            {paragraph.split("\n").map((line, lineIndex, lines) => (
+              <span key={lineIndex}>
+                {line}
+                {lineIndex < lines.length - 1 ? <br /> : null}
+              </span>
+            ))}
+          </p>
+        ))}
+    </>
+  );
+}
+
+/**
  * An agent-authored fence is a contract, not a source listing. Render the
  * route/verdict on the head, then the fields the successor seat has to act on.
  * Long progress text collapses so the packet stays scannable in the flow.
@@ -28,7 +54,7 @@ export function ContractCard({ card }: { card: ContractCardData }) {
                 <span className="react-contract-card-label">{field.label}</span>
                 <span className="react-contract-card-preview">{field.value.split("\n")[0]}</span>
               </summary>
-              <p className="react-contract-card-body">{field.value}</p>
+              <Prose value={field.value} />
             </details>
           ) : (
             <div key={field.key} className="react-contract-card-field">

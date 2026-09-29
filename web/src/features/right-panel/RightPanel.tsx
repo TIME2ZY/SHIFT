@@ -59,6 +59,14 @@ export function RightPanel({
   const hasSelection =
     Boolean(sessionId) && selectableAgents.some((agent) => agent.id === selectedAgentId);
 
+  /* One obvious action for the whole roster; the per-seat button stays as an
+     escape hatch and only surfaces where it is needed. */
+  const refreshAll = () => {
+    for (const agent of enabledAgents) {
+      if (!agent.availability?.checking) refresh.mutate(agent.id);
+    }
+  };
+
   function rosterTabIndexFor(agent: AgentSummary): 0 | -1 {
     if (!sessionId || agent.routable === false) return -1;
     if (agent.id === selectedAgentId) return 0;
@@ -137,6 +145,16 @@ export function RightPanel({
       </header>
       <header className="react-panel-title">
         <strong>席位</strong>
+        {enabledAgents.length > 0 ? (
+          <button
+            type="button"
+            className="react-panel-action"
+            disabled={refresh.isPending}
+            onClick={refreshAll}
+          >
+            {refresh.isPending ? "检测中…" : "重新检测全部"}
+          </button>
+        ) : null}
       </header>
 
       <div className="react-panel-body react-panel-body-agents">
