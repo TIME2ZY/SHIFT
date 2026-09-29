@@ -4689,10 +4689,27 @@ body {
   min-height: 0;
   width: 100%;
   max-width: 1480px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
   align-items: stretch;
   gap: var(--space-4);
   margin: 0 auto;
+}
+
+/* Below ~900px the fixed memory rail leaves the trace column too narrow to
+   hold a hop row, so the columns stack instead of squeezing the spine. */
+@media (max-width: 900px) {
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-traces {
+    min-height: min(72dvh, 720px);
+  }
+
+  .audit-memory {
+    position: static;
+    max-height: none;
+  }
 }
 
 .audit-traces,
@@ -5096,7 +5113,6 @@ body {
     align-items: flex-start;
   }
 
-  .audit-layout,
   .audit-page .trace-metrics dl,
   .audit-page .trace-controls {
     grid-template-columns: 1fr;
