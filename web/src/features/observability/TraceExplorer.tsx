@@ -22,13 +22,24 @@ function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
 }
 
+function elapsedFromMs(ms: number) {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours}h ${restMinutes}m` : `${hours}h`;
+}
+
 function elapsed(startedAt: string | null, endedAt: string | null) {
   const started = Date.parse(startedAt || "");
   const ended = Date.parse(endedAt || "");
   if (!Number.isFinite(started)) return "时间未知";
   if (!Number.isFinite(ended)) return "进行中";
-  const ms = Math.max(0, ended - started);
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  return elapsedFromMs(Math.max(0, ended - started));
 }
 
 function routePreview(trace: TraceSummary) {
@@ -123,7 +134,7 @@ function memoryEventCopy(span: TraceSpan) {
   };
 }
 
-/** Longest hop sets the duration bar scale, so one slow hop reads at a glance. */
+/** Settled duration of one hop, or null while it is still running. */
 function durationMs(startedAt: string | null, endedAt: string | null): number | null {
   const start = Date.parse(startedAt || "");
   if (!Number.isFinite(start)) return null;
@@ -202,21 +213,70 @@ function SpineLink({ handoff, label }: { handoff: ExecutionHandoff; label(id: st
   );
 }
 
+/**
+ * Where the session time went. One bar, segments proportional to each hop's
+ * share of the total: answering "which hop was slow" needs a comparison, but
+ * answering "where did the time go" needs the parts to sum to the whole. A
+ * per-hop bar normalised to the longest hop loses both — the outlier eats the
+ * range and the rest collapse to slivers.
+ */
+function TimeRibbon({
+  invocations,
+  durations,
+  label,
+}: {
+  invocations: ExecutionInvocation[];
+  durations: (number | null)[];
+  label(id: string): string;
+}) {
+  const total = durations.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const measured = durations.filter((value): value is number => Boolean(value)).length;
+  if (total <= 0 || measured < 2) return null;
+  const longest = Math.max(...invocations.map((_, index) => (durations[index] ?? 0) / total));
+  const longestIndex = durations.findIndex((value) => (value ?? 0) / total === longest);
+
+  return (
+    <figure className="trace-time-ribbon">
+      <figcaption>
+        <span>时间去向</span>
+        <small>
+          共 {elapsedFromMs(total)}
+          {longestIndex >= 0
+            ? ` · 最长 ${label(invocations[longestIndex].agentId)} 占 ${Math.round(longest * 100)}%`
+            : ""}
+        </small>
+      </figcaption>
+      <div className="trace-time-ribbon-bar" aria-hidden="true">
+        {invocations.map((invocation, index) => {
+          const duration = durations[index];
+          if (!duration) return null;
+          const share = Math.round((duration / total) * 100);
+          return (
+            <i
+              key={invocation.invocationId}
+              data-agent-color={agentColorSlot(invocation.agentId)}
+              style={{ width: `${(duration / total) * 100}%` }}
+              title={`${label(invocation.agentId)} · ${elapsedFromMs(duration)} · 占 ${share}%`}
+            />
+          );
+        })}
+      </div>
+    </figure>
+  );
+}
+
 function SpineHop({
   index,
   invocation,
   spans,
   label,
-  durationWidth,
 }: {
   index: number;
   invocation: ExecutionInvocation;
   spans: TraceSpan[];
   label(id: string): string;
-  durationWidth: number;
 }) {
   const elapsedLabel = elapsed(invocation.startedAt, invocation.endedAt);
-  const open = invocation.state === "active" || !invocation.endedAt;
   const memory = memoryCountParts(spans);
   return (
     <li
@@ -228,13 +288,6 @@ function SpineHop({
         <span className="trace-spine-hop-index">{index}</span>
         <strong>{label(invocation.agentId)}</strong>
         <span className="trace-spine-hop-duty">{triggerTypeLabel(invocation.triggerType)}</span>
-        <span
-          className="trace-spine-duration"
-          aria-hidden="true"
-          title={open ? "未结束" : elapsedLabel}
-        >
-          <i data-open={open || undefined} style={{ width: `${durationWidth}%` }} />
-        </span>
         <small className="trace-spine-hop-elapsed">{elapsedLabel}</small>
         {invocation.outcome.errorCode ? (
           <b className="trace-spine-error" title={invocation.outcome.errorCode}>
@@ -273,7 +326,6 @@ function HandoverSpine({
   const invocationIds = new Set(invocations.map((item) => item.invocationId));
   const grouped = groupHandoffs(handoffs, invocationIds);
   const durations = invocations.map((item) => durationMs(item.startedAt, item.endedAt));
-  const longest = Math.max(1, ...(durations.filter((value) => value != null) as number[]));
   const memoryTotals = memoryCountParts(recallSpans);
 
   return (
@@ -286,22 +338,16 @@ function HandoverSpine({
         </small>
       </header>
       <p className="trace-spine-status">{statusLine}</p>
+      <TimeRibbon invocations={invocations} durations={durations} label={label} />
       <ol className="trace-spine-list">
         {invocations.map((invocation, index) => {
           const spans = recallSpans.filter((span) => span.invocationId === invocation.invocationId);
-          const duration = durations[index];
           return (
             <Fragment key={invocation.invocationId}>
               {(grouped.incoming.get(invocation.invocationId) || []).map((handoff) => (
                 <SpineLink key={handoff.handoffId} handoff={handoff} label={label} />
               ))}
-              <SpineHop
-                index={index + 1}
-                invocation={invocation}
-                spans={spans}
-                label={label}
-                durationWidth={duration == null ? 0 : (duration / longest) * 100}
-              />
+              <SpineHop index={index + 1} invocation={invocation} spans={spans} label={label} />
               {(grouped.dangling.get(invocation.invocationId) || []).map((handoff) => (
                 <SpineLink key={handoff.handoffId} handoff={handoff} label={label} />
               ))}

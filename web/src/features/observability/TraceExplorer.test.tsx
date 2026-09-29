@@ -600,6 +600,14 @@ describe("TraceExplorer", () => {
       "Codex",
     ]);
 
+    // The ribbon apportions the session time: one segment per hop, and the
+    // parts add up to the whole rather than to the longest hop.
+    const segments = [...document.querySelectorAll<HTMLElement>(".trace-time-ribbon-bar i")];
+    expect(segments).toHaveLength(7);
+    const shareSum = segments.reduce((sum, node) => sum + parseFloat(node.style.width), 0);
+    expect(shareSum).toBeCloseTo(100, 0);
+    expect(screen.getByText("时间去向")).toBeInTheDocument();
+
     await userEvent.click(screen.getByRole("button", { name: /同一来源两条交接/ }));
     expect(screen.getByText(/3 次调用 · 3 次交接/)).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接 1 失败")).toBeInTheDocument();
@@ -614,8 +622,8 @@ describe("TraceExplorer", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /仍在执行/ }));
     expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
-    expect(document.querySelector(".trace-spine-duration i[data-open='true']")).not.toBeNull();
-    expect(screen.getByTitle("未结束")).toBeInTheDocument();
+    // One unfinished hop and nothing else to apportion: no time ribbon at all.
+    expect(document.querySelector(".trace-time-ribbon-bar")).toBeNull();
   });
 
   it("reports a failed trace query instead of pretending the ledger is empty", async () => {

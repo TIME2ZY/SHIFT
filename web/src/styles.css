@@ -3295,25 +3295,45 @@ body {
   font-size: var(--text-meta);
 }
 
-/* Duration is relative to the longest hop: slow work reads without an axis */
-.trace-spine-duration {
-  flex: 1 1 120px;
-  max-width: 260px;
-  min-width: 48px;
-  height: 6px;
+/* Time ribbon: one bar, segments = each hop's share of the session total */
+.trace-time-ribbon {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 var(--space-1);
+}
+.trace-time-ribbon figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.trace-time-ribbon figcaption > span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.trace-time-ribbon figcaption > small {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.trace-time-ribbon-bar {
+  display: flex;
+  height: 10px;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--surface-inset);
 }
-.trace-spine-duration i {
+.trace-time-ribbon-bar i {
   display: block;
   height: 100%;
-  border-radius: 3px;
   background: var(--agent-color, var(--accent));
+  box-shadow: inset -1px 0 0 var(--surface-canvas);
+  transition: filter var(--duration-fast) var(--ease-standard);
 }
-.trace-spine-duration i[data-open="true"] {
-  background: repeating-linear-gradient(135deg, var(--accent) 0 4px, transparent 4px 8px);
+.trace-time-ribbon-bar i:hover {
+  filter: brightness(1.15);
 }
+
 .trace-spine-hop-elapsed {
   flex: 0 0 auto;
   min-width: 4.5em;
