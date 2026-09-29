@@ -384,7 +384,10 @@ export function App() {
               </div>
               <div className="react-chat-actions">
                 {activeStatusLabel ? (
+                  /* Scoped to this turn: the task card's status is about the
+                      collaboration as a whole, and the two are often out of step. */
                   <span className="react-run-status" data-status={run?.status}>
+                    <small>本轮</small>
                     {activeStatusLabel}
                   </span>
                 ) : null}

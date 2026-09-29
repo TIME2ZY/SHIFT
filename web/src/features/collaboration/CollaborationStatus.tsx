@@ -77,7 +77,9 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
         <>
           <dl className="react-task-assignment">
             <div>
-              <dt>当前席位</dt>
+              {/* "在岗" names the collaboration's duty seat; the composer's target
+                  for the next message is a different thing and says so itself. */}
+              <dt>在岗席位</dt>
               <dd>{seatLabel(snapshot)}</dd>
             </div>
             <div>

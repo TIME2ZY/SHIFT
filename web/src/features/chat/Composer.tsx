@@ -188,7 +188,9 @@ export function Composer({
               : useWorktree
                 ? "将在隔离 worktree 中运行"
                 : targetAgent
-                  ? `发给 ${targetAgent.label} · Enter 发送`
+                  ? /* Scoped to this message: the collaboration's duty seat is a
+                        separate fact and is labelled 在岗席位 in the task card. */
+                    `这条发给 ${targetAgent.label} · Enter 发送`
                   : "暂无可接活席位 · 请查看席位卡并重新检测"}
         </span>
       </div>

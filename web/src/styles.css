@@ -942,6 +942,18 @@ body {
   background: var(--surface-instrument-raised);
 }
 
+/* The status belongs to this turn; the task card's status is a different object */
+.react-run-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.react-run-status small {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 400;
+}
+
 .react-run-status::before {
   display: inline-block;
   width: 6px;
