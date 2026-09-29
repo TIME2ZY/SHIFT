@@ -385,10 +385,14 @@ export function App() {
               <div className="react-chat-actions">
                 {activeStatusLabel ? (
                   /* Scoped to this turn: the task card's status is about the
-                      collaboration as a whole, and the two are often out of step. */
-                  <span className="react-run-status" data-status={run?.status}>
+                      collaboration as a whole, and the two are often out of step.
+                      The scope word sits beside the chip so the chip itself stays
+                      exactly the status. */
+                  <span className="react-run-status-group">
                     <small>本轮</small>
-                    {activeStatusLabel}
+                    <span className="react-run-status" data-status={run?.status}>
+                      {activeStatusLabel}
+                    </span>
                   </span>
                 ) : null}
                 <button

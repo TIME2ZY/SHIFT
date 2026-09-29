@@ -943,12 +943,13 @@ body {
 }
 
 /* The status belongs to this turn; the task card's status is a different object */
-.react-run-status {
+.react-run-status-group {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
 }
-.react-run-status small {
+
+.react-run-status-group small {
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 400;
