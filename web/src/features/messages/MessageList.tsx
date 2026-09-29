@@ -11,6 +11,7 @@ import type { AgentSummary } from "../agents/types";
 import type { PersistedMessage } from "./types";
 import type { TraceSummary } from "../observability/types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 interface QuickPrompt {
   title: string;
@@ -528,7 +529,7 @@ export function MessageList({
   }
 
   if (isLoading) {
-    return <div className="react-message-state">正在加载消息…</div>;
+    return <Skeleton lines={4} label="正在加载消息" />;
   }
 
   if (error) {

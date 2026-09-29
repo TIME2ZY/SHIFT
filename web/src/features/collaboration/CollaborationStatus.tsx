@@ -3,6 +3,7 @@ import type { AcceptanceCard, CollaborationChainStep, CollaborationSnapshot } fr
 import { TaskContextDetails } from "./TaskContextDetails";
 import { DUTY_LABELS } from "../../shared/contracts/contract-fence";
 import { invocationStateLabel } from "../../shared/contracts/invocation-state";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "推进中",
@@ -67,9 +68,7 @@ export function CollaborationStatus({ snapshot, loading, error }: CollaborationS
           任务状态暂不可用。
         </p>
       ) : null}
-      {loading && !snapshot && !error ? (
-        <p className="react-panel-empty">正在读取任务状态…</p>
-      ) : null}
+      {loading && !snapshot && !error ? <Skeleton lines={3} label="正在读取任务状态" /> : null}
       {!loading && !error && !snapshot ? (
         <p className="react-panel-empty">发送消息后，这里会显示目标与完成证据。</p>
       ) : null}

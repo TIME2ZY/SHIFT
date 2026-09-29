@@ -325,7 +325,7 @@ export function App() {
           sessions={sessions.data ?? []}
           agents={agents.data ?? []}
           activeSessionId={activeSessionId}
-          isLoading={Boolean(activeProjectKey) && sessions.isPending}
+          isLoading={projects.isPending || sessions.isFetching}
           error={sessions.error}
           isCreating={createSession.isPending}
           deletingSessionId={deleteSession.isPending ? deleteSession.variables?.sessionId : null}

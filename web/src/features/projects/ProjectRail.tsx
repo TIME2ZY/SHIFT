@@ -6,6 +6,7 @@ import {
 } from "./mutations";
 import { useArchivedProjectsQuery } from "./queries";
 import type { ProjectSummary } from "./types";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 interface ProjectRailProps {
   projects: ProjectSummary[];
@@ -127,7 +128,11 @@ export function ProjectRail({
         </button>
       </header>
 
-      {isLoading ? <p className="react-project-message">正在读取项目…</p> : null}
+      {isLoading ? (
+        <div className="react-project-message">
+          <Skeleton lines={2} label="正在读取项目" />
+        </div>
+      ) : null}
       {error ? (
         <div className="react-project-message" role="alert">
           <p>无法加载项目：{error.message}</p>

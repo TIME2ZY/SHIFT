@@ -9,6 +9,7 @@ import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
 import { evidenceKindLabel, memoryKindLabel, memoryTitle } from "./trace-labels";
 import { IdChip } from "../../shared/ui/IdChip";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 function formatMemoryDate(value: string | number | undefined) {
   if (value == null) return "时间未记录";
@@ -96,7 +97,7 @@ export function AuditPage({
           <div className="audit-column-body">
             {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
             {memories.isPending && sessionId ? (
-              <p className="react-panel-empty">正在读取 Memory…</p>
+              <Skeleton lines={5} label="正在读取 Memory" />
             ) : null}
             {memories.error ? (
               <p className="react-panel-error" role="alert">

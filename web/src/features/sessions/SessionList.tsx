@@ -3,6 +3,7 @@ import { AgentAvatar } from "../agents/AgentAvatar";
 import type { AgentSummary } from "../agents/types";
 import { sessionDisplayTitle } from "./display";
 import type { SessionSummary } from "./types";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 interface SessionListProps {
   sessions: SessionSummary[];
@@ -126,7 +127,11 @@ export function SessionList({
   return (
     <div className="react-session-panel">
       {toolbar}
-      {isLoading ? <p className="react-sidebar-message">正在加载对话…</p> : null}
+      {isLoading ? (
+        <div className="react-sidebar-message">
+          <Skeleton lines={3} label="正在加载对话" />
+        </div>
+      ) : null}
       {error ? (
         <div className="react-sidebar-message" role="alert">
           <p>无法加载对话：{error.message}</p>
