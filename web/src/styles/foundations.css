@@ -1,0 +1,66 @@
+/* styles/foundations.css — split out of the former single styles.css.
+   Order within this file follows the original cascade; see styles.css for the import order. */
+
+body {
+  min-width: 320px;
+}
+
+#root {
+  height: 100%;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes react-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes react-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes react-skeleton-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes react-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@container (max-width: 640px) {
+  .trace-workbench-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 220px) minmax(0, 1fr);
+  }
+}
