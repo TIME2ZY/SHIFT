@@ -482,6 +482,35 @@ body {
   color: var(--accent);
 }
 
+.react-theme-toggle {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.react-theme-toggle:hover {
+  color: var(--text-primary);
+  background: var(--surface-raised);
+}
+
+.react-theme-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .react-brand-mark svg {
   width: 19px;
   height: 19px;
@@ -544,8 +573,8 @@ body {
 }
 
 .react-app-nav button[data-active] {
-  color: var(--accent-nav);
-  background: var(--accent-nav-bg);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
   font-weight: 600;
 }
 
@@ -665,15 +694,13 @@ body {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: var(--radius-md);
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-instrument-raised));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-rail));
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
   transition:
     color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+    border-color var(--duration-fast) var(--ease-out);
 }
 
 .react-new-session:hover:not(:disabled) {
@@ -687,18 +714,14 @@ body {
   opacity: 0.6;
 }
 
-/* Elevated session row */
+/* Session row: surface tone + selection bar, not a bordered card */
 .react-session-row {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 .react-session-row:hover,
@@ -709,11 +732,8 @@ body {
 .react-session-row[data-active],
 .react-session-row[data-active]:hover,
 .react-session-row[data-active]:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-instrument-raised));
-  box-shadow:
-    inset 3px 0 var(--accent),
-    0 2px 8px -2px color-mix(in srgb, var(--accent) 15%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 .react-session-item {
@@ -824,9 +844,10 @@ body {
   gap: 4px;
 }
 
+/* Relative dates are CJK prose ("21 天前"), not identifiers */
 .react-session-item small {
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.3 var(--font-ui);
 }
 
 .react-sidebar-message {
@@ -878,8 +899,8 @@ body {
   max-width: min(60vw, 720px);
   margin: 0;
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-ui);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -919,6 +940,19 @@ body {
   color: var(--text-secondary);
   font: 500 12px/1.3 var(--font-ui);
   background: var(--surface-instrument-raised);
+}
+
+/* The status belongs to this turn; the task card's status is a different object */
+.react-run-status-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.react-run-status-group small {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 400;
 }
 
 .react-run-status::before {
@@ -997,45 +1031,32 @@ body {
   color: var(--danger);
 }
 
+/* The empty state is the work surface, not a landing page */
 .react-chat-empty {
   display: grid;
-  min-height: 100%;
-  place-content: center;
-  text-align: center;
-  padding: 40px var(--space-4) 80px;
+  align-content: start;
   gap: var(--space-3);
-  max-width: 760px;
+  width: min(100%, var(--chat-measure));
   margin: 0 auto;
-}
-
-.react-chat-empty-badge {
-  display: inline-grid;
-  width: 56px;
-  height: 56px;
-  place-items: center;
-  margin: 0 auto var(--space-2);
-  border-radius: var(--radius-lg);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-instrument-raised));
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  box-shadow: 0 8px 24px -4px var(--accent-glow);
+  padding: var(--space-10) var(--space-5) var(--space-8);
+  text-align: left;
 }
 
 .react-chat-empty h2 {
-  font-family: var(--font-brand);
-  font-size: clamp(22px, 2.6vw, 30px);
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-family: var(--font-ui);
+  font-size: var(--text-section);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
   color: var(--text-primary);
 }
 
 .react-chat-empty > p {
-  max-width: 56ch;
-  margin: 0 auto;
+  max-width: 46ch;
+  margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-ui);
+  line-height: var(--leading-body);
 }
 
 .react-chat-empty code {
@@ -1048,51 +1069,54 @@ body {
 }
 
 .react-chat-quick-prompts {
-  margin-top: var(--space-6);
   display: grid;
-  gap: var(--space-3);
-  text-align: left;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
 }
 
 .react-chat-quick-prompts > span {
-  font-size: 12px;
-  font-weight: 600;
   color: var(--text-tertiary);
-  letter-spacing: 0.02em;
+  font: 600 var(--text-micro)/1.3 var(--font-ui);
+  letter-spacing: 0;
 }
 
-.react-prompt-grid {
+.react-chat-quick-prompts ul {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.react-chat-quick-prompts li {
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .react-prompt-card {
   display: grid;
-  gap: 4px;
-  padding: 14px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-instrument-raised);
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition:
-    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .react-prompt-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow:
-    var(--shadow-md),
-    0 0 16px -4px var(--accent-glow);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-canvas));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
 .react-prompt-card:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .react-prompt-card:disabled {
@@ -1101,31 +1125,15 @@ body {
 }
 
 .react-prompt-card strong {
-  font-size: 13px;
-  font-weight: 600;
   color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 600;
 }
 
 .react-prompt-card small {
-  font-size: 12px;
   color: var(--text-tertiary);
-  line-height: 1.4;
-}
-
-/* Row: avatar outside · meta + bubble inside main column */
-.react-message {
-  position: relative;
-  display: grid;
-  width: min(90%, 920px);
-  max-width: 100%;
-  min-width: 0;
-  grid-template-columns: 38px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  box-sizing: border-box;
+  font-size: var(--text-meta);
+  line-height: 1.5;
 }
 
 .react-message[data-role="assistant"] {
@@ -1214,17 +1222,16 @@ body {
   font-size: 12px;
 }
 
-/* Bubble styling & Horizontal Overflow Prevention */
+/* Bubble: surface tone for the user turn, rule for the assistant turn */
 .react-message-bubble {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
   padding: 12px 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-sm);
-  transition: border-color var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
   overflow-wrap: break-word;
   word-break: break-word;
 }
@@ -1241,11 +1248,9 @@ body {
 
 .react-message[data-role="user"] .react-message-bubble {
   justify-self: end;
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
   border-top-right-radius: 4px;
-  border-top-left-radius: var(--radius-lg);
+  border-top-left-radius: var(--radius-md);
   background: var(--user-bg);
-  box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .react-message[data-role="system"] .react-message-bubble {
@@ -1256,16 +1261,15 @@ body {
   box-shadow: none;
 }
 
+/* A live turn reads as an active rule, not a glow */
 .react-message[data-live] .react-message-bubble {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border-subtle));
-  box-shadow: 0 0 16px -4px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--user-bg));
 }
 
 .react-message[data-role="assistant"][data-live] .react-message-bubble {
-  border: 0;
-  border-inline-start: 2px solid
-    color-mix(in srgb, var(--agent-color, var(--accent)) 68%, var(--border-subtle));
+  background: transparent;
   box-shadow: none;
+  border-inline-start-color: var(--agent-color, var(--accent));
 }
 
 .react-message-content {
@@ -1274,7 +1278,7 @@ body {
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
-  line-height: 1.6;
+  line-height: var(--leading-body);
 }
 
 .react-markdown {
@@ -1299,8 +1303,9 @@ body {
 .react-markdown pre,
 .react-markdown blockquote,
 .react-markdown table {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-4);
   max-width: 100%;
+  line-height: var(--leading-body);
 }
 
 .react-markdown h1,
@@ -1511,10 +1516,11 @@ body {
   white-space: nowrap;
 }
 
+/* Process summaries are Chinese sentences, not log lines */
 .react-process-summary > summary small {
   overflow: hidden;
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1820,10 +1826,9 @@ body {
   align-items: center;
   gap: var(--space-2);
   padding: 6px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-inset);
-  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -1860,6 +1865,213 @@ body {
   background: color-mix(in srgb, var(--warning) 15%, transparent);
   color: var(--warning);
   font: 12px/1 var(--font-ui);
+}
+
+/* Handoff fence as a readable contract, not a source listing */
+.react-contract-card {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--surface-inset);
+}
+
+.react-contract-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.react-contract-card-title {
+  color: var(--accent);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.react-contract-card-badge {
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+}
+
+.react-contract-card-fields {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.react-contract-card-field {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.react-contract-card-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.react-contract-card-value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.react-contract-card-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.react-contract-card-long > summary {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+  cursor: pointer;
+  list-style: none;
+}
+
+.react-contract-card-long > summary::-webkit-details-marker {
+  display: none;
+}
+
+.react-contract-card-preview {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-contract-card-long > summary::after {
+  content: "展开";
+  grid-column: 2;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.react-contract-card-long[open] > summary::after {
+  content: "收起";
+}
+
+.react-contract-card-body {
+  margin: var(--space-2) 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Blank lines separate paragraphs: a wall of CJK has no rhythm otherwise */
+.react-contract-card-body + .react-contract-card-body {
+  margin-top: var(--space-3);
+}
+
+.react-contract-card-source > summary {
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  cursor: pointer;
+}
+.react-contract-card-source pre {
+  overflow-x: auto;
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-code) / var(--text-code-line) var(--font-mono);
+}
+
+/* Loading holds the shape of what is coming instead of flashing a sentence */
+.react-skeleton {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.react-skeleton > span {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 0%,
+    var(--surface-instrument-raised) 50%,
+    var(--surface-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: react-skeleton-sweep 1.4s var(--ease-standard) infinite;
+}
+
+@keyframes react-skeleton-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Identifiers are provenance chips, not words in the sentence */
+.react-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+  color: var(--text-tertiary);
+  font: inherit;
+  vertical-align: baseline;
+  cursor: copy;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.react-id-chip:hover,
+.react-id-chip:focus-visible {
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+}
+
+.react-id-chip code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.react-id-chip-state {
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.react-id-chip:hover .react-id-chip-state,
+.react-id-chip:focus-visible .react-id-chip-state {
+  opacity: 1;
+}
+
+.react-recovery-body > summary {
+  margin-top: var(--space-2);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.react-recovery-body > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .react-run-error {
@@ -2173,6 +2385,7 @@ body {
   opacity: 0.55;
 }
 
+/* Composer is a control: it keeps an edge, but not card chrome */
 .react-composer-row {
   position: relative;
   display: grid;
@@ -2181,17 +2394,15 @@ body {
   gap: var(--space-3);
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
 .react-composer-row:focus-within {
   border-color: var(--accent);
-  box-shadow:
-    var(--shadow-md),
-    0 0 0 3px var(--accent-glow);
+  box-shadow: var(--focus-ring), var(--shadow-sm);
 }
 
 .react-composer-row textarea {
@@ -2314,7 +2525,7 @@ body {
 
 .react-mention-menu button:hover,
 .react-mention-menu button[data-active] {
-  background: var(--accent-nav-bg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
 }
 
 .react-mention-info {
@@ -2362,10 +2573,33 @@ body {
   font-size: 13px;
 }
 
+.react-panel-action {
+  margin-inline-start: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.react-panel-action:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.react-panel-action:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .react-panel-title span {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
-  text-transform: uppercase;
+  font: var(--text-meta)/1.3 var(--font-ui);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .trace-explorer {
@@ -2410,10 +2644,11 @@ body {
   display: grid;
   flex: 0 0 auto;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 3px solid var(--danger);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 .trace-alert-center > button,
 .trace-alert-center li {
@@ -2466,10 +2701,11 @@ body {
 .trace-metrics {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .trace-metrics dl {
@@ -2563,10 +2799,11 @@ body {
 }
 
 .handoff-funnel {
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  padding: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .handoff-funnel > header {
@@ -2654,9 +2891,10 @@ body {
 }
 
 .memory-diagnostics {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .memory-diagnostics > header {
@@ -2936,8 +3174,9 @@ body {
   gap: var(--space-2);
   align-items: center;
   padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 0;
   background: color-mix(in srgb, var(--accent) 5%, var(--surface-inset));
 }
 .trace-request-evidence span,
@@ -2975,8 +3214,9 @@ body {
   gap: 6px;
   margin-top: var(--space-2);
   padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
+  border-radius: 0;
   background: var(--surface-inset);
 }
 .trace-tool-summary > header {
@@ -3024,166 +3264,265 @@ body {
   color: var(--danger);
 }
 
-.trace-waterfall {
+/* ── Handover spine ────────────────────────────────────────────
+   The rail draws the flow; each hop hangs off it as a strip. Time is a
+   small bar inside the strip, not an axis the whole view is laid out on. */
+.trace-spine {
   display: grid;
   gap: var(--space-2);
 }
-.trace-waterfall > header {
+.trace-spine > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.trace-spine > header strong {
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.trace-spine > header small {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+.trace-spine-status {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+}
+
+.trace-spine-list {
+  position: relative;
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trace-spine-list::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.trace-spine-hop,
+.trace-spine-link {
+  position: relative;
+  min-width: 0;
+  padding-left: 24px;
+}
+
+/* A hop is a node on the rail, tinted with the seat's identity colour */
+.trace-spine-hop::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-canvas);
+  background: var(--agent-color, var(--accent));
+}
+.trace-spine-hop[data-state="failed"]::before,
+.trace-spine-hop[data-state="aborted"]::before {
+  background: var(--danger);
+}
+.trace-spine-hop[data-state="active"]::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.trace-spine-hop-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.trace-spine-hop-index {
+  flex: 0 0 auto;
+  min-width: 1.6em;
+  color: var(--text-tertiary);
+  font: 600 var(--text-micro)/1.4 var(--font-mono);
+}
+.trace-spine-hop-head strong {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.trace-spine-hop-duty {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+/* Time ribbon: one bar, segments = each hop's share of the session total */
+.trace-time-ribbon {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 var(--space-1);
+}
+.trace-time-ribbon figcaption {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-2);
 }
-.trace-waterfall > header strong {
-  font-size: 12px;
-}
-.trace-waterfall > header small {
+.trace-time-ribbon figcaption > span {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
-}
-.trace-waterfall-status {
-  margin: 0;
-  color: var(--text-tertiary);
-  font: 12px/1.4 var(--font-mono);
-}
-.trace-waterfall ol {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.trace-waterfall-row,
-.trace-waterfall-hop {
-  display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 4px 0;
-}
-.trace-waterfall-hop {
-  padding: 2px 0;
-  border-top: 1px dashed var(--border-subtle);
-}
-.trace-waterfall-label {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-.trace-waterfall-label strong {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-micro);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.trace-waterfall-label small,
-.trace-waterfall-label code,
-.trace-waterfall-row > small {
+.trace-time-ribbon figcaption > small {
   color: var(--text-tertiary);
-  font: 12px/1.2 var(--font-mono);
+  font-size: var(--text-micro);
 }
-.trace-waterfall-hop .trace-waterfall-label {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-}
-.trace-waterfall-hop[data-state="failed"] span,
-.trace-waterfall-row[data-state="failed"] > small {
-  color: var(--danger);
-}
-.trace-waterfall-track {
-  position: relative;
-  height: 12px;
+.trace-time-ribbon-bar {
+  display: flex;
+  height: 10px;
+  overflow: hidden;
   border-radius: var(--radius-xs);
   background: var(--surface-inset);
 }
-.trace-waterfall-track i {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 2px;
-  border-radius: 2px;
-}
-.trace-waterfall-track i[data-kind="generation"] {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.trace-waterfall-track i[data-kind="generation"][data-state="failed"],
-.trace-waterfall-track i[data-kind="generation"][data-state="aborted"] {
-  background: color-mix(in srgb, var(--danger) 60%, transparent);
-}
-.trace-waterfall-track i[data-kind="generation"][data-state="active"] {
-  background: color-mix(in srgb, var(--warning) 60%, transparent);
-}
-.trace-waterfall-track i[data-open="true"] {
-  mask-image: linear-gradient(to right, #000 0 68%, transparent);
-}
-.trace-waterfall-track i[data-open="true"]::after {
-  content: "";
-  position: absolute;
-  top: -2px;
-  right: 0;
-  bottom: -2px;
-  width: 2px;
-  background: var(--warning);
-}
-.trace-waterfall-track i[data-kind="recall"] {
-  background: color-mix(in srgb, var(--success) 55%, transparent);
-}
-.trace-waterfall-track i[data-kind="handoff"] {
-  background: var(--text-tertiary);
-}
-.trace-waterfall-track i[data-point="true"] {
-  top: 3px;
-  bottom: auto;
-  width: 6px;
-  min-width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  transform: translateX(-50%);
-}
-.trace-waterfall-ruler {
-  display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
-  align-items: end;
-  padding: 0 0 2px;
-  color: var(--text-tertiary);
-  font: 11px/1 var(--font-mono);
-}
-.trace-waterfall-scale {
-  position: relative;
-  height: 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.trace-waterfall-scale span {
-  position: absolute;
-  bottom: 3px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-.trace-waterfall-scale span:first-child {
-  transform: none;
-}
-.trace-waterfall-recall-toggle {
+.trace-time-ribbon-bar i {
   display: block;
-  padding: 0 0 4px;
+  height: 100%;
+  background: var(--agent-color, var(--accent));
+  box-shadow: inset -1px 0 0 var(--surface-canvas);
+  transition: filter var(--duration-fast) var(--ease-standard);
 }
-.trace-waterfall-recall-toggle button {
+.trace-time-ribbon-bar i:hover {
+  filter: brightness(1.15);
+}
+
+.trace-spine-hop-elapsed {
+  flex: 0 0 auto;
+  min-width: 4.5em;
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-micro)/1.4 var(--font-mono);
+  text-align: right;
 }
-.trace-waterfall-recall-toggle button[aria-expanded="true"] {
+.trace-spine-error {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--badge-error-bg);
+  color: var(--badge-error-fg);
+  font: 600 var(--text-micro)/1.4 var(--font-ui);
+}
+
+/* Memory is a first-class line: writes, recall hits and injections at a glance */
+.trace-spine-memory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 5px 0 0;
+  font-size: var(--text-meta);
+}
+.trace-spine-memory > span:first-child {
+  color: var(--text-tertiary);
+}
+.trace-spine-memory-part {
   color: var(--text-secondary);
 }
-.trace-waterfall-row > b {
+
+.trace-spine-ledger {
+  margin-top: 4px;
+}
+.trace-spine-ledger > button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-micro);
+}
+.trace-spine-ledger > button:hover {
+  text-decoration: underline;
+}
+.trace-spine-ledger ul {
+  display: grid;
+  gap: 3px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 0 0 var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  list-style: none;
+}
+.trace-spine-ledger li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-2);
+  font-size: var(--text-meta);
+}
+.trace-spine-ledger li strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.trace-spine-ledger li span {
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The handoff is the joint between two nodes: route on top, provenance below */
+.trace-spine-link::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-hard);
+}
+.trace-spine-link[data-state="failed"]::before {
+  background: var(--danger);
+}
+.trace-spine-link-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+}
+.trace-spine-route i {
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+.trace-spine-link[data-state="failed"] .trace-spine-route {
   color: var(--danger);
-  font: 12px/1 var(--font-mono);
+}
+.trace-spine-link-state {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.trace-spine-link-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.trace-spine-link-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trace-metrics-panel {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 .trace-metrics-panel > summary {
   display: flex;
@@ -3218,15 +3557,38 @@ body {
 .trace-metrics-panel .trace-metrics,
 .trace-metrics-panel .trace-offline-eval {
   border: 0;
-  border-top: 1px solid var(--border-subtle);
   border-radius: 0;
   background: transparent;
 }
 
+/* Group header states the kind once; the rows carry only what varies */
+.audit-memory-group {
+  display: grid;
+  gap: 0;
+  margin-top: var(--space-3);
+}
+
+.audit-memory-group > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.audit-memory-group > h3 small {
+  color: var(--text-tertiary);
+  font: 400 var(--text-micro)/1 var(--font-mono);
+}
+
 .audit-memory-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-inset);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 .audit-memory-card-summary {
   display: grid;
@@ -3296,15 +3658,17 @@ body {
   height: calc(100% - 52px);
 }
 
+/* Task block sits on the panel surface; rules separate its sections */
 .react-collab-status {
   display: grid;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-instrument-raised);
-  box-shadow: var(--shadow-sm);
+  padding: var(--space-1) 0 var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .react-collab-status header {
@@ -3320,9 +3684,9 @@ body {
 
 .react-collab-status header span {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: var(--text-meta)/1.3 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .react-task-goal {
@@ -3358,8 +3722,8 @@ body {
   overflow: hidden;
   overflow-wrap: anywhere;
   margin-top: 4px;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
 }
 
 .react-task-goal[open] .react-task-goal-preview {
@@ -3368,8 +3732,8 @@ body {
 
 .react-task-goal p {
   margin: var(--space-2) 0 0;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3386,6 +3750,96 @@ body {
   display: grid;
   gap: 6px;
   margin: 0;
+}
+
+/* Chain: the tail is a live handover rail, not a 17-row numbered dump */
+.react-task-chain {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.react-task-chain-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.react-task-chain-head small {
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+.react-task-chain-head span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-steps {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.react-task-chain-steps li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 3px 0;
+  font-size: var(--text-meta);
+  line-height: 1.4;
+}
+
+.react-task-chain-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-hard);
+}
+
+.react-task-chain-steps li[data-status="completed"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="sealed"] .react-task-chain-dot {
+  background: var(--success);
+}
+
+.react-task-chain-steps li[data-status="failed"] .react-task-chain-dot {
+  background: var(--danger);
+}
+
+.react-task-chain-steps li[data-status="active"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="running"] .react-task-chain-dot,
+.react-task-chain-steps li[data-status="started"] .react-task-chain-dot {
+  background: var(--accent);
+}
+
+.react-task-chain-who {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.react-task-chain-steps em {
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-toggle {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-micro);
+}
+
+.react-task-chain-toggle:hover {
+  text-decoration: underline;
 }
 
 .react-task-acceptance-details > summary {
@@ -3417,17 +3871,23 @@ body {
   white-space: nowrap;
 }
 
+/* Status colour follows severity: waiting is amber, failure is red */
 .react-collab-blocker {
   display: grid;
   gap: 3px;
   padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-inline-start: 2px solid currentColor;
   background: var(--badge-thinking-bg);
   color: var(--badge-thinking-fg);
 }
 
+.react-collab-blocker[data-tone="danger"] {
+  background: var(--badge-error-bg);
+  color: var(--badge-error-fg);
+}
+
 .react-collab-blocker strong {
-  font-size: 12px;
+  font-size: var(--text-meta);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -3435,11 +3895,13 @@ body {
 .react-task-evidence {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
+  gap: 0;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--border-subtle);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .react-task-evidence span {
@@ -3447,8 +3909,11 @@ body {
   gap: 3px;
   min-width: 0;
   padding: 7px 5px;
-  background: var(--surface-instrument);
   text-align: center;
+}
+
+.react-task-evidence span + span {
+  border-inline-start: 1px solid var(--border-subtle);
 }
 
 .react-task-evidence strong {
@@ -3470,9 +3935,10 @@ body {
 .react-acceptance-card {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
+  border-radius: 0;
   background: var(--surface-instrument);
 }
 
@@ -3504,11 +3970,12 @@ body {
   font-size: 12px;
 }
 
+/* Acceptance facts mix hashes with Chinese verdicts; read in the UI face */
 .react-acceptance-card dd {
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3710,28 +4177,31 @@ body {
   }
 }
 
+/* Flat list: rows divided by hairlines, selection is a tinted surface + bar */
 .react-agent-cards,
 .react-memory-list {
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
 }
 
 .react-agent-card,
 .react-memory-list article {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--surface-instrument-raised);
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
   overflow: hidden;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.react-agent-card:first-child,
+.react-memory-list article:first-child {
+  border-top: 0;
 }
 
 .react-agent-card:hover:not([aria-disabled="true"]):not([data-unavailable]) {
-  border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, var(--border));
-  box-shadow: var(--shadow-md);
+  background: var(--surface-raised);
 }
 
 .react-agent-card[aria-disabled="true"] {
@@ -3745,15 +4215,8 @@ body {
 }
 
 .react-agent-card[data-selected] {
-  border-color: var(--agent-color, var(--accent));
-  background: color-mix(
-    in srgb,
-    var(--agent-color, var(--accent)) 8%,
-    var(--surface-instrument-raised)
-  );
-  box-shadow:
-    0 4px 14px -2px color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent),
-    inset 3px 0 var(--agent-color, var(--accent));
+  background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--surface-instrument));
+  box-shadow: inset 2px 0 var(--agent-color, var(--accent));
 }
 
 .react-agent-select {
@@ -3804,18 +4267,17 @@ body {
 }
 
 .react-agent-details {
-  padding: 0 var(--space-3) var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3);
   padding-top: var(--space-3);
-  margin: 0 var(--space-1) var(--space-1);
+  border-top: 1px solid var(--border-subtle);
   cursor: default;
 }
 
 .react-agent-details > p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--text-ui);
+  line-height: var(--leading-ui);
 }
 
 .react-agent-meta {
@@ -3834,9 +4296,9 @@ body {
 
 .react-memory-inject {
   margin-bottom: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-instrument));
   color: var(--text-secondary);
   font-size: 12px;
@@ -3874,11 +4336,16 @@ body {
   font-size: 13px;
 }
 
-.react-agent-card code,
+/* Model names are identifiers; memory kind and recall counts are prose */
+.react-agent-card code {
+  color: var(--text-tertiary);
+  font: var(--text-meta)/1.3 var(--font-mono);
+}
+
 .react-memory-list small,
 .react-memory-list header span {
   color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
+  font: var(--text-meta)/1.4 var(--font-ui);
 }
 
 .react-agent-card > p,
@@ -4020,7 +4487,7 @@ body {
 }
 
 .react-memory-list article {
-  border-left: 2px solid var(--border-hard);
+  padding-left: var(--space-1);
 }
 
 .react-memory-list header {
@@ -4030,16 +4497,16 @@ body {
 .react-panel-empty,
 .react-panel-error {
   margin: 0;
-  padding: var(--space-3);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid var(--border);
   color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.5;
 }
 
 .react-panel-error {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-inline-start-color: color-mix(in srgb, var(--danger) 60%, var(--border));
   color: var(--danger);
 }
 
@@ -4141,8 +4608,9 @@ body {
 .audit-page-header h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 18px;
-  font-weight: 620;
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .audit-page-chip {
@@ -4210,13 +4678,14 @@ body {
 
 .audit-column-heading h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 620;
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .audit-column-heading small {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
+  font: var(--text-meta)/1.3 var(--font-ui);
 }
 
 .audit-page-actions {
@@ -4251,10 +4720,27 @@ body {
   min-height: 0;
   width: 100%;
   max-width: 1480px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
   align-items: stretch;
   gap: var(--space-4);
   margin: 0 auto;
+}
+
+/* Below ~900px the fixed memory rail leaves the trace column too narrow to
+   hold a hop row, so the columns stack instead of squeezing the spine. */
+@media (max-width: 900px) {
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-traces {
+    min-height: min(72dvh, 720px);
+  }
+
+  .audit-memory {
+    position: static;
+    max-height: none;
+  }
 }
 
 .audit-traces,
@@ -4658,7 +5144,6 @@ body {
     align-items: flex-start;
   }
 
-  .audit-layout,
   .audit-page .trace-metrics dl,
   .audit-page .trace-controls {
     grid-template-columns: 1fr;
@@ -4761,12 +5246,23 @@ body {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--accent-nav);
+  color: var(--accent);
   font: inherit;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+/* The roster has one "recheck all" action; this is the per-seat escape hatch */
+.react-agent-card:hover .react-agent-availability button,
+.react-agent-availability button:focus-visible,
+.react-agent-availability[data-unavailable] button {
+  opacity: 1;
+  pointer-events: auto;
 }
 .react-agent-availability button:hover:not(:disabled) {
-  background: var(--accent-nav-bg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-rail));
 }
 .react-agent-availability button:focus-visible {
   outline: 2px solid var(--accent);
@@ -4812,12 +5308,15 @@ body {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+/* Sealed context is prose, not source: read it in the UI face */
 .react-task-context pre {
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  line-height: var(--leading-body);
   padding: 8px;
   background: var(--surface-inset);
 }

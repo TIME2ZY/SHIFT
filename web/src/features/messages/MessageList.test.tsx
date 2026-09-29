@@ -34,9 +34,8 @@ describe("MessageList", () => {
       />
     );
 
-    expect(
-      screen.getByRole("heading", { level: 2, name: "开启多智能体协同控制台" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "开始一个任务" })).toBeInTheDocument();
+    expect(screen.getByText("开局")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "使用推荐提示：收敛问题与方案" }));
     expect(onUsePrompt).toHaveBeenCalledWith({

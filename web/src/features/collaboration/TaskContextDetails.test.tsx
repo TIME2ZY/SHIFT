@@ -75,6 +75,8 @@ it("shows packet contents and only claims restoration when prompt preparation is
   const { rerender } = render(<TaskContextDetails recovery={[packet]} />);
   await userEvent.click(screen.getByText("上下文续接"));
   await userEvent.click(screen.getByText(/未记录后续注入/));
+  expect(screen.getByLabelText("续工包内容")).not.toBeVisible();
+  await userEvent.click(screen.getByText("查看封存原文"));
   expect(screen.getByLabelText("续工包内容")).toBeVisible();
   expect(screen.queryByText(/已加入调用/)).not.toBeInTheDocument();
   rerender(

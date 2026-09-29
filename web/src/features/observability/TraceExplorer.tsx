@@ -9,9 +9,29 @@ import type {
 } from "./types";
 import { useObservabilityHealthQuery, useSessionTracesQuery, useTraceDetailQuery } from "./queries";
 import { exportSessionTrace } from "./api";
+import {
+  alertMeasureLabel,
+  errorCodeLabel,
+  handoffStatusLabel,
+  triggerTypeLabel,
+} from "./trace-labels";
+import { IdChip } from "../../shared/ui/IdChip";
+import { agentColorSlot } from "../agents/AgentAvatar";
 
 function stateLabel(state: TraceSummary["state"]) {
   return { active: "运行中", completed: "完成", failed: "失败", aborted: "中止" }[state];
+}
+
+function elapsedFromMs(ms: number) {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours}h ${restMinutes}m` : `${hours}h`;
 }
 
 function elapsed(startedAt: string | null, endedAt: string | null) {
@@ -19,13 +39,7 @@ function elapsed(startedAt: string | null, endedAt: string | null) {
   const ended = Date.parse(endedAt || "");
   if (!Number.isFinite(started)) return "时间未知";
   if (!Number.isFinite(ended)) return "进行中";
-  const ms = Math.max(0, ended - started);
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
-}
-
-function parsedTime(value: string | null) {
-  const time = Date.parse(value || "");
-  return Number.isFinite(time) ? time : null;
+  return elapsedFromMs(Math.max(0, ended - started));
 }
 
 function routePreview(trace: TraceSummary) {
@@ -33,26 +47,6 @@ function routePreview(trace: TraceSummary) {
   const agents = new Set(trace.invocations.map((item) => item.agentId)).size;
   const handoffs = Number(trace.handoffCounts?.total ?? trace.handoffs.length);
   return `${agents} 个 Agent · ${handoffs} 次交接`;
-}
-
-function formatTick(ms: number) {
-  if (ms < 1000) return "0s";
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
-}
-
-function timeTicks(totalMs: number) {
-  if (totalMs <= 0) return [{ ms: 0, label: "0s" }];
-  const steps = [1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
-  const step = steps.find((value) => totalMs / value <= 4) || 600_000;
-  const ticks = [{ ms: 0, label: "0s" }];
-  for (let ms = step; ms < totalMs - step * 0.08; ms += step) {
-    ticks.push({ ms, label: formatTick(ms) });
-  }
-  return ticks;
 }
 
 function groupHandoffs(handoffs: ExecutionHandoff[], invocationIds: Set<string>) {
@@ -113,41 +107,6 @@ function sumAttr(spans: TraceSpan[], key: string) {
   return spans.reduce((sum, span) => sum + Number(span.attributes?.[key] || 0), 0);
 }
 
-function countOutcome(writes: TraceSpan[], outcome: string) {
-  return writes.filter((span) => span.attributes?.outcome === outcome).length;
-}
-
-function memorySummary(spans: TraceSpan[]) {
-  const injections = spans.filter((span) => span.name === "memory_injected");
-  const searches = spans.filter((span) => span.name === "memory_searched");
-  const writes = spans.filter((span) => span.name === "memory_write_completed");
-  const bootstrap = injections.filter((span) => span.attributes?.source !== "a2a");
-  const handed = injections.filter((span) => span.attributes?.source === "a2a");
-  const created = countOutcome(writes, "created");
-  const superseded = countOutcome(writes, "superseded");
-  const unchanged = countOutcome(writes, "unchanged");
-  const rejected = countOutcome(writes, "rejected");
-  const writeKinds = [
-    created ? `创建 ${created}` : null,
-    superseded ? `替代 ${superseded}` : null,
-    unchanged ? `未变化 ${unchanged}` : null,
-    rejected ? `拒绝 ${rejected}` : null,
-  ].filter(Boolean);
-  const writeLine = !writes.length
-    ? null
-    : created === writes.length && writeKinds.length === 1
-      ? `写入 ${writes.length} 条`
-      : `写入 ${writes.length}（${writeKinds.join(" · ")}）`;
-  return [
-    bootstrap.length ? `启动注入 ${sumAttr(bootstrap, "delivered")} 条` : null,
-    handed.length ? `交接注入 ${sumAttr(handed, "delivered")} 条` : null,
-    searches.length ? `检索命中 ${sumAttr(searches, "memoryHits")} 条` : null,
-    writeLine,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 function memoryEventCopy(span: TraceSpan) {
   const attributes = span.attributes || {};
   if (span.name === "memory_injected") {
@@ -175,86 +134,183 @@ function memoryEventCopy(span: TraceSpan) {
   };
 }
 
-function HandoffHop({
-  handoff,
-  label,
-  position,
-}: {
-  handoff: ExecutionHandoff;
-  label(id: string): string;
-  position(value: string | null): number;
-}) {
-  const markAt = handoff.startedAt || handoff.createdAt;
+/** Settled duration of one hop, or null while it is still running. */
+function durationMs(startedAt: string | null, endedAt: string | null): number | null {
+  const start = Date.parse(startedAt || "");
+  if (!Number.isFinite(start)) return null;
+  const end = Date.parse(endedAt || "");
+  return Number.isFinite(end) ? Math.max(0, end - start) : null;
+}
+
+/**
+ * Memory as three named quantities — writes, recall hits, injections — so the
+ * reader sees generation and retrieval without opening anything.
+ */
+function memoryCountParts(spans: TraceSpan[]) {
+  const writes = spans.filter((span) => span.name === "memory_write_completed");
+  const searches = spans.filter((span) => span.name === "memory_searched");
+  const injections = spans.filter((span) => span.name === "memory_injected");
+  const parts: string[] = [];
+  if (writes.length) parts.push(`写入 ${writes.length}`);
+  if (searches.length) {
+    const total = sumAttr(searches, "totalHits");
+    const hits = sumAttr(searches, "memoryHits");
+    parts.push(total ? `检索命中 ${hits}/${total}` : `检索命中 ${hits}`);
+  }
+  if (injections.length) parts.push(`注入 ${sumAttr(injections, "delivered")}`);
+  return parts;
+}
+
+function MemoryLedger({ spans }: { spans: TraceSpan[] }) {
+  const [open, setOpen] = useState(false);
+  if (!spans.length) return null;
+  return (
+    <div className="trace-spine-ledger">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        {open ? "收起记忆明细" : `查看记忆明细 · ${spans.length} 笔`}
+      </button>
+      {open ? (
+        <ul>
+          {spans.map((span) => {
+            const copy = memoryEventCopy(span);
+            return (
+              <li key={span.spanId} data-kind={span.kind} data-state={span.state}>
+                <strong title={span.name}>{copy.title}</strong>
+                <span>{copy.detail}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** A handoff is the joint between two hops: the flow is drawn, not implied. */
+function SpineLink({ handoff, label }: { handoff: ExecutionHandoff; label(id: string): string }) {
   return (
     <li
-      className="trace-waterfall-hop"
+      className="trace-spine-link"
       data-state={handoff.completeStatus}
-      title={`${handoff.reason || "未记录原因"} · ${handoff.routeStatus} / ${handoff.receiveStatus} / ${handoff.completeStatus}`}
+      title={handoff.reason || "未记录原因"}
     >
-      <div className="trace-waterfall-label">
-        <code title={handoff.handoffId}>{handoff.handoffId.slice(-8)}</code>
-        <span>
-          {label(handoff.sourceAgent)} → {label(handoff.targetAgent)}
+      <div className="trace-spine-link-head">
+        <span className="trace-spine-route">
+          {label(handoff.sourceAgent)}
+          <i aria-hidden="true"> → </i>
+          {label(handoff.targetAgent)}
         </span>
+        <span className="trace-spine-link-state">{handoffStatusLabel(handoff.completeStatus)}</span>
       </div>
-      <div className="trace-waterfall-track" aria-hidden="true">
-        {markAt ? (
-          <i data-kind="handoff" data-point="true" style={{ left: `${position(markAt)}%` }} />
-        ) : null}
+      <div className="trace-spine-link-meta">
+        <span>
+          路由 {handoffStatusLabel(handoff.routeStatus)} · 接收{" "}
+          {handoffStatusLabel(handoff.receiveStatus)}
+        </span>
+        <IdChip value={handoff.handoffId} label="交接记录" />
       </div>
-      <small>{handoff.completeStatus}</small>
     </li>
   );
 }
 
-function RecallBlock({
-  spans,
-  position,
+/**
+ * Where the session time went. One bar, segments proportional to each hop's
+ * share of the total: answering "which hop was slow" needs a comparison, but
+ * answering "where did the time go" needs the parts to sum to the whole. A
+ * per-hop bar normalised to the longest hop loses both — the outlier eats the
+ * range and the rest collapse to slivers.
+ */
+function TimeRibbon({
+  invocations,
+  durations,
+  label,
 }: {
-  spans: TraceSpan[];
-  position(value: string | null): number;
+  invocations: ExecutionInvocation[];
+  durations: (number | null)[];
+  label(id: string): string;
 }) {
-  const [open, setOpen] = useState(false);
-  if (!spans.length) return null;
-  const summary = memorySummary(spans) || "Memory 记录";
+  const total = durations.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const measured = durations.filter((value): value is number => Boolean(value)).length;
+  if (total <= 0 || measured < 2) return null;
+  const longest = Math.max(...invocations.map((_, index) => (durations[index] ?? 0) / total));
+  const longestIndex = durations.findIndex((value) => (value ?? 0) / total === longest);
+
   return (
-    <>
-      <li className="trace-waterfall-recall-toggle">
-        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-          {summary}
-        </button>
-      </li>
-      {open
-        ? spans.map((span) => {
-            const copy = memoryEventCopy(span);
-            return (
-              <li
-                className="trace-waterfall-row"
-                data-kind={span.kind}
-                data-state={span.state}
-                data-point="true"
-                key={span.spanId}
-              >
-                <div className="trace-waterfall-label">
-                  <strong title={span.name}>{copy.title}</strong>
-                  <small>{copy.detail}</small>
-                </div>
-                <div className="trace-waterfall-track">
-                  <i
-                    data-kind="recall"
-                    data-point="true"
-                    style={{ left: `${position(span.startedAt)}%` }}
-                  />
-                </div>
-              </li>
-            );
-          })
-        : null}
-    </>
+    <figure className="trace-time-ribbon">
+      <figcaption>
+        <span>时间去向</span>
+        <small>
+          共 {elapsedFromMs(total)}
+          {longestIndex >= 0
+            ? ` · 最长 ${label(invocations[longestIndex].agentId)} 占 ${Math.round(longest * 100)}%`
+            : ""}
+        </small>
+      </figcaption>
+      <div className="trace-time-ribbon-bar" aria-hidden="true">
+        {invocations.map((invocation, index) => {
+          const duration = durations[index];
+          if (!duration) return null;
+          const share = Math.round((duration / total) * 100);
+          return (
+            <i
+              key={invocation.invocationId}
+              data-agent-color={agentColorSlot(invocation.agentId)}
+              style={{ width: `${(duration / total) * 100}%` }}
+              title={`${label(invocation.agentId)} · ${elapsedFromMs(duration)} · 占 ${share}%`}
+            />
+          );
+        })}
+      </div>
+    </figure>
   );
 }
 
-function TraceWaterfall({
+function SpineHop({
+  index,
+  invocation,
+  spans,
+  label,
+}: {
+  index: number;
+  invocation: ExecutionInvocation;
+  spans: TraceSpan[];
+  label(id: string): string;
+}) {
+  const elapsedLabel = elapsed(invocation.startedAt, invocation.endedAt);
+  const memory = memoryCountParts(spans);
+  return (
+    <li
+      className="trace-spine-hop"
+      data-state={invocation.state}
+      data-agent-color={agentColorSlot(invocation.agentId)}
+    >
+      <div className="trace-spine-hop-head">
+        <span className="trace-spine-hop-index">{index}</span>
+        <strong>{label(invocation.agentId)}</strong>
+        <span className="trace-spine-hop-duty">{triggerTypeLabel(invocation.triggerType)}</span>
+        <small className="trace-spine-hop-elapsed">{elapsedLabel}</small>
+        {invocation.outcome.errorCode ? (
+          <b className="trace-spine-error" title={invocation.outcome.errorCode}>
+            {errorCodeLabel(invocation.outcome.errorCode)}
+          </b>
+        ) : null}
+      </div>
+      {memory.length ? (
+        <p className="trace-spine-memory">
+          <span>记忆</span>
+          {memory.map((part, partIndex) => (
+            <span key={partIndex} className="trace-spine-memory-part">
+              {part}
+            </span>
+          ))}
+        </p>
+      ) : null}
+      <MemoryLedger spans={spans} />
+    </li>
+  );
+}
+
+function HandoverSpine({
   invocations,
   recallSpans,
   handoffs,
@@ -267,104 +323,39 @@ function TraceWaterfall({
   label(id: string): string;
   statusLine: string;
 }) {
-  const times = [
-    ...invocations.map((invocation) => parsedTime(invocation.startedAt)),
-    ...invocations.map((invocation) => parsedTime(invocation.endedAt)),
-    ...recallSpans.map((span) => parsedTime(span.startedAt)),
-    ...handoffs.map((handoff) => parsedTime(handoff.startedAt || handoff.createdAt)),
-  ].filter((time): time is number => time != null);
-  if (!times.length) return null;
-  const traceStart = Math.min(...times);
-  const traceEnd = Math.max(...times);
-  const total = Math.max(1, traceEnd - traceStart);
-  const position = (value: string | null) => {
-    const time = parsedTime(value);
-    return time == null ? 0 : ((time - traceStart) / total) * 100;
-  };
-  const width = (from: string | null, to: string | null) => {
-    const start = parsedTime(from);
-    const end = parsedTime(to);
-    if (start == null) return 0.5;
-    if (end == null) return Math.max(0.5, 100 - position(from));
-    return Math.max(0.5, ((end - start) / total) * 100);
-  };
   const invocationIds = new Set(invocations.map((item) => item.invocationId));
   const grouped = groupHandoffs(handoffs, invocationIds);
-  const ticks = timeTicks(total);
+  const durations = invocations.map((item) => durationMs(item.startedAt, item.endedAt));
+  const memoryTotals = memoryCountParts(recallSpans);
 
   return (
-    <section className="trace-waterfall" aria-label="执行时间轴">
+    <section className="trace-spine" aria-label="交接流程">
       <header>
-        <strong>执行时间轴</strong>
+        <strong>交接流程</strong>
         <small>
-          {invocations.length} Invocation · {handoffs.length} Handoff
+          {invocations.length} 次调用 · {handoffs.length} 次交接
+          {memoryTotals.length ? ` · 记忆 ${memoryTotals.join(" · ")}` : ""}
         </small>
       </header>
-      <p className="trace-waterfall-status">{statusLine}</p>
-      <ol>
-        <li className="trace-waterfall-ruler" aria-hidden="true">
-          <span />
-          <div className="trace-waterfall-scale">
-            {ticks.map((tick) => (
-              <span key={tick.ms} style={{ left: `${(tick.ms / total) * 100}%` }}>
-                {tick.label}
-              </span>
-            ))}
-          </div>
-        </li>
-        {invocations.map((invocation) => {
-          const children = recallSpans.filter(
-            (span) => span.invocationId === invocation.invocationId
-          );
-          const open = invocation.state === "active" || !invocation.endedAt;
+      <p className="trace-spine-status">{statusLine}</p>
+      <TimeRibbon invocations={invocations} durations={durations} label={label} />
+      <ol className="trace-spine-list">
+        {invocations.map((invocation, index) => {
+          const spans = recallSpans.filter((span) => span.invocationId === invocation.invocationId);
           return (
             <Fragment key={invocation.invocationId}>
               {(grouped.incoming.get(invocation.invocationId) || []).map((handoff) => (
-                <HandoffHop
-                  key={handoff.handoffId}
-                  handoff={handoff}
-                  label={label}
-                  position={position}
-                />
+                <SpineLink key={handoff.handoffId} handoff={handoff} label={label} />
               ))}
-              <li
-                className="trace-waterfall-row"
-                data-kind="generation"
-                data-state={invocation.state}
-              >
-                <div className="trace-waterfall-label">
-                  <strong>{label(invocation.agentId)}</strong>
-                  <small>{invocation.triggerType || "invocation"}</small>
-                </div>
-                <div className="trace-waterfall-track">
-                  <i
-                    data-kind="generation"
-                    data-state={invocation.state}
-                    data-open={open || undefined}
-                    title={open ? "未结束" : undefined}
-                    style={{
-                      left: `${position(invocation.startedAt)}%`,
-                      width: `${width(invocation.startedAt, invocation.endedAt)}%`,
-                    }}
-                  />
-                </div>
-                <small>{elapsed(invocation.startedAt, invocation.endedAt)}</small>
-                {invocation.outcome.errorCode ? <b>{invocation.outcome.errorCode}</b> : null}
-              </li>
-              <RecallBlock spans={children} position={position} />
+              <SpineHop index={index + 1} invocation={invocation} spans={spans} label={label} />
               {(grouped.dangling.get(invocation.invocationId) || []).map((handoff) => (
-                <HandoffHop
-                  key={handoff.handoffId}
-                  handoff={handoff}
-                  label={label}
-                  position={position}
-                />
+                <SpineLink key={handoff.handoffId} handoff={handoff} label={label} />
               ))}
             </Fragment>
           );
         })}
         {grouped.leftover.map((handoff) => (
-          <HandoffHop key={handoff.handoffId} handoff={handoff} label={label} position={position} />
+          <SpineLink key={handoff.handoffId} handoff={handoff} label={label} />
         ))}
       </ol>
     </section>
@@ -422,21 +413,24 @@ function SystemAlerts({ alerts }: { alerts: ObservabilityHealth["alerts"] }) {
     <section className="trace-alert-center" aria-label="系统告警">
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <strong>系统告警</strong>
-        <span>{alerts.length}</span>
+        <span>{alerts.length} 类</span>
       </button>
       {open ? (
         <ol>
-          {alerts.map((alert) => (
-            <li data-severity={alert.severity} key={alert.code}>
-              <span aria-hidden="true" />
-              <div>
-                <strong>{alert.diagnostic.title}</strong>
-                <p>{alert.diagnostic.action}</p>
-                <code>{alert.code}</code>
-              </div>
-              <b>{alert.count ?? alert.value ?? "!"}</b>
-            </li>
-          ))}
+          {alerts.map((alert) => {
+            const measure = alertMeasureLabel(alert);
+            return (
+              <li data-severity={alert.severity} key={alert.code}>
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{alert.diagnostic.title}</strong>
+                  <p>{alert.diagnostic.action}</p>
+                  <code>{alert.code}</code>
+                </div>
+                <b title={measure.detail ?? undefined}>{measure.text}</b>
+              </li>
+            );
+          })}
         </ol>
       ) : null}
     </section>
@@ -623,11 +617,16 @@ export function TraceExplorer({
               {selected.outcome.errorCode ? (
                 <div className="trace-breakpoint">
                   <span>异常</span>
-                  <strong>{selected.outcome.errorCode}</strong>
-                  <small>{selected.outcome.failureStage || selected.outcome.terminalReason}</small>
+                  <strong>{errorCodeLabel(selected.outcome.errorCode)}</strong>
+                  <small>
+                    <code title={selected.outcome.errorCode}>{selected.outcome.errorCode}</code>
+                    {selected.outcome.failureStage || selected.outcome.terminalReason
+                      ? ` · ${selected.outcome.failureStage || selected.outcome.terminalReason}`
+                      : ""}
+                  </small>
                 </div>
               ) : null}
-              <TraceWaterfall
+              <HandoverSpine
                 invocations={selectedInvocations}
                 recallSpans={selectedSpans.filter((span) => span.kind === "recall")}
                 handoffs={selectedHandoffs}

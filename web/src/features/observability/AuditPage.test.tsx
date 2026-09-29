@@ -171,6 +171,10 @@ describe("AuditPage", () => {
     expect(screen.getByText("写入 7（创建 5 · 替代 2） · 4/5 检索命中")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "航线" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
+    // The kind is stated once on the group, and the rows carry only what varies.
+    const group = screen.getByRole("heading", { level: 3 });
+    expect(group).toHaveTextContent("决策");
+    expect(group).toHaveTextContent("1");
     expect(screen.getByText("存储")).toBeInTheDocument();
     expect(screen.getByText("检索 2 · 注入 1")).toBeInTheDocument();
     expect(screen.getByText("近 24 小时对照")).toBeInTheDocument();
@@ -195,11 +199,11 @@ describe("AuditPage", () => {
     );
 
     expect(screen.queryByText("SQLite 是唯一真相源。")).not.toBeInTheDocument();
-    expect(screen.queryByText("来源 Invocation")).not.toBeInTheDocument();
+    expect(screen.queryByText("来源调用")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /存储/ }));
     expect(screen.getByText("SQLite 是唯一真相源。")).toBeInTheDocument();
-    expect(screen.getByText("来源 Invocation")).toBeInTheDocument();
+    expect(screen.getByText("来源调用")).toBeInTheDocument();
     expect(screen.getByText("assistant-output")).toBeInTheDocument();
   });
 });

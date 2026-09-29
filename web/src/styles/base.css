@@ -19,8 +19,8 @@ body {
   background: var(--surface-inset);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   scrollbar-width: thin;
@@ -197,7 +197,7 @@ button {
 .user-avatar {
   overflow: hidden;
   border-radius: 50%;
-  color: light-dark(#4f46e5, #c4b5fd);
+  color: var(--user-avatar-fg);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   background:
     radial-gradient(circle at 32% 28%, color-mix(in srgb, #fff 55%, transparent), transparent 52%),

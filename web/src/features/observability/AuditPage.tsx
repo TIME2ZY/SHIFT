@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { RefObject } from "react";
 import type { AgentSummary } from "../agents/types";
 import type { MemoryItem } from "../memory/queries";
@@ -7,15 +7,14 @@ import { ObservabilityContrast } from "./ObservabilityContrast";
 import { TraceExplorer } from "./TraceExplorer";
 import { SessionAuditOverview } from "./SessionAuditOverview";
 import { useSessionAuditSummaryQuery } from "./queries";
+import { evidenceKindLabel, memoryKindLabel, memoryTitle } from "./trace-labels";
+import { IdChip } from "../../shared/ui/IdChip";
+import { Skeleton } from "../../shared/ui/Skeleton";
 
 function formatMemoryDate(value: string | number | undefined) {
   if (value == null) return "时间未记录";
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : "时间未记录";
-}
-
-function shortId(value: string) {
-  return value.length > 12 ? value.slice(-8) : value;
 }
 
 function usageEvidence(
@@ -44,16 +43,23 @@ export function AuditPage({
   const summary = useSessionAuditSummaryQuery(sessionId);
   const usageOf = (id: string) => memoryUsage.data?.[id];
   const activeCount = memories.data?.memories.length ?? summary.data?.memory.active ?? 0;
+  const groupedMemories = useMemo(() => {
+    const groups = new Map<string, MemoryItem[]>();
+    for (const memory of memories.data?.memories ?? []) {
+      const kind = memoryKindLabel(memory.kind);
+      const list = groups.get(kind) ?? [];
+      list.push(memory);
+      groups.set(kind, list);
+    }
+    // Largest kind first: the composition of the session's memory is the point.
+    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [memories.data]);
 
   return (
     <main id="main-content" className="audit-page">
       <header className="audit-page-header">
         <h1>{sessionTitle}</h1>
-        {sessionId ? (
-          <span className="audit-page-chip audit-page-chip-id" title={sessionId}>
-            {shortId(sessionId)}
-          </span>
-        ) : null}
+        {sessionId ? <IdChip value={sessionId} label="会话" /> : null}
         {summary.data ? (
           <span className="audit-page-chip">
             {formatMemoryDate(summary.data.execution.lastActivityAt)}
@@ -91,7 +97,7 @@ export function AuditPage({
           <div className="audit-column-body">
             {!sessionId ? <p className="react-panel-empty">请先选择会话。</p> : null}
             {memories.isPending && sessionId ? (
-              <p className="react-panel-empty">正在读取 Memory…</p>
+              <Skeleton lines={5} label="正在读取 Memory" />
             ) : null}
             {memories.error ? (
               <p className="react-panel-error" role="alert">
@@ -101,11 +107,21 @@ export function AuditPage({
             {memories.data?.memories.length === 0 ? (
               <p className="react-panel-empty">当前会话没有有效 Memory。</p>
             ) : null}
-            <div className="react-memory-list">
-              {memories.data?.memories.map((memory) => (
-                <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
-              ))}
-            </div>
+            {/* Grouped by kind: "11 约束 + 2 决策" is a fact worth reading at a
+                glance, and a flat list of thirteen identical rows is not. */}
+            {groupedMemories.map(([kind, list]) => (
+              <section key={kind} className="audit-memory-group">
+                <h3>
+                  {kind}
+                  <small>{list.length}</small>
+                </h3>
+                <div className="react-memory-list">
+                  {list.map((memory) => (
+                    <MemoryCard key={memory.id} memory={memory} usage={usageOf(memory.id)} />
+                  ))}
+                </div>
+              </section>
+            ))}
             <ObservabilityContrast sessionId={sessionId} />
           </div>
         </aside>
@@ -130,11 +146,10 @@ function MemoryCard({
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <strong>{memory.topic || "未命名记忆"}</strong>
+        <strong title={memory.topic || undefined}>{memoryTitle(memory)}</strong>
         <svg className="audit-memory-chevron" viewBox="0 0 16 16" aria-hidden="true">
           <path d="m6 3 5 5-5 5" />
         </svg>
-        <span>{memory.kind || "memory"}</span>
         <small>{usageEvidence(usage)}</small>
       </button>
       {expanded ? (
@@ -147,14 +162,18 @@ function MemoryCard({
             </div>
             {memory.sourceInvocationId ? (
               <div>
-                <dt>来源 Invocation</dt>
-                <dd title={memory.sourceInvocationId}>{shortId(memory.sourceInvocationId)}</dd>
+                <dt>来源调用</dt>
+                <dd>
+                  <IdChip value={memory.sourceInvocationId} label="来源调用" />
+                </dd>
               </div>
             ) : null}
             {memory.sourceMessageId ? (
               <div>
                 <dt>来源消息</dt>
-                <dd title={memory.sourceMessageId}>{shortId(memory.sourceMessageId)}</dd>
+                <dd>
+                  <IdChip value={memory.sourceMessageId} label="来源消息" />
+                </dd>
               </div>
             ) : null}
             {memory.createdBy ? (
@@ -166,7 +185,9 @@ function MemoryCard({
             {typeof memory.metadata?.evidenceKind === "string" ? (
               <div>
                 <dt>证据类型</dt>
-                <dd>{memory.metadata.evidenceKind}</dd>
+                <dd title={memory.metadata.evidenceKind}>
+                  {evidenceKindLabel(memory.metadata.evidenceKind)}
+                </dd>
               </div>
             ) : null}
             <div>
@@ -176,7 +197,9 @@ function MemoryCard({
             {memory.supersededBy ? (
               <div>
                 <dt>被替代为</dt>
-                <dd title={memory.supersededBy}>{shortId(memory.supersededBy)}</dd>
+                <dd>
+                  <IdChip value={memory.supersededBy} label="替代记录" />
+                </dd>
               </div>
             ) : null}
           </dl>

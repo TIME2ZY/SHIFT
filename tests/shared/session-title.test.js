@@ -26,3 +26,16 @@ test("buildSessionTitle bounds long titles and replaces fenced code", () => {
   assert.match(title, /…$/);
   assert.equal(buildSessionTitle("请检查 ```js\nalert(1)\n``` 是否安全"), "检查 代码片段 是否安全");
 });
+
+test("buildSessionTitle ends latin sentences on a full stop, not mid-word", () => {
+  assert.equal(buildSessionTitle("Do not use tools. Do not modify anything."), "Do not use tools");
+  assert.equal(buildSessionTitle("Stop the server. Then rerun the suite."), "Stop the server");
+});
+
+test("buildSessionTitle keeps version numbers and decimal literals intact", () => {
+  const title = buildSessionTitle("Bump react to 18.2.0 and fix the hook deps");
+  assert.match(title, /18\.2\.0/);
+  // The truncation stops at a word boundary instead of inside a word.
+  assert.match(title, /…$/);
+  assert.doesNotMatch(title, / an…$/);
+});

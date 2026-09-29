@@ -14,7 +14,9 @@ function buildSessionTitle(input, maxLength = 24) {
     )
     .replace(/^[吧把，,：:\-—\s]+/, "");
 
-  const firstSentence = title.split(/[。！？!?；;\n]/, 1)[0].trim();
+  // CJK terminators end a sentence on their own; Latin ones need a following
+  // space so "1.5" and "v1.2.3" do not split mid-token.
+  const firstSentence = title.split(/(?:[。！？!?；;\n]|[.!?](?=\s|$))/, 1)[0].trim();
   if (Array.from(firstSentence).length >= 6) title = firstSentence;
   title = title
     .replace(/[，,]\s*(?:你)?(?:认为|觉得)?(?:怎么样|如何|呢|吗).*$/u, "")
@@ -25,7 +27,14 @@ function buildSessionTitle(input, maxLength = 24) {
   const chars = Array.from(title);
   if (chars.length <= limit) return title;
   const head = chars.slice(0, limit - 1).join("");
-  const boundaries = [head.lastIndexOf("，"), head.lastIndexOf(","), head.lastIndexOf("：")];
+  // Prefer a real boundary: CJK punctuation, latin punctuation, then a space so
+  // English does not stop mid-word ("…react to 18.2.0 an…").
+  const boundaries = [
+    head.lastIndexOf("，"),
+    head.lastIndexOf(","),
+    head.lastIndexOf("："),
+    head.lastIndexOf(" "),
+  ];
   const boundary = Math.max(...boundaries);
   const compact = boundary >= 8 ? head.slice(0, boundary) : head;
   return `${compact.replace(/[，,：:\s]+$/u, "")}…`;

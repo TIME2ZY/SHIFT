@@ -4,71 +4,63 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* ── Base surfaces (modern translucent / rich surfaces) ── */
-  --surface: light-dark(#f1f3f9, #13151f);
-  --surface-raised: light-dark(#e5e8f2, #1b1e2b);
-  --surface-inset: light-dark(#e2e5f0, #0d0e16);
+  --surface: #f1f3f9;
+  --surface-raised: #e5e8f2;
+  --surface-inset: #e2e5f0;
 
   /* ── Regional surfaces (panel differentiation with subtle depth) ── */
-  --surface-rail: light-dark(#e9ecf5, #0f111a);
-  --surface-canvas: light-dark(#f6f8fd, #161824);
-  --surface-instrument: light-dark(#eff2fa, #181b28);
-  --surface-instrument-raised: light-dark(#ffffff, #212536);
+  --surface-rail: #e9ecf5;
+  --surface-canvas: #f6f8fd;
+  --surface-instrument: #eff2fa;
+  --surface-instrument-raised: #ffffff;
 
   /* Text */
-  --text-primary: light-dark(#0f172a, #f1f5f9);
-  --text-secondary: light-dark(#475569, #94a3b8);
-  --text-tertiary: light-dark(#64748b, #64748b);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #5d6b7f;
 
   /* Borders */
-  --border: light-dark(#cbd5e1, #33384a);
-  --border-subtle: light-dark(#e2e8f0, #222636);
-  --border-hard: light-dark(#94a3b8, #475569);
+  --border: #cbd5e1;
+  --border-subtle: #e2e8f0;
+  --border-hard: #94a3b8;
 
-  /* Primary CTA / focus (electric violet-indigo gradient accent) */
-  --accent: light-dark(#6366f1, #818cf8);
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  --accent-hover: light-dark(#4f46e5, #a5b4fc);
-  --accent-text: light-dark(#ffffff, #0f172a);
-  --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
-
-  /* Nav selection (left rail — cooler, does not compete with CTA) */
-  --accent-nav: light-dark(#4f46e5, #818cf8);
-  --accent-nav-bg: light-dark(
-    color-mix(in srgb, #6366f1 12%, var(--surface-rail)),
-    color-mix(in srgb, #818cf8 14%, var(--surface-rail))
-  );
+  /* One accent for CTA, focus and selection — nothing competes with it */
+  --accent: #5b5bdb;
+  --accent-hover: #4c45d4;
+  --accent-text: #ffffff;
 
   /* Semantic */
-  --danger: light-dark(#dc2626, #f87171);
-  --danger-hover: light-dark(#b91c1c, #fca5a5);
-  --danger-text: light-dark(#ffffff, #180505);
-  --stderr: light-dark(#d97706, #fbbf24);
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-text: #ffffff;
+  --stderr: #d97706;
   --warning: var(--stderr);
-  --success: light-dark(#16a34a, #4ade80);
+  --success: #16a34a;
 
   /* Message roles */
-  --user-bg: light-dark(#eef2ff, #1e2238);
-  --assistant-line: light-dark(#94a3b8, #475569);
+  --user-bg: #eef2ff;
+  --assistant-line: #94a3b8;
+  --user-avatar-fg: #4f46e5;
 
   /* Per-agent palette (identity only — refined, harmonized tones) */
-  --agent-1: light-dark(#0d9488, #2dd4bf);
-  --agent-2: light-dark(#2563eb, #60a5fa);
-  --agent-3: light-dark(#d97706, #fbbf24);
-  --agent-4: light-dark(#7c3aed, #c084fc);
-  --agent-5: light-dark(#ea580c, #fb923c);
-  --agent-6: light-dark(#0284c7, #38bdf8);
+  --agent-1: #0d9488;
+  --agent-2: #2563eb;
+  --agent-3: #d97706;
+  --agent-4: #7c3aed;
+  --agent-5: #ea580c;
+  --agent-6: #0284c7;
   --agent-color: var(--agent-1);
 
   /* Semantic badge surfaces (theme-aware) */
-  --badge-thinking-bg: light-dark(#fef3c7, color-mix(in srgb, var(--stderr) 20%, var(--surface)));
-  --badge-thinking-fg: light-dark(#b45309, var(--stderr));
+  --badge-thinking-bg: #fef3c7;
+  --badge-thinking-fg: #b45309;
   --badge-writing-bg: color-mix(in srgb, var(--accent) 15%, var(--surface));
-  --badge-writing-fg: var(--accent);
+  --badge-writing-fg: #4c45d4;
   --badge-error-bg: color-mix(in srgb, var(--danger) 15%, var(--surface));
-  --badge-error-fg: var(--danger);
+  --badge-error-fg: #b91c1c;
 
   /* Elevation & Shadows */
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -82,21 +74,36 @@
   --focus-ring-danger:
     0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--danger) 60%, transparent);
 
-  /* UI copy and source code stay different. Each role is the same on every page. */
+  /* UI copy and source code stay different. Each role is the same on every page.
+     System faces only: this is a local console and must render identically
+     offline, so nothing is fetched from a font CDN. */
   --font-brand:
-    "Space Grotesk", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
   --font-ui:
-    "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
   --font-body: var(--font-ui);
   --font-sans: var(--font-ui);
   --font-mono:
-    "JetBrains Mono", ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas,
-    "Microsoft YaHei Mono", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace;
+    ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "JetBrains Mono", "PingFang SC",
+    "Microsoft YaHei", monospace;
   --font-mono-features: "liga" 0, "calt" 0;
   --text-code: 13px;
   --text-code-line: 1.65;
+
+  /* Type scale — one step per role, so hierarchy comes from size, not weight */
+  --text-micro: 11px;
+  --text-meta: 12px;
+  --text-ui: 13px;
+  --text-body: 15px;
+  --text-section: 18px;
+  --text-title: 22px;
+  --text-display: 28px;
+
+  /* CJK needs more leading than Latin to keep dense lines readable */
+  --leading-ui: 1.55;
+  --leading-body: 1.75;
 
   /* Spacing scale (8px base) */
   --space-1: 4px;
@@ -111,8 +118,9 @@
 
   /* Sizing */
   /* Single measure for the chat column: the message list and the composer must
-     share one width or the reading column and the input visually diverge. */
-  --chat-measure: 1040px;
+     share one width or the reading column and the input visually diverge.
+     Kept near 60 full-width CJK glyphs so long agent prose stays readable. */
+  --chat-measure: 880px;
   --sidebar-w: 268px;
   --sidebar-w-narrow: 200px;
   --instrument-w: 330px;
@@ -164,4 +172,86 @@
 }
 [data-agent-color="6"] {
   --agent-color: var(--agent-6);
+}
+
+/* Dark palette. `light-dark()` inside custom properties resolves once and does not
+   follow a runtime `color-scheme` change, so the theme switch redefines the tokens
+   instead: data-theme="dark" for an explicit choice, or the OS media query when
+   following the system. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #13151f;
+  --surface-raised: #1b1e2b;
+  --surface-inset: #0d0e16;
+  --surface-rail: #0f111a;
+  --surface-canvas: #161824;
+  --surface-instrument: #181b28;
+  --surface-instrument-raised: #212536;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #8492a6;
+  --border: #33384a;
+  --border-subtle: #222636;
+  --border-hard: #475569;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-text: #0f172a;
+  --danger: #f87171;
+  --danger-hover: #fca5a5;
+  --danger-text: #180505;
+  --stderr: #fbbf24;
+  --success: #4ade80;
+  --user-bg: #1e2238;
+  --assistant-line: #475569;
+  --user-avatar-fg: #c4b5fd;
+  --agent-1: #2dd4bf;
+  --agent-2: #60a5fa;
+  --agent-3: #fbbf24;
+  --agent-4: #c084fc;
+  --agent-5: #fb923c;
+  --agent-6: #38bdf8;
+  --badge-thinking-bg: color-mix(in srgb, var(--stderr) 20%, var(--surface));
+  --badge-thinking-fg: var(--stderr);
+  --badge-writing-fg: #a5b4fc;
+  --badge-error-fg: #f87171;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #13151f;
+    --surface-raised: #1b1e2b;
+    --surface-inset: #0d0e16;
+    --surface-rail: #0f111a;
+    --surface-canvas: #161824;
+    --surface-instrument: #181b28;
+    --surface-instrument-raised: #212536;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-tertiary: #8492a6;
+    --border: #33384a;
+    --border-subtle: #222636;
+    --border-hard: #475569;
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-text: #0f172a;
+    --danger: #f87171;
+    --danger-hover: #fca5a5;
+    --danger-text: #180505;
+    --stderr: #fbbf24;
+    --success: #4ade80;
+    --user-bg: #1e2238;
+    --assistant-line: #475569;
+    --user-avatar-fg: #c4b5fd;
+    --agent-1: #2dd4bf;
+    --agent-2: #60a5fa;
+    --agent-3: #fbbf24;
+    --agent-4: #c084fc;
+    --agent-5: #fb923c;
+    --agent-6: #38bdf8;
+    --badge-thinking-bg: color-mix(in srgb, var(--stderr) 20%, var(--surface));
+    --badge-thinking-fg: var(--stderr);
+    --badge-writing-fg: #a5b4fc;
+    --badge-error-fg: #f87171;
+  }
 }

@@ -19,6 +19,13 @@ import { AuditPage } from "../features/observability/AuditPage";
 import { useSessionTracesQuery } from "../features/observability/queries";
 import { useSessionRun, useSessionRunStore } from "../runtime/session-run-provider";
 import type { RunStatus } from "../runtime/types";
+import {
+  applyThemePreference,
+  nextThemePreference,
+  readThemePreference,
+  THEME_LABELS,
+  type ThemePreference,
+} from "../shared/ui/theme";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running", "reconnecting"]);
 const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
@@ -85,6 +92,7 @@ export function App() {
     useState<Record<string, string>>(readAgentPreferences);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(readThemePreference);
   const [composerDraftSeed, setComposerDraftSeed] = useState<ComposerDraftSeed | null>(null);
   const [composerFocusRequestId, setComposerFocusRequestId] = useState(0);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
@@ -151,6 +159,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(AGENT_PREFERENCES_KEY, JSON.stringify(agentBySession));
   }, [agentBySession]);
+
+  useEffect(() => {
+    applyThemePreference(themePreference);
+  }, [themePreference]);
 
   useEffect(() => {
     if (activeProjectKey) window.localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectKey);
@@ -230,6 +242,29 @@ export function App() {
             <small>多智能体交班台</small>
           </span>
           <button
+            type="button"
+            className="react-theme-toggle"
+            aria-label={`外观：${THEME_LABELS[themePreference]}，点击切换`}
+            title={`外观：${THEME_LABELS[themePreference]}`}
+            onClick={() => setThemePreference(nextThemePreference(themePreference))}
+          >
+            {themePreference === "dark" ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+              </svg>
+            ) : themePreference === "light" ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="13" rx="2" />
+                <path d="M8 21h8m-4-4v4" />
+              </svg>
+            )}
+          </button>
+          <button
             ref={sidebarCloseRef}
             className="react-sidebar-close"
             type="button"
@@ -290,7 +325,7 @@ export function App() {
           sessions={sessions.data ?? []}
           agents={agents.data ?? []}
           activeSessionId={activeSessionId}
-          isLoading={Boolean(activeProjectKey) && sessions.isPending}
+          isLoading={projects.isPending || sessions.isFetching}
           error={sessions.error}
           isCreating={createSession.isPending}
           deletingSessionId={deleteSession.isPending ? deleteSession.variables?.sessionId : null}
@@ -349,8 +384,15 @@ export function App() {
               </div>
               <div className="react-chat-actions">
                 {activeStatusLabel ? (
-                  <span className="react-run-status" data-status={run?.status}>
-                    {activeStatusLabel}
+                  /* Scoped to this turn: the task card's status is about the
+                      collaboration as a whole, and the two are often out of step.
+                      The scope word sits beside the chip so the chip itself stays
+                      exactly the status. */
+                  <span className="react-run-status-group">
+                    <small>本轮</small>
+                    <span className="react-run-status" data-status={run?.status}>
+                      {activeStatusLabel}
+                    </span>
                   </span>
                 ) : null}
                 <button
