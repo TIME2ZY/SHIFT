@@ -2,17 +2,22 @@
  * Handoff fence parsing and field evaluation (Phase C-3).
  * Boundary: parse/evaluate only. Rendering / receive-bundle live in handoff.js.
  * Routing finalize lives in a2a-finalize.js.
+ *
+ * The field names come from `shared/fence-format`; only the parsing and the
+ * scoring live here.
  */
 
-const REQUIRED_FIELDS = ["what", "why", "next_action"];
-const RECOMMENDED_FIELDS = ["to", "intent", "goal", "tradeoff", "open_questions"];
+const { HANDOFF } = require("../shared/fence-format");
+const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
+
+const REQUIRED_FIELDS = HANDOFF.required;
+const RECOMMENDED_FIELDS = HANDOFF.recommended;
 /** Intents whose successor cannot see tool transcript — files/evidence are resume fields. */
 const RESUME_INTENTS = Object.freeze(["implement", "review", "fix", "deliver", "plan"]);
-const RESUME_FIELDS = Object.freeze(["files", "evidence"]);
-const LIST_FIELDS = new Set(["open_questions", "files", "evidence", "constraints", "prohibited"]);
-const SCALAR_FIELDS = new Set(["to", "intent", "goal", "what", "why", "tradeoff", "next_action"]);
+const RESUME_FIELDS = HANDOFF.resume;
+const LIST_FIELDS = new Set(HANDOFF.lists);
+const SCALAR_FIELDS = new Set(HANDOFF.scalars);
 const ALL_KNOWN_FIELDS = new Set([...SCALAR_FIELDS, ...LIST_FIELDS]);
-const { HANDOFF_INTENTS } = require("../shared/collab-contracts");
 
 function parseHandoffBlocks(text) {
   if (!text || typeof text !== "string") return [];

@@ -8,6 +8,7 @@
  * nothing and must not drift from those skills.
  */
 import MarkdownIt from "markdown-it";
+import type { FenceFieldMap, FenceLang } from "../../../../src/shared/fence-format";
 
 export const DUTY_LABELS: Record<string, string> = {
   discuss: "讨论",
@@ -35,13 +36,31 @@ interface FieldSpec {
   values?: Record<string, string>;
 }
 
-interface FenceSpec {
-  lang: string;
+interface FenceSpec<L extends FenceLang = FenceLang> {
+  lang: L;
   title: string;
   scalars: Record<string, FieldSpec>;
   lists: Record<string, FieldSpec>;
   /** Fence body is a JSON object rather than YAML-ish key/value. */
   json?: boolean;
+}
+
+/**
+ * The field names come from `src/shared/fence-format`, so every fence must
+ * label every field its grammar allows. Adding one there and not here is a
+ * compile error, not a silent fallback to a raw source block at runtime.
+ */
+function defineFence<L extends FenceLang>(
+  spec: {
+    lang: L;
+    title: string;
+    json?: boolean;
+  } & {
+    scalars: Record<FenceFieldMap[L]["scalars"], FieldSpec>;
+    lists: Record<FenceFieldMap[L]["lists"], FieldSpec>;
+  }
+): FenceSpec<L> {
+  return spec;
 }
 
 export interface ContractField {
@@ -78,7 +97,7 @@ const VERDICT_LABELS: Record<string, string> = {
 };
 
 export const CONTRACT_FENCES: FenceSpec[] = [
-  {
+  defineFence({
     lang: "handoff",
     title: "交接",
     scalars: {
@@ -97,8 +116,8 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       evidence: { label: "证据" },
       open_questions: { label: "待确认" },
     },
-  },
-  {
+  }),
+  defineFence({
     lang: "solution_baseline",
     title: "方案基线",
     scalars: {
@@ -110,8 +129,8 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       non_goals: { label: "不做的内容" },
       acceptance_criteria: { label: "验收标准" },
     },
-  },
-  {
+  }),
+  defineFence({
     lang: "implementation_plan",
     title: "实现计划",
     scalars: {
@@ -123,8 +142,8 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       tests: { label: "验证" },
       risks: { label: "风险" },
     },
-  },
-  {
+  }),
+  defineFence({
     lang: "code_review",
     title: "代码审查",
     scalars: {
@@ -135,8 +154,20 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       findings: { label: "问题" },
       tests: { label: "验证记录" },
     },
-  },
-  {
+  }),
+  defineFence({
+    lang: "delivery_receipt",
+    title: "交付回执",
+    scalars: {
+      commit_sha: { label: "提交", id: true },
+      pr_url: { label: "PR" },
+      base_branch: { label: "基线分支" },
+    },
+    lists: {
+      verification: { label: "验证记录" },
+    },
+  }),
+  defineFence({
     lang: "final_acceptance",
     title: "最终验收",
     scalars: {
@@ -150,8 +181,8 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       checks: { label: "核验" },
       gaps: { label: "未满足项" },
     },
-  },
-  {
+  }),
+  defineFence({
     lang: "task_progress",
     title: "执行进度",
     json: true,
@@ -167,8 +198,8 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       blockers: { label: "阻塞" },
       verification: { label: "验证记录" },
     },
-  },
-  {
+  }),
+  defineFence({
     lang: "task_goal",
     title: "目标修订",
     json: true,
@@ -178,10 +209,10 @@ export const CONTRACT_FENCES: FenceSpec[] = [
       source_message_id: { label: "来源消息", id: true },
     },
     lists: {},
-  },
+  }),
 ];
 
-const FENCE_BY_LANG = new Map(CONTRACT_FENCES.map((spec) => [spec.lang, spec]));
+const FENCE_BY_LANG = new Map<string, FenceSpec>(CONTRACT_FENCES.map((spec) => [spec.lang, spec]));
 
 /** Fence languages this module turns into structured cards. */
 export const CONTRACT_FENCE_LANGS = CONTRACT_FENCES.map((spec) => spec.lang);
