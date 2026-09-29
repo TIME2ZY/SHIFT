@@ -3256,9 +3256,19 @@ body {
   color: var(--text-tertiary);
   font: 12px/1.2 var(--font-mono);
 }
-.trace-waterfall-hop .trace-waterfall-label {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
+/* Provenance sits in the wide end column: the name column is 90–140px and
+   cannot hold a hash without wrapping it one character per line. */
+.trace-waterfall-provenance {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  opacity: 0.55;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.trace-waterfall-hop:hover .trace-waterfall-provenance,
+.trace-waterfall-row:hover .trace-waterfall-provenance {
+  opacity: 1;
 }
 .trace-waterfall-hop[data-state="failed"] span,
 .trace-waterfall-row[data-state="failed"] > small {

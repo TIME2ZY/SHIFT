@@ -9,7 +9,12 @@ import type {
 } from "./types";
 import { useObservabilityHealthQuery, useSessionTracesQuery, useTraceDetailQuery } from "./queries";
 import { exportSessionTrace } from "./api";
-import { errorCodeLabel, handoffStatusLabel, triggerTypeLabel } from "./trace-labels";
+import {
+  alertMeasureLabel,
+  errorCodeLabel,
+  handoffStatusLabel,
+  triggerTypeLabel,
+} from "./trace-labels";
 import { IdChip } from "../../shared/ui/IdChip";
 
 function stateLabel(state: TraceSummary["state"]) {
@@ -197,9 +202,6 @@ function HandoffHop({
         <span>
           {label(handoff.sourceAgent)} → {label(handoff.targetAgent)}
         </span>
-        <small>
-          <IdChip value={handoff.handoffId} label="交接记录" />
-        </small>
       </div>
       <div className="trace-waterfall-track" aria-hidden="true">
         {markAt ? (
@@ -207,6 +209,10 @@ function HandoffHop({
         ) : null}
       </div>
       <small>{handoffStatusLabel(handoff.completeStatus)}</small>
+      {/* Provenance, not identity: it needs the wide meta column, never the name column */}
+      <span className="trace-waterfall-provenance">
+        <IdChip value={handoff.handoffId} label="交接记录" />
+      </span>
     </li>
   );
 }
@@ -430,21 +436,24 @@ function SystemAlerts({ alerts }: { alerts: ObservabilityHealth["alerts"] }) {
     <section className="trace-alert-center" aria-label="系统告警">
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <strong>系统告警</strong>
-        <span>{alerts.length}</span>
+        <span>{alerts.length} 类</span>
       </button>
       {open ? (
         <ol>
-          {alerts.map((alert) => (
-            <li data-severity={alert.severity} key={alert.code}>
-              <span aria-hidden="true" />
-              <div>
-                <strong>{alert.diagnostic.title}</strong>
-                <p>{alert.diagnostic.action}</p>
-                <code>{alert.code}</code>
-              </div>
-              <b>{alert.count ?? alert.value ?? "!"}</b>
-            </li>
-          ))}
+          {alerts.map((alert) => {
+            const measure = alertMeasureLabel(alert);
+            return (
+              <li data-severity={alert.severity} key={alert.code}>
+                <span aria-hidden="true" />
+                <div>
+                  <strong>{alert.diagnostic.title}</strong>
+                  <p>{alert.diagnostic.action}</p>
+                  <code>{alert.code}</code>
+                </div>
+                <b title={measure.detail ?? undefined}>{measure.text}</b>
+              </li>
+            );
+          })}
         </ol>
       ) : null}
     </section>

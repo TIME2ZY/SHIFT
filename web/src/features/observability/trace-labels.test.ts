@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { handoffStatusLabel, memoryKindLabel, memoryTitle, triggerTypeLabel } from "./trace-labels";
+import {
+  alertMeasureLabel,
+  handoffStatusLabel,
+  memoryKindLabel,
+  memoryTitle,
+  triggerTypeLabel,
+} from "./trace-labels";
 import { invocationStateLabel } from "../../shared/contracts/invocation-state";
 
 describe("trace labels", () => {
@@ -25,5 +31,12 @@ describe("trace labels", () => {
     expect(invocationStateLabel("aborted")).toBe("已停止");
     expect(invocationStateLabel("something_new")).toBe("未知");
     expect(memoryKindLabel("constraint")).toBe("约束");
+  });
+
+  it("names the quantity behind an alert figure instead of printing a bare number", () => {
+    expect(alertMeasureLabel({ count: 12 })).toEqual({ text: "12 次", detail: "观测到的次数" });
+    expect(alertMeasureLabel({ value: 0.42, threshold: 0.9 }).text).toBe("取值 0.42 / 阈值 0.9");
+    expect(alertMeasureLabel({ value: 0.42 }).text).toBe("取值 0.42");
+    expect(alertMeasureLabel({}).text).toBe("无观测值");
   });
 });

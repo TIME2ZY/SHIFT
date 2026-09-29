@@ -398,9 +398,13 @@ describe("TraceExplorer", () => {
       </QueryClientProvider>
     );
     expect(await screen.findByRole("button", { name: /系统告警/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /系统告警/ })).toHaveTextContent("1 类");
     expect(screen.queryByText("执行区段缺少结束事件")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /系统告警/ }));
     expect(screen.getByText("执行区段缺少结束事件")).toBeInTheDocument();
+    // The figure names its quantity; a bare number or "!" is never printed.
+    expect(screen.getByText("1 次")).toBeInTheDocument();
+    expect(screen.queryByText("!")).not.toBeInTheDocument();
     expect(screen.queryByText("Handoff 证据轨道")).not.toBeInTheDocument();
     expect(screen.queryByText("Memory 漏斗诊断")).not.toBeInTheDocument();
     expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);

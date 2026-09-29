@@ -90,3 +90,24 @@ export function errorCodeLabel(code: string | null | undefined): string | null {
   if (!code) return null;
   return "执行出错";
 }
+
+/**
+ * An alert's right-hand figure means different things per alert. Never print
+ * a bare number: name the quantity, and give a metric its threshold.
+ */
+export function alertMeasureLabel(alert: { count?: number; value?: number; threshold?: number }): {
+  text: string;
+  detail: string | null;
+} {
+  if (typeof alert.count === "number") {
+    return { text: `${alert.count} 次`, detail: "观测到的次数" };
+  }
+  if (typeof alert.value === "number") {
+    const threshold = typeof alert.threshold === "number" ? ` / 阈值 ${alert.threshold}` : "";
+    return {
+      text: `取值 ${alert.value}${threshold}`,
+      detail: threshold ? "观测值与告警阈值" : "观测值",
+    };
+  }
+  return { text: "无观测值", detail: "已知告警，尚无数字观测" };
+}
