@@ -111,6 +111,24 @@ function frame(event: string, id: number | null, data: Record<string, unknown>):
 /** Fast reconnect schedule so tests never wait on real timers. */
 const FAST_RECONNECT = { baseDelayMs: 2, maxDelayMs: 8 };
 
+/**
+ * Wait for a condition instead of for wall-clock time. These tests drive a
+ * reconnect loop with millisecond backoff: sleeping a fixed 60ms and then
+ * asserting used to pass alone but fail under full-suite load, because the
+ * scheduler had not delivered the third reconnect yet.
+ */
+async function waitFor(
+  predicate: () => boolean,
+  { timeoutMs = 2000, stepMs = 5 }: { timeoutMs?: number; stepMs?: number } = {}
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() > deadline) throw new Error("condition not met within " + timeoutMs + "ms");
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+}
+
 describe("applyRunEventFrame", () => {
   it("deduplicates cursor ids and hydrates snapshot", () => {
     const store = createSessionRunStore();
@@ -357,7 +375,7 @@ describe("subscribeRunEvents reconnect", () => {
     });
 
     // Let both failures and the recovery land.
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await waitFor(() => store.getSnapshot().runs.s1?.status === "done");
     unsubscribe();
 
     // EOF and two network failures share the same backoff schedule.
@@ -387,7 +405,7 @@ describe("subscribeRunEvents reconnect", () => {
     resolveLater(okResponse([]));
 
     // Give the microtask + first backoff a chance to land.
-    await new Promise((r) => setTimeout(r, 30));
+    await waitFor(() => store.getSnapshot().runs.s1?.status === "reconnecting");
     const mid = store.getSnapshot().runs.s1;
     expect(mid.status).toBe("reconnecting");
     expect(mid.reconnectAttempt).toBeGreaterThanOrEqual(1);
@@ -479,14 +497,15 @@ describe("subscribeRunEvents reconnect", () => {
     const promise = subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
 
     emit(frame("done", 1, {}));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(store.getSnapshot().runs.s1.status).toBe("done");
+    await waitFor(() => store.getSnapshot().runs.s1?.status === "done");
     expect(controller.signal.aborted).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // The next run on this session is still picked up by the same subscriber.
     emit(frame("agent-start", 2, { agent: "grok", traceId: "trace-2", invocationId: "inv-2" }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitFor(() =>
+      Object.keys(store.getSnapshot().runs.s1?.liveMessages ?? {}).includes("inv-2")
+    );
     const second = store.getSnapshot().runs.s1;
     expect(second.traceId).toBe("trace-2");
     expect(second.status).toBe("running");
@@ -508,12 +527,11 @@ describe("subscribeRunEvents reconnect", () => {
     const promise = subscribeRunEvents("s1", store, controller, {}, FAST_RECONNECT);
 
     first.emit(frame("done", 1, {}));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(store.getSnapshot().runs.s1.status).toBe("done");
+    await waitFor(() => store.getSnapshot().runs.s1?.status === "done");
 
     // Simulate a connection reset mid-read.
     first.drop();
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await waitFor(() => fetchMock.mock.calls.length === 2);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/sessions/s1/events?after=1",
