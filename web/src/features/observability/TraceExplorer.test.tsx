@@ -413,17 +413,19 @@ describe("TraceExplorer", () => {
     const breakpointCode = document.querySelector(".trace-breakpoint code");
     expect(breakpointCode?.textContent).toBe("provider_exit_7");
     expect(screen.getAllByText("Grok").length).toBeGreaterThan(0);
-    expect(screen.getByText("执行时间轴")).toBeInTheDocument();
-    expect(screen.getByText("1 次调用 · 0 次交接")).toBeInTheDocument();
+    expect(screen.getByText("交接流程")).toBeInTheDocument();
+    expect(screen.getByText(/1 次调用 · 0 次交接/)).toBeInTheDocument();
     expect(screen.getByText("执行 1 失败 · 交接无失败 · 工具 1 失败 · 1 孤儿")).toBeInTheDocument();
     expect(screen.queryByText("无失败")).not.toBeInTheDocument();
     expect(screen.getByText("工具执行")).toBeInTheDocument();
     expect(screen.getByText(/2 次调用 · 1 失败 · 1 孤儿 · 1 未闭合/)).toBeInTheDocument();
+    // Memory counts are on the strip itself; nothing needs opening to see them.
+    // The header totals and the per-hop lines can both carry a count.
+    expect(screen.getAllByText("写入 1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/检索命中 2/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Memory 检索")).not.toBeInTheDocument();
     expect(screen.queryByText("0ms")).not.toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("button", { name: "启动注入 2 条 · 检索命中 2 条 · 写入 1 条" })
-    );
+    await userEvent.click(screen.getByRole("button", { name: /查看记忆明细 · \d+ 笔/ }));
     expect(screen.getAllByText("Memory 检索").length).toBeGreaterThan(0);
     expect(screen.getByText("命中 3（Memory 2）")).toBeInTheDocument();
     expect(screen.getByText("启动注入")).toBeInTheDocument();
@@ -435,7 +437,7 @@ describe("TraceExplorer", () => {
     expect(screen.getByText("failed-tool")).toBeInTheDocument();
     expect(screen.getByText("orphan-tool")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /并行检查两个实现分支/ }));
-    expect(screen.getByText("3 次调用 · 0 次交接")).toBeInTheDocument();
+    expect(screen.getByText(/3 次调用 · 0 次交接/)).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
     expect(screen.getByText("2 个 Agent · 0 次交接")).toBeInTheDocument();
     expect(screen.queryByText("Codex → Grok → Codex")).not.toBeInTheDocument();
@@ -570,14 +572,16 @@ describe("TraceExplorer", () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText("7 次调用 · 6 次交接")).toBeInTheDocument();
+    expect(await screen.findByText(/7 次调用 · 6 次交接/)).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接无失败")).toBeInTheDocument();
     expect(screen.getByText("2 个 Agent · 6 次交接")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "启动注入 2 条 · 写入 1 条" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "交接注入 2 条 · 检索命中 3 条" })
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "交接注入 2 条 · 检索命中 3 条" }));
+    // Generation and retrieval are readable without opening anything.
+    expect(screen.getAllByText("写入 1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/检索命中 3/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("注入 2").length).toBeGreaterThan(0);
+    for (const ledger of screen.getAllByRole("button", { name: /查看记忆明细 · \d+ 笔/ })) {
+      await userEvent.click(ledger);
+    }
     expect(screen.getByText("交接注入")).toBeInTheDocument();
     expect(screen.getByText("送达 2 / 选中 3")).toBeInTheDocument();
     expect(timelineSequence()).toEqual([
@@ -597,7 +601,7 @@ describe("TraceExplorer", () => {
     ]);
 
     await userEvent.click(screen.getByRole("button", { name: /同一来源两条交接/ }));
-    expect(screen.getByText("3 次调用 · 3 次交接")).toBeInTheDocument();
+    expect(screen.getByText(/3 次调用 · 3 次交接/)).toBeInTheDocument();
     expect(screen.getByText("执行完成 · 交接 1 失败")).toBeInTheDocument();
     expect(timelineSequence()).toEqual([
       "Codex",
@@ -610,7 +614,7 @@ describe("TraceExplorer", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /仍在执行/ }));
     expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
-    expect(document.querySelector(".trace-waterfall-track i[data-open='true']")).not.toBeNull();
+    expect(document.querySelector(".trace-spine-duration i[data-open='true']")).not.toBeNull();
     expect(screen.getByTitle("未结束")).toBeInTheDocument();
   });
 
@@ -756,15 +760,15 @@ function testRecall(
 }
 
 function timelineSequence() {
-  const timeline = document.querySelector(".trace-waterfall");
-  return [
-    ...(timeline?.querySelectorAll(
-      ".trace-waterfall-hop, .trace-waterfall-row[data-kind='generation']"
-    ) || []),
-  ].map((node) => {
-    if (node.classList.contains("trace-waterfall-hop")) {
-      return node.querySelector("span")?.textContent?.replace(/\s+/g, " ").trim() || "";
+  const timeline = document.querySelector(".trace-spine");
+  return [...(timeline?.querySelectorAll(".trace-spine-link, .trace-spine-hop") || [])].map(
+    (node) => {
+      if (node.classList.contains("trace-spine-link")) {
+        return (
+          node.querySelector(".trace-spine-route")?.textContent?.replace(/\s+/g, " ").trim() || ""
+        );
+      }
+      return node.querySelector("strong")?.textContent || "";
     }
-    return node.querySelector("strong")?.textContent || "";
-  });
+  );
 }

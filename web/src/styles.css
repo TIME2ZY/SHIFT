@@ -3196,170 +3196,238 @@ body {
   color: var(--danger);
 }
 
-.trace-waterfall {
+/* ── Handover spine ────────────────────────────────────────────
+   The rail draws the flow; each hop hangs off it as a strip. Time is a
+   small bar inside the strip, not an axis the whole view is laid out on. */
+.trace-spine {
   display: grid;
   gap: var(--space-2);
 }
-.trace-waterfall > header {
+.trace-spine > header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
-.trace-waterfall > header strong {
-  font-size: 12px;
+.trace-spine > header strong {
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 600;
 }
-.trace-waterfall > header small {
+.trace-spine > header small {
   color: var(--text-tertiary);
-  font: 12px/1 var(--font-mono);
+  font-size: var(--text-meta);
 }
-.trace-waterfall-status {
+.trace-spine-status {
   margin: 0;
-  color: var(--text-tertiary);
-  font: 12px/1.4 var(--font-mono);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
 }
-.trace-waterfall ol {
+
+.trace-spine-list {
+  position: relative;
   display: grid;
-  gap: 2px;
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.trace-waterfall-row,
-.trace-waterfall-hop {
-  display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
+.trace-spine-list::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.trace-spine-hop,
+.trace-spine-link {
+  position: relative;
+  min-width: 0;
+  padding-left: 24px;
+}
+
+/* A hop is a node on the rail, tinted with the seat's identity colour */
+.trace-spine-hop::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-canvas);
+  background: var(--agent-color, var(--accent));
+}
+.trace-spine-hop[data-state="failed"]::before,
+.trace-spine-hop[data-state="aborted"]::before {
+  background: var(--danger);
+}
+.trace-spine-hop[data-state="active"]::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.trace-spine-hop-head {
+  display: flex;
+  align-items: baseline;
   gap: var(--space-2);
-  align-items: center;
-  padding: 4px 0;
-}
-.trace-waterfall-hop {
-  padding: 2px 0;
-  border-top: 1px dashed var(--border-subtle);
-}
-.trace-waterfall-label {
-  display: grid;
-  gap: 1px;
   min-width: 0;
 }
-.trace-waterfall-label strong {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 12px;
+.trace-spine-hop-index {
+  flex: 0 0 auto;
+  min-width: 1.6em;
+  color: var(--text-tertiary);
+  font: 600 var(--text-micro)/1.4 var(--font-mono);
+}
+.trace-spine-hop-head strong {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
   font-weight: 600;
+}
+.trace-spine-hop-duty {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-meta);
+}
+
+/* Duration is relative to the longest hop: slow work reads without an axis */
+.trace-spine-duration {
+  flex: 1 1 120px;
+  max-width: 260px;
+  min-width: 48px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-inset);
+}
+.trace-spine-duration i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--agent-color, var(--accent));
+}
+.trace-spine-duration i[data-open="true"] {
+  background: repeating-linear-gradient(135deg, var(--accent) 0 4px, transparent 4px 8px);
+}
+.trace-spine-hop-elapsed {
+  flex: 0 0 auto;
+  min-width: 4.5em;
+  color: var(--text-tertiary);
+  font: var(--text-micro)/1.4 var(--font-mono);
+  text-align: right;
+}
+.trace-spine-error {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--badge-error-bg);
+  color: var(--badge-error-fg);
+  font: 600 var(--text-micro)/1.4 var(--font-ui);
+}
+
+/* Memory is a first-class line: writes, recall hits and injections at a glance */
+.trace-spine-memory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 5px 0 0;
+  font-size: var(--text-meta);
+}
+.trace-spine-memory > span:first-child {
+  color: var(--text-tertiary);
+}
+.trace-spine-memory-part {
+  color: var(--text-secondary);
+}
+
+.trace-spine-ledger {
+  margin-top: 4px;
+}
+.trace-spine-ledger > button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-micro);
+}
+.trace-spine-ledger > button:hover {
+  text-decoration: underline;
+}
+.trace-spine-ledger ul {
+  display: grid;
+  gap: 3px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 0 0 var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  list-style: none;
+}
+.trace-spine-ledger li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-2);
+  font-size: var(--text-meta);
+}
+.trace-spine-ledger li strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.trace-spine-ledger li span {
+  color: var(--text-tertiary);
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.trace-waterfall-label small,
-.trace-waterfall-label code,
-.trace-waterfall-row > small {
-  color: var(--text-tertiary);
-  font: 12px/1.2 var(--font-mono);
-}
-/* Provenance sits in the wide end column: the name column is 90–140px and
-   cannot hold a hash without wrapping it one character per line. */
-.trace-waterfall-provenance {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-  opacity: 0.55;
-  transition: opacity var(--duration-fast) var(--ease-standard);
-}
 
-.trace-waterfall-hop:hover .trace-waterfall-provenance,
-.trace-waterfall-row:hover .trace-waterfall-provenance {
-  opacity: 1;
-}
-.trace-waterfall-hop[data-state="failed"] span,
-.trace-waterfall-row[data-state="failed"] > small {
-  color: var(--danger);
-}
-.trace-waterfall-track {
-  position: relative;
-  height: 12px;
-  border-radius: var(--radius-xs);
-  background: var(--surface-inset);
-}
-.trace-waterfall-track i {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 2px;
-  border-radius: 2px;
-}
-.trace-waterfall-track i[data-kind="generation"] {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.trace-waterfall-track i[data-kind="generation"][data-state="failed"],
-.trace-waterfall-track i[data-kind="generation"][data-state="aborted"] {
-  background: color-mix(in srgb, var(--danger) 60%, transparent);
-}
-.trace-waterfall-track i[data-kind="generation"][data-state="active"] {
-  background: color-mix(in srgb, var(--warning) 60%, transparent);
-}
-.trace-waterfall-track i[data-open="true"] {
-  mask-image: linear-gradient(to right, #000 0 68%, transparent);
-}
-.trace-waterfall-track i[data-open="true"]::after {
+/* The handoff is the joint between two nodes: route on top, provenance below */
+.trace-spine-link::before {
   content: "";
   position: absolute;
-  top: -2px;
-  right: 0;
-  bottom: -2px;
-  width: 2px;
-  background: var(--warning);
-}
-.trace-waterfall-track i[data-kind="recall"] {
-  background: color-mix(in srgb, var(--success) 55%, transparent);
-}
-.trace-waterfall-track i[data-kind="handoff"] {
-  background: var(--text-tertiary);
-}
-.trace-waterfall-track i[data-point="true"] {
-  top: 3px;
-  bottom: auto;
+  left: 3px;
+  top: 7px;
   width: 6px;
-  min-width: 6px;
   height: 6px;
   border-radius: 50%;
-  transform: translateX(-50%);
+  background: var(--border-hard);
 }
-.trace-waterfall-ruler {
-  display: grid;
-  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto auto;
-  align-items: end;
-  padding: 0 0 2px;
-  color: var(--text-tertiary);
-  font: 11px/1 var(--font-mono);
+.trace-spine-link[data-state="failed"]::before {
+  background: var(--danger);
 }
-.trace-waterfall-scale {
-  position: relative;
-  height: 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.trace-waterfall-scale span {
-  position: absolute;
-  bottom: 3px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-.trace-waterfall-scale span:first-child {
-  transform: none;
-}
-.trace-waterfall-recall-toggle {
-  display: block;
-  padding: 0 0 4px;
-}
-.trace-waterfall-recall-toggle button {
-  color: var(--text-tertiary);
-  font: 12px/1.3 var(--font-mono);
-}
-.trace-waterfall-recall-toggle button[aria-expanded="true"] {
+.trace-spine-link-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
   color: var(--text-secondary);
+  font-size: var(--text-meta);
 }
-.trace-waterfall-row > b {
+.trace-spine-route i {
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+.trace-spine-link[data-state="failed"] .trace-spine-route {
   color: var(--danger);
-  font: 12px/1 var(--font-mono);
+}
+.trace-spine-link-state {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.trace-spine-link-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.trace-spine-link-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trace-metrics-panel {
