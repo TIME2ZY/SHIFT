@@ -651,6 +651,12 @@ Health 的 span 完整性使用 trace-span-projection.countIncompleteTraceSpans�
 
 结构化 task_goal/task_progress 经 workflow-evidence → registry.submitTaskUpdate → 原 task/event 事务保存。task-updates 用例通过 registry 注入的 get/persist 接口工作；原 captureUserGoal 实现迁入同一用例，registry 不新增业务分支。进度只表示有引用的 Agent 报告，不改变验收；新计划、需求基线和目标修订撤销旧进度。后续用户消息通过 captureUserGoal 记录来源，原始用户目标不覆盖。
 
+Agent 正文围栏的字段词表统一位于 `shared/fence-format`：`handoff-parse`、
+`implementation-plan-gate`、`outcome-evidence-gate` 与 `task-updates` 消费共享定义，
+删除各自被替代的字段清单及 `REQUIRED_PLAN_FIELDS` 导出。前端 `contract-fence` 通过配套
+类型声明提供字段标签，运行时回归检查展示注册表覆盖共享词表，并展示 `delivery_receipt`。
+解析语法、方案哈希、门禁判定与权威写入口保持不变，没有新增交接消费或持久化路径。
+
 Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 provider 调用前通过 event-store 写 context-restored（prompt_prepared、包 ID/hash、任务版本、输入 hash）。PRE、A2A 和 emergency retry 共用记录入口。封存读取最新已处理 workflow evidence；包优先保留目标、进度和 Git 工作区引用，封存写失败显式上抛。invocation repository 的定向恢复事件查询供 collaboration API 展示包和恢复证据，不扫描工具正文、不推断模型已理解。
 
 前端 TaskContextDetails 通过 collaboration API 展示需求、计划、进度、续工包及输入准备证据，类型来自 src/shared/task-context.d.ts。run-event-stream 在任务更新或恢复事件后刷新既有查询。MessageList 使用既有路由消息的 parentInvocationId/source 定位 callback 或最终回答原文；没有新增交接消费、审批或写入路径。

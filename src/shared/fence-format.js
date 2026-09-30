@@ -6,10 +6,9 @@
  * it, so a field cannot be added to a skill and silently missed on either side.
  * The authoring grammar itself lives in `skills/<name>/SKILL.md`.
  *
- * `delivery_receipt` and `implementation_plan` are deliberately included even
- * though the UI is the only consumer of some of them: a fence an agent can be
- * told to emit must have a name here, or it renders as an unlabelled source
- * block.
+ * `delivery_receipt` and `implementation_plan` share their field vocabulary
+ * with the evidence and plan gates. Every fence an agent can be told to emit
+ * must have a name here, or it renders as an unlabelled source block.
  *
  * @see docs/decisions/002-multi-agent-reliability-contracts.md
  */
