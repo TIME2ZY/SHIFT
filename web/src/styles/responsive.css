@@ -1,0 +1,382 @@
+/* styles/responsive.css — split out of the former single styles.css.
+   Order within this file follows the original cascade; see styles.css for the import order. */
+
+@media (max-width: 900px) {
+  .trace-workbench-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(120px, 220px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 840px) {
+  .memory-diagnostics dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .memory-diagnostics dl div:nth-child(3n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .handoff-funnel ol {
+    grid-template-columns: 1fr;
+  }
+
+  .handoff-funnel li,
+  .handoff-funnel li:first-child,
+  .handoff-funnel li:last-child {
+    border: 1px solid rgba(82, 162, 255, 0.2);
+    border-radius: 6px;
+  }
+
+  .handoff-funnel li + li {
+    margin-top: 5px;
+  }
+
+  .handoff-funnel li i {
+    top: auto;
+    right: 50%;
+    bottom: -5px;
+    transform: translateX(50%) rotate(135deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .react-handoff-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .react-handoff-dialog {
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .react-handoff-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-memory {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .trace-request-evidence,
+  .trace-evidence li {
+    grid-template-columns: 1fr;
+  }
+  .trace-request-evidence code,
+  .trace-evidence li > div:first-child {
+    grid-column: 1;
+  }
+  .trace-route-tree li {
+    grid-template-columns: 85px minmax(0, 1fr);
+    margin-left: calc(var(--trace-depth) * 14px);
+  }
+  .trace-route-tree code {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 1050px) {
+  .react-shell {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+
+  .react-right-panel {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    right: 0;
+    width: min(400px, 92vw);
+    height: 100dvh;
+    border-left: 1px solid var(--border-hard);
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    transform: translateX(100%);
+    transition:
+      transform var(--duration) var(--ease-out),
+      visibility 0s linear var(--duration);
+  }
+
+  .react-right-panel[data-open] {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .react-panel-mobile-header {
+    display: flex;
+    min-height: 56px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .react-panel-mobile-header strong {
+    font-size: 14px;
+  }
+
+  .react-panel-mobile-header button,
+  .react-info-panel-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .react-panel-mobile-header button {
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .react-panel-mobile-header button svg,
+  .react-info-panel-button svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+  }
+
+  .react-panel-body {
+    height: calc(100% - 114px); /* mobile header + panel title */
+  }
+
+  .react-info-panel-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+
+  .react-drawer-backdrop {
+    position: fixed;
+    z-index: 40;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: default;
+    background: var(--overlay-scrim);
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@media (max-width: 720px) {
+  .react-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .react-sidebar {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    left: 0;
+    width: min(340px, 92vw);
+    height: 100dvh;
+    border-right: 1px solid var(--border-hard);
+    border-bottom: 0;
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition:
+      transform var(--duration) var(--ease-out),
+      visibility 0s linear var(--duration);
+  }
+
+  .react-sidebar[data-open] {
+    visibility: visible;
+    transform: translateX(0);
+    transition-delay: 0s;
+  }
+
+  .react-sidebar-close {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    margin-left: auto;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .react-sidebar-close svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+  }
+
+  .react-mobile-drawer-button {
+    display: inline-grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .react-mobile-drawer-button svg {
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+  }
+
+  .react-new-session,
+  .react-session-item,
+  .react-session-menu summary {
+    min-height: 44px;
+  }
+
+  .react-session-item {
+    padding-right: 44px;
+  }
+
+  .react-session-delete {
+    width: 36px;
+    height: 36px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .react-session-search {
+    min-height: 44px;
+  }
+
+  .react-chat-header {
+    gap: var(--space-2);
+    padding-inline: var(--space-3);
+  }
+
+  .react-chat-title {
+    flex: 1;
+  }
+
+  .react-chat-actions {
+    gap: var(--space-2);
+  }
+
+  .react-chat-actions > .react-run-status,
+  .react-chat-actions > button:not(.react-info-panel-button) {
+    display: none;
+  }
+
+  .react-chat-actions .react-info-panel-button {
+    width: 44px;
+    padding: 0;
+    color: var(--text-secondary);
+  }
+
+  .react-info-panel-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .react-messages {
+    padding-right: var(--space-3);
+    padding-left: var(--space-3);
+  }
+
+  .react-composer {
+    padding-inline: var(--space-3);
+  }
+
+  .react-message-nav {
+    display: none;
+  }
+
+  .react-composer-hint {
+    display: none;
+  }
+
+  .react-message {
+    width: 100%;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .react-message[data-role="user"] {
+    width: min(92%, 780px);
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .react-shell[data-page="audit"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .audit-page {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .audit-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .audit-page .trace-metrics dl,
+  .audit-page .trace-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-traces {
+    min-height: min(72dvh, 720px);
+  }
+
+  .audit-memory {
+    position: static;
+    max-height: none;
+  }
+
+  .trace-write-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trace-offline-eval > div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .trace-offline-eval b {
+    margin-left: 0;
+  }
+
+  .audit-page-actions button,
+  .react-app-nav button {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

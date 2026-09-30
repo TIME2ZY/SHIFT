@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const { DUTIES } = require("../shared/collab-contracts");
 const { hashUserGoal } = require("./workflow-gates");
+const { fenceAllowedKeys } = require("../shared/fence-format");
 
 // Task updates use the registry's existing persist transaction, never a second repository.
 function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
@@ -88,7 +89,7 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
     if (input.type === "task_goal") {
       if (!["discuss", "plan", "accept"].includes(input.actorDuty))
         return reject("goal_revision_requires_planning_duty");
-      if (!hasOnly(value, ["goal_hash", "text", "source_message_id"]) || !text(value.text))
+      if (!hasOnly(value, fenceAllowedKeys("task_goal")) || !text(value.text))
         return reject("invalid_goal_revision");
       const sources = [task.artifacts.userGoal, ...(task.artifacts.userUpdates || [])];
       const source = sources.find((m) => m.messageId && m.messageId === value.source_message_id);
@@ -168,16 +169,7 @@ function hasOnly(value, keys) {
 }
 function validProgress(value) {
   return (
-    hasOnly(value, [
-      "goal_hash",
-      "plan_hash",
-      "current",
-      "completed",
-      "remaining",
-      "blockers",
-      "next_action",
-      "verification",
-    ]) &&
+    hasOnly(value, fenceAllowedKeys("task_progress")) &&
     text(value.current) &&
     text(value.next_action) &&
     list(value.remaining) &&

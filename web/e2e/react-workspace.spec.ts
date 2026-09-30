@@ -660,6 +660,21 @@ test("uses accessible drawers without shrinking the mobile conversation", async 
   expect(viewport.chatHeight).toBeGreaterThan(700);
 });
 
+test("keeps the audit trace minimum height limited to mobile widths", async ({ page }) => {
+  await mockShiftApi(page);
+  await page.goto("./");
+  await page.getByRole("button", { name: "审计", exact: true }).click();
+  const traces = page.getByRole("region", { name: "航线" });
+  await expect(traces).toBeVisible();
+
+  for (const width of [720, 721, 900, 901]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() => traces.evaluate((element) => getComputedStyle(element).minHeight))
+      .toBe(width <= 720 ? "648px" : "0px");
+  }
+});
+
 test("locates a durable failure after refresh and exports structural metadata", async ({
   page,
 }) => {

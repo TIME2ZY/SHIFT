@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { ENV } = require("../../src/shared/brand");
+const { IMPLEMENTATION_PLAN, fenceAllowedKeys } = require("../../src/shared/fence-format");
 const {
   IMPLEMENTATION_GATE_STATUS,
   parseImplementationPlan,
@@ -34,6 +35,19 @@ test("implementation plan parser requires concrete files, changes, and tests", (
   assert.deepEqual(plan.tests, ["node --test tests/agents/gate.test.js"]);
   assert.equal(validateImplementationPlan(plan).ok, true);
   assert.equal(parseImplementationPlan("```implementation_plan\nsummary: vague\n```"), null);
+});
+
+test("implementation plans cover the shared fields and reject each missing required field", () => {
+  const plan = parseImplementationPlan(PLAN_TEXT);
+  assert.deepEqual(Object.keys(plan).sort(), fenceAllowedKeys("implementation_plan").sort());
+  assert.deepEqual(validateImplementationPlan(null).missing, [...IMPLEMENTATION_PLAN.required]);
+  for (const field of IMPLEMENTATION_PLAN.required) {
+    const incomplete = { ...plan, [field]: IMPLEMENTATION_PLAN.scalars.includes(field) ? "" : [] };
+    assert.deepEqual(validateImplementationPlan(incomplete), { ok: false, missing: [field] });
+  }
+  const withoutRisks = parseImplementationPlan(PLAN_TEXT.replace(/risks:\n[\s\S]*?(?=```)/, ""));
+  assert.deepEqual(withoutRisks.risks, []);
+  assert.equal(validateImplementationPlan(withoutRisks).ok, true);
 });
 
 test("implementation plan hash is stable and changes with the approved plan", () => {

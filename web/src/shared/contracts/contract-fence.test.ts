@@ -1,5 +1,20 @@
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
-import { dutyLabel, parseContractFence, splitContractFences } from "./contract-fence";
+import {
+  CONTRACT_FENCES,
+  CONTRACT_FENCE_LANGS,
+  dutyLabel,
+  parseContractFence,
+  splitContractFences,
+} from "./contract-fence";
+
+// The shared grammar is CommonJS and web/tsconfig sets allowJs:false, so the
+// tests reach it at runtime to prove the two sides have not drifted apart.
+const require = createRequire(import.meta.url);
+const sharedFenceFormat = require("../../../../src/shared/fence-format.js") as {
+  FENCE_LANGS: string[];
+  fenceFields(fence: string): { scalars: string[]; lists: string[] };
+};
 
 describe("parseContractFence", () => {
   it("reads the handoff authoring shape from skills/cross-agent-handoff/SKILL.md", () => {
@@ -122,5 +137,36 @@ describe("splitContractFences", () => {
 
   it("maps known duties to Chinese", () => {
     expect(dutyLabel("implement")).toBe("实现");
+  });
+});
+
+describe("contract fence registry vs the shared grammar", () => {
+  it("labels every fence and field the shared vocabulary declares", () => {
+    expect([...CONTRACT_FENCE_LANGS].sort()).toEqual([...sharedFenceFormat.FENCE_LANGS].sort());
+  });
+
+  it("never lets a fence fall back to a raw block because a field went unlabelled", () => {
+    for (const fence of sharedFenceFormat.FENCE_LANGS) {
+      const spec = CONTRACT_FENCES.find((entry) => entry.lang === fence);
+      expect(spec, `missing display spec for ${fence}`).toBeTruthy();
+      const { scalars, lists } = sharedFenceFormat.fenceFields(fence);
+      for (const field of scalars) {
+        expect(spec?.scalars[field], `no label for ${fence}.${field}`).toBeTruthy();
+      }
+      for (const field of lists) {
+        expect(spec?.lists[field], `no label for ${fence}.${field}`).toBeTruthy();
+      }
+    }
+  });
+
+  it("renders delivery receipts, which previously had no display spec", () => {
+    const body = [
+      "commit_sha: 1234567890abcdef1234567890abcdef12345678",
+      "pr_url: https://example.test/pr/1",
+      "base_branch: master",
+    ].join("\n");
+    const card = parseContractFence("delivery_receipt", body);
+    expect(card?.title).toBe("交付回执");
+    expect(card?.fields.map((field) => field.label)).toEqual(["提交", "PR", "基线分支"]);
   });
 });

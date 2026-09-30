@@ -1,6 +1,13 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const {
+  fenceFields,
+  SOLUTION_BASELINE,
+  CODE_REVIEW,
+  DELIVERY_RECEIPT,
+  FINAL_ACCEPTANCE,
+} = require("../shared/fence-format");
 
 const COMMIT_SUBJECT_RE =
   /^(feat|fix|refactor|perf|test|docs|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^\r\n]+$/;
@@ -14,10 +21,7 @@ const REQUIRED_PR_SECTIONS = Object.freeze([
 ]);
 
 function parseSolutionBaseline(text) {
-  const value = parseStructuredBlock(text, "solution_baseline", {
-    scalars: ["user_goal_hash", "summary"],
-    lists: ["constraints", "non_goals", "acceptance_criteria"],
-  });
+  const value = parseStructuredBlock(text, "solution_baseline", fenceFields("solution_baseline"));
   return validateSolutionBaseline(value).ok ? value : null;
 }
 
@@ -26,7 +30,7 @@ function validateSolutionBaseline(value) {
   if (!value || typeof value !== "object") {
     return {
       ok: false,
-      missing: ["user_goal_hash", "summary", "constraints", "non_goals", "acceptance_criteria"],
+      missing: [...SOLUTION_BASELINE.required],
     };
   }
   if (!isShortHash(value.user_goal_hash)) missing.push("user_goal_hash");
@@ -52,10 +56,7 @@ function hashSolutionBaseline(value) {
 }
 
 function parseCodeReview(text) {
-  const value = parseStructuredBlock(text, "code_review", {
-    scalars: ["verdict", "summary"],
-    lists: ["findings", "tests"],
-  });
+  const value = parseStructuredBlock(text, "code_review", fenceFields("code_review"));
   if (value) value.verdict = clean(value.verdict).toLowerCase().replace(/-/g, "_");
   return validateCodeReview(value).ok ? value : null;
 }
@@ -63,7 +64,7 @@ function parseCodeReview(text) {
 function validateCodeReview(value) {
   const missing = [];
   if (!value || typeof value !== "object") {
-    return { ok: false, missing: ["verdict", "summary", "findings", "tests"] };
+    return { ok: false, missing: [...CODE_REVIEW.required] };
   }
   if (!["approve", "changes_requested"].includes(value.verdict)) missing.push("verdict");
   if (!clean(value.summary)) missing.push("summary");
@@ -87,17 +88,14 @@ function hashCodeReview(value, commitSha) {
 }
 
 function parseDeliveryReceipt(text) {
-  const value = parseStructuredBlock(text, "delivery_receipt", {
-    scalars: ["commit_sha", "pr_url", "base_branch"],
-    lists: ["verification"],
-  });
+  const value = parseStructuredBlock(text, "delivery_receipt", fenceFields("delivery_receipt"));
   return validateDeliveryReceipt(value).ok ? value : null;
 }
 
 function validateDeliveryReceipt(value) {
   const missing = [];
   if (!value || typeof value !== "object") {
-    return { ok: false, missing: ["commit_sha", "pr_url", "base_branch", "verification"] };
+    return { ok: false, missing: [...DELIVERY_RECEIPT.required] };
   }
   if (!/^[a-f0-9]{40}$/i.test(clean(value.commit_sha))) missing.push("commit_sha");
   if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+\/?$/i.test(clean(value.pr_url))) {
@@ -159,16 +157,7 @@ function hasModelAttribution(body) {
 }
 
 function parseFinalAcceptance(text) {
-  const value = parseStructuredBlock(text, "final_acceptance", {
-    scalars: [
-      "verdict",
-      "user_goal_hash",
-      "solution_hash",
-      "implementation_plan_hash",
-      "commit_sha",
-    ],
-    lists: ["checks", "gaps"],
-  });
+  const value = parseStructuredBlock(text, "final_acceptance", fenceFields("final_acceptance"));
   if (value) value.verdict = clean(value.verdict).toLowerCase();
   return validateFinalAcceptanceShape(value).ok ? value : null;
 }
@@ -178,15 +167,7 @@ function validateFinalAcceptanceShape(value) {
   if (!value || typeof value !== "object") {
     return {
       ok: false,
-      missing: [
-        "verdict",
-        "user_goal_hash",
-        "solution_hash",
-        "implementation_plan_hash",
-        "commit_sha",
-        "checks",
-        "gaps",
-      ],
+      missing: [...FINAL_ACCEPTANCE.required],
     };
   }
   if (!["accept", "reject"].includes(value.verdict)) missing.push("verdict");

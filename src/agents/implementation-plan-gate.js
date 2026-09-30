@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const { ENV } = require("../shared/brand");
+const { IMPLEMENTATION_PLAN } = require("../shared/fence-format");
 
 const IMPLEMENTATION_GATE_STATUS = Object.freeze({
   REQUIRED: "required",
@@ -9,8 +10,8 @@ const IMPLEMENTATION_GATE_STATUS = Object.freeze({
   APPROVED: "approved",
 });
 
-const REQUIRED_PLAN_FIELDS = Object.freeze(["summary", "files", "changes", "tests"]);
-const PLAN_LIST_FIELDS = new Set(["files", "changes", "tests", "risks"]);
+const PLAN_SCALAR_FIELDS = new Set(IMPLEMENTATION_PLAN.scalars);
+const PLAN_LIST_FIELDS = new Set(IMPLEMENTATION_PLAN.lists);
 
 function parseImplementationPlan(text) {
   const blocks = [];
@@ -24,7 +25,10 @@ function parseImplementationPlan(text) {
 }
 
 function parseImplementationPlanBody(body) {
-  const plan = { summary: "", files: [], changes: [], tests: [], risks: [] };
+  const plan = Object.fromEntries([
+    ...IMPLEMENTATION_PLAN.scalars.map((field) => [field, ""]),
+    ...IMPLEMENTATION_PLAN.lists.map((field) => [field, []]),
+  ]);
   let currentList = null;
 
   for (const rawLine of String(body || "").split(/\r?\n/)) {
@@ -41,8 +45,8 @@ function parseImplementationPlanBody(body) {
     if (colon < 0) continue;
     const key = line.slice(0, colon).trim().toLowerCase();
     const value = cleanPlanValue(line.slice(colon + 1));
-    if (key === "summary") {
-      plan.summary = value;
+    if (PLAN_SCALAR_FIELDS.has(key)) {
+      plan[key] = value;
       currentList = null;
       continue;
     }
@@ -66,11 +70,14 @@ function cleanPlanValue(value) {
 function validateImplementationPlan(plan) {
   const missing = [];
   if (!plan || typeof plan !== "object") {
-    return { ok: false, missing: REQUIRED_PLAN_FIELDS.slice() };
+    return { ok: false, missing: [...IMPLEMENTATION_PLAN.required] };
   }
-  if (!String(plan.summary || "").trim()) missing.push("summary");
-  for (const field of REQUIRED_PLAN_FIELDS.slice(1)) {
-    if (!Array.isArray(plan[field]) || plan[field].length === 0) missing.push(field);
+  for (const field of IMPLEMENTATION_PLAN.required) {
+    if (PLAN_SCALAR_FIELDS.has(field)) {
+      if (!String(plan[field] || "").trim()) missing.push(field);
+    } else if (!Array.isArray(plan[field]) || plan[field].length === 0) {
+      missing.push(field);
+    }
   }
   return { ok: missing.length === 0, missing };
 }
@@ -181,7 +188,6 @@ function renderImplementationGateBlock(gate) {
 
 module.exports = {
   IMPLEMENTATION_GATE_STATUS,
-  REQUIRED_PLAN_FIELDS,
   parseImplementationPlan,
   parseImplementationPlanBody,
   validateImplementationPlan,
