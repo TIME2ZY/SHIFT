@@ -63,10 +63,6 @@
     grid-template-columns: 1fr;
   }
 
-  .audit-traces {
-    min-height: min(72dvh, 720px);
-  }
-
   .audit-memory {
     position: static;
     max-height: none;
