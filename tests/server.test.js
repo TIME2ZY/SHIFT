@@ -1097,6 +1097,7 @@ test("Project opening creates Sessions whose execution directories cannot drift"
 
 test("chat endpoint does not create a worktree by default", async () => {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-no-worktree-base-"));
+  const canonicalBaseDir = normalizeCanonicalPath(fs.realpathSync.native(baseDir));
   const calls = [];
 
   await withServer(
@@ -1129,10 +1130,10 @@ test("chat endpoint does not create a worktree by default", async () => {
 
       assert.equal(response.status, 200);
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].cwd, normalizeCanonicalPath(baseDir));
+      assert.equal(calls[0].cwd, canonicalBaseDir);
       assert.equal(calls[0].env.SHIFT_WORKTREE, "0");
-      assert.equal(calls[0].env.SHIFT_BASE_DIR, normalizeCanonicalPath(baseDir));
-      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, normalizeCanonicalPath(baseDir));
+      assert.equal(calls[0].env.SHIFT_BASE_DIR, canonicalBaseDir);
+      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, canonicalBaseDir);
       assert.equal(calls[0].env.SHIFT_BRANCH, "");
     }
   );

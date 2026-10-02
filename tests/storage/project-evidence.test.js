@@ -208,7 +208,7 @@ test("recall search isolates project-doc passages by the trusted Thread Project"
       rootDir: secondRoot,
     });
     assert.equal(trustedReindex.projectKey, alphaProjectKey);
-    assert.equal(path.resolve(trustedReindex.rootDir), path.resolve(firstRoot));
+    assert.equal(fs.realpathSync.native(trustedReindex.rootDir), fs.realpathSync.native(firstRoot));
   } finally {
     storage.close();
     fs.rmSync(firstRoot, { recursive: true, force: true });
