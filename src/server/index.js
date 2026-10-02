@@ -23,6 +23,10 @@ const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const { createChatRuntime } = require("./chat-runtime");
 const { createRunEventRoutes } = require("./run-event-routes");
+const { createDelegationRoutes } = require("./delegation-routes");
+const { createDelegationOrchestrator } = require("../agents/delegation-orchestrator");
+const { createTaskWorkspace } = require("../worktree/task-workspace");
+const { processIdentity, reconcileOwnedProcesses } = require("../agents/process-ownership");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
 
 const { initializeCatalogSeats } = require("../agents/duty-routing");
@@ -120,6 +124,11 @@ function createServer(options = {}) {
     {
       ...options,
       memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
+      runtimeIdentity: processIdentity(process.pid),
+      isRuntimeOwnerAlive: (identity) => {
+        const current = processIdentity(identity.pid);
+        return current?.token === identity.token && current?.platform === identity.platform;
+      },
     },
     logger
   );
@@ -330,12 +339,40 @@ function createServer(options = {}) {
     logger,
   });
   chatRuntime.attachExecutor(chatRunExecutor);
+  const delegationOrchestrator = createDelegationOrchestrator({
+    repository: storageContext.storage.collaborationTasks,
+    seats: storageContext.storage.threadSeats,
+    agents: AGENTS,
+    availability,
+    runtime: chatRuntime,
+    startRun: (input) =>
+      chatRuntime.startRun({
+        ...input,
+        apiUrl: `http://127.0.0.1:${server.address()?.port || 8787}`,
+      }),
+    getSession: getSessionDurable,
+    createSession: createSessionDurable,
+    projects: storageContext.storage.projects,
+    createWorkspace: () => createTaskWorkspace(appPaths.shiftHome),
+    traces: storageContext.storage.traces,
+    registry: collabTaskRegistry,
+    logger,
+  });
+  const handleDelegationRoutes = createDelegationRoutes({
+    orchestrator: delegationOrchestrator,
+    sendJson,
+    readJsonBody,
+  });
   const handleRunEventRoutes = createRunEventRoutes({
     runtime: chatRuntime,
     storage: storageContext.storage,
     getSession: getSessionDurable,
     sendJson,
     readJsonBody,
+    prepareRun: (sessionId, input) => {
+      delegationOrchestrator.initialize(sessionId);
+      return delegationOrchestrator.prepare(sessionId, input);
+    },
   });
 
   async function handleRequest(req, res) {
@@ -385,6 +422,8 @@ function createServer(options = {}) {
       return;
     }
 
+    if (await handleDelegationRoutes(req, res, url)) return;
+
     if (await handleMemoryRoutes(req, res, url)) {
       return;
     }
@@ -415,7 +454,27 @@ function createServer(options = {}) {
   const server = http.createServer(
     createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
   );
-  server.once("listening", () => availability.start());
+  server.once("listening", () => {
+    availability.start();
+    void Promise.resolve()
+      .then(() =>
+        reconcileOwnedProcesses(storageContext.storage.processOwnership.listOpen(), {
+          recordExit: (entry, reason) => {
+            const recorded = eventStore.append({
+              ...entry,
+              kind: "process.exited",
+              payload: { reason, startupReconciled: true },
+            });
+            if (!recorded?.ok) throw new Error("Failed to persist process recovery.");
+          },
+        })
+      )
+      .then((blockers) => {
+        if (blockers.length) logger.error?.("[process-recovery] " + JSON.stringify(blockers));
+        else delegationOrchestrator.allowRecoveredQueue();
+      })
+      .catch((error) => logger.error?.("[process-recovery] " + error.message));
+  });
   let storageClosePromise = null;
   function closeStorageContext() {
     availability.close();
@@ -423,6 +482,7 @@ function createServer(options = {}) {
     _previewManagers.delete(worktreeManager);
     storageClosePromise = (async () => {
       try {
+        await delegationOrchestrator.close();
         await chatRuntime.shutdown();
         await storageContext.close();
       } catch (error) {

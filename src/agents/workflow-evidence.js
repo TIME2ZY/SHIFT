@@ -17,6 +17,7 @@ function processWorkflowEvidenceOutput(input = {}) {
   const registry = input.registry;
   const events = [];
   if (!threadId || !registry) return events;
+  if (registry.getTask?.(threadId)?.delegationState === "draft") return events;
 
   const taskUpdates = parseTaskUpdates(content);
   function applyTaskUpdate(update) {

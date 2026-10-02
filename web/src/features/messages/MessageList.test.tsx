@@ -18,9 +18,7 @@ afterEach(() => {
 });
 
 describe("MessageList", () => {
-  it("fills the composer when a recommended starter prompt is clicked", async () => {
-    const user = userEvent.setup();
-    const onUsePrompt = vi.fn();
+  it("shows an observation empty state without direct execution controls", () => {
     renderMessageList(
       <MessageList
         sessionId="s1"
@@ -30,20 +28,11 @@ describe("MessageList", () => {
         isLoading={false}
         error={null}
         onRetry={vi.fn()}
-        onUsePrompt={onUsePrompt}
       />
     );
 
-    expect(screen.getByRole("heading", { level: 2, name: "开始一个任务" })).toBeInTheDocument();
-    expect(screen.getByText("开局")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "使用推荐提示：收敛问题与方案" }));
-    expect(onUsePrompt).toHaveBeenCalledWith({
-      title: "收敛问题与方案",
-      description: "先确认目标与约束，再整理实施方案",
-      prompt:
-        "请先确认问题和约束，再提交 implementation_plan；需要协作时选择当前可路由席位。本轮不要改代码。",
-    });
+    expect(screen.getByRole("heading", { level: 2, name: "暂无执行记录" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /使用推荐提示/ })).not.toBeInTheDocument();
   });
 
   it("renders persisted and live messages in the same transcript", () => {

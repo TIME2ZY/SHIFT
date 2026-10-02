@@ -23,6 +23,7 @@ const {
 const { refreshDigest } = require("../storage/memory-digest");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { activeSkillNames } = require("../agents/duty-routing");
+const { processIdentity } = require("../agents/process-ownership");
 const { createTurnState, resetTurnStateForEntry, createTurnTracker } = require("./chat-turn-state");
 const { assemblePrompt } = require("./chat-prompt-assembly");
 const { startInvocationAndAnnounce } = require("./chat-invocation-starter");
@@ -301,6 +302,7 @@ async function runChatWorklist(ctx) {
             }
           : {}),
         INVOKE_SESSION_ID: turnRunState.resumeSessionId,
+        INVOKE_PURPOSE: ctx.preparationOnly ? "prepare" : "execute",
         INVOKE_WORKSPACE_KEY: workspaceKey,
       };
 
@@ -394,7 +396,33 @@ async function runChatWorklist(ctx) {
           seals: turnRunState.recoveryEvidence,
           taskVersion: turnRunState.taskSnapshot?.version,
         });
+        const trackProcess = Boolean(collabTaskRegistry?.getTask(sessionId)?.delegationState);
+        const processEvent = (kind, payload = {}) => {
+          const written = events.append({
+            threadId: sessionId,
+            invocationId: turnRunState.activeInvocationId,
+            kind,
+            payload,
+          });
+          if (!written?.ok) throw new Error("Process ownership event was not persisted.");
+        };
+        if (trackProcess) processEvent("process.spawn_intent");
         const streamResult = await runChildStream({
+          onSpawn: trackProcess
+            ? (child) => {
+                if (!child.pid) {
+                  processEvent("process.exited", { reason: "not_spawned" });
+                  return;
+                }
+                const identity = processIdentity(child.pid);
+                if (!identity) {
+                  processEvent("process.exited", { reason: "process_already_gone" });
+                  return;
+                }
+                processEvent("process.bound", { identity });
+              }
+            : undefined,
+          onClose: trackProcess ? () => processEvent("process.exited") : undefined,
           spawnRunner,
           args: buildChatArgs(agent, turnRunState.agentPrompt, turnRunState.promptForAgent),
           cwd: runWorkspace.worktreeDir,

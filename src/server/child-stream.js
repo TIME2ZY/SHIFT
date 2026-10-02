@@ -59,6 +59,8 @@ function runChildStream({
   signal,
   timeoutMs,
   env,
+  onSpawn,
+  onClose,
 }) {
   const graceMs = killGraceMs || DEFAULT_KILL_GRACE_MS;
   const workDir = cwd || ROOT;
@@ -256,6 +258,13 @@ function runChildStream({
       clearTimeout(killTimer);
       clearInterval(activityTimer);
       if (signal) signal.removeEventListener("abort", abortHandler);
+      if (onClose) {
+        try {
+          onClose();
+        } catch (error) {
+          streamFailure ||= error;
+        }
+      }
       resolve({
         code,
         signal: closeSignal,
@@ -267,6 +276,13 @@ function runChildStream({
         stopReason: stopReason || (signal?.aborted ? signal?.reason || "aborted" : null),
       });
     });
+    if (onSpawn) {
+      try {
+        onSpawn(child);
+      } catch (error) {
+        failStream("process ownership", error);
+      }
+    }
   });
 }
 

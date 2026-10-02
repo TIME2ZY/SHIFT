@@ -9,6 +9,33 @@ const { prepareCleanEpoch } = require("../../src/storage/offline/clean-epoch");
 const { MIGRATIONS } = require("../../src/storage/schema");
 const { createServerStorage } = require("../../src/storage/server-storage");
 
+test("runtime lease rejects another live owner before reconciling and releases after close", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-lease-"));
+  const file = path.join(dir, "shift.sqlite");
+  prepareCleanEpoch({ file });
+  const options = {
+    memoryDbFile: file,
+    runtimeIdentity: { pid: 1, token: "first" },
+    isRuntimeOwnerAlive: () => true,
+  };
+  const first = createServerStorage(options);
+  try {
+    assert.throws(
+      () => createServerStorage({ ...options, runtimeIdentity: { pid: 2, token: "second" } }),
+      /already owned/
+    );
+    assert.equal(
+      first.storage.db.prepare("SELECT COUNT(*) AS count FROM runtime_server_lease").get().count,
+      1
+    );
+  } finally {
+    await first.close();
+  }
+  const second = createServerStorage({ ...options, runtimeIdentity: { pid: 2, token: "second" } });
+  await second.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("online storage rejects retired files and dual modes", async () => {
   assert.throws(() => createServerStorage({ storageMode: "files" }), /only accepts sqlite/);
   assert.throws(() => createServerStorage({ storageMode: "dual" }), /only accepts sqlite/);

@@ -24,6 +24,7 @@ const { createWindowRepository } = require("./window-repository");
 const { createCollaborationTaskRepository } = require("./collaboration-task-repository");
 const { createThreadSeatRepository } = require("./thread-seat-repository");
 const { createInvocationDutyBindingRepository } = require("./invocation-duty-binding-repository");
+const { createProcessOwnershipRepository } = require("./process-ownership-repository");
 
 function createStorage(options = {}) {
   const db = options.db || openMemoryDatabase(options);
@@ -50,6 +51,7 @@ function createStorage(options = {}) {
     collaborationTasks: createCollaborationTaskRepository(db),
     threadSeats: createThreadSeatRepository(db),
     invocationDutyBindings: createInvocationDutyBindingRepository(db),
+    processOwnership: createProcessOwnershipRepository(db),
     projects: createProjectRepository(db, options.projectRepositoryOptions),
     memories: createMemoryRepository(db, recall),
     digests: createMemoryDigestRepository(db),

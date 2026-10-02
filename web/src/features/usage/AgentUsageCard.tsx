@@ -20,7 +20,7 @@ interface AgentUsageCardProps {
   disabled?: boolean;
   /** Roving tabindex: 0 on the seat holding the tab stop, -1 on the rest. */
   rosterTabIndex: 0 | -1;
-  onSelect(agentId: string): void;
+  onSelect?(agentId: string): void;
   onRefresh?(): void;
   refreshing?: boolean;
 }
@@ -60,7 +60,7 @@ export function AgentUsageCard({
 
   function select() {
     if (disabled) return;
-    onSelect(agent.id);
+    onSelect?.(agent.id);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -81,14 +81,14 @@ export function AgentUsageCard({
     >
       <div
         className="react-agent-select"
-        role="radio"
-        aria-checked={selected}
+        role={onSelect ? "radio" : undefined}
+        aria-checked={onSelect ? selected : undefined}
         aria-disabled={disabled || undefined}
         aria-label={`${agent.label}${model ? `，${model}` : ""}，${STATUS_LABELS[status]}${unavailable ? "，不可用" : ""}`}
         data-agent-id={agent.id}
-        tabIndex={rosterTabIndex}
-        onClick={select}
-        onKeyDown={handleKeyDown}
+        tabIndex={onSelect ? rosterTabIndex : undefined}
+        onClick={onSelect ? select : undefined}
+        onKeyDown={onSelect ? handleKeyDown : undefined}
       >
         <AgentAvatar agentId={agent.id} label={agent.label} prominent />
         <span className="react-agent-identity">
@@ -127,7 +127,7 @@ export function AgentUsageCard({
         </div>
       ) : null}
 
-      {selected ? (
+      {selected || !onSelect ? (
         <div className="react-agent-details">
           <p>{agent.description || "暂无运行器说明。"}</p>
 

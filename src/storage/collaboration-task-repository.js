@@ -1,5 +1,7 @@
 "use strict";
 
+const { createDelegationQueue, failure } = require("./delegation-queue");
+
 const {
   COLLAB_ACTOR_KINDS,
   COLLAB_TASK_STATES,
@@ -68,13 +70,27 @@ function createCollaborationTaskRepository(db) {
 
   const saveTransaction = db.transaction((task, event) => {
     const threadId = requiredString(task?.threadId, "thread id");
-    const record = normalizeTask(task, find.get(threadId));
+    const current = find.get(threadId);
+    if (current && task.version !== undefined && task.version !== current.version) {
+      throw failure("TASK_REVISION_CONFLICT", "任务已更新，请刷新后重试。");
+    }
+    const record = normalizeTask(task, current);
+    if (
+      current?.submitted_at &&
+      (record.goal !== current.goal ||
+        record.goalHash !== current.goal_hash ||
+        record.goalNormalized !== current.goal_normalized ||
+        parseObject(record.artifactsJson).userGoal?.hash !== current.goal_hash ||
+        parseObject(record.artifactsJson).userGoal?.text !== current.goal_normalized)
+    ) {
+      throw failure("TASK_FROZEN", "已提交目标不可修改，请建立关联新任务。");
+    }
     upsert.run(record);
     if (event) insertEvent.run(normalizeEvent(record.threadId, event));
     return mapTask(find.get(record.threadId), listEvents.all(record.threadId));
   });
 
-  return {
+  const repository = {
     get(threadId) {
       const id = requiredString(threadId, "thread id");
       const row = find.get(id);
@@ -97,6 +113,12 @@ function createCollaborationTaskRepository(db) {
       })();
     },
   };
+  repository.delegations = createDelegationQueue({
+    db,
+    get: repository.get,
+    save: repository.save,
+  });
+  return repository;
 }
 
 function normalizeTask(input = {}, current = null) {
@@ -214,6 +236,18 @@ function mapTask(row, events = []) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: Number(row.version || 1),
+    delegationState: row.delegation_state || null,
+    contract: parseNullableObject(row.contract_json),
+    contractHash: row.contract_hash || null,
+    team: parseNullableObject(row.team_json),
+    queueSeq: row.queue_seq || null,
+    parentThreadId: row.parent_thread_id || null,
+    submittedAt: row.submitted_at || null,
+    executionTraceId: row.execution_trace_id || null,
+    delegationReason: row.delegation_reason || null,
+    result: parseNullableObject(row.result_json),
+    repairCount: row.repair_count || 0,
+    deadlineAt: row.deadline_at || null,
     history: events.map(mapEvent),
   };
 }

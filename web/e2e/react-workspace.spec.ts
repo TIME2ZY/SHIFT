@@ -21,6 +21,29 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     runStarted: false,
   };
 
+  const contract = {
+    workflowId: "software_delivery",
+    goal: "实现工作区功能",
+    deliverables: ["工作区实现"],
+    acceptanceCriteria: ["浏览器验证通过"],
+    subtasks: [{ id: "workspace", title: "工作区实现", description: "实现和验证工作区" }],
+  };
+  let task = {
+    threadId: "session-1",
+    version: 1,
+    delegationState: "draft",
+    contract: null as typeof contract | null,
+    queueSeq: null as number | null,
+    repairCount: 0,
+    team: {
+      members: [
+        { providerId: "codex", seatId: "codex", label: "Codex", availabilityStatus: "available" },
+      ],
+      reviewMode: "solo_fallback",
+    },
+    result: null as { summary: string; delivery: null } | null,
+    delegationReason: null as string | null,
+  };
   await page.route("**/favicon.svg", async (route) => {
     await route.fulfill({
       contentType: "image/svg+xml",
@@ -33,6 +56,44 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     const url = new URL(request.url());
     const method = request.method();
 
+    if (url.pathname === "/api/tasks") {
+      await route.fulfill({
+        status: method === "POST" ? 201 : 200,
+        json: method === "POST" ? { task } : { tasks: [task], busy: false, recoveryBlocked: false },
+      });
+      return;
+    }
+    if (url.pathname.startsWith("/api/tasks/session-1")) {
+      if (url.pathname.endsWith("/prepare")) {
+        task = { ...task, contract, version: task.version + 1 };
+        state.runStarted = true;
+        await route.fulfill({ status: 202, json: { sessionId: "session-1", traceId: "trace-1" } });
+        return;
+      }
+      if (method === "PATCH") {
+        const body = request.postDataJSON();
+        task = { ...task, contract: body.contract, version: task.version + 1 };
+      }
+      if (url.pathname.endsWith("/submit")) {
+        task = {
+          ...task,
+          delegationState:
+            chatMode === "slow" ? "running" : chatMode === "error" ? "failed" : "completed",
+          queueSeq: 1,
+          version: task.version + 1,
+          result: { summary: "工作区改动已完成。", delivery: null },
+          delegationReason: chatMode === "error" ? "Provider unavailable" : null,
+        };
+        state.chatBody = request.postDataJSON();
+        state.chatCompleted = true;
+      }
+      if (url.pathname.endsWith("/cancel"))
+        task = { ...task, delegationState: "cancelled", version: task.version + 1 };
+      await route.fulfill({
+        json: { task, busy: false, preparingThreadId: null, recoveryBlocked: false },
+      });
+      return;
+    }
     if (url.pathname === "/api/agents" && method === "GET") {
       await route.fulfill({
         json: {
@@ -553,78 +614,50 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
   return state;
 }
 
-test("keeps worktree execution while exposing Audit in the former workspace slot", async ({
+test("prepares an editable delegation then freezes submitted scope and restores it after reload", async ({
   page,
 }) => {
-  const state = await mockShiftApi(page);
-
+  await mockShiftApi(page);
   await page.goto("./");
-  await expect(page.locator("#main-content").getByText("React E2E")).toBeVisible();
-
-  await expect(page.getByRole("button", { name: "工作区", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "审计", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "航线" })).toBeVisible();
-
-  await page.getByRole("button", { name: "对话", exact: true }).click();
-  await expect(page.getByText(/发给 Codex · Enter 发送/)).toBeVisible();
-  await expect(page.getByRole("region", { name: "任务卡" })).toContainText(
-    "发送消息后，这里会显示目标与完成证据"
-  );
-  await page.getByText("隔离改代码", { exact: true }).click();
-  await expect(page.getByText("将在隔离 worktree 中运行")).toBeVisible();
-
-  await page.getByRole("textbox", { name: "消息" }).fill("@Gemini 实现工作区功能");
-  await page.getByRole("button", { name: "发送" }).click();
-
-  await expect(page.locator(".react-messages")).toContainText("工作区改动已完成。");
-  await expect(page.getByRole("region", { name: "任务卡" })).toContainText("等待讨论席位批准方案");
-  await page.getByText("需求与计划", { exact: false }).click();
-  await expect(page.getByText("隔离工作区执行方案", { exact: true })).toBeVisible();
-  await expect(page.getByText("重启恢复回归", { exact: true })).toBeVisible();
-  await page.getByText("上下文续接", { exact: false }).click();
-  await page.getByText(/gemini · 窗口 1 · 未记录后续注入/).click();
-  await expect(page.getByLabel("续工包内容")).toHaveText("next_action: 运行重启恢复回归");
-  await expect(page.locator(".react-run-status")).toHaveText("已完成");
-  await expect(page.locator(".react-toast").getByText("本回合注入 1 条记忆")).toBeVisible();
-  await expect(page.locator(".react-toast").getByText("Agent 已写入记忆")).toBeVisible();
-  await page.getByRole("button", { name: "审计", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "航线" })).toBeVisible();
-  await page
-    .locator(".react-memory-list")
-    .getByRole("button", { name: /React 迁移/ })
-    .click();
+  await page.getByRole("button", { name: "新建委托" }).click();
+  await page.getByRole("textbox", { name: "目标与补充材料" }).fill("实现工作区功能");
+  await page.getByRole("button", { name: "主 Agent 整理草稿" }).click();
+  await expect(page.getByRole("textbox", { name: "收敛目标" })).toHaveValue("实现工作区功能");
+  await page.getByRole("textbox", { name: "收敛目标" }).fill("实现并验证工作区功能");
+  await page.getByRole("button", { name: "提交委托" }).click();
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText("已交付");
   await expect(
-    page.locator(".react-memory-list").getByText("工作区流程已经通过浏览器验证。")
+    page
+      .getByRole("region", { name: "任务委托" })
+      .getByRole("heading", { name: "实现并验证工作区功能", exact: true })
   ).toBeVisible();
-  expect(state.chatBody).toMatchObject({
-    sessionId: "session-1",
-    agent: "gemini",
-    prompt: "@Gemini 实现工作区功能",
-    useWorktree: true,
-  });
+  await expect(page.getByRole("textbox", { name: "收敛目标" })).toHaveCount(0);
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText("已交付");
 });
 
-test("surfaces a streamed provider failure as a toast and failed run", async ({ page }) => {
+test("retains provider failure and offers a related delegation", async ({ page }) => {
   await mockShiftApi(page, "error");
   await page.goto("./");
-
-  await page.getByRole("textbox", { name: "消息" }).fill("trigger failure");
-  await page.getByRole("button", { name: "发送" }).click();
-
-  await expect(page.locator(".react-toast").getByText("Provider unavailable")).toBeVisible();
-  await expect(page.locator(".react-run-status")).toHaveText("运行失败");
+  await page.getByRole("textbox", { name: "目标与补充材料" }).fill("工作区功能");
+  await page.getByRole("button", { name: "主 Agent 整理草稿" }).click();
+  await page.getByRole("button", { name: "提交委托" }).click();
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText("未完成");
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText(
+    "Provider unavailable"
+  );
+  await expect(page.getByRole("button", { name: "建立关联新委托" })).toBeVisible();
 });
 
-test("stops a connecting run and confirms the cancellation", async ({ page }) => {
+test("cancels a running delegation through the platform", async ({ page }) => {
   await mockShiftApi(page, "slow");
   await page.goto("./");
-
-  await page.getByRole("textbox", { name: "消息" }).fill("long task");
-  await page.getByRole("button", { name: "发送" }).click();
-  await page.getByRole("button", { name: "停止" }).click();
-
-  await expect(page.locator(".react-toast").getByText("已停止当前运行。")).toBeVisible();
-  await expect(page.getByText("已停止", { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "目标与补充材料" }).fill("工作区功能");
+  await page.getByRole("button", { name: "主 Agent 整理草稿" }).click();
+  await page.getByRole("button", { name: "提交委托" }).click();
+  await page.getByRole("button", { name: "取消委托" }).click();
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText("已取消");
 });
 
 test("uses accessible drawers without shrinking the mobile conversation", async ({ page }) => {

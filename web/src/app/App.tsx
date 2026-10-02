@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppNavigation } from "./navigation";
 import { AgentAvatar } from "../features/agents/AgentAvatar";
 import { useAgentsQuery } from "../features/agents/queries";
-import { useCollaborationQuery } from "../features/collaboration/queries";
-import { findExplicitLeadingAgent } from "../features/agents/routing";
-import { Composer, type ComposerDraftSeed } from "../features/chat/Composer";
-import { useChatActions } from "../features/chat/useChatActions";
+import { TaskConsole, DELEGATION_LABELS } from "../features/tasks/TaskConsole";
+import { useTaskActions, useTasksQuery } from "../features/tasks/queries";
+import { useSessionObserver } from "../runtime/useSessionObserver";
 import { MessageList } from "../features/messages/MessageList";
 import { useMessagesQuery } from "../features/messages/queries";
 import { RightPanel } from "../features/right-panel/RightPanel";
@@ -13,7 +12,7 @@ import { ProjectRail } from "../features/projects/ProjectRail";
 import { useProjectsQuery } from "../features/projects/queries";
 import { SessionList } from "../features/sessions/SessionList";
 import { sessionDisplayTitle } from "../features/sessions/display";
-import { useCreateSessionMutation, useDeleteSessionMutation } from "../features/sessions/mutations";
+import { useDeleteSessionMutation } from "../features/sessions/mutations";
 import { useSessionsQuery } from "../features/sessions/queries";
 import { AuditPage } from "../features/observability/AuditPage";
 import { useSessionTracesQuery } from "../features/observability/queries";
@@ -28,19 +27,7 @@ import {
 } from "../shared/ui/theme";
 
 const RUNNING_STATUSES = new Set<RunStatus>(["connecting", "running", "reconnecting"]);
-const AGENT_PREFERENCES_KEY = "shift.agent-preferences";
 const ACTIVE_PROJECT_KEY = "shift.active-project-key";
-
-function readAgentPreferences(): Record<string, string> {
-  try {
-    const value = window.localStorage.getItem(AGENT_PREFERENCES_KEY);
-    if (!value) return {};
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
 
 function statusLabel(status: RunStatus | undefined): string | null {
   switch (status) {
@@ -83,22 +70,21 @@ export function App() {
   const activeProjectKey = activeProject?.projectKey ?? null;
   const sessions = useSessionsQuery(activeProjectKey);
   const agents = useAgentsQuery();
-  const chat = useChatActions();
+  const observer = useSessionObserver();
   const runStore = useSessionRunStore();
-  const createSession = useCreateSessionMutation();
+  const tasks = useTasksQuery();
+  const taskActions = useTaskActions();
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() =>
+    window.localStorage.getItem("shift.active-task")
+  );
   const deleteSession = useDeleteSessionMutation();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [agentBySession, setAgentBySession] =
-    useState<Record<string, string>>(readAgentPreferences);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
   const [themePreference, setThemePreference] = useState<ThemePreference>(readThemePreference);
-  const [composerDraftSeed, setComposerDraftSeed] = useState<ComposerDraftSeed | null>(null);
-  const [composerFocusRequestId, setComposerFocusRequestId] = useState(0);
   const sidebarCloseRef = useRef<HTMLButtonElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const infoTriggerRef = useRef<HTMLButtonElement>(null);
-  const draftSeedIdRef = useRef(0);
 
   const activeSession =
     (selectedSessionId
@@ -106,26 +92,16 @@ export function App() {
       : undefined) ??
     sessions.data?.[0] ??
     null;
-  const activeSessionId = activeSession?.id ?? null;
+  const activeTask =
+    tasks.data?.tasks.find((task) => task.threadId === selectedTaskId) ??
+    (selectedSessionId ? null : (tasks.data?.tasks[0] ?? null));
+  const activeSessionId = activeTask?.threadId ?? selectedTaskId ?? activeSession?.id ?? null;
   const messages = useMessagesQuery(activeSessionId);
   const traces = useSessionTracesQuery(activeSessionId, { limit: 100 });
   const run = useSessionRun(activeSessionId);
-  const collaboration = useCollaborationQuery(activeSessionId);
-  const routableAgents = (agents.data ?? []).filter(
-    (agent) =>
-      agent.routable !== false &&
-      collaboration.data?.seats.some((seat) => seat.providerId === agent.id)
-  );
-  const preferredAgentId =
-    (activeSessionId ? agentBySession[activeSessionId] : undefined) ||
-    activeSession?.lastAgent ||
-    agents.data?.[0]?.id ||
-    "";
-  const selectedAgentId = routableAgents.some((agent) => agent.id === preferredAgentId)
-    ? preferredAgentId
-    : routableAgents[0]?.id || "";
   const running = RUNNING_STATUSES.has(run?.status ?? "idle");
-  const activeSessionTitle = sessionDisplayTitle(activeSession);
+  const activeSessionTitle =
+    activeTask?.contract?.goal || (selectedTaskId ? "新委托" : sessionDisplayTitle(activeSession));
   const activeParticipantIds = uniqueAgentIds([
     ...(activeSession?.participantAgentIds ?? []),
     ...(messages.data ?? []).map((message) => message.agentId || message.agent),
@@ -135,6 +111,10 @@ export function App() {
     (agentId) => agents.data?.find((agent) => agent.id === agentId)?.label || agentId
   );
   const activeStatusLabel = statusLabel(run?.status);
+  useEffect(() => {
+    if (selectedTaskId) window.localStorage.setItem("shift.active-task", selectedTaskId);
+    else window.localStorage.removeItem("shift.active-task");
+  }, [selectedTaskId]);
 
   const closeSidebar = useCallback(() => {
     setSidebarOpen(false);
@@ -157,52 +137,29 @@ export function App() {
   }, [closeSidebar, sidebarOpen]);
 
   useEffect(() => {
-    window.localStorage.setItem(AGENT_PREFERENCES_KEY, JSON.stringify(agentBySession));
-  }, [agentBySession]);
-
-  useEffect(() => {
     applyThemePreference(themePreference);
   }, [themePreference]);
 
   useEffect(() => {
-    if (activeProjectKey) window.localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectKey);
+    if (selectedProjectKey) window.localStorage.setItem(ACTIVE_PROJECT_KEY, selectedProjectKey);
     else window.localStorage.removeItem(ACTIVE_PROJECT_KEY);
     setSelectedSessionId(null);
-  }, [activeProjectKey]);
+  }, [activeProjectKey, selectedProjectKey]);
 
   useEffect(() => {
-    if (!activeSessionId || typeof chat.restore !== "function") return undefined;
-    return chat.restore(activeSessionId);
-  }, [activeSessionId, chat.restore]);
+    if (!activeSessionId || typeof observer.restore !== "function") return undefined;
+    return observer.restore(activeSessionId);
+  }, [activeSessionId, observer.restore]);
 
-  function selectAgent(agentId: string) {
-    if (!activeSessionId || !routableAgents.some((agent) => agent.id === agentId)) return;
-    setAgentBySession((current) => ({ ...current, [activeSessionId]: agentId }));
-  }
-
-  function sendPrompt(
-    prompt: string,
-    useWorktree: boolean,
-    clientTurnId: string
-  ): Promise<boolean> {
-    if (!activeSessionId) return Promise.resolve(false);
-    const explicitAgent = findExplicitLeadingAgent(prompt, routableAgents);
-    const targetAgentId = explicitAgent?.id || selectedAgentId;
-    if (!targetAgentId) return Promise.resolve(false);
-    return chat.send(activeSessionId, targetAgentId, prompt, useWorktree, clientTurnId);
-  }
-
-  function createNewSession() {
-    if (!activeProjectKey) return;
-    if (activeSession && activeSession.messageCount === 0 && !running && !activeSession.worktree) {
-      setComposerFocusRequestId((current) => current + 1);
-      return;
-    }
-    createSession.mutate(activeProjectKey, {
-      onSuccess(session) {
-        setSelectedSessionId(session.id);
-      },
-    });
+  function createNewSession(parentThreadId?: string) {
+    taskActions.mutate(
+      { action: "create", projectKey: selectedProjectKey || undefined, parentThreadId },
+      {
+        onSuccess(result) {
+          if (result.task) setSelectedTaskId(result.task.threadId);
+        },
+      }
+    );
   }
 
   function removeSession(sessionId: string) {
@@ -239,7 +196,7 @@ export function App() {
           </span>
           <span>
             <strong>SHIFT</strong>
-            <small>多智能体交班台</small>
+            <small>任务委托平台</small>
           </span>
           <button
             type="button"
@@ -287,7 +244,7 @@ export function App() {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 5.5h16v11H9l-5 3v-14Z" />
             </svg>
-            <span>对话</span>
+            <span>任务</span>
           </button>
           <button
             type="button"
@@ -317,8 +274,48 @@ export function App() {
         />
 
         <div className="react-sidebar-title">
-          <span>最近会话</span>
+          <span>委托任务</span>
           {sessions.isFetching ? <span className="react-sync-label">同步中</span> : null}
+        </div>
+
+        <button
+          type="button"
+          className="delegation-create"
+          disabled={taskActions.isPending}
+          onClick={() => createNewSession()}
+        >
+          新建委托
+        </button>
+        <p className="delegation-context">
+          {selectedProjectKey
+            ? "项目上下文：" +
+              (projects.data?.find((project) => project.projectKey === selectedProjectKey)
+                ?.displayName || "已选择")
+            : "新委托使用独立任务目录"}
+          {selectedProjectKey && (
+            <button type="button" onClick={() => setSelectedProjectKey(null)}>
+              不关联项目
+            </button>
+          )}
+        </p>
+        <div className="delegation-task-list" aria-label="委托任务列表">
+          {tasks.data?.tasks.map((task) => (
+            <button
+              type="button"
+              key={task.threadId}
+              data-active={task.threadId === activeSessionId || undefined}
+              onClick={() => {
+                setSelectedTaskId(task.threadId);
+                if (window.matchMedia("(max-width: 720px)").matches) closeSidebar();
+              }}
+            >
+              <strong>{task.contract?.goal || "新委托草稿"}</strong>
+              <small>{DELEGATION_LABELS[task.delegationState]}</small>
+            </button>
+          ))}
+        </div>
+        <div className="react-sidebar-title">
+          <span>历史会话</span>
         </div>
 
         <SessionList
@@ -327,20 +324,20 @@ export function App() {
           activeSessionId={activeSessionId}
           isLoading={projects.isPending || sessions.isFetching}
           error={sessions.error}
-          isCreating={createSession.isPending}
+          isCreating={false}
           deletingSessionId={deleteSession.isPending ? deleteSession.variables?.sessionId : null}
           emptyMessage={activeProject ? "这个项目还没有对话。" : "先打开一个项目，再创建对话。"}
-          onCreate={activeProjectKey ? createNewSession : undefined}
           onDelete={removeSession}
           onSelect={(sessionId) => {
+            setSelectedTaskId(null);
             setSelectedSessionId(sessionId);
             if (window.matchMedia("(max-width: 720px)").matches) closeSidebar();
           }}
           onRetry={() => void sessions.refetch()}
         />
-        {createSession.error || deleteSession.error ? (
+        {taskActions.error || deleteSession.error ? (
           <p className="react-sidebar-error" role="alert">
-            {(createSession.error || deleteSession.error)?.message}
+            {(taskActions.error || deleteSession.error)?.message}
           </p>
         ) : null}
       </aside>
@@ -415,48 +412,28 @@ export function App() {
               </div>
             </header>
 
-            <MessageList
-              sessionId={activeSessionId}
-              messages={messages.data ?? []}
-              traces={traces.data?.traces ?? []}
-              agents={agents.data ?? []}
-              run={run}
-              isLoading={messages.isPending && Boolean(activeSessionId)}
-              error={messages.error}
-              onRetry={() => void messages.refetch()}
-              onUsePrompt={(prompt) => {
-                draftSeedIdRef.current += 1;
-                setComposerDraftSeed({
-                  id: draftSeedIdRef.current,
-                  text: prompt.prompt,
-                  useWorktree: prompt.useWorktree,
-                });
-              }}
-            />
-
-            <Composer
-              sessionId={activeSessionId}
-              agents={routableAgents}
-              selectedAgentId={selectedAgentId}
-              running={running}
-              draftSeed={composerDraftSeed}
-              focusRequestId={composerFocusRequestId}
-              onDraftSeedApplied={() => setComposerDraftSeed(null)}
-              onSend={sendPrompt}
-              onStop={() => {
-                if (activeSessionId) chat.stop(activeSessionId);
-              }}
-            />
+            <TaskConsole sessionId={activeSessionId} onRelatedTask={createNewSession} />
+            <details className="delegation-details" open={!activeTask}>
+              <summary>执行细节与会话记录</summary>
+              <MessageList
+                sessionId={activeSessionId}
+                messages={messages.data ?? []}
+                traces={traces.data?.traces ?? []}
+                agents={agents.data ?? []}
+                run={run}
+                isLoading={messages.isPending && Boolean(activeSessionId)}
+                error={messages.error}
+                onRetry={() => void messages.refetch()}
+              />
+            </details>
           </main>
 
           <RightPanel
             sessionId={activeSessionId}
             agents={agents.data ?? []}
-            selectedAgentId={selectedAgentId}
             run={run}
             open={infoPanelOpen}
             onClose={closeInfoPanel}
-            onAgentChange={selectAgent}
           />
         </>
       ) : (

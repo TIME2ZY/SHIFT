@@ -210,7 +210,7 @@ test("chat persists thread state through SQLite repositories", async () => {
   }
 });
 
-test("routed structured handoff is collaboration evidence, not product Memory", async () => {
+test("preparation handoff cannot spawn work or create product Memory", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-memory-server-"));
   const storage = createStorage({ file: ":memory:" });
   storage.metadata.activateCleanCutover();
@@ -256,9 +256,10 @@ test("routed structured handoff is collaboration evidence, not product Memory", 
     }).then((response) => response.text());
     const memories = storage.memories.listForThread(session.id);
 
-    assert.equal(run, 2);
+    assert.equal(run, 1);
     assert.equal(memories.length, 0);
-    assert.match(stream, /event: handoff-captured/);
+    assert.doesNotMatch(stream, /event: handoff-captured/);
+    assert.equal(storage.handoffs.listForThread(session.id).length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await server.closeStorageContext?.();

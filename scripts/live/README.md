@@ -1,123 +1,27 @@
 # Live scenarios（真实 CLI，不进 `npm test`）
 
-用**真实 Agent CLI** 在**独立 sandbox 真实开源仓库**上修复真实 GitHub issue，验证 SHIFT 主链路
-（project 绑定 → chat → SSE → invocation 终态 → SQLite 持久化）在真实协作中立得住。
-
-|        | `npm test`      | Live                                                                     |
-| ------ | --------------- | ------------------------------------------------------------------------ |
-| CLI    | mock            | **真 codex / grok**                                                      |
-| 靶项目 | 测试夹具        | **真实仓库 @ base commit**（dayjs）                                      |
-| DB     | 临时目录 / 内存 | **隔离 `output/live/.../shift-home`**（`--use-default-home` 才用 UI 库） |
-| 入口   | `npm test`      | `npm run test:live:issue-fix` / `npm run test:live:collab-slice`         |
-
-## 场景：collab-slice（Codex → Grok plan）
-
-验证多 Agent 交接的最小真实切片，不断言 PR / CI：
-
-1. 克隆实例仓库到 sandbox（不打 F2P 补丁、不 `npm ci`）
-2. open Project → create Session，`useWorktree: true`
-3. 用户消息要求 Codex 写 `solution_baseline` 并 `@Grok` 提交 `implementation_plan`，禁止改文件
-4. 硬断言（纯函数在 `scripts/live/lib/collab-assert.js`）：
-   - 至少 2 个终态 invocation，且包含 Codex 与 Grok
-   - 恰好存在 accepted handoff 且有 `targetInvocationId`
-   - `GET /api/sessions/:id/collaboration` 为 `phase=implement` 且 `planHash` 非空
-   - 刷新后再 GET，phase / planHash 不变
-   - project_dir 与 worktree diff 均为空
+当前入口是任务委托准备期的真实 Codex CLI smoke。它使用隔离的 SQLite 和任务目录，
+调用真实 `/api/tasks` API，验证主 Agent 能生成可编辑合同、durable trace 正常终结，
+并且只读准备期没有修改项目文件。
 
 ```powershell
-npm run test:live:collab-slice -- --dry-run
-npm run test:live:collab-slice -- --instance dayjs-2505
+npm run test:live:delegation
 ```
 
-Grok 若不写 `implementation_plan` 块，断言记为 `plan_fence_missing`，不放宽门禁。
+前置条件：Node 20+、Git、已安装并登录的 Codex CLI，以及本机代理
+`http://127.0.0.1:7897`。代理预检失败会停止，禁止绕过代理直连。
+该命令会调用真实模型并使用现有配额；单次 CLI 限时 90 秒。
 
-## 场景：issue-fix（S1）
+产物保存在 `output/live/delegation-smoke-<timestamp>/`：
 
-对每个实例：
+- `home/`：本轮独立 runtime，不写交互式 SHIFT_HOME。
+- `result.json`：生成的合同、所选 Agent、trace 终态及目录未修改检查。
 
-1. **Sandbox 准备**：克隆上游仓库 → checkout 实例 base commit → 应用 F2P 测试补丁并提交 → 安装依赖
-2. **红灯预检**：跑项目测试，要求恰好 F2P 测试失败、其余全绿（否则实例无效，exit 2）
-3. **open Project → create Session**：sandbox 作为 `project_dir` 绑定进 SHIFT
-4. **chat**：真实 issue 文本作为用户消息交给 Agent，Agent 在 sandbox 里修 bug
-5. **硬断言**：
-   - L6 chat outcome：agent-exit 0、assistant 非空、invocation 终态 `completed`
-   - L7 durable trace / messages 持久化（user + assistant-final）
-   - L8 diff 范围：sandbox 只允许改 `src/**`（碰测试文件即失败）
-   - L9 F2P 全绿 + 无 P2P 回归
+此 smoke 不提交执行、不创建远端 PR。完整软件团队的 discuss → plan → implement →
+review → deliver → accept、handoff 一次消费与完成证据绑定，由
+`tests/server/collaboration-chat.test.js` 的确定性集成测试覆盖；Git/GitHub 取证使用测试替身。
+真实 PR/CI 全链路仍需使用实际可交付的远端项目验证。
 
-## 实例清单（SWE-bench 语义）
-
-`scripts/live/instances/<id>/`：
-
-- `instance.json` — repo、baseCommit、failToPass 测试名、allowPrefixes
-- `issue.md` — 原始 issue 文本（用户消息）
-- `test.patch` — 来自上游修复 PR 的测试补丁（仅测试文件）
-
-已收录（均已在 Windows 本机验证红→绿）：
-
-| 实例         | issue                                      | base      |
-| ------------ | ------------------------------------------ | --------- |
-| `dayjs-2505` | `.utcOffset(0, true)` clone 与原实例不一致 | `1547bff` |
-| `dayjs-2377` | duration `toISOString()` 浮点尾数泄漏      | `5f3f878` |
-
-## 前置
-
-1. Node 20+、git
-2. 目标 Agent CLI 在 PATH（默认 codex，可用 `--agent grok`）
-3. 网络可达 GitHub（克隆仓库）；可用 `--source <本地克隆>` 离线复用
-4. sandbox 依赖安装默认 `npm ci`；可用 `--node-modules <路径>` junction 复用缓存加速
-5. 仅当使用 `--use-default-home` 时需要已初始化的交互式 runtime DB：`npm run storage:init-home`
-
-## 命令
-
-```powershell
-# 只打印计划与 prompt，不调用任何 CLI
-npm run test:live:issue-fix -- --dry-run
-
-# 单实例（默认 codex）
-npm run test:live:issue-fix -- --instance dayjs-2505
-
-# 换 Agent / 离线仓库源 / 复用 node_modules
-npm run test:live:issue-fix -- --instance dayjs-2377 --agent grok --source D:\cache\dayjs --node-modules D:\cache\dayjs\node_modules
-
-# 全部实例
-npm run test:live:issue-fix
-
-# 显式写入交互式 SHIFT_HOME（与 npm start 同库）
-npm run test:live:issue-fix -- --instance dayjs-2505 --use-default-home
-```
-
-## 产物
-
-`output/live/issue-fix-<timestamp>/`（`output/` 已 gitignore）：
-
-- `shift-home/` — 本轮隔离 runtime（`--use-default-home` 时不创建）
-- `<instance>/report.md` / `report.json` — 判定与逐项断言
-- `<instance>/target/` — sandbox 仓库本体（保留现场，可在浏览器里继续聊）
-- `<instance>/jest-before.json` / `jest-after.json` — 修复前后逐测试结果
-- `<instance>/chat-sse.txt`、`chat-summary.json`、`messages.json`
-- `<instance>/agent.patch`、`changed-files.json`、`session-id.txt`
-
-## 验收
-
-主验收只认 **clean run**（单次进程、无续跑）。所有硬断言通过即 exit 0。
-
-| Code | 含义                                                   |
-| ---- | ------------------------------------------------------ |
-| 0    | 全部实例通过                                           |
-| 1    | 硬断言失败或运行错误                                   |
-| 2    | Preflight 失败（CLI 缺失、未知实例、实例红灯预检不过） |
-| 3    | chat 超时                                              |
-
-确定性单测（进 `npm test`）：`tests/live/sandbox-assert.test.js`、`tests/live/harness.test.js`
-（断言语义与 harness 隔离不依赖真 CLI。）
-
-## 费用与时间
-
-真模型 + 真仓库：单实例约 5–20 分钟并产生 API 费用。先用 `--dry-run` 确认 prompt。
-
-## 后续场景（规划中，未实现）
-
-- S2 多 Agent + worktree 交付（handoff 恰好消费一次、主 repo 干净）
-- S3 seal + 重启恢复
-- S4 观测门禁（durable trace 完整性发布 gate）
+旧 `run-issue-fix.js`、`run-collab-slice.js` 及 npm 入口已删除：它们依赖旧版直接发送消息
+执行接口，与冻结后发布委托的产品流程冲突。`instances/` 和 `lib/` 中的离线实例、
+F2P/交接断言仍作为可复用评测材料保留，由 `tests/live/` 覆盖，不构成在线执行入口。

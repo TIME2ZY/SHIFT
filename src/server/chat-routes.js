@@ -185,6 +185,7 @@ function createChatRunExecutor({
       threadId: sessionId,
       clientTurnId,
       metadata: {
+        purpose: body.internalPurpose || null,
         requestedAgent,
         requestedSeatId: initialSeat.seatId,
         requestedDuty,
@@ -296,7 +297,11 @@ function createChatRunExecutor({
         `[skills] native materialize failed; using prompt fallback: ${skillDelivery.materialize.errors.join("; ")}`
       );
     }
-    const { augmentedPrompt, skillNames } = skillDelivery;
+    const skillNames = skillDelivery.skillNames;
+    const augmentedPrompt =
+      body.internalPurpose === "prepare"
+        ? [body.internalTaskPrompt, turnPrompt].filter(Boolean).join("\n\n")
+        : [skillDelivery.augmentedPrompt, body.internalTaskPrompt].filter(Boolean).join("\n\n");
     const nativeSkillDelivery = skillDelivery.nativeDelivery === true;
     const apiUrl = apiUrlInput || process.env[ENV.API_URL] || `http://${host || "127.0.0.1"}`;
     const worklist = [requestedAgent];
@@ -364,7 +369,11 @@ function createChatRunExecutor({
         ? findUserMessageByClientTurnId(sessionId, clientTurnId)
         : sessionAfterUser?.messages?.[sessionAfterUser.messages.length - 1]);
     const userMessageId = persistedUserMessage?.id || null;
-    if (collabTaskRegistry && typeof collabTaskRegistry.captureUserGoal === "function") {
+    if (
+      body.internalPurpose !== "prepare" &&
+      collabTaskRegistry &&
+      typeof collabTaskRegistry.captureUserGoal === "function"
+    ) {
       const currentTask = collabTaskRegistry.getTask(sessionId);
       collabTaskRegistry.captureUserGoal(sessionId, {
         text: turnPrompt,
@@ -413,6 +422,7 @@ function createChatRunExecutor({
     };
     const skipPersist = new Set(["agent-event", "message"]);
     const threadCtx = {
+      preparationOnly: body.internalPurpose === "prepare",
       availability,
       sessionId,
       traceId,
@@ -459,6 +469,7 @@ function createChatRunExecutor({
     callbacks.registerThread(sessionId, threadCtx);
 
     const workCtx = {
+      preparationOnly: body.internalPurpose === "prepare",
       availability,
       res: detachedRes,
       sendSse: emitUi,

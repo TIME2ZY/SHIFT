@@ -9,20 +9,13 @@ const { createServer } = require("../src/server/index");
 const { parseA2AMentions } = require("../src/agents/routing");
 const callbacks = require("../src/agents/callbacks");
 const { createCollabTaskRegistry } = require("../src/agents/collab-task-registry");
-const { hashUserGoal, hashSolutionBaseline } = require("../src/agents/outcome-evidence-gate");
-const { hashImplementationPlan } = require("../src/agents/implementation-plan-gate");
 const { createStorage } = require("../src/storage");
 const { normalizeCanonicalPath } = require("../src/storage/project-identity");
 const { prepareCleanEpoch } = require("../src/storage/offline/clean-epoch");
 const { initializeCatalogSeats } = require("../src/agents/duty-routing");
 const { AGENTS, resetAgentCatalog } = require("../src/agents/catalog");
 const { createRuntimePaths } = require("../src/shared/runtime-paths");
-const {
-  startAndCollect,
-  startSessionRun,
-  collectSessionEvents,
-  closeTestServer,
-} = require("./helpers/chat-run-client");
+const { startAndCollect, closeTestServer } = require("./helpers/chat-run-client");
 
 const TEST_UI_TOKEN = "test-ui-token";
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -140,7 +133,10 @@ async function withServer(options, fn) {
       serverOptions.storage = liveStorage;
     }
     const server = createServer({
-      availabilityProbe: async () => ({ status: "unknown", reason: null }),
+      availabilityProbe: async (id) => ({
+        status: id === "codex" ? "available" : "unavailable",
+        reason: null,
+      }),
       memoryDbFile,
       worktreeManager: options.worktreeManager || createPassthroughWorktreeManager(),
       uiToken: TEST_UI_TOKEN,
@@ -200,6 +196,9 @@ test("availability refresh preserves seats and never creates business runs", asy
       assert.equal(refreshed.status, 202);
       const current = await fetch(`${baseUrl}/api/agents`).then((res) => res.json());
       assert.equal(current.agents.find((agent) => agent.id === "gemini").routable, true);
+      const noPlanner = await startChat(baseUrl, { sessionId, prompt: "hello" });
+      assert.equal(noPlanner.status, 503);
+      assert.equal((await noPlanner.json()).code, "NO_PLANNING_SEAT");
       assert.deepEqual((await getSeats()).seats, before.seats);
       const restored = await fetch(`${baseUrl}/api/sessions/${sessionId}`).then((res) =>
         res.json()
@@ -383,7 +382,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
           child.stdout.write(
             JSON.stringify({
               type: "text.delta",
-              agent: "opencode",
+              agent: "codex",
               invocationId: "inv-test",
               text: "partial ",
             }) + "\n"
@@ -391,7 +390,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
           child.stdout.write(
             JSON.stringify({
               type: "text.delta",
-              agent: "opencode",
+              agent: "codex",
               invocationId: "inv-test",
               text: "answer",
             }) + "\n"
@@ -399,9 +398,9 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
           child.stdout.write(
             JSON.stringify({
               type: "usage.update",
-              agent: "opencode",
+              agent: "codex",
               invocationId: "inv-test",
-              provider: "opencode",
+              provider: "codex",
               scope: "step",
               mode: "delta",
               inputTokens: 100,
@@ -418,7 +417,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       const response = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "hello" }),
+        body: JSON.stringify({ agent: "codex", prompt: "hello" }),
       });
       const text = await response.text();
 
@@ -428,23 +427,23 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
       );
       assert.equal(calls[0].args[1], "--agent");
-      assert.equal(calls[0].args[2], "opencode");
+      assert.equal(calls[0].args[2], "codex");
       assert.ok(
         calls[0].args[3].includes("hello"),
         `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`
       );
       assert.ok(
-        calls[0].args[3].includes("APPLICATION SKILL"),
-        "Expected augmented prompt to contain APPLICATION SKILL marker"
+        calls[0].args[3].includes("委托准备主 Agent"),
+        "Expected preparation prompt to contain the delegation contract instructions"
       );
       assert.ok(
         calls[0].args[3].includes("MCP 回调工具说明"),
         "Expected prompt to contain callback instructions"
       );
       // Soft collab rules must be present on the first (non-A2A) turn.
-      assert.match(calls[0].args[3], /<!-- Collaboration Rules -->/);
-      assert.match(calls[0].args[3], /本 Thread 已参与/);
-      assert.match(calls[0].args[3], /@OpenCode/);
+      assert.match(calls[0].args[3], /delegation_plan/);
+      assert.match(calls[0].args[3], /禁止 handoff/);
+      assert.match(calls[0].args[3], /只分析用户目标/);
       assert.match(text, /"type":"text.delta"/);
       assert.match(text, /"text":"partial answer"/);
       const sessionMatch = text.match(/"sessionId":"([^"]+)"/);
@@ -456,7 +455,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       const history = await historyResponse.json();
       assert.equal(history.messages.length, 2);
       assert.equal(history.messages[0].role, "user");
-      assert.equal(history.messages[0].agent, "opencode");
+      assert.equal(history.messages[0].agent, "codex");
       assert.equal(history.messages[1].role, "assistant");
       assert.equal(history.messages[1].content, "partial answer");
       assert.equal(history.messages[1].usage.totalTokens, 120);
@@ -683,7 +682,12 @@ test("chat endpoint rejects all agent mode", async () => {
       },
     },
     async (baseUrl) => {
-      const response = await startChat(baseUrl, { agent: "all", prompt: "compare" });
+      const created = await createProjectSession(baseUrl).then((res) => res.json());
+      const response = await startChat(baseUrl, {
+        sessionId: created.session.id,
+        agent: "all",
+        prompt: "compare",
+      });
       const body = await response.json();
 
       assert.equal(response.status, 400);
@@ -728,82 +732,6 @@ test("chat endpoint suppresses benign codex startup stderr", async () => {
       assert.doesNotMatch(text, /Reading additional input/);
       assert.doesNotMatch(text, /codex_core_plugins::manifest/);
       assert.doesNotMatch(text, /event: stderr/);
-    }
-  );
-});
-
-test("chat endpoint passes previous agent output to A2A-routed agent", async () => {
-  const prompts = [];
-
-  await withServer(
-    {
-      spawnRunner(command, args) {
-        prompts.push(args[args.length - 1]);
-        const child = createMockChild();
-        process.nextTick(() => {
-          if (args[2] === "codex") {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "codex",
-                invocationId: "inv-a2a-1",
-                text: "@Gemini\n请继续实现。\ncodex result",
-              }) + "\n"
-            );
-          } else {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "gemini",
-                invocationId: "inv-a2a-2",
-                text: "gemini received",
-              }) + "\n"
-            );
-          }
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const response = await chatInNewProjectSession(baseUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "codex", prompt: "build feature" }),
-      });
-      const text = await response.text();
-
-      assert.equal(response.status, 200);
-      assert.equal(prompts.length, 2);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"gemini"/);
-      assert.match(text, /event: handoff-parsed\ndata: \{[^\n]*"to":"gemini"/);
-      // Soft collab rules on first turn and A2A follow-up turn.
-      assert.match(prompts[0], /<!-- Collaboration Rules -->/);
-      assert.match(prompts[0], /本 Thread 已参与/);
-      assert.match(prompts[0], /@Codex/);
-      assert.match(prompts[1], /<!-- Collaboration Rules -->/);
-      assert.match(prompts[1], /本 Thread 已参与/);
-      assert.match(prompts[1], /@Gemini/);
-      assert.match(prompts[1], /任务交接/);
-      assert.match(prompts[1], /codex result/);
-      assert.match(prompts[1], /用户原始请求/);
-      assert.match(prompts[1], /build feature/);
-      assert.match(prompts[1], /未提供标准/);
-
-      // Handoff system markers must persist so session switch can reload them.
-      const sessionId = (text.match(/"sessionId":"([^"]+)"/) || [])[1];
-      assert.ok(sessionId);
-      const messagesResp = await fetch(
-        `${baseUrl}/api/messages?sessionId=${encodeURIComponent(sessionId)}`
-      );
-      const body = await messagesResp.json();
-      const systemRoutes = (body.messages || []).filter(
-        (m) => m.role === "system" && m.kind === "a2a-route"
-      );
-      assert.equal(systemRoutes.length, 1);
-      assert.equal(systemRoutes[0].from, "codex");
-      assert.equal(systemRoutes[0].to, "gemini");
-      assert.match(systemRoutes[0].content, /→/);
     }
   );
 });
@@ -888,67 +816,6 @@ test("DELETE /api/sessions/:id deletes a session", async () => {
     const getResponse = await fetch(`${baseUrl}/api/sessions/${session.id}`);
     assert.equal(getResponse.status, 404);
   });
-});
-
-test("DELETE /api/sessions/:id discards an attached worktree", async () => {
-  const calls = [];
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ baseDir, sessionId }) {
-          calls.push(["ensure", sessionId]);
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir: baseDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: new Date().toISOString(),
-          };
-        },
-        getStatus(sessionId) {
-          return { sessionId, branch: `codex/session-${sessionId}`, clean: true, porcelain: [] };
-        },
-        getDiff() {
-          return "";
-        },
-        discardWorktree(sessionId) {
-          calls.push(["discard", sessionId]);
-          return { ok: true, sessionId };
-        },
-      },
-      spawnRunner() {
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write("answer");
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-delete-worktree-"));
-      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
-        result.json()
-      );
-      const response = await startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "hello",
-        sessionId: session.id,
-        useWorktree: true,
-      });
-      const text = await response.text();
-      const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
-
-      const deleted = await fetch(`${baseUrl}/api/sessions/${sessionId}`, { method: "DELETE" });
-      assert.equal(deleted.status, 200);
-      assert.deepEqual(calls, [
-        ["ensure", sessionId],
-        ["discard", sessionId],
-      ]);
-    }
-  );
 });
 
 test("DELETE /api/sessions/:id returns 404 for unknown session", async () => {
@@ -1074,7 +941,7 @@ test("session run reuses a user message for the same clientTurnId", async () => 
       assert.equal(retryTrigger, firstTrigger);
       assert.ok(firstInvocation);
       assert.ok(retryInvocation);
-      assert.notEqual(retryInvocation, firstInvocation);
+      assert.equal(retryInvocation, firstInvocation);
 
       let detail = await fetch(`${baseUrl}/api/sessions/${session.id}`).then((response) =>
         response.json()
@@ -1271,806 +1138,6 @@ test("chat endpoint does not create a worktree by default", async () => {
   );
 });
 
-test("chat endpoint creates and uses a session worktree as child cwd", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-base-"));
-  const worktreeDir = path.join(os.tmpdir(), "server-worktree-session");
-  const calls = [];
-  const worktreeCalls = [];
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ baseDir: requestedBaseDir, sessionId }) {
-          worktreeCalls.push({ requestedBaseDir, sessionId });
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: "2026-06-30T00:00:00.000Z",
-          };
-        },
-      },
-      spawnRunner(command, args, options) {
-        calls.push({ command, args, cwd: options.cwd, env: options.env });
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write("answer");
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
-        result.json()
-      );
-      const response = await startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "@Gemini hello",
-        sessionId: session.id,
-        useWorktree: true,
-      });
-      const text = await response.text();
-
-      assert.equal(response.status, 200);
-      const sessionId = text.match(/"sessionId":"([^"]+)"/)[1];
-      assert.equal(worktreeCalls.length, 1);
-      assert.equal(worktreeCalls[0].requestedBaseDir, normalizeCanonicalPath(baseDir));
-      assert.equal(worktreeCalls[0].sessionId, sessionId);
-      assert.equal(calls[0].cwd, worktreeDir);
-      assert.equal(
-        calls[0].args[0],
-        path.resolve(__dirname, "..", "src", "agents", "invoke-cli.js")
-      );
-      assert.equal(calls[0].env.SHIFT_WORKTREE, "1");
-      assert.equal(calls[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
-    }
-  );
-});
-
-test("worktree A2A keeps Grok read-only until Codex approves its concrete plan", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-base-"));
-  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-a2a-worktree-session-"));
-  const git = (...args) => {
-    const result = require("node:child_process").spawnSync("git", args, {
-      cwd: worktreeDir,
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, result.stderr);
-  };
-  git("init");
-  git("config", "user.name", "Test");
-  git("config", "user.email", "test@example.invalid");
-  git("commit", "--allow-empty", "-m", "initial");
-  // Native skill materialization is generated data, not part of the implementation.
-  fs.writeFileSync(path.join(worktreeDir, ".git", "info", "exclude"), "*\n");
-  const runs = [];
-  let reviewedContent = "";
-  let grokRuns = 0;
-  const grokPlanOut = [
-    "```implementation_plan",
-    "summary: Add the review target file",
-    "files:",
-    "  - review-target.txt",
-    "changes:",
-    "  - Create the file with the requested content",
-    "tests:",
-    "  - Read the file from the shared worktree",
-    "risks:",
-    "  - Keep the change isolated",
-    "```",
-    "",
-    "@Codex",
-    "```handoff",
-    "to: codex",
-    "intent: discuss",
-    "what: Concrete implementation plan is ready",
-    "why: The plan needs lead approval before writes",
-    "next_action: Review the plan and send an implement handoff if approved",
-    "```",
-  ].join("\n");
-  const codexApprovalOut = [
-    "```solution_baseline",
-    `user_goal_hash: ${hashUserGoal("implement and request review")}`,
-    "summary: Add the requested review target file",
-    "constraints:",
-    "  - Keep the change isolated",
-    "non_goals:",
-    "  - Do not modify unrelated files",
-    "acceptance_criteria:",
-    "  - OpenCode can read the implemented file",
-    "```",
-    "",
-    "@Grok",
-    "```handoff",
-    "to: grok",
-    "intent: implement",
-    "what: Implement the submitted concrete plan",
-    "why: The plan matches the converged solution",
-    "next_action: Apply the approved plan and run its checks",
-    "```",
-  ].join("\n");
-  const grokImplementationOut = [
-    "@OpenCode",
-    "",
-    "```handoff",
-    "to: opencode",
-    "intent: review",
-    "goal: Review the implementation",
-    "what: Grok changed review-target.txt",
-    "why: Verify the worktree diff",
-    "tradeoff: none",
-    "next_action: Read and review the changed file",
-    "files:",
-    "  - review-target.txt",
-    "```",
-  ].join("\n");
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ sessionId }) {
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: "2026-08-04T00:00:00.000Z",
-          };
-        },
-      },
-      spawnRunner(_command, args, options) {
-        const agent = args[2];
-        runs.push({
-          agent,
-          cwd: options.cwd,
-          runnerPath: args[0],
-          env: options.env,
-          prompt: args[3],
-        });
-        const child = createMockChild();
-        process.nextTick(() => {
-          if (agent === "grok") {
-            grokRuns += 1;
-            const isApproved = options.env.SHIFT_IMPLEMENTATION_GATE === "approved";
-            if (isApproved) {
-              fs.writeFileSync(path.join(options.cwd, "review-target.txt"), "changed by grok\n");
-              git("add", "-f", "review-target.txt");
-              git("commit", "-m", "implement approved plan");
-            }
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "grok",
-                invocationId: "worktree-grok",
-                text: isApproved ? grokImplementationOut : grokPlanOut,
-              }) + "\n"
-            );
-          } else if (agent === "codex") {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "codex",
-                invocationId: "worktree-codex",
-                text: codexApprovalOut,
-              }) + "\n"
-            );
-          } else {
-            reviewedContent = fs.readFileSync(path.join(options.cwd, "review-target.txt"), "utf8");
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "opencode",
-                invocationId: "worktree-opencode",
-                text: "reviewed",
-              }) + "\n"
-            );
-          }
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
-        result.json()
-      );
-      const response = await startChat(baseUrl, {
-        agent: "grok",
-        prompt: "implement and request review",
-        sessionId: session.id,
-        useWorktree: true,
-      });
-      await response.text();
-
-      assert.equal(response.status, 200);
-      assert.deepEqual(
-        runs.map(({ agent, cwd }) => ({ agent, cwd })),
-        [
-          { agent: "grok", cwd: worktreeDir },
-          { agent: "codex", cwd: worktreeDir },
-          { agent: "grok", cwd: worktreeDir },
-          { agent: "opencode", cwd: worktreeDir },
-        ]
-      );
-      assert.equal(reviewedContent, "changed by grok\n");
-      assert.equal(grokRuns, 2);
-      assert.equal(runs[0].env.SHIFT_IMPLEMENTATION_GATE, "required");
-      assert.equal(runs[0].env.SHIFT_APPROVED_PLAN_HASH, "");
-      assert.match(runs[0].prompt, /## 实现门禁/);
-      assert.match(runs[0].prompt, /只读/);
-      assert.equal(runs[2].env.SHIFT_IMPLEMENTATION_GATE, "approved");
-      assert.match(runs[2].env.SHIFT_APPROVED_PLAN_HASH, /^[a-f0-9]{16}$/);
-      assert.match(runs[2].prompt, /APPROVED/);
-      assert.ok(runs.every((run) => path.isAbsolute(run.runnerPath)));
-      assert.ok(runs.every((run) => run.runnerPath.startsWith(path.resolve(__dirname, ".."))));
-    }
-  );
-});
-
-test("PR4 workflow verifies OpenCode delivery before Codex accepts the original goal", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-pr4-base-"));
-  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-pr4-worktree-"));
-  const userPrompt = "deliver with an audited pull request";
-  const goalHash = hashUserGoal(userPrompt);
-  const solution = {
-    user_goal_hash: goalHash,
-    summary: "Deliver the requested change through evidence-bound gates",
-    constraints: ["Keep the five collaboration phases"],
-    non_goals: ["Do not move code review to Codex"],
-    acceptance_criteria: [
-      "OpenCode creates a verified pull request",
-      "Codex checks the original user goal",
-    ],
-  };
-  const solutionHash = hashSolutionBaseline(solution);
-  const implementationPlan = {
-    summary: "Implement the audited delivery workflow",
-    files: ["src/audited-delivery.js"],
-    changes: ["Add the requested evidence-bound behavior"],
-    tests: ["npm run verify:pr"],
-    risks: ["Keep legacy routes compatible"],
-  };
-  const implementationPlanHash = hashImplementationPlan(implementationPlan);
-  const commitSha = "a".repeat(40);
-  let workspaceHead = commitSha;
-  let workspaceDirty = false;
-  const prUrl = "https://github.com/acme/repo/pull/7";
-  const branch = "codex/session-pr4";
-  const runs = [];
-  let codexRuns = 0;
-  let grokRuns = 0;
-
-  function handoff(to, intent, what) {
-    return [
-      `@${to === "grok" ? "Grok" : to === "opencode" ? "OpenCode" : "Codex"}`,
-      "```handoff",
-      `to: ${to}`,
-      `intent: ${intent}`,
-      `what: ${what}`,
-      "why: Follow the evidence-bound workflow",
-      "next_action: Continue with the assigned workflow responsibility",
-      "```",
-    ].join("\n");
-  }
-
-  const codexBaselineOut = [
-    "```solution_baseline",
-    `user_goal_hash: ${goalHash}`,
-    `summary: ${solution.summary}`,
-    "constraints:",
-    `  - ${solution.constraints[0]}`,
-    "non_goals:",
-    `  - ${solution.non_goals[0]}`,
-    "acceptance_criteria:",
-    ...solution.acceptance_criteria.map((item) => `  - ${item}`),
-    "```",
-    handoff("grok", "plan", "Inspect the code and propose a concrete plan"),
-  ].join("\n\n");
-  const grokPlanOut = [
-    "```implementation_plan",
-    `summary: ${implementationPlan.summary}`,
-    "files:",
-    `  - ${implementationPlan.files[0]}`,
-    "changes:",
-    `  - ${implementationPlan.changes[0]}`,
-    "tests:",
-    `  - ${implementationPlan.tests[0]}`,
-    "risks:",
-    `  - ${implementationPlan.risks[0]}`,
-    "```",
-    handoff("codex", "discuss", "Review the concrete implementation plan"),
-  ].join("\n\n");
-  const codexApprovalOut = handoff("grok", "implement", "Implement the approved plan");
-  const grokImplementationOut = handoff(
-    "opencode",
-    "review",
-    "Review the completed implementation and its verification"
-  );
-  const openCodeDeliveryOut = [
-    "```code_review",
-    "verdict: approve",
-    "summary: No blocking findings",
-    "findings:",
-    "  - none",
-    "tests:",
-    "  - npm run verify:pr: passed",
-    "```",
-    "```delivery_receipt",
-    `commit_sha: ${commitSha}`,
-    `pr_url: ${prUrl}`,
-    "base_branch: master",
-    "verification:",
-    "  - npm run verify:pr: passed",
-    "  - GitHub checks: passed",
-    "```",
-    handoff("codex", "accept", "Perform final goal acceptance on the verified delivery"),
-  ].join("\n\n");
-  const codexFinalOut = [
-    "```final_acceptance",
-    "verdict: accept",
-    `user_goal_hash: ${goalHash}`,
-    `solution_hash: ${solutionHash}`,
-    `implementation_plan_hash: ${implementationPlanHash}`,
-    `commit_sha: ${commitSha}`,
-    "checks:",
-    "  - OpenCode creates a verified pull request => pass: PR #7 and green CI",
-    "  - Codex checks the original user goal => pass: goal and solution hashes matched",
-    "gaps:",
-    "  - none",
-    "```",
-  ].join("\n");
-
-  await withServer(
-    {
-      worktreeManager: {
-        getStatus() {
-          return {
-            headSha: workspaceHead,
-            porcelain: workspaceDirty ? [" M src/audited-delivery.js"] : [],
-          };
-        },
-        ensureWorktree({ sessionId }) {
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch,
-            status: "active",
-            createdAt: "2026-08-05T00:00:00.000Z",
-          };
-        },
-      },
-      deliveryVerifier: {
-        verify({ receipt, cwd, branch: actualBranch }) {
-          assert.equal(receipt.commit_sha, commitSha);
-          assert.equal(cwd, worktreeDir);
-          assert.equal(actualBranch, branch);
-          return {
-            verified: true,
-            commitSha,
-            commitSubject: "feat(collab): verify delivery evidence",
-            commitBody: "Bind the reviewed commit to the pull request and CI evidence.",
-            branch,
-            baseBranch: "master",
-            prUrl,
-            prNumber: 7,
-            prTitle: "Verify OpenCode delivery evidence",
-            prBody: [
-              "## 意图",
-              "交付经过审查的实现",
-              "## 主链路影响",
-              "不改变 invocation 主链路",
-              "## 路径变化（公开入口 / 双写）",
-              "没有新增公开入口或双写",
-              "## 测试（旧接口测试是否处理）",
-              "相关验证通过，未保留旧接口测试",
-              "## 风险与回滚",
-              "风险可通过回滚该提交消除",
-              "来自 deepseek-v4-flash",
-            ].join("\n\n"),
-            ciStatus: "success",
-          };
-        },
-      },
-      spawnRunner(_command, args, _options) {
-        const agent = args[2];
-        runs.push({ agent, prompt: args[3] });
-        const child = createMockChild();
-        process.nextTick(() => {
-          let output = "";
-          if (agent === "codex") {
-            output = [codexBaselineOut, codexApprovalOut, codexFinalOut][codexRuns++];
-          } else if (agent === "grok") {
-            output = [grokPlanOut, grokImplementationOut][grokRuns++];
-          } else {
-            output = openCodeDeliveryOut;
-          }
-          child.stdout.write(
-            JSON.stringify({
-              type: "text.delta",
-              agent,
-              invocationId: `pr4-${agent}`,
-              text: output,
-            }) + "\n"
-          );
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
-        result.json()
-      );
-      const response = await startChat(baseUrl, {
-        agent: "codex",
-        prompt: userPrompt,
-        sessionId: session.id,
-        useWorktree: true,
-        duty: "discuss",
-      });
-      const text = await response.text();
-      assert.equal(response.status, 200);
-      assert.deepEqual(
-        runs.map((run) => run.agent),
-        ["codex", "grok", "codex", "grok", "opencode", "codex"]
-      );
-      assert.match(runs[0].prompt, /solution_baseline/);
-      assert.match(runs[4].prompt, /## Review 与交付门禁/);
-      assert.match(runs[5].prompt, /final_acceptance/);
-      assert.match(runs[5].prompt, /最初用户目标/);
-      assert.match(text, /event: delivery-evidence-verified/);
-      assert.match(text, /event: final-acceptance-submitted/);
-
-      const accepted = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
-        (result) => result.json()
-      );
-      assert.equal(accepted.collaboration.status, "accepted");
-      assert.equal(accepted.collaboration.phase, "done");
-      assert.equal(accepted.collaboration.acceptance.verdict, "accepted");
-
-      workspaceHead = "b".repeat(40);
-      const stale = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
-        (result) => result.json()
-      );
-      assert.equal(stale.collaboration.acceptance.verdict, "incomplete");
-      assert.equal(stale.collaboration.acceptance.reason, "acceptance_head_mismatch");
-      workspaceHead = commitSha;
-      workspaceDirty = true;
-      const dirty = await fetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
-        (result) => result.json()
-      );
-      assert.equal(dirty.collaboration.acceptance.verdict, "incomplete");
-      assert.equal(dirty.collaboration.acceptance.reason, "acceptance_worktree_dirty");
-      assert.equal(dirty.collaboration.blocker.reason, "acceptance_worktree_dirty");
-    }
-  );
-});
-
-test("chat endpoint reuses the session worktree on later turns", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-base-"));
-  const worktreeDir = path.join(os.tmpdir(), "server-worktree-reuse");
-  let ensureCount = 0;
-  const cwds = [];
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ sessionId }) {
-          ensureCount += 1;
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: "2026-06-30T00:00:00.000Z",
-          };
-        },
-      },
-      spawnRunner(command, args, options) {
-        cwds.push(options.cwd);
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write("ok");
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const opened = await fetch(`${baseUrl}/api/projects/open`, {
-        method: "POST",
-        body: JSON.stringify({ dir: baseDir }),
-      }).then((response) => response.json());
-      const { session } = await nativeFetch(`${baseUrl}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-Shift-UI-Token": TEST_UI_TOKEN,
-        },
-        body: JSON.stringify({ projectKey: opened.project.projectKey }),
-      }).then((response) => response.json());
-
-      for (const prompt of ["first", "second"]) {
-        const response = await startChat(baseUrl, {
-          agent: "opencode",
-          prompt,
-          sessionId: session.id,
-          useWorktree: true,
-        });
-        assert.equal(response.status, 200);
-        await response.text();
-      }
-
-      assert.equal(ensureCount, 1);
-      assert.deepEqual(cwds, [worktreeDir, worktreeDir]);
-    }
-  );
-});
-
-test("isolated worktree chat uses native skill delivery instead of full prompt injection", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-skill-base-"));
-  const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-skill-wt-"));
-  const prompts = [];
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ sessionId }) {
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: "2026-06-30T00:00:00.000Z",
-          };
-        },
-      },
-      spawnRunner(command, args) {
-        prompts.push(args[args.length - 1]);
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write(
-            JSON.stringify({
-              type: "text.delta",
-              agent: "opencode",
-              invocationId: "skill-native-1",
-              text: "ok",
-            }) + "\n"
-          );
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const { session } = await openProjectSession(baseUrl, baseDir).then((result) =>
-        result.json()
-      );
-      const response = await startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "hello native skills",
-        sessionId: session.id,
-        useWorktree: true,
-      });
-      assert.equal(response.status, 200);
-      await response.text();
-    }
-  );
-
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /PLATFORM SKILL CATALOG/);
-  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: cross-agent-handoff/);
-  assert.doesNotMatch(prompts[0], /APPLICATION SKILL: memory-write/);
-  assert.ok(
-    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "implementation-plan", "SKILL.md"))
-  );
-  assert.ok(
-    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "cross-agent-handoff", "SKILL.md"))
-  );
-  assert.equal(
-    fs.existsSync(path.join(worktreeDir, ".agents", "skills", "code-review-deliver")),
-    false
-  );
-  fs.rmSync(baseDir, { recursive: true, force: true });
-  fs.rmSync(worktreeDir, { recursive: true, force: true });
-});
-
-test("chat endpoint treats useWorktree as a per-run permission gate after a worktree already exists", async () => {
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-worktree-toggle-"));
-  const worktreeDir = path.join(os.tmpdir(), "server-worktree-toggle-session");
-  const runs = [];
-
-  await withServer(
-    {
-      worktreeManager: {
-        ensureWorktree({ sessionId }) {
-          return {
-            sessionId,
-            baseDir,
-            worktreeDir,
-            branch: `codex/session-${sessionId}`,
-            status: "active",
-            createdAt: "2026-06-30T00:00:00.000Z",
-          };
-        },
-      },
-      spawnRunner(command, args, options) {
-        runs.push({ cwd: options.cwd, env: options.env });
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write("ok");
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const opened = await fetch(`${baseUrl}/api/projects/open`, {
-        method: "POST",
-        body: JSON.stringify({ dir: baseDir }),
-      }).then((response) => response.json());
-      const { session } = await nativeFetch(`${baseUrl}/api/sessions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-Shift-UI-Token": TEST_UI_TOKEN,
-        },
-        body: JSON.stringify({ projectKey: opened.project.projectKey }),
-      }).then((response) => response.json());
-
-      const first = await startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "first",
-        sessionId: session.id,
-        useWorktree: true,
-      });
-      assert.equal(first.status, 200);
-      await first.text();
-
-      const second = await startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "second",
-        sessionId: session.id,
-        useWorktree: false,
-      });
-      assert.equal(second.status, 200);
-      await second.text();
-
-      assert.equal(runs.length, 2);
-      assert.equal(runs[0].cwd, worktreeDir);
-      assert.equal(runs[0].env.SHIFT_WORKTREE, "1");
-      assert.equal(runs[0].env.SHIFT_WORKTREE_DIR, worktreeDir);
-
-      assert.equal(runs[1].cwd, normalizeCanonicalPath(baseDir));
-      assert.equal(runs[1].env.SHIFT_WORKTREE, "0");
-      assert.equal(runs[1].env.SHIFT_WORKTREE_DIR, normalizeCanonicalPath(baseDir));
-      assert.equal(runs[1].env.SHIFT_BRANCH, "");
-    }
-  );
-});
-
-test("chat endpoint resumes the matching provider session after base↔worktree round-trip", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-"));
-  const memoryDbFile = path.join(tmpDir, "shift.sqlite");
-  const transcriptsDir = path.join(tmpDir, "transcripts");
-  const prevTranscriptDir = process.env.SHIFT_TRANSCRIPT_DIR;
-  const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "server-workspace-roundtrip-base-"));
-  const worktreeDir = path.join(os.tmpdir(), "server-workspace-roundtrip-wt");
-  const runs = [];
-
-  if (!prevTranscriptDir) process.env.SHIFT_TRANSCRIPT_DIR = transcriptsDir;
-  prepareCleanEpoch({ file: memoryDbFile });
-  const seedStorage = createStorage({ file: memoryDbFile });
-  const projectKey = seedStorage.projects.openDirectory(baseDir).projectKey;
-  seedStorage.close();
-
-  const server = createServer({
-    availabilityProbe: async () => ({ status: "unknown", reason: null }),
-    uiToken: TEST_UI_TOKEN,
-    memoryDbFile,
-    storageMode: "sqlite",
-    worktreeManager: {
-      ensureWorktree({ sessionId }) {
-        return {
-          sessionId,
-          baseDir,
-          worktreeDir,
-          branch: `codex/session-${sessionId}`,
-          status: "active",
-          createdAt: "2026-07-02T00:00:00.000Z",
-        };
-      },
-    },
-    spawnRunner(command, args, options) {
-      runs.push({ cwd: options.cwd, env: options.env, args });
-      const child = createMockChild();
-      const providerSessionId =
-        runs.length === 1
-          ? "provider-base-1"
-          : runs.length === 2
-            ? "provider-wt-1"
-            : `provider-later-${runs.length}`;
-      process.nextTick(() => {
-        child.stdout.write(
-          `${JSON.stringify({ type: "run.started", sessionId: providerSessionId })}\n`
-        );
-        child.stdout.end();
-        child.emit("close", 0, null);
-      });
-      return child;
-    },
-  });
-
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-
-  try {
-    const { port } = server.address();
-    const baseUrl = `http://127.0.0.1:${port}`;
-    const created = await fetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      body: JSON.stringify({ projectKey }),
-    });
-    const { session } = await created.json();
-
-    const initialBaseChat = await startChat(baseUrl, {
-      agent: "opencode",
-      prompt: "initial base turn",
-      sessionId: session.id,
-      useWorktree: false,
-    });
-    await initialBaseChat.text();
-
-    const worktreeChat = await startChat(baseUrl, {
-      agent: "opencode",
-      prompt: "worktree turn",
-      sessionId: session.id,
-      useWorktree: true,
-    });
-    assert.equal(worktreeChat.status, 200);
-    await worktreeChat.text();
-
-    const resumedWorktreeChat = await startChat(baseUrl, {
-      agent: "opencode",
-      prompt: "worktree turn again",
-      sessionId: session.id,
-      useWorktree: true,
-    });
-    await resumedWorktreeChat.text();
-
-    const baseChat = await startChat(baseUrl, {
-      agent: "opencode",
-      prompt: "base turn again",
-      sessionId: session.id,
-      useWorktree: false,
-    });
-    assert.equal(baseChat.status, 200);
-    await baseChat.text();
-
-    assert.equal(runs.length, 4);
-    assert.equal(runs[0].env.INVOKE_SESSION_ID, "");
-    assert.equal(runs[1].env.INVOKE_SESSION_ID, "");
-    assert.equal(runs[2].cwd, worktreeDir);
-    assert.equal(runs[2].env.INVOKE_SESSION_ID, "provider-wt-1");
-    assert.equal(runs[2].env.INVOKE_WORKSPACE_KEY, `worktree:${worktreeDir}`);
-    assert.equal(runs[3].cwd, normalizeCanonicalPath(baseDir));
-    assert.equal(runs[3].env.INVOKE_SESSION_ID, "provider-base-1");
-    assert.equal(runs[3].env.INVOKE_WORKSPACE_KEY, `base:${normalizeCanonicalPath(baseDir)}`);
-  } finally {
-    await closeTestServer(server);
-    if (!prevTranscriptDir) {
-      delete process.env.SHIFT_TRANSCRIPT_DIR;
-    }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
 test("worktree status, diff, and discard endpoints delegate to manager", async () => {
   const calls = [];
   await withServer(
@@ -2181,185 +1248,6 @@ test("parseA2AMentions caps at 2 targets", () => {
 test("parseA2AMentions rejects removed agent names", () => {
   const text = "@architect 方案\n@万事通 测试\n@小码 实现\n@小评 review";
   assert.deepEqual(parseA2AMentions(text, "codex"), []);
-});
-
-test("chat endpoint aborts previous invocation on same session", async () => {
-  let callCount = 0;
-  await withServer(
-    {
-      spawnRunner(_command, _args) {
-        callCount += 1;
-        const child = createMockChild();
-        if (callCount === 1) {
-          // Hold the first child open until it is killed by the second chat.
-          child.kill = (sig) => {
-            child.stderr.write(`killed:${sig}\n`);
-            child.emit("close", null, sig);
-            return true;
-          };
-        } else {
-          // Second child finishes quickly so the test can complete.
-          process.nextTick(() => {
-            child.stdout.write("done");
-            child.emit("close", 0, null);
-          });
-        }
-        return child;
-      },
-    },
-    async (baseUrl, { memoryDbFile }) => {
-      // Create a session explicitly so both chats target the same id.
-      const created = await createProjectSession(baseUrl);
-      const { session } = await created.json();
-
-      const first = await startSessionRun(
-        baseUrl,
-        {
-          agent: "codex",
-          prompt: "long task",
-          sessionId: session.id,
-          clientTurnId: "turn-old",
-        },
-        { headers: { "X-Shift-UI-Token": TEST_UI_TOKEN } }
-      );
-      assert.equal(first.status, 202);
-
-      const second = await startSessionRun(
-        baseUrl,
-        {
-          agent: "opencode",
-          prompt: "new task",
-          sessionId: session.id,
-          clientTurnId: "turn-new",
-        },
-        { headers: { "X-Shift-UI-Token": TEST_UI_TOKEN } }
-      );
-      assert.equal(second.status, 202);
-      const secondJson = await second.json();
-      const { text } = await collectSessionEvents(baseUrl, session.id, {
-        headers: { "X-Shift-UI-Token": TEST_UI_TOKEN },
-        traceId: secondJson.traceId,
-      });
-      const startedFrame = text
-        .split("\n\n")
-        .find(
-          (frame) =>
-            frame.includes("event: agent-start\n") &&
-            frame.includes(`"traceId":"${secondJson.traceId}"`)
-        );
-      assert.ok(startedFrame, "agent-start must expose the current Trace");
-      const startData = JSON.parse(
-        startedFrame
-          .split("\n")
-          .find((line) => line.startsWith("data: "))
-          .slice(6)
-      );
-      assert.equal(startData.agent, "opencode");
-      assert.equal(startData.duty, "discuss");
-      assert.ok(startData.invocationId && startData.seatId);
-      const windowMeta = text
-        .split("\n\n")
-        .find(
-          (frame) =>
-            frame.includes("event: window-meta\n") &&
-            frame.includes(`"invocationId":"${startData.invocationId}"`)
-        );
-      assert.ok(windowMeta, "window-meta must correlate by invocationId");
-      assert.match(windowMeta, /"parentInvocationId":null/);
-      assert.match(windowMeta, /"triggerMessageId":"[^"]+"/);
-      assert.match(windowMeta, /"triggerType":"user-message"/);
-      assert.equal(callCount, 2);
-
-      const storage = createStorage({ file: memoryDbFile });
-      try {
-        const invocations = storage.invocations.listForThread(session.id);
-        const firstInvocation = invocations.find((row) => row.agentId === "codex");
-        assert.ok(firstInvocation);
-        assert.equal(firstInvocation.state, "aborted");
-        const ended = storage.invocations
-          .listEvents(firstInvocation.id)
-          .find((event) => event.kind === "invocation-end");
-        assert.equal(ended.payload.supersededByClientTurnId, "turn-new");
-      } finally {
-        storage.close();
-      }
-    }
-  );
-});
-
-test("stale aborted chat cleanup does not unregister the replacement chat callbacks", async () => {
-  const spawned = [];
-
-  await withServer(
-    {
-      spawnRunner(command, args, options = {}) {
-        const child = createMockChild();
-        child.env = options.env;
-        child.closeNow = (code = 0, sig = null) => child.emit("close", code, sig);
-        child.kill = (sig) => {
-          child.killedWith = sig;
-          return true;
-        };
-        spawned.push(child);
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const created = await createProjectSession(baseUrl);
-      const { session } = await created.json();
-
-      const firstPromise = startChat(baseUrl, {
-        agent: "codex",
-        prompt: "old task",
-        sessionId: session.id,
-      }).then((r) => r.text());
-
-      const deadline1 = Date.now() + 2000;
-      while (spawned.length < 1 && Date.now() < deadline1) {
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.equal(spawned.length, 1);
-
-      const secondPromise = startChat(baseUrl, {
-        agent: "opencode",
-        prompt: "replacement task",
-        sessionId: session.id,
-      }).then((r) => r.text());
-
-      const deadline2 = Date.now() + 2000;
-      while (spawned.length < 2 && Date.now() < deadline2) {
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      assert.equal(spawned.length, 2);
-      assert.equal(spawned[0].killedWith, "SIGTERM");
-
-      try {
-        // The stale first request closes after the replacement request has
-        // registered its callback thread. Its cleanup must not delete the
-        // replacement thread/token.
-        spawned[0].closeNow(null, "SIGTERM");
-        await Promise.race([
-          firstPromise,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("first chat did not close")), 2000)
-          ),
-        ]);
-
-        const env = spawned[1].env;
-        const callbackResp = await fetch(
-          `${baseUrl}/api/callbacks/thread-context?` +
-            `sessionId=${encodeURIComponent(session.id)}&` +
-            `invocationId=${encodeURIComponent(env.SHIFT_INVOCATION_ID)}`,
-          { headers: { "X-Callback-Token": env.SHIFT_CALLBACK_TOKEN } }
-        );
-        assert.equal(callbackResp.status, 200);
-      } finally {
-        spawned[1].stdout.write("done");
-        spawned[1].closeNow(0, null);
-        await secondPromise.catch(() => {});
-      }
-    }
-  );
 });
 
 // ── MCP callback tests ────────────────────────────────────────
@@ -3542,7 +2430,7 @@ test("/api/callbacks/list-invocations returns agent + state metadata", async () 
       active,
       `active invocation should be listed, got: ${JSON.stringify(body.invocations)}`
     );
-    assert.equal(active.agent, "opencode");
+    assert.equal(active.agent, "codex");
     assert.ok(active.startedAt);
     assert.equal(active.endedAt, null);
     assert.equal(active.state, null);
@@ -3659,7 +2547,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
       },
       async (baseUrl) => {
         const response = await startChat(baseUrl, {
-          agent: "gemini",
+          agent: "codex",
           prompt: "hello world",
           sessionId: "bootstrap-test-session",
         });
@@ -3669,13 +2557,13 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
 
     assert.ok(capturedPrompt, "spawnRunner should have been called");
     // Agent persona identity (from identities/*.md) comes first
-    assert.match(capturedPrompt, /<!-- Agent Identity: gemini \/ Gemini -->/);
+    assert.match(capturedPrompt, /<!-- Agent Identity: codex \/ Codex -->/);
     assert.match(capturedPrompt, /<!-- \/Agent Identity -->/);
     // Session coords section
     assert.match(capturedPrompt, /<!-- Session Identity -->/);
     assert.match(capturedPrompt, /Thread: bootstrap-test-session/);
     assert.match(capturedPrompt, /Session: bootstrap-test-session/);
-    assert.match(capturedPrompt, /Agent: Gemini/);
+    assert.match(capturedPrompt, /Agent: Codex/);
     // Digest section (empty for new session with fresh dir)
     assert.match(capturedPrompt, /<!-- Digest -->/);
     assert.match(capturedPrompt, /第一个 invocation/);
@@ -3695,224 +2583,6 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
     else process.env.SHIFT_TRANSCRIPT_DIR = prevDir;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-});
-
-test("A2A fresh sessions get persona, recovery digest and handoff", async () => {
-  const prompts = [];
-
-  await withServer(
-    {
-      initialSessionIds: ["bootstrap-a2a-test"],
-      spawnRunner(command, args) {
-        prompts.push(args[args.length - 1]);
-        const child = createMockChild();
-        process.nextTick(() => {
-          if (args[2] === "codex") {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "codex",
-                invocationId: "bootstrap-a2a-1",
-                text: "@Gemini\nhandoff please\ncodex result",
-              }) + "\n"
-            );
-          } else {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "gemini",
-                invocationId: "bootstrap-a2a-2",
-                text: "gemini received",
-              }) + "\n"
-            );
-          }
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const response = await startChat(baseUrl, {
-        agent: "codex",
-        prompt: "start",
-        sessionId: "bootstrap-a2a-test",
-      });
-      await response.text();
-    }
-  );
-
-  assert.equal(prompts.length, 2);
-  // First agent: full bootstrap (session + digest + recall) + its persona
-  assert.match(prompts[0], /<!-- Agent Identity: codex \/ Codex -->/);
-  assert.match(prompts[0], /<!-- Session Identity -->/);
-  assert.match(prompts[0], /<!-- 回忆铁律/);
-  assert.match(prompts[0], /<!-- Digest/);
-  // A2A agent: own persona + recovery digest + handoff; memory retrieval remains the A2A card
-  assert.match(prompts[1], /<!-- Agent Identity: gemini \/ Gemini -->/);
-  assert.match(prompts[1], /<!-- Session Identity -->/);
-  assert.match(prompts[1], /Agent: Gemini/);
-  assert.doesNotMatch(prompts[1], /<!-- 回忆铁律/);
-  assert.match(prompts[1], /<!-- Digest/);
-  // Wave R: A2A turns get compact Active Memory Card, not the full bootstrap packet.
-  assert.match(prompts[1], /<!-- Active Memories/);
-  assert.match(prompts[1], /任务交接/);
-  assert.match(prompts[1], /codex result/);
-  // No ```handoff block → soft degraded path still routes with warning
-  assert.match(prompts[1], /未提供标准/);
-});
-
-test("A2A-routed agents receive structured handoff fields when present", async () => {
-  const prompts = [];
-  const codexOut = [
-    "@Gemini",
-    "",
-    "```handoff",
-    "to: gemini",
-    "goal: 拆解登录方案",
-    "what: 用户要登录功能",
-    "why: 需要无状态鉴权支持多实例",
-    "tradeoff: 暂不做 OAuth",
-    "next_action: 给出 JWT vs Session 对比与推荐",
-    "files:",
-    "  - docs/auth.md",
-    "```",
-    "",
-    "codex narrative",
-  ].join("\n");
-
-  await withServer(
-    {
-      initialSessionIds: ["structured-handoff-test"],
-      spawnRunner(command, args) {
-        prompts.push(args[args.length - 1]);
-        const child = createMockChild();
-        process.nextTick(() => {
-          if (args[2] === "codex") {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "codex",
-                invocationId: "sh-1",
-                text: codexOut,
-              }) + "\n"
-            );
-          } else {
-            child.stdout.write(
-              JSON.stringify({
-                type: "text.delta",
-                agent: "opencode",
-                invocationId: "sh-2",
-                text: "planned",
-              }) + "\n"
-            );
-          }
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const response = await startChat(baseUrl, {
-        agent: "codex",
-        prompt: "做登录",
-        sessionId: "structured-handoff-test",
-      });
-      await response.text();
-    }
-  );
-
-  assert.equal(prompts.length, 2);
-  assert.match(prompts[1], /Structured Handoff/);
-  assert.match(prompts[1], /what: 用户要登录功能/);
-  assert.match(prompts[1], /why: 需要无状态鉴权支持多实例/);
-  assert.match(prompts[1], /next_action: 给出 JWT vs Session 对比与推荐/);
-  assert.match(prompts[1], /交接包完整度: ok/);
-  assert.match(prompts[1], /做登录/);
-  assert.doesNotMatch(prompts[1], /未提供标准/);
-  // A2A follow-up gets the shared short handoff card.
-  assert.match(prompts[1], /A2A Handoff Card/);
-  assert.match(prompts[1], /APPLICATION SKILL: cross-agent-handoff/);
-});
-
-test("A2A allows the same Seat to re-enter the worklist with another Duty", async () => {
-  const prompts = [];
-  const agentsSeen = [];
-  const firstOut = [
-    "@OpenCode",
-    "",
-    "```handoff",
-    "to: opencode",
-    "what: 实现了登录",
-    "why: 需要鉴权",
-    "next_action: 请 review",
-    "```",
-  ].join("\n");
-  const openCodeOut = [
-    "@Codex",
-    "",
-    "```handoff",
-    "to: codex",
-    "intent: discuss",
-    "what: |",
-    "  结论: request-changes",
-    "  P0: 缺空指针检查",
-    "why: 可崩溃",
-    "next_action: 修 P0 后回审",
-    "```",
-  ].join("\n");
-
-  await withServer(
-    {
-      initialSessionIds: ["reentry-handoff-test"],
-      spawnRunner(command, args) {
-        const agent = args[2];
-        agentsSeen.push(agent);
-        prompts.push(args[args.length - 1]);
-        const child = createMockChild();
-        process.nextTick(() => {
-          let text = "done";
-          if (agent === "codex" && agentsSeen.filter((a) => a === "codex").length === 1) {
-            text = firstOut;
-          } else if (agent === "opencode") {
-            text = openCodeOut;
-          } else if (agent === "codex") {
-            text = "fixed p0";
-          }
-          child.stdout.write(
-            JSON.stringify({
-              type: "text.delta",
-              agent,
-              invocationId: `reentry-${agentsSeen.length}`,
-              text,
-            }) + "\n"
-          );
-          child.emit("close", 0, null);
-        });
-        return child;
-      },
-    },
-    async (baseUrl) => {
-      const response = await startChat(baseUrl, {
-        agent: "codex",
-        prompt: "做登录并走 review",
-        sessionId: "reentry-handoff-test",
-      });
-      const text = await response.text();
-      assert.equal(response.status, 200);
-      assert.deepEqual(agentsSeen, ["codex", "opencode", "codex"]);
-      assert.equal(prompts.length, 3);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"codex"[^\n]*"to":"opencode"/);
-      assert.match(text, /event: a2a-route\ndata: \{[^\n]*"from":"opencode"[^\n]*"to":"codex"/);
-      assert.match(text, /"reentry":true/);
-      // Re-entered Seat gets only the discuss Duty handoff card.
-      assert.match(prompts[2], /任务交接/);
-      assert.match(prompts[2], /request-changes|缺空指针/);
-      assert.match(prompts[2], /A2A Handoff Card/);
-      assert.match(prompts[2], /APPLICATION SKILL: cross-agent-handoff/);
-      assert.doesNotMatch(prompts[2], /APPLICATION SKILL: implementation-plan/);
-      assert.match(prompts[2], /<!-- Agent Identity: codex/);
-    }
-  );
 });
 
 test("bootstrap digest lists prior invocations when chat is re-entered with same sessionId", async () => {
@@ -3969,7 +2639,7 @@ test("chat records invocation events and recall routes expose them (no token = f
           child.stdout.write(
             JSON.stringify({
               type: "text.delta",
-              agent: "opencode",
+              agent: "codex",
               invocationId: "recall-1",
               text: "hello recall",
             }) + "\n"
@@ -3984,14 +2654,14 @@ test("chat records invocation events and recall routes expose them (no token = f
       const chat = await chatInNewProjectSession(baseUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent: "opencode", prompt: "remember this" }),
+        body: JSON.stringify({ agent: "codex", prompt: "remember this" }),
       });
       const chatText = await chat.text();
       const sidMatch = chatText.match(/"sessionId":"([^"]+)"/);
       assert.ok(sidMatch, "expected session id");
       const sid = sidMatch[1];
       const invMatch = chatText.match(
-        /event: agent-start\ndata: \{"agent":"opencode","invocationId":"([^"]+)"[^\n]*\}/
+        /event: agent-start\ndata: \{"agent":"codex","invocationId":"([^"]+)"[^\n]*\}/
       );
       assert.ok(invMatch, "expected agent-start with invocationId");
       const invId = invMatch[1];
@@ -4001,7 +2671,7 @@ test("chat records invocation events and recall routes expose them (no token = f
       assert.equal(listRes.status, 200);
       assert.equal(list.invocations.length, 1);
       assert.equal(list.invocations[0].invocationId, invId);
-      assert.equal(list.invocations[0].agent, "opencode");
+      assert.equal(list.invocations[0].agent, "codex");
       assert.equal(list.invocations[0].state, "completed");
       assert.ok(
         list.invocations[0].eventCount >= 3,

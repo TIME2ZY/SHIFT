@@ -8,6 +8,18 @@
 
 ## 1. 所有权
 
+ADR-009 增加委托准备、冻结、Team 与全局队列：仍由 collaboration_tasks / collaboration_task_events 持久化。
+delegationState 表达执行生命周期；taskStatus 表达原有 Agent 证据验收，两者不能互相猜测完成。
+委托合同包含 workflowId、goal、deliverables、acceptanceCriteria、subtasks（稳定 id、title、description）。
+提交事务检查 expectedRevision，冻结合同及 hash、保存 Duty→Seat Team、分配全局 FIFO 序号并写事件。
+发布后禁止 goal/合同/Team 被普通 save 或 task_goal 修改；技术方案及证据仍由既有 Registry 写入。
+一次委托绑定一个 Thread；parentThreadId 引用关联新委托的来源。无用户项目时绑定平台生成的任务目录。
+队列仅调度委托，handoff 仍由 acceptHandoff 仲裁，二者不共用业务实体。
+
+runtime_server_lease 记录拥有当前 SHIFT_HOME 的服务进程身份；启动须原子领取，存活服务不可被第二个服务的恢复流程覆盖。
+process.spawn_intent / process.bound / process.exited 经既有 EventStore 写入，进程读模型只做投影。
+重启按 pid 与内核创建标识核对身份，再终止遗留进程；PID 已复用时不得误杀，无身份或无法确认停止时保留可观察阻塞。
+
 | 业务事实                | 权威源                            | 唯一写入口目标                            | 派生读模型                     |
 | ----------------------- | --------------------------------- | ----------------------------------------- | ------------------------------ |
 | Thread enabled Seats    | SQLite `thread_seats`             | Thread Seat service                       | Session / task card            |
