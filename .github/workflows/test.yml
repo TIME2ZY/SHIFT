@@ -20,8 +20,11 @@ jobs:
       SHIFT_STORAGE_MODE: sqlite
 
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Node 20's bundled node-gyp recognizes VS 2022, not the VS 18
+        # installation on windows-latest. Native SQLite must build reliably.
+        os: [ubuntu-latest, windows-2022]
         node-version: [20, 22]
 
     steps:
