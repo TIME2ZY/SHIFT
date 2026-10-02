@@ -59,11 +59,41 @@ async function closeTestServer(server, timeoutMs = 8000) {
   await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
 }
 
+const testStorageByOrigin = new Map();
+function registerTaskTestStorage(baseUrl, storage) {
+  testStorageByOrigin.set(new URL(baseUrl).origin, storage);
+}
 async function startSessionRun(baseUrl, body, init = {}) {
-  return request(init, `${baseUrl}/api/sessions/${encodeURIComponent(body.sessionId)}/runs`, {
+  const storage = testStorageByOrigin.get(new URL(baseUrl).origin);
+  let route = `${baseUrl}/api/sessions/${encodeURIComponent(body.sessionId)}/runs`;
+  let payload = body;
+  // Lifecycle fixtures bind their existing observation Thread to a real independent draft.
+  // Production never exposes an initialize-by-thread write API.
+  if (
+    storage?.threads.get(body.sessionId) &&
+    !body.useWorktree &&
+    !body.duty &&
+    !body.internalPurpose
+  ) {
+    let task = storage.tasks.list().find((entry) => entry.preparationThreadId === body.sessionId);
+    if (!task) {
+      task = storage.tasks.create({ projectKey: storage.threads.get(body.sessionId).projectKey });
+      task = storage.tasks.bindPreparation(task.id, body.sessionId);
+    }
+    route = `${baseUrl}/api/tasks/${task.id}/prepare`;
+    payload = { prompt: body.prompt, clientTurnId: body.clientTurnId };
+    for (let n = 0; n < 100; n++) {
+      const status = await request(init, `${baseUrl}/api/tasks/${task.id}`, {}).then((response) =>
+        response.json()
+      );
+      if (!status.recoveryBlocked && !status.preparingTaskId) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  return request(init, route, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
     signal: combineSignal(init, init.timeoutMs),
   });
 }
@@ -167,6 +197,7 @@ async function startAndCollect(baseUrl, body, init = {}) {
 }
 
 module.exports = {
+  registerTaskTestStorage,
   startSessionRun,
   stopSessionRun,
   collectSessionEvents,

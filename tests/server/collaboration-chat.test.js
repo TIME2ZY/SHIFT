@@ -13,11 +13,21 @@ const { collectSessionEvents } = require("../helpers/chat-run-client");
 const TOKEN = "delegation-test";
 const SHA = "a".repeat(40);
 const contract = {
-  workflowId: "software_delivery",
   goal: "Add export",
   deliverables: ["export"],
   acceptanceCriteria: ["Exports valid data"],
-  subtasks: [{ id: "export", title: "Export", description: "Add export" }],
+  subtasks: [
+    {
+      id: "export",
+      title: "Export",
+      description: "Add export",
+      workflowId: "software_delivery",
+      capabilities: ["software"],
+      dependsOn: [],
+      deliverables: ["export"],
+      acceptanceCriteria: ["Exports valid data"],
+    },
+  ],
 };
 function spawnText(text) {
   const child = new EventEmitter();
@@ -46,12 +56,12 @@ const fence = (name, fields) =>
     )
     .join("\n") +
   "\n```";
-const handoff = (duty, what = "Continue frozen task") =>
+const handoff = (duty, what = "Continue frozen task", goal = contract.goal) =>
   "@codex\n" +
   fence("handoff", {
     to: "codex",
     intent: duty,
-    goal: contract.goal,
+    goal,
     what,
     why: "Continue next Duty",
     next_action: "Use stored evidence",
@@ -115,19 +125,20 @@ async function fixture(t, spawnRunner, extra = {}) {
     (value) => !value.recoveryBlocked
   );
   const create = async () => (await api("/api/tasks", "POST", { projectKey })).task;
-  const save = async (id) => {
+  const save = async (id, spec = contract) => {
     const current = (await api("/api/tasks/" + id)).task;
-    return (await api("/api/tasks/" + id, "PATCH", { contract, expectedRevision: current.version }))
-      .task;
+    return (
+      await api("/api/tasks/" + id, "PATCH", { contract: spec, expectedRevision: current.revision })
+    ).task;
   };
-  const submit = async (id) => {
-    const draft = await save(id);
-    return api(`/api/tasks/${id}/submit`, "POST", { expectedRevision: draft.version });
+  const submit = async (id, spec = contract) => {
+    const draft = await save(id, spec);
+    return api(`/api/tasks/${id}/submit`, "POST", { expectedRevision: draft.revision });
   };
   const settled = (id) =>
     waitFor(
       () => api("/api/tasks/" + id),
-      (value) => ["completed", "failed", "cancelled"].includes(value.task.delegationState)
+      (value) => ["completed", "failed", "cancelled"].includes(value.task.state)
     );
   return { storage, api, create, save, submit, settled, base };
 }
@@ -138,20 +149,20 @@ test("prepare uses existing durable stream, network retry replays, submission fr
     return spawnText("```delegation_plan\n" + JSON.stringify(contract) + "\n```");
   });
   const draft = await f.create();
-  const id = draft.threadId;
+  const id = draft.id;
   const prepared = await f.api(`/api/tasks/${id}/prepare`, "POST", {
     prompt: "Add export",
     clientTurnId: "prepare-1",
   });
   assert.equal(prepared.status, 202);
-  const stream = await collectSessionEvents(f.base, id, {
+  const stream = await collectSessionEvents(f.base, prepared.sessionId, {
     headers: { "X-Shift-UI-Token": TOKEN },
     traceId: prepared.traceId,
   });
   assert.match(stream.text, /event: agent-start/);
   await waitFor(
     () => f.api("/api/tasks/" + id),
-    (value) => !value.preparingThreadId
+    (value) => !value.preparingTaskId
   );
   const repeat = await f.api(`/api/tasks/${id}/prepare`, "POST", {
     prompt: "different",
@@ -162,26 +173,26 @@ test("prepare uses existing durable stream, network retry replays, submission fr
   const saved = await f.save(id);
   const stale = await f.api("/api/tasks/" + id, "PATCH", {
     contract,
-    expectedRevision: saved.version - 1,
+    expectedRevision: saved.revision - 1,
   });
   assert.equal(stale.code, "TASK_REVISION_CONFLICT");
   const submitted = await f.api(`/api/tasks/${id}/submit`, "POST", {
-    expectedRevision: saved.version,
+    expectedRevision: saved.revision,
   });
   assert.equal(submitted.status, 202);
   const frozen = await f.api("/api/tasks/" + id, "PATCH", {
     contract: { ...contract, goal: "different" },
-    expectedRevision: submitted.task.version,
+    expectedRevision: submitted.task.revision,
   });
   assert.equal(frozen.code, "TASK_FROZEN");
   await f.settled(id);
-  assert.equal(f.storage.collaborationTasks.get(id).delegationState, "failed");
+  assert.equal(f.storage.tasks.get(id).state, "failed");
   assert.equal(
-    f.storage.invocations.listForThread(id).every((row) => row.state !== "active"),
+    f.storage.invocations.listForThread(prepared.sessionId).every((row) => row.state !== "active"),
     true
   );
 });
-test("software Team completes all Duties through durable handoff and bound platform evidence", async (t) => {
+test("software nodes share an isolated Task workspace but have independent Team Runs and acceptance", async (t) => {
   const duties = [];
   const review = {
     verdict: "approve",
@@ -221,26 +232,36 @@ test("software Team completes all Duties through durable handoff and bound platf
   };
   const f = await fixture(
     t,
-    (storage, _command, args) => {
-      const task = storage.collaborationTasks.delegations
+    (storage, _command, args, options) => {
+      const run = storage.tasks
         .list()
-        .find((row) => row.delegationState === "running");
+        .find((row) => row.state === "running")
+        .runs.at(-1);
+      const task = storage.collaborationTasks.get(run.threadId);
+      const scope = task.executionBinding.contract;
+      const route = (duty) => handoff(duty, "Continue node", scope.goal);
+      if (run.nodeId === "report")
+        assert.equal(
+          fs.readFileSync(path.join(options.cwd, "export-result.txt"), "utf8"),
+          "first node artifact"
+        );
+
       const duty = args.at(-1).match(/"currentDuty":"([^"]+)"/)?.[1];
       duties.push(duty);
-      assert.match(args.at(-1), /目标、交付物、验收条件和可见分任务均已冻结/);
+      assert.match(args.at(-1), /冻结范围/);
       let text;
       if (duty === "discuss")
         text = task.artifacts.implementationPlan
-          ? handoff("implement")
+          ? route("implement")
           : fence("solution_baseline", {
               user_goal_hash: task.goalHash,
               summary: "Add export",
               constraints: ["Keep existing API"],
               non_goals: ["No redesign"],
-              acceptance_criteria: contract.acceptanceCriteria,
+              acceptance_criteria: scope.acceptanceCriteria,
             }) +
             "\n" +
-            handoff("plan");
+            route("plan");
       else if (duty === "plan")
         text =
           fence("implementation_plan", {
@@ -251,16 +272,19 @@ test("software Team completes all Duties through durable handoff and bound platf
             risks: ["none"],
           }) +
           "\n" +
-          handoff("discuss");
-      else if (duty === "implement") text = handoff("review");
-      else if (duty === "review") text = fence("code_review", review) + "\n" + handoff("deliver");
+          route("discuss");
+      else if (duty === "implement") {
+        if (run.nodeId === "export")
+          fs.writeFileSync(path.join(options.cwd, "export-result.txt"), "first node artifact");
+        text = route("review");
+      } else if (duty === "review") text = fence("code_review", review) + "\n" + route("deliver");
       else if (duty === "deliver")
         text =
           fence("code_review", review) +
           "\n" +
           fence("delivery_receipt", receipt) +
           "\n" +
-          handoff("accept");
+          route("accept");
       else
         text = fence("final_acceptance", {
           verdict: "accept",
@@ -268,7 +292,7 @@ test("software Team completes all Duties through durable handoff and bound platf
           solution_hash: task.artifacts.solutionBaseline?.hash,
           implementation_plan_hash: task.artifacts.implementationPlan?.hash,
           commit_sha: SHA,
-          checks: contract.acceptanceCriteria.map(
+          checks: scope.acceptanceCriteria.map(
             (value) => value + " => pass: export regression passed"
           ),
           gaps: ["none"],
@@ -283,35 +307,66 @@ test("software Team completes all Duties through durable handoff and bound platf
     }
   );
   const draft = await f.create();
-  await f.submit(draft.threadId);
-  const result = (await f.settled(draft.threadId)).task;
+  const spec = {
+    ...contract,
+    deliverables: ["export", "report"],
+    acceptanceCriteria: [...contract.acceptanceCriteria, "Report export counts"],
+    subtasks: [
+      contract.subtasks[0],
+      {
+        id: "report",
+        title: "Count report",
+        description: "Produce export count report",
+        workflowId: "software_delivery",
+        capabilities: ["software"],
+        dependsOn: ["export"],
+        deliverables: ["report"],
+        acceptanceCriteria: ["Report export counts"],
+      },
+    ],
+  };
+  await f.submit(draft.id, spec);
+  const result = (await f.settled(draft.id)).task;
   assert.equal(
-    result.delegationState,
+    result.state,
     "completed",
     JSON.stringify({
       duties,
-      reason: result.delegationReason,
-      history: f.storage.collaborationTasks.get(draft.threadId).history,
+      reason: result.reason,
+      history: f.storage.collaborationTasks.get(result.runs.at(-1).threadId).history,
     })
   );
   assert.deepEqual(duties, [
-    "discuss",
-    "plan",
-    "discuss",
-    "implement",
-    "review",
-    "deliver",
-    "accept",
+    ...["discuss", "plan", "discuss", "implement", "review", "deliver", "accept"],
+    ...["discuss", "plan", "discuss", "implement", "review", "deliver", "accept"],
   ]);
-  assert.equal(result.repairCount, 0);
-  assert.equal(result.result.delivery.commitSha, SHA);
-  const invocations = f.storage.invocations.listForThread(draft.threadId);
-  assert.equal(invocations.length, 7);
+  assert.equal(result.runs.length, 2);
+  assert.notEqual(result.runs[0].threadId, result.runs[1].threadId);
+  assert.equal(result.artifacts[0].locator, result.artifacts[1].locator);
+  assert.equal(result.acceptances.length, 2);
+  assert.equal(result.runs[1].baseline.mode, "continue_workspace");
+  assert.deepEqual(result.runs[1].baseline.completedNodeIds, ["export"]);
+  assert.deepEqual(
+    f.storage.collaborationTasks.get(result.runs[1].threadId).executionBinding.contract
+      .acceptanceCriteria,
+    ["Report export counts", "Exports valid data"]
+  );
+  assert.deepEqual(
+    f.storage.collaborationTasks.get(result.runs[0].threadId).executionBinding.contract
+      .acceptanceCriteria,
+    ["Exports valid data"]
+  );
+  assert.equal(result.acceptances[0].evidenceLevel, "verified");
+  assert.equal(result.artifacts[0].metadata.delivery.commitSha, SHA);
+  const invocations = result.runs.flatMap((run) =>
+    f.storage.invocations.listForThread(run.threadId)
+  );
+  assert.equal(invocations.length, 14);
   assert.ok(invocations.every((row) => row.state === "completed"));
-  const hops = f.storage.handoffs.listForThread(draft.threadId);
-  assert.equal(hops.length, 6);
+  const hops = result.runs.flatMap((run) => f.storage.handoffs.listForThread(run.threadId));
+  assert.equal(hops.length, 12);
   assert.ok(hops.every((row) => row.targetInvocationId && row.completeStatus === "completed"));
-  assert.equal(f.storage.memories.listForThread(draft.threadId).length, 0);
+  assert.equal(f.storage.memories.listForThread(result.runs[0].threadId).length, 0);
 });
 test("submitted self-provider hops honor depth and preserve explicit unfinished outcome", async (t) => {
   const previous = process.env.MAX_A2A_DEPTH;
@@ -323,10 +378,12 @@ test("submitted self-provider hops honor depth and preserve explicit unfinished 
   let runs = 0;
   const f = await fixture(t, () => spawnText(handoff("discuss", "Compare option " + ++runs)));
   const draft = await f.create();
-  await f.submit(draft.threadId);
-  await f.settled(draft.threadId);
+  await f.submit(draft.id);
+  const result = (await f.settled(draft.id)).task;
   assert.equal(runs, 9);
-  const invocations = f.storage.invocations.listForThread(draft.threadId);
+  const invocations = result.runs.flatMap((run) =>
+    f.storage.invocations.listForThread(run.threadId)
+  );
   assert.ok(invocations.every((row) => row.state === "completed"));
   assert.ok(
     invocations.some((row) =>
@@ -335,8 +392,65 @@ test("submitted self-provider hops honor depth and preserve explicit unfinished 
         .some((event) => event.kind === "a2a-skipped" && event.payload.reason === "max_depth")
     )
   );
-  assert.equal(
-    f.storage.collaborationTasks.get(draft.threadId).delegationReason,
-    "acceptance_incomplete"
+  assert.equal(f.storage.tasks.get(draft.id).reason, "acceptance_incomplete");
+});
+
+test("a stale main-Agent result cannot overwrite edits made during preparation", async (t) => {
+  let child;
+  const f = await fixture(t, () => {
+    child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => {
+      child.emit("close", null, "SIGTERM");
+      return true;
+    };
+    return child;
+  });
+  const task = await f.create();
+  const started = await f.api(`/api/tasks/${task.id}/prepare`, "POST", {
+    prompt: "Plan export",
+    clientTurnId: "stale-plan",
+  });
+  assert.equal(started.status, 202);
+  await waitFor(() => child, Boolean);
+  const current = (await f.api(`/api/tasks/${task.id}`)).task;
+  const saved = await f.api(`/api/tasks/${task.id}`, "PATCH", {
+    contract: { ...contract, goal: "User edited scope" },
+    expectedRevision: current.revision,
+  });
+  assert.equal(saved.status, 200);
+  child.stdout.write(
+    JSON.stringify({
+      type: "text.delta",
+      text: "```delegation_plan\n" + JSON.stringify(contract) + "\n```",
+    }) + "\n"
   );
+  child.emit("close", 0, null);
+  const finished = await waitFor(
+    () => f.api(`/api/tasks/${task.id}`),
+    (value) => !value.preparingTaskId
+  );
+  assert.equal(finished.task.contract.goal, "User edited scope");
+  assert.equal(finished.task.reason, "TASK_REVISION_CONFLICT");
+  assert.notEqual(task.id, started.sessionId);
+});
+
+test("main-Agent clarification is a visible draft result, not an execution failure", async (t) => {
+  const f = await fixture(t, () => spawnText("需要输出 CSV 还是 JSON？"));
+  const task = await f.create();
+  const started = await f.api(`/api/tasks/${task.id}/prepare`, "POST", {
+    prompt: "Export",
+    clientTurnId: "clarify",
+  });
+  assert.equal(started.status, 202);
+  const current = await waitFor(
+    () => f.api(`/api/tasks/${task.id}`),
+    (value) => !value.preparingTaskId
+  );
+  assert.equal(current.task.state, "draft");
+  assert.equal(current.task.reason, "needs_input");
+  assert.equal(current.task.contract, null);
+  assert.equal(current.task.preparationMessage.content, "需要输出 CSV 还是 JSON？");
+  assert.equal(f.storage.collaborationTasks.get(started.sessionId), null);
 });

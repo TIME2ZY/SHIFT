@@ -150,8 +150,8 @@ vi.mock("../features/tasks/queries", () => ({
   useTaskActions: () => ({ mutate: mocks.mutate, isPending: false, error: null }),
 }));
 vi.mock("../features/tasks/TaskConsole", () => ({
-  TaskConsole: ({ sessionId }: { sessionId: string | null }) => (
-    <section aria-label="任务委托">{sessionId}</section>
+  TaskConsole: ({ taskId }: { taskId: string | null }) => (
+    <section aria-label="任务委托">{taskId}</section>
   ),
 }));
 describe("App task delegation entry", () => {
@@ -159,7 +159,7 @@ describe("App task delegation entry", () => {
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: "新建委托" }));
     expect(mocks.mutate).toHaveBeenCalledWith(
-      { action: "create", projectKey: undefined, parentThreadId: undefined },
+      { action: "create", projectKey: undefined, parentTaskId: undefined },
       expect.any(Object)
     );
     expect(screen.queryByRole("textbox", { name: "消息" })).not.toBeInTheDocument();
@@ -170,7 +170,7 @@ describe("App task delegation entry", () => {
     await userEvent.click(screen.getByRole("button", { name: "切换到 BETA" }));
     await userEvent.click(screen.getByRole("button", { name: "新建委托" }));
     expect(mocks.mutate).toHaveBeenCalledWith(
-      { action: "create", projectKey: "project-2", parentThreadId: undefined },
+      { action: "create", projectKey: "project-2", parentTaskId: undefined },
       expect.any(Object)
     );
   });

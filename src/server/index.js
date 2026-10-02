@@ -23,8 +23,12 @@ const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const { createChatRuntime } = require("./chat-runtime");
 const { createRunEventRoutes } = require("./run-event-routes");
-const { createDelegationRoutes } = require("./delegation-routes");
-const { createDelegationOrchestrator } = require("../agents/delegation-orchestrator");
+const { createTaskRoutes } = require("./task-routes");
+const { createTaskPlatform } = require("../tasks/platform");
+const { createTaskScheduler } = require("../tasks/scheduler");
+const { createAgentCatalog } = require("../agents/agent-catalog");
+const { createTeamCatalog } = require("../teams/catalog");
+const { createSoftwareDeliveryTeam } = require("../teams/software-delivery");
 const { createTaskWorkspace } = require("../worktree/task-workspace");
 const { processIdentity, reconcileOwnedProcesses } = require("../agents/process-ownership");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
@@ -151,7 +155,10 @@ function createServer(options = {}) {
   });
   const collabTaskRegistry = createCollabTaskRegistry({
     repository: storageContext.storage?.collaborationTasks || null,
-    readWorkspace: (threadId) => worktreeManager.getStatus(threadId),
+    readWorkspace: (threadId) =>
+      worktreeManager.getStatus(
+        storageContext.storage.tasks.findRunByThread(threadId)?.taskId || threadId
+      ),
   });
   const activeInvocations = new Map();
   const chatRuntime = createChatRuntime({ eventStore });
@@ -339,27 +346,54 @@ function createServer(options = {}) {
     logger,
   });
   chatRuntime.attachExecutor(chatRunExecutor);
-  const delegationOrchestrator = createDelegationOrchestrator({
-    repository: storageContext.storage.collaborationTasks,
-    seats: storageContext.storage.threadSeats,
-    agents: AGENTS,
-    availability,
-    runtime: chatRuntime,
-    startRun: (input) =>
-      chatRuntime.startRun({
-        ...input,
-        apiUrl: `http://127.0.0.1:${server.address()?.port || 8787}`,
+  const startTaskInvocation = (input) =>
+    chatRuntime.startRun({
+      ...input,
+      apiUrl: `http://127.0.0.1:${server.address()?.port || 8787}`,
+    });
+  const agentCatalog = createAgentCatalog({ agents: AGENTS, availability });
+  const teamCatalog = createTeamCatalog({
+    agents: agentCatalog,
+    definitions: [
+      createSoftwareDeliveryTeam({
+        startRun: startTaskInvocation,
+        getSession: getSessionDurable,
+        createSession: createSessionDurable,
+        projects: storageContext.storage.projects,
+        createWorkspace: (id) => createTaskWorkspace(appPaths.shiftHome, id),
+        traces: storageContext.storage.traces,
+        registry: collabTaskRegistry,
+        runtime: chatRuntime,
+        workspace: worktreeManager,
+        setSessionWorktree: updateWorktreeDurable,
       }),
+    ],
+  });
+  const taskScheduler = createTaskScheduler({
+    repository: storageContext.storage.tasks,
+    teams: teamCatalog,
+    canDispatch: () =>
+      chatRuntime.runs.size === 0 &&
+      storageContext.storage.invocations.listActive().length === 0 &&
+      storageContext.storage.processOwnership.listOpen().length === 0,
+    logger,
+  });
+  const taskPlatform = createTaskPlatform({
+    repository: storageContext.storage.tasks,
+    scheduler: taskScheduler,
+    teams: teamCatalog,
+    catalog: agentCatalog,
+    startRun: startTaskInvocation,
+    runtime: chatRuntime,
     getSession: getSessionDurable,
     createSession: createSessionDurable,
     projects: storageContext.storage.projects,
-    createWorkspace: () => createTaskWorkspace(appPaths.shiftHome),
+    createWorkspace: (id) => createTaskWorkspace(appPaths.shiftHome, id),
     traces: storageContext.storage.traces,
-    registry: collabTaskRegistry,
     logger,
   });
-  const handleDelegationRoutes = createDelegationRoutes({
-    orchestrator: delegationOrchestrator,
+  const handleTaskRoutes = createTaskRoutes({
+    platform: taskPlatform,
     sendJson,
     readJsonBody,
   });
@@ -369,10 +403,6 @@ function createServer(options = {}) {
     getSession: getSessionDurable,
     sendJson,
     readJsonBody,
-    prepareRun: (sessionId, input) => {
-      delegationOrchestrator.initialize(sessionId);
-      return delegationOrchestrator.prepare(sessionId, input);
-    },
   });
 
   async function handleRequest(req, res) {
@@ -422,7 +452,7 @@ function createServer(options = {}) {
       return;
     }
 
-    if (await handleDelegationRoutes(req, res, url)) return;
+    if (await handleTaskRoutes(req, res, url)) return;
 
     if (await handleMemoryRoutes(req, res, url)) {
       return;
@@ -471,7 +501,7 @@ function createServer(options = {}) {
       )
       .then((blockers) => {
         if (blockers.length) logger.error?.("[process-recovery] " + JSON.stringify(blockers));
-        else delegationOrchestrator.allowRecoveredQueue();
+        else taskPlatform.allowRecoveredQueue();
       })
       .catch((error) => logger.error?.("[process-recovery] " + error.message));
   });
@@ -482,7 +512,7 @@ function createServer(options = {}) {
     _previewManagers.delete(worktreeManager);
     storageClosePromise = (async () => {
       try {
-        await delegationOrchestrator.close();
+        await taskPlatform.close();
         await chatRuntime.shutdown();
         await storageContext.close();
       } catch (error) {

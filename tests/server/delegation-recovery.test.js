@@ -12,11 +12,21 @@ const { initializeRuntimeHome } = require("../../src/storage/offline/runtime-hom
 const { processIdentity, reconcileOwnedProcesses } = require("../../src/agents/process-ownership");
 
 const contract = {
-  workflowId: "software_delivery",
   goal: "Add export",
   deliverables: ["export"],
   acceptanceCriteria: ["valid data"],
-  subtasks: [{ id: "export", title: "Export", description: "Export data" }],
+  subtasks: [
+    {
+      id: "export",
+      title: "Export",
+      description: "Export data",
+      workflowId: "software_delivery",
+      capabilities: ["software"],
+      dependsOn: [],
+      deliverables: ["export"],
+      acceptanceCriteria: ["valid data"],
+    },
+  ],
 };
 async function waitFor(read, predicate) {
   const deadline = Date.now() + 20000;
@@ -97,13 +107,13 @@ test(
       const { task } = await first.api("/api/tasks", "POST", {
         projectKey: project.project.projectKey,
       });
-      ids.push(task.threadId);
-      const saved = await first.api(`/api/tasks/${task.threadId}`, "PATCH", {
+      ids.push(task.id);
+      const saved = await first.api(`/api/tasks/${task.id}`, "PATCH", {
         contract,
-        expectedRevision: task.version,
+        expectedRevision: task.revision,
       });
-      await first.api(`/api/tasks/${task.threadId}/submit`, "POST", {
-        expectedRevision: saved.task.version,
+      await first.api(`/api/tasks/${task.id}/submit`, "POST", {
+        expectedRevision: saved.task.revision,
       });
     }
     await waitFor(
@@ -117,7 +127,7 @@ test(
         (owners) => owners.some((owner) => owner.identity)
       );
       orphanIdentity = owners[0].identity;
-      assert.equal(storage.collaborationTasks.get(ids[1]).delegationState, "queued");
+      assert.equal(storage.tasks.get(ids[1]).state, "queued");
     } finally {
       storage.close();
     }
@@ -129,17 +139,21 @@ test(
     const second = await start(orphanIdentity);
     const settled = await waitFor(
       () => second.api(`/api/tasks/${ids[1]}`),
-      (state) => state.task.delegationState === "failed"
+      (state) => state.task.state === "failed"
     );
     assert.equal(settled.task.queueSeq, 2);
     const interrupted = (await second.api(`/api/tasks/${ids[0]}`)).task;
-    assert.equal(interrupted.delegationState, "failed");
-    assert.equal(interrupted.delegationReason, "application_interrupted");
+    assert.equal(interrupted.state, "failed");
+    assert.equal(interrupted.reason, "application_interrupted");
     assert.equal(processIdentity(orphanIdentity.pid)?.token === orphanIdentity.token, false);
     const spawned = second.messages.filter((message) => message.kind === "spawn");
     assert.ok(spawned.length > 0);
     assert.ok(
-      spawned.every((message) => message.threadId === ids[1] && !message.oldIdentityStillAlive)
+      spawned.every(
+        (message) =>
+          settled.task.runs.some((run) => run.threadId === message.threadId) &&
+          !message.oldIdentityStillAlive
+      )
     );
     const recoveredStorage = createStorage({ file: paths.databaseFile });
     try {
@@ -154,7 +168,7 @@ test(
         .prepare(
           "SELECT e.payload_json FROM invocation_events e JOIN invocations i ON i.id = e.invocation_id WHERE i.thread_id = ? AND e.kind = 'process.exited'"
         )
-        .get(ids[0]);
+        .get(interrupted.runs[0].threadId);
       assert.equal(JSON.parse(exit.payload_json).reason, "startup_terminated");
     } finally {
       recoveredStorage.close();

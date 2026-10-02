@@ -143,6 +143,7 @@ test("chat persists thread state through SQLite repositories", async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     const createdResponse = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
@@ -244,6 +245,7 @@ test("preparation handoff cannot spawn work or create product Memory", async () 
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
@@ -288,6 +290,7 @@ test("chat seals from cumulative window usage and starts the next generation", a
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
@@ -372,9 +375,11 @@ test("default sqlite mode restores sessions after restart", async () => {
 
   let firstServer;
   let secondServer;
+  const taskFixtureStorage = createStorage({ file: memoryDbFile });
   try {
     firstServer = await startServer();
     const firstUrl = `http://127.0.0.1:${firstServer.address().port}`;
+    require("../helpers/chat-run-client").registerTaskTestStorage(firstUrl, taskFixtureStorage);
     const { session } = await apiFetch(`${firstUrl}/api/sessions`, {
       method: "POST",
       body: JSON.stringify({ projectKey }),
@@ -394,6 +399,7 @@ test("default sqlite mode restores sessions after restart", async () => {
 
     secondServer = await startServer();
     const secondUrl = `http://127.0.0.1:${secondServer.address().port}`;
+    require("../helpers/chat-run-client").registerTaskTestStorage(secondUrl, taskFixtureStorage);
     const sessions = await apiFetch(
       `${secondUrl}/api/projects/${encodeURIComponent(projectKey)}/sessions`
     ).then((response) => response.json());
@@ -450,6 +456,7 @@ test("default sqlite mode restores sessions after restart", async () => {
     }
     if (previousTranscriptDir === undefined) delete process.env.SHIFT_TRANSCRIPT_DIR;
     else process.env.SHIFT_TRANSCRIPT_DIR = previousTranscriptDir;
+    taskFixtureStorage.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

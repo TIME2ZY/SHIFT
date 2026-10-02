@@ -10,6 +10,7 @@ const {
 } = require("./workflow-gates");
 
 function processWorkflowEvidenceOutput(input = {}) {
+  if (input.preparationOnly) return [];
   const agent = String(input.agent || "").toLowerCase();
   const duty = String(input.duty || "").toLowerCase();
   const content = String(input.content || "");
@@ -17,7 +18,6 @@ function processWorkflowEvidenceOutput(input = {}) {
   const registry = input.registry;
   const events = [];
   if (!threadId || !registry) return events;
-  if (registry.getTask?.(threadId)?.delegationState === "draft") return events;
 
   const taskUpdates = parseTaskUpdates(content);
   function applyTaskUpdate(update) {

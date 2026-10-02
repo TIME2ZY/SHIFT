@@ -62,7 +62,7 @@ async function main() {
     while ((await api("/api/tasks")).recoveryBlocked)
       await new Promise((resolve) => setTimeout(resolve, 25));
     const { task } = await api("/api/tasks", "POST", {});
-    const started = await api(`/api/tasks/${task.threadId}/prepare`, "POST", {
+    const started = await api(`/api/tasks/${task.id}/prepare`, "POST", {
       prompt:
         "请规划一个无依赖的 JavaScript CSV 导出函数。交付一个函数和单元测试；支持逗号与双引号转义。只整理目标、交付物、验收条件和分任务，不写文件。",
       clientTurnId: "smoke-prepare",
@@ -70,28 +70,35 @@ async function main() {
     const deadline = Date.now() + 100000;
     let current;
     do {
-      current = await api("/api/tasks/" + task.threadId);
-      if (!current.preparingThreadId) break;
+      current = await api("/api/tasks/" + task.id);
+      if (!current.preparingTaskId) break;
       await new Promise((resolve) => setTimeout(resolve, 500));
     } while (Date.now() < deadline);
-    if (current.preparingThreadId) {
-      await api(`/api/tasks/${task.threadId}/cancel`, "POST", {});
+    if (current.preparingTaskId) {
+      await api(`/api/tasks/${task.id}/cancel`, "POST", {});
       throw new Error("Live preparation deadline exceeded");
     }
-    const { session } = await api("/api/sessions/" + task.threadId);
+    const { session } = await api("/api/sessions/" + started.sessionId);
     const git = spawnSync("git", ["-C", session.projectDir, "status", "--porcelain"], {
       encoding: "utf8",
       windowsHide: true,
     });
-    const { traces } = await api(`/api/sessions/${task.threadId}/traces`);
-    const passed = Boolean(current.task.contract) && git.status === 0 && !git.stdout.trim();
+    const { traces } = await api(`/api/sessions/${started.sessionId}/traces`);
+    const platformSlotReleased = !current.busy && !current.recoveryBlocked;
+    const passed =
+      Boolean(current.task.contract) &&
+      platformSlotReleased &&
+      traces.some((trace) => trace.traceId === started.traceId && trace.state === "completed") &&
+      git.status === 0 &&
+      !git.stdout.trim();
     const report = {
       passed,
       selectedAgent: started.selectedAgent,
       contract: current.task.contract,
-      reason: current.task.delegationReason,
+      reason: current.task.reason,
       traceStates: traces.map((trace) => trace.state),
       sourceWorkspaceUnchanged: git.status === 0 && !git.stdout.trim(),
+      platformSlotReleased,
       submitted: false,
     };
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify(report, null, 2));

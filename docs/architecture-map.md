@@ -7,7 +7,7 @@
 > **依据：** `AGENTS.md` 主链路、目录职责、真相源与架构实现地图维护要求。
 >
 > **ADR：** 现行 `001` 真相源、`002` Trace/Handoff 契约、`003` 可选向量召回、`005` Memory
-> 仅 thread、`006` Project/`SHIFT_HOME`、`007` Seat/Duty、`008` FTS trigram、`009` 委托与持久队列。
+> 仅 thread、`006` Project/`SHIFT_HOME`、`007` 软件团队 Seat/Duty、`008` FTS trigram、`009` 任务平台与团队运行时。
 > `004` 已被 `007` 取代，不得再当选席或门禁依据。
 >
 > **维护：** 代码改变本文件所列路径、入口、边界或结论时，必须在同一 PR 中同步更新。
@@ -31,9 +31,10 @@
 HTTP createServer (src/server/index.js)
   ├─ project-routes     → project-repository (open / list / archive / restore)
   ├─ session-routes     → sqlite-session-service (Project-bound thread CRUD + collaboration snapshot)
-  ├─ delegation-routes → /api/tasks 创建、读取、PATCH 草稿、prepare、submit、cancel
-  ├─ delegation-orchestrator → 平台 Team 绑定、全局 FIFO、期限与有界修复；调用既有 chat-runtime
-  ├─ run-event-routes   → POST /runs 仅整理草稿、POST /runs/:traceId/stop、GET /events cursor SSE
+  ├─ task-routes → /api/tasks 创建、读取、PATCH 草稿、prepare、submit、cancel
+  ├─ tasks/platform + scheduler → 冻结节点计划、能力选择、FIFO/依赖/attempt/取消/恢复
+  ├─ teams/software-delivery → 团队内部 Duty/handoff/交付证据；调用既有 chat-runtime
+  ├─ run-event-routes   → POST /runs 返回 TASK_ENTRY_REQUIRED、POST /runs/:traceId/stop、GET /events cursor SSE
   ├─ chat-runtime       → 后端拥有 invocation Promise/AbortController；HTTP/SSE 不再拥有生命周期；公开关闭入口是 server.shutdown：先停接收、abort 并等待收口、关闭 SSE、再关 SQLite。只 server.close 不会等待 SQLite 释放
   ├─ chat-routes        → createChatRunExecutor（后台执行 worklist，无 POST /api/chat 热路径）
   ├─ callback-routes    → mid-run postMessage / MCP 私有 HTTP bridge / (A2A finalize)
@@ -48,7 +49,8 @@ Web App (web/src/app/App.tsx)
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
-  collaboration-task-repository.delegations → collaboration_tasks/events 的冻结合同、Team、queue_seq 和执行状态（schema v32）
+  task-repository → tasks/task_plans/plan_nodes/team_runs/task_artifacts/task_acceptances/task_events（schema v33）
+  collaboration-task-repository → 软件团队内部方案/交付证据；executionBinding 只读 join 冻结 Node/TeamRun
   process-ownership-repository → process.spawn_intent/bound/exited 事件的只读恢复投影
   runtime_server_lease → 同一数据库进程身份租约，第二个活服务不能收口第一个
   durable-recorder  → trace_runs + invocations + events + (assistant-final 原子 finish)
@@ -697,24 +699,26 @@ Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 p
 - 前端控制面统一为 TaskConsole → useTaskActions → /api/tasks。Composer、useChatActions.send/stop、run-api 及其旧行为测试已删除。
   SSE 观察保留为 runtime/useSessionObserver；MessageList 在流式期以 aria-busy 静默，终态与失败通知仍保留。
 
-### 委托主链路（2026-10-02）
+### 任务平台主链路（2026-10-03）
 
-- 委托创建经 delegation-orchestrator.create 绑定一个内部 Thread；可选 Project，没有上下文时 task-workspace 建立独立 Git 基线。
-- 草稿 normalizeDelegationContract → collaborationTasks.delegations.saveDraft；提交在同一 SQLite immediate transaction 检查版本、存合同/hash/Team/FIFO 序号和规范事件。
-- claimNext 与数据库唯一 active slot 保证全局单委托执行；内存 busy 只持有当前 executor Promise。委托内的 handoff 继续使用既有 accept/enqueue/bind/complete，不充当全局队列。
-- Team 按可路由性、已验证 available 优先及稳定席位排序选择 Duty 绑定。优先独立 Provider 审查，否则记录 solo_fallback。提交后的路由校验 Team 绑定；同 Provider 的职责交接仍消费 durable handoff，错配写拒绝事件。
-- 准备期只读权限映射在 preparation-permissions：Codex sandbox=read-only，Claude Read/Glob/Grep 且空 strict MCP。draft 不消费 workflow evidence 或 handoff。其余 Provider 参与执行 Team。
-- execute 只调用原 chat-runtime/startRun，chat-routes/chat-worklist 仍是唯一 started、流式和终态链路。每跳加入冻结合同；solution_baseline 条件必须逐项匹配，repository.save 与 task_goal 不可覆盖冻结目标。
-- 完成由 existing registry.acceptanceReadiness 与 delegation queue 的 hash/commit 绑定守卫决定；单纯 completed Trace 不够。最多两轮证据修复与 30 分钟墙钟期限，超限显式 failed，成果和工作目录引用保留。
-- 取消运行先 cancelling，停止并等待 owned Trace 后 cancelled；queued 直接取消。重启收口遗留运行且保留 queued，绝不重放未知副作用。
-- spawn_intent 在 spawn 前、process.bound 在识别 PID/创建 token 后、process.exited 在关闭后统一走 EventStore。启动 reconcileOwnedProcesses 只杀身份匹配的树；身份不明或退出事件写失败时 recoveryBlocked，队列保持不领取。
-- processIdentity 与 runtime_server_lease 防止 PID 复用和第二个服务实例错误收口。租约在 DB 关闭前释放。
-- delegationProgress 只投影匹配 goal/plan 的 Agent 报告；单项报告完成与整任务验收通过分别展示，不能反写任务事实。
-- 契约见 ADR-009 与 collaboration-data-contract。软件交付仍沿用 PR/CI 门禁，未引入并行本地完成口径。
+- task-routes → tasks/platform：创建 Task UUID，不创建 Thread/Project。prepare 才绑定只读准备 Thread，CAS revision 防止旧分析覆盖用户编辑。旧 Session /runs 写入口返回 TASK_ENTRY_REQUIRED；SSE/stop 观察基础设施保留。
+- tasks/planning 输出带 workflowId、capabilities、dependsOn、节点交付物和条件的计划；shared/delegation-contracts 校验 DAG 和全局条件覆盖，不限制软件 workflow。
+- agent-catalog 聚合 Provider 适配器能力与可用性；teams/catalog 按 Team 声明角色选择成员。第一阶段仅注册 software_delivery；通用调度通过契约可接其他 Team，测试用两个不同定义验证。
+- task-repository.submit 冻结独立 Plan 与实际 plan_nodes，并事务保存节点 Team/FIFO/event。SQLite 的 Task 与 TeamRun 唯一 active slot 保证串行；claimNext 按依赖就绪与 ordinal 创建独立 attempt。
+- tasks/scheduler 只处理通用回执、有限重试、Task 期限、取消与恢复；软件 Git/PR/CI 留在 teams/software-delivery。所有节点验收通过才完成 Task，成功退出文本不构成完成。
+- 每次尝试新建观察 Thread，共用 Task id 持有的隔离工作树。baseline 记录 headSha/porcelain 与 continue_workspace；后继输入包含已验收前置节点 Artifact/Acceptance 与版本。
+- software-delivery 使用 chat-runtime → chat-routes → chat-worklist 单一 CLI 链；每跳保留 Team instructions，内部交接走既有 durable handoff。collaboration repository 从 TeamRun/PlanNode 得到只读 executionBinding，冻结 goal 和 baseline 条件，旧平台 queue 列已删除。
+- chat-routes 返回 chat-runtime.attachPromise 的收口 Promise；调用方恢复前先释放运行记录，同时保留终态写入异常。调度器检查 runtime、active invocation 与 process ownership，正常收口可继续执行，未知遗留运行阻止新领取。
+- 软件共享工作树的组合验收：每次尝试 baseline 固定此前已完成的软件节点 id；团队自己的冻结范围保持本节点目标，内部验收条件还包含这些节点原有条件，须在当前工作树重新核验。引用通过 PlanNode 只读投影得到，不复制合同；旧尝试的条件集合不会随之后节点完成而增长。通用平台回执仍只匹配当前节点条件，累计复查属于软件 Team 责任。
+- Team 完成回执由 finishRun 原子校验并写 Artifact/Acceptance、Run/Node/Task/event。失败产物可回看，不能用于下游；重复回执内容 hash 不同明确冲突。
+- Task.cancelling 表示收口等待，Run/Node 此时仍 running，占槽直到 executor durable 终态。服务中断 mark unknownSideEffect，不自动重跑。queued 顺序保留。
+- process.spawn_intent/bound/exited 经 EventStore 写；启动及继续调度均检查遗留进程，身份/退出持久化不明时 recoveryBlocked。runtime_server_lease 保护活服务不被第二个实例覆盖。
+- v33 cutover 赋新 Task id，legacySource 记录原 Thread 与结果，旧提交只迁移成可回看的终态，不自动重放。旧 orchestrator、delegation queue、display progress 与硬编码软件 Team 选择器已删除。
+- Web TaskConsole 使用 Task id 展示节点、独立尝试、团队、成果版本和验收等级；App 按 TeamRun.threadId 或 preparationThreadId 观察 SSE，不把 Task id 当会话 id。
 
 ---
 
-最后核对日期：2026-10-02，覆盖以上全部章节，含「运行修复补充（2026-09-09）」、
+最后核对日期：2026-10-03，覆盖以上全部章节，含「运行修复补充（2026-09-09）」、
 Canonical JSONL 归档退役说明与「P2 结构拆分与前端守卫（2026-09-14）」。核对确认本文件
 引用的代码锚点（路径、模块名、迁移编号）在当前实现中真实存在；被声明删除的旧入口
 （`role-contracts.js`、`/api/chat`、`mirrorLastMessage`、storage_outbox、transcript 模块）

@@ -26,12 +26,28 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     goal: "实现工作区功能",
     deliverables: ["工作区实现"],
     acceptanceCriteria: ["浏览器验证通过"],
-    subtasks: [{ id: "workspace", title: "工作区实现", description: "实现和验证工作区" }],
+    subtasks: [
+      {
+        id: "workspace",
+        title: "工作区实现",
+        description: "实现和验证工作区",
+        workflowId: "software_delivery",
+        capabilities: ["software"],
+        dependsOn: [],
+        deliverables: ["工作区实现"],
+        acceptanceCriteria: ["浏览器验证通过"],
+      },
+    ],
   };
   let task = {
-    threadId: "session-1",
-    version: 1,
-    delegationState: "draft",
+    id: "task-1",
+    preparationThreadId: null as string | null,
+    nodes: [] as unknown[],
+    runs: [] as unknown[],
+    artifacts: [] as unknown[],
+    acceptances: [] as unknown[],
+    revision: 1,
+    state: "draft",
     contract: null as typeof contract | null,
     queueSeq: null as number | null,
     repairCount: 0,
@@ -42,7 +58,7 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       reviewMode: "solo_fallback",
     },
     result: null as { summary: string; delivery: null } | null,
-    delegationReason: null as string | null,
+    reason: null as string | null,
   };
   await page.route("**/favicon.svg", async (route) => {
     await route.fulfill({
@@ -63,34 +79,41 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       });
       return;
     }
-    if (url.pathname.startsWith("/api/tasks/session-1")) {
+    if (url.pathname.startsWith("/api/tasks/task-1")) {
       if (url.pathname.endsWith("/prepare")) {
-        task = { ...task, contract, version: task.version + 1 };
+        task = { ...task, contract, preparationThreadId: "session-1", revision: task.revision + 1 };
         state.runStarted = true;
         await route.fulfill({ status: 202, json: { sessionId: "session-1", traceId: "trace-1" } });
         return;
       }
       if (method === "PATCH") {
         const body = request.postDataJSON();
-        task = { ...task, contract: body.contract, version: task.version + 1 };
+        task = { ...task, contract: body.contract, revision: task.revision + 1 };
       }
       if (url.pathname.endsWith("/submit")) {
         task = {
           ...task,
-          delegationState:
-            chatMode === "slow" ? "running" : chatMode === "error" ? "failed" : "completed",
+          state: chatMode === "slow" ? "running" : chatMode === "error" ? "failed" : "completed",
           queueSeq: 1,
-          version: task.version + 1,
-          result: { summary: "工作区改动已完成。", delivery: null },
-          delegationReason: chatMode === "error" ? "Provider unavailable" : null,
+          revision: task.revision + 1,
+          artifacts: [
+            {
+              id: "artifact-1",
+              kind: "workspace",
+              locator: state.projectDir,
+              summary: "工作区改动已完成。",
+              metadata: {},
+            },
+          ],
+          reason: chatMode === "error" ? "Provider unavailable" : null,
         };
         state.chatBody = request.postDataJSON();
         state.chatCompleted = true;
       }
       if (url.pathname.endsWith("/cancel"))
-        task = { ...task, delegationState: "cancelled", version: task.version + 1 };
+        task = { ...task, state: "cancelled", revision: task.revision + 1 };
       await route.fulfill({
-        json: { task, busy: false, preparingThreadId: null, recoveryBlocked: false },
+        json: { task, busy: false, preparingTaskId: null, recoveryBlocked: false },
       });
       return;
     }
@@ -199,8 +222,13 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
                 goalOriginal: "实现工作区功能",
                 goalNormalized: "在隔离工作区完成并验证功能",
                 taskContext: {
-                  threadId: "session-1",
-                  version: 4,
+                  id: "task-1",
+                  preparationThreadId: null as string | null,
+                  nodes: [] as unknown[],
+                  runs: [] as unknown[],
+                  artifacts: [] as unknown[],
+                  acceptances: [] as unknown[],
+                  revision: 4,
                   originalGoal: "实现工作区功能",
                   currentGoal: { text: "实现工作区功能", hash: "goal-hash", messageId: "user-1" },
                   userUpdates: [],
@@ -450,7 +478,12 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       state.traceQueries.push(url.search);
       const failed = {
         traceId: "trace-failed",
-        threadId: "session-1",
+        id: "task-1",
+        preparationThreadId: null as string | null,
+        nodes: [] as unknown[],
+        runs: [] as unknown[],
+        artifacts: [] as unknown[],
+        acceptances: [] as unknown[],
         clientTurnId: "turn-2",
         requestAttempt: 2,
         state: "failed",
@@ -500,7 +533,12 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         json: {
           trace: {
             traceId: "trace-failed",
-            threadId: "session-1",
+            id: "task-1",
+            preparationThreadId: null as string | null,
+            nodes: [] as unknown[],
+            runs: [] as unknown[],
+            artifacts: [] as unknown[],
+            acceptances: [] as unknown[],
             spans: [
               {
                 spanId: "generation-inv-failed",
@@ -713,6 +751,9 @@ test("locates a durable failure after refresh and exports structural metadata", 
 }) => {
   const state = await mockShiftApi(page);
   await page.goto("./");
+  await page.getByRole("textbox", { name: "目标与补充材料" }).fill("回看执行记录");
+  await page.getByRole("button", { name: "主 Agent 整理草稿" }).click();
+  await expect(page.getByRole("textbox", { name: "收敛目标" })).toBeVisible();
 
   await page.getByRole("button", { name: "审计", exact: true }).click();
   const tracePanel = page.getByRole("region", { name: "航线" });

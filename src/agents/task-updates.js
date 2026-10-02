@@ -12,7 +12,8 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
     const text = String(input.text || "").trim();
     if (!text) return { captured: false, reason: "missing_user_goal" };
     const task = getOrCreateTask(threadId);
-    if (task.submittedAt) return { captured: true, reused: true, goalHash: task.goalHash, task };
+    if (task.executionBinding)
+      return { captured: true, reused: true, goalHash: task.goalHash, task };
     const existing = task.artifacts?.userGoal;
     const updates = task.artifacts?.userUpdates || [];
     if (existing?.hash && !input.force) {
@@ -88,7 +89,7 @@ function createTaskUpdates({ getOrCreateTask, persist, resetOutcomeEvidence }) {
       return reject("task_goal_mismatch");
     const previousGoalHash = task.artifacts.userGoal.hash;
     if (input.type === "task_goal") {
-      if (task.submittedAt) return reject("task_goal_frozen");
+      if (task.executionBinding) return reject("task_goal_frozen");
       if (!["discuss", "plan", "accept"].includes(input.actorDuty))
         return reject("goal_revision_requires_planning_duty");
       if (!hasOnly(value, fenceAllowedKeys("task_goal")) || !text(value.text))

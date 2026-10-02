@@ -177,8 +177,8 @@ function createGateRecorder(core, deps) {
           if (String(baseline.user_goal_hash || "") !== goalHash) {
             return rejectAccepted("solution_user_goal_mismatch");
           }
-          if (step.task.submittedAt) {
-            const expected = [...step.task.contract.acceptanceCriteria]
+          if (step.task.executionBinding) {
+            const expected = [...step.task.executionBinding.contract.acceptanceCriteria]
               .map((value) => value.trim())
               .sort();
             const actual = [...baseline.acceptance_criteria].map((value) => value.trim()).sort();

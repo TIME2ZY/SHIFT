@@ -18,7 +18,9 @@ related:
 
 ## 1. 状态
 
-**Accepted，core model implemented**
+**Accepted，software Team internal model implemented**
+
+ADR-009 将通用任务身份、计划、分配、调度和完成迁到独立 Task 平台。本 ADR 的 Seat/Duty、handoff 与 Git/PR/CI 证据协议只定义 software_delivery 团队内部执行，不再定义平台 Task 的身份或通用完成条件。
 
 本 ADR 的 Seat、Duty、按职责 Skill、任务卡、accept Duty 完成与证据绑定合同已进入在线路径。
 Provider availability 是进程内派生观测，启动后检测一次，手动重新检测，无 TTL；当前代码锚点由

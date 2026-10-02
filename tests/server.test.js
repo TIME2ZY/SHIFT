@@ -144,10 +144,13 @@ async function withServer(options, fn) {
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
+    const taskFixtureStorage = createStorage({ file: memoryDbFile });
+    require("./helpers/chat-run-client").registerTaskTestStorage(origin, taskFixtureStorage);
     projectKeysByOrigin.set(origin, projectKey);
     try {
       await fn(origin, { memoryDbFile, projectKey });
     } finally {
+      taskFixtureStorage.close();
       projectKeysByOrigin.delete(origin);
       await closeTestServer(server);
     }
@@ -187,7 +190,7 @@ test("availability refresh preserves seats and never creates business runs", asy
       );
       const rejected = await startChat(baseUrl, { sessionId, agent: "gemini", prompt: "hello" });
       assert.equal(rejected.status, 503);
-      assert.equal((await rejected.json()).code, "NO_ROUTABLE_SEATS");
+      assert.equal((await rejected.json()).code, "NO_CAPABLE_AGENT");
       available = true;
       const refreshed = await fetch(`${baseUrl}/api/agents/refresh`, {
         method: "POST",
@@ -198,7 +201,7 @@ test("availability refresh preserves seats and never creates business runs", asy
       assert.equal(current.agents.find((agent) => agent.id === "gemini").routable, true);
       const noPlanner = await startChat(baseUrl, { sessionId, prompt: "hello" });
       assert.equal(noPlanner.status, 503);
-      assert.equal((await noPlanner.json()).code, "NO_PLANNING_SEAT");
+      assert.equal((await noPlanner.json()).code, "NO_CAPABLE_AGENT");
       assert.deepEqual((await getSeats()).seats, before.seats);
       const restored = await fetch(`${baseUrl}/api/sessions/${sessionId}`).then((res) =>
         res.json()
@@ -433,7 +436,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         `Expected prompt to contain "hello", got: ${calls[0].args[3]?.slice(-50)}`
       );
       assert.ok(
-        calls[0].args[3].includes("委托准备主 Agent"),
+        calls[0].args[3].includes("任务委托平台的主 Agent"),
         "Expected preparation prompt to contain the delegation contract instructions"
       );
       assert.ok(
@@ -443,7 +446,7 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
       // Soft collab rules must be present on the first (non-A2A) turn.
       assert.match(calls[0].args[3], /delegation_plan/);
       assert.match(calls[0].args[3], /禁止 handoff/);
-      assert.match(calls[0].args[3], /只分析用户目标/);
+      assert.match(calls[0].args[3], /只理解目标/);
       assert.match(text, /"type":"text.delta"/);
       assert.match(text, /"text":"partial answer"/);
       const sessionMatch = text.match(/"sessionId":"([^"]+)"/);
@@ -669,29 +672,26 @@ test("chat endpoint preserves raw stdout chunk boundaries in SSE message events"
   );
 });
 
-test("chat endpoint rejects all agent mode", async () => {
+test("Task preparation rejects client-selected Agent and execution policy", async () => {
+  let spawned = 0;
   await withServer(
     {
       spawnRunner() {
-        const child = createMockChild();
-        process.nextTick(() => {
-          child.stdout.write("should not run");
-          child.emit("close", 0, null);
-        });
-        return child;
+        spawned++;
+        return createMockChild();
       },
     },
     async (baseUrl) => {
-      const created = await createProjectSession(baseUrl).then((res) => res.json());
-      const response = await startChat(baseUrl, {
-        sessionId: created.session.id,
-        agent: "all",
-        prompt: "compare",
+      const { task } = await fetch(baseUrl + "/api/tasks", { method: "POST", body: "{}" }).then(
+        (response) => response.json()
+      );
+      const rejected = await fetch(baseUrl + "/api/tasks/" + task.id + "/prepare", {
+        method: "POST",
+        body: JSON.stringify({ prompt: "compare", agent: "all" }),
       });
-      const body = await response.json();
-
-      assert.equal(response.status, 400);
-      assert.match(body.error, /Unsupported agent/);
+      assert.equal(rejected.status, 400);
+      assert.equal((await rejected.json()).code, "UNSUPPORTED_PREPARATION_OPTIONS");
+      assert.equal(spawned, 0);
     }
   );
 });
@@ -987,9 +987,9 @@ test("session run rejects the retired projectDir override", async () => {
       });
       const text = await response.text();
 
-      assert.equal(response.status, 400);
+      assert.equal(response.status, 409);
       const body = JSON.parse(text);
-      assert.match(body.error, /cannot be changed/);
+      assert.equal(body.code, "TASK_ENTRY_REQUIRED");
     }
   );
 });

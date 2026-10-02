@@ -37,7 +37,11 @@ function createSessionRoutes({
 
   function readWorkspace(sessionId) {
     try {
-      return worktreeManager?.getStatus?.(sessionId) || null;
+      return (
+        worktreeManager?.getStatus?.(
+          executionStorage?.tasks?.findRunByThread(sessionId)?.taskId || sessionId
+        ) || null
+      );
     } catch {
       return null;
     }
@@ -306,18 +310,36 @@ function createSessionRoutes({
 
       try {
         if (req.method === "GET" && action === "status") {
-          sendJson(res, 200, worktreeManager.getStatus(sessionId));
+          sendJson(
+            res,
+            200,
+            worktreeManager.getStatus(
+              executionStorage?.tasks?.findRunByThread(sessionId)?.taskId || sessionId
+            )
+          );
           return true;
         }
         if (req.method === "GET" && action === "diff") {
           sendJson(
             res,
             200,
-            buildWorktreeDiffPayload(sessionId, worktreeManager.getDiff(sessionId))
+            buildWorktreeDiffPayload(
+              sessionId,
+              worktreeManager.getDiff(
+                executionStorage?.tasks?.findRunByThread(sessionId)?.taskId || sessionId
+              )
+            )
           );
           return true;
         }
         if (req.method === "POST" && action === "discard") {
+          if (executionStorage?.tasks?.findRunByThread(sessionId)) {
+            sendJson(res, 409, {
+              error: "工作树由 Task 持有，请从任务入口停止执行。",
+              code: "TASK_WORKSPACE_OWNED",
+            });
+            return true;
+          }
           const result = worktreeManager.discardWorktree(sessionId);
           setSessionWorktree(sessionId, null);
           sendJson(res, 200, result);
@@ -339,7 +361,9 @@ function createSessionRoutes({
       }
       let worktree = null;
       try {
-        worktree = worktreeManager.getStatus(sessionId);
+        worktree = worktreeManager.getStatus(
+          executionStorage?.tasks?.findRunByThread(sessionId)?.taskId || sessionId
+        );
       } catch (error) {
         if (!/^No managed worktree/.test(error.message)) {
           sendJson(res, 400, { error: error.message });

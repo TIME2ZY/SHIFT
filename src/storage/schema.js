@@ -1234,6 +1234,11 @@ const MIGRATIONS = Object.freeze([
       CREATE TABLE runtime_server_lease (slot INTEGER PRIMARY KEY CHECK(slot = 1), identity_json TEXT NOT NULL);
     `,
   },
+  {
+    version: 33,
+    name: "independent_task_platform",
+    up: (db) => require("./offline/task-platform-cutover").migrateTaskPlatform(db),
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

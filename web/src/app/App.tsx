@@ -77,6 +77,7 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() =>
     window.localStorage.getItem("shift.active-task")
   );
+  const [observation, setObservation] = useState<{ taskId: string; threadId: string } | null>(null);
   const deleteSession = useDeleteSessionMutation();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -93,9 +94,15 @@ export function App() {
     sessions.data?.[0] ??
     null;
   const activeTask =
-    tasks.data?.tasks.find((task) => task.threadId === selectedTaskId) ??
+    tasks.data?.tasks.find((task) => task.id === selectedTaskId) ??
     (selectedSessionId ? null : (tasks.data?.tasks[0] ?? null));
-  const activeSessionId = activeTask?.threadId ?? selectedTaskId ?? activeSession?.id ?? null;
+  const activeTaskId = activeTask?.id ?? selectedTaskId;
+  const latestRun = activeTask?.runs.filter((run) => run.threadId).at(-1);
+  const activeSessionId = activeTaskId
+    ? observation?.taskId === activeTaskId
+      ? observation.threadId
+      : (latestRun?.threadId ?? activeTask?.preparationThreadId ?? null)
+    : (activeSession?.id ?? null);
   const messages = useMessagesQuery(activeSessionId);
   const traces = useSessionTracesQuery(activeSessionId, { limit: 100 });
   const run = useSessionRun(activeSessionId);
@@ -151,12 +158,12 @@ export function App() {
     return observer.restore(activeSessionId);
   }, [activeSessionId, observer.restore]);
 
-  function createNewSession(parentThreadId?: string) {
+  function createNewSession(parentTaskId?: string) {
     taskActions.mutate(
-      { action: "create", projectKey: selectedProjectKey || undefined, parentThreadId },
+      { action: "create", projectKey: selectedProjectKey || undefined, parentTaskId },
       {
         onSuccess(result) {
-          if (result.task) setSelectedTaskId(result.task.threadId);
+          if (result.task) setSelectedTaskId(result.task.id);
         },
       }
     );
@@ -302,15 +309,15 @@ export function App() {
           {tasks.data?.tasks.map((task) => (
             <button
               type="button"
-              key={task.threadId}
-              data-active={task.threadId === activeSessionId || undefined}
+              key={task.id}
+              data-active={task.id === activeTaskId || undefined}
               onClick={() => {
-                setSelectedTaskId(task.threadId);
+                setSelectedTaskId(task.id);
                 if (window.matchMedia("(max-width: 720px)").matches) closeSidebar();
               }}
             >
               <strong>{task.contract?.goal || "新委托草稿"}</strong>
-              <small>{DELEGATION_LABELS[task.delegationState]}</small>
+              <small>{DELEGATION_LABELS[task.state]}</small>
             </button>
           ))}
         </div>
@@ -412,7 +419,13 @@ export function App() {
               </div>
             </header>
 
-            <TaskConsole sessionId={activeSessionId} onRelatedTask={createNewSession} />
+            <TaskConsole
+              taskId={activeTaskId}
+              onRelatedTask={createNewSession}
+              onObserve={(threadId) => {
+                if (activeTaskId) setObservation({ taskId: activeTaskId, threadId });
+              }}
+            />
             <details className="delegation-details" open={!activeTask}>
               <summary>执行细节与会话记录</summary>
               <MessageList

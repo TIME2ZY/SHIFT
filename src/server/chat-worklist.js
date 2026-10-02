@@ -396,7 +396,9 @@ async function runChatWorklist(ctx) {
           seals: turnRunState.recoveryEvidence,
           taskVersion: turnRunState.taskSnapshot?.version,
         });
-        const trackProcess = Boolean(collabTaskRegistry?.getTask(sessionId)?.delegationState);
+        const trackProcess = Boolean(
+          ctx.preparationOnly || collabTaskRegistry?.getTask(sessionId)?.executionBinding
+        );
         const processEvent = (kind, payload = {}) => {
           const written = events.append({
             threadId: sessionId,

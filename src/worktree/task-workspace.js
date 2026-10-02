@@ -3,8 +3,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-function createTaskWorkspace(shiftHome) {
-  const directory = path.join(shiftHome, "tasks", crypto.randomUUID());
+function createTaskWorkspace(shiftHome, taskId = crypto.randomUUID()) {
+  require("../shared/id-policy").assertValidOpaqueId(taskId, "taskId");
+  const directory = path.join(shiftHome, "tasks", taskId);
+  if (fs.existsSync(path.join(directory, ".git"))) return directory;
   fs.mkdirSync(directory, { recursive: true });
   for (const args of [
     ["init"],

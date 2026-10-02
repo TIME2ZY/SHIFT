@@ -12,13 +12,15 @@ export const DELEGATION_LABELS: Record<DelegationState, string> = {
   cancelled: "已取消",
 };
 export function TaskConsole({
-  sessionId,
+  taskId,
+  onObserve,
   onRelatedTask,
 }: {
-  sessionId: string | null;
+  taskId: string | null;
+  onObserve?: (threadId: string) => void;
   onRelatedTask: (source: string) => void;
 }) {
-  const query = useTaskQuery(sessionId);
+  const query = useTaskQuery(taskId);
   const actions = useTaskActions();
   const task = query.data?.task;
   const [request, setRequest] = useState("");
@@ -26,9 +28,11 @@ export function TaskConsole({
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   useEffect(() => {
     setDraft(task?.contract ?? null);
+  }, [task?.id, task?.revision]);
+  useEffect(() => {
     setRequest(task?.contract?.goal ?? "");
-  }, [task?.threadId, task?.version]);
-  if (!sessionId)
+  }, [task?.id]);
+  if (!taskId)
     return (
       <section className="delegation-console">
         <h2>把目标委托给 SHIFT</h2>
@@ -41,16 +45,16 @@ export function TaskConsole({
         <p>{query.isPending ? "读取任务…" : "历史会话可在执行细节中回看。"}</p>
       </section>
     );
-  const editable = task.delegationState === "draft";
+  const editable = task.state === "draft";
   const pending = actions.isPending;
-  const preparing = query.data?.preparingThreadId === task.threadId;
+  const preparing = query.data?.preparingTaskId === task.id;
   const updateList = (key: "deliverables" | "acceptanceCriteria", value: string) => {
     if (draft) setDraft({ ...draft, [key]: value.split("\n") });
   };
   return (
     <section className="delegation-console" aria-label="任务委托">
       <header>
-        <strong>{DELEGATION_LABELS[task.delegationState]}</strong>
+        <strong>{DELEGATION_LABELS[task.state]}</strong>
         <span>{task.queueSeq ? " · 排队序号 " + task.queueSeq : ""}</span>
       </header>
       {query.data?.recoveryBlocked && (
@@ -68,9 +72,7 @@ export function TaskConsole({
           </label>
           <button
             disabled={pending || !request.trim() || query.data?.busy}
-            onClick={() =>
-              actions.mutate({ action: "prepare", id: task.threadId, prompt: request })
-            }
+            onClick={() => actions.mutate({ action: "prepare", id: task.id, prompt: request })}
           >
             主 Agent 整理草稿
           </button>
@@ -84,10 +86,17 @@ export function TaskConsole({
           {preparing && (
             <button
               disabled={pending}
-              onClick={() => actions.mutate({ action: "cancel", id: task.threadId })}
+              onClick={() => actions.mutate({ action: "cancel", id: task.id })}
             >
               取消委托
             </button>
+          )}
+          {task.preparationMessage && (
+            <p className="delegation-result" role="status">
+              {task.preparationMessage.content
+                .replace(/```delegation_plan\s*\n[\s\S]*?\n```/g, "")
+                .trim() || "主 Agent 已生成计划，可在下方编辑。"}
+            </p>
           )}
           {draft && (
             <fieldset disabled={pending || preparing}>
@@ -144,13 +153,76 @@ export function TaskConsole({
                         })
                       }
                     />
+                    <p>
+                      节点 ID：{item.id} · 流程：{item.workflowId} · 能力：
+                      {item.capabilities.join("、")}
+                    </p>
+                    <label>
+                      依赖节点（逗号分隔 ID）
+                      <input
+                        value={item.dependsOn.join(",")}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            subtasks: draft.subtasks.map((entry) =>
+                              entry.id === item.id
+                                ? {
+                                    ...entry,
+                                    dependsOn: event.target.value
+                                      .split(",")
+                                      .map((id) => id.trim())
+                                      .filter(Boolean),
+                                  }
+                                : entry
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      分任务交付物（每行一项）
+                      <textarea
+                        value={item.deliverables.join("\n")}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            subtasks: draft.subtasks.map((entry) =>
+                              entry.id === item.id
+                                ? { ...entry, deliverables: event.target.value.split("\n") }
+                                : entry
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      分任务完成条件（每行一项）
+                      <textarea
+                        value={item.acceptanceCriteria.join("\n")}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            subtasks: draft.subtasks.map((entry) =>
+                              entry.id === item.id
+                                ? { ...entry, acceptanceCriteria: event.target.value.split("\n") }
+                                : entry
+                            ),
+                          })
+                        }
+                      />
+                    </label>
                     <button
                       type="button"
                       disabled={draft.subtasks.length === 1}
                       onClick={() =>
                         setDraft({
                           ...draft,
-                          subtasks: draft.subtasks.filter((entry) => entry.id !== item.id),
+                          subtasks: draft.subtasks
+                            .filter((entry) => entry.id !== item.id)
+                            .map((entry) => ({
+                              ...entry,
+                              dependsOn: entry.dependsOn.filter((id) => id !== item.id),
+                            })),
                         })
                       }
                     >
@@ -169,6 +241,11 @@ export function TaskConsole({
                         id: "step-" + crypto.randomUUID(),
                         title: "新分任务",
                         description: "描述范围和完成条件",
+                        workflowId: "software_delivery",
+                        capabilities: ["software"],
+                        dependsOn: [],
+                        deliverables: [...draft.deliverables],
+                        acceptanceCriteria: [...draft.acceptanceCriteria],
                       },
                     ],
                   })
@@ -180,9 +257,9 @@ export function TaskConsole({
                 onClick={() =>
                   actions.mutate({
                     action: "save",
-                    id: task.threadId,
+                    id: task.id,
                     contract: draft,
-                    expectedRevision: task.version,
+                    expectedRevision: task.revision,
                   })
                 }
               >
@@ -195,15 +272,15 @@ export function TaskConsole({
                   try {
                     const saved = await actions.mutateAsync({
                       action: "save",
-                      id: task.threadId,
+                      id: task.id,
                       contract: draft,
-                      expectedRevision: task.version,
+                      expectedRevision: task.revision,
                     });
                     if (saved.task)
                       await actions.mutateAsync({
                         action: "submit",
-                        id: task.threadId,
-                        expectedRevision: saved.task.version,
+                        id: task.id,
+                        expectedRevision: saved.task.revision,
                       });
                   } catch (error) {
                     setSubmissionError(
@@ -226,27 +303,19 @@ export function TaskConsole({
               <li key={item.id}>
                 <strong>{item.title}</strong>
                 <span>
-                  {" "}
-                  ·{" "}
-                  {
+                  {" · " +
                     {
-                      accepted: "验收通过",
-                      reported_complete: "Agent 报告完成",
-                      in_progress: "Agent 正在处理",
-                      pending: "待报告",
-                    }[
-                      task.subtaskProgress?.items.find((entry) => entry.id === item.id)?.state ||
-                        "pending"
-                    ]
-                  }
+                      pending: "待领取",
+                      running: "团队执行中",
+                      completed: "验收通过",
+                      failed: "失败",
+                      cancelled: "取消",
+                    }[task.nodes.find((entry) => entry.id === item.id)?.state || "pending"]}
                 </span>
                 <p>{item.description}</p>
               </li>
             ))}
           </ol>
-          {task.subtaskProgress?.blockers.length ? (
-            <p role="status">Agent 报告阻塞：{task.subtaskProgress.blockers.join("；")}</p>
-          ) : null}
           <h3>交付物</h3>
           <ul>
             {task.contract?.deliverables.map((value, index) => (
@@ -259,58 +328,93 @@ export function TaskConsole({
               <li key={index}>{value}</li>
             ))}
           </ul>
-          <p>
-            团队：
-            {task.team?.members
-              .map(
-                (member) =>
-                  member.label + (member.availabilityStatus === "unknown" ? "（可用性待验证）" : "")
+          <h3>团队运行</h3>
+          {task.nodes.map((node) => (
+            <p key={node.id}>
+              {node.title}：
+              {node.team.members
+                .map(
+                  (member) =>
+                    member.label +
+                    (member.availabilityStatus === "unknown" ? "（可用性待验证）" : "")
+                )
+                .join("、")}
+              {Object.values(node.team.bindings).some(
+                (binding) => binding.routingReason === "solo_fallback"
               )
-              .join("、")}
-          </p>
-          {task.team?.reviewMode === "solo_fallback" && (
-            <p>当前由一个 Agent 承担各职责，审查采用同席位模式。</p>
-          )}
-          <p>修复轮次：{task.repairCount}</p>
-          {["queued", "running", "cancelling"].includes(task.delegationState) && (
+                ? " · 同席位审查"
+                : ""}
+            </p>
+          ))}
+          <ol>
+            {task.runs.map((run) => (
+              <li key={run.id}>
+                {run.nodeId} · 第 {run.attempt} 次尝试 · {run.state}
+                {run.reason ? " · " + run.reason : ""}
+                {run.unknownSideEffect ? " · 中断前副作用待核验" : ""}
+                {run.threadId && (
+                  <button onClick={() => onObserve?.(run.threadId!)}>查看执行记录</button>
+                )}
+              </li>
+            ))}
+          </ol>
+          {task.acceptances.map((acceptance) => (
+            <p key={acceptance.runId}>
+              验收：{acceptance.evidenceLevel === "verified" ? "平台证据核验" : "Agent 审查"} ·{" "}
+              {acceptance.criteria.join("；")}
+            </p>
+          ))}
+          {["queued", "running", "cancelling"].includes(task.state) && (
             <button
-              disabled={pending || task.delegationState === "cancelling"}
-              onClick={() => actions.mutate({ action: "cancel", id: task.threadId })}
+              disabled={pending || task.state === "cancelling"}
+              onClick={() => actions.mutate({ action: "cancel", id: task.id })}
             >
               取消委托
             </button>
           )}
-          {["completed", "failed", "cancelled"].includes(task.delegationState) && (
-            <button onClick={() => onRelatedTask(task.threadId)}>建立关联新委托</button>
+          {["completed", "failed", "cancelled"].includes(task.state) && (
+            <button onClick={() => onRelatedTask(task.id)}>建立关联新委托</button>
           )}
-          {task.result && (
+          {task.artifacts.length > 0 && (
             <div>
-              <h3>交付结果</h3>
-              <p className="delegation-result">{task.result.summary}</p>
-              {task.result.workspaceDir && (
-                <p>
-                  成果目录：<code>{task.result.workspaceDir}</code>
-                </p>
-              )}
-              {task.result.delivery?.commitSha && <p>Commit：{task.result.delivery.commitSha}</p>}
-              {task.result.delivery?.prUrl && (
-                <a href={task.result.delivery.prUrl} target="_blank" rel="noreferrer">
-                  查看交付 PR
-                </a>
-              )}
-              <p>CI：{task.result.delivery?.ciStatus || "unknown"}</p>
+              <h3>成果</h3>
+              {task.artifacts.map((artifact) => (
+                <article key={artifact.id}>
+                  <p className="delegation-result">{artifact.summary}</p>
+                  <p>
+                    {artifact.kind}：<code>{artifact.locator}</code>
+                  </p>
+                  {artifact.contentHash && (
+                    <p>
+                      版本：<code>{artifact.contentHash}</code>
+                    </p>
+                  )}
+                </article>
+              ))}
             </div>
+          )}
+          {task.legacySource && (
+            <>
+              <p>此任务来自旧版记录；执行历史与原结果保留。</p>
+              {task.legacySource.result &&
+                typeof task.legacySource.result === "object" &&
+                "summary" in task.legacySource.result &&
+                typeof task.legacySource.result.summary === "string" && (
+                  <p className="delegation-result">{task.legacySource.result.summary}</p>
+                )}
+            </>
           )}
         </>
       )}
-      {task.delegationReason && (
+      {task.reason && (
         <p role="status">
           {{
+            needs_input: "主 Agent 需要补充信息，请结合上方反馈继续描述目标。",
             acceptance_incomplete: "完成证据尚不齐全，成果已保留。可建立关联新委托补充要求。",
             deadline_exceeded: "执行超过平台期限，成果已保留。",
             application_interrupted: "应用中断，先前执行已收口。可建立关联委托继续。",
             user_cancelled: "委托已取消，已有成果和记录保留。",
-          }[task.delegationReason] || task.delegationReason}
+          }[task.reason] || task.reason}
         </p>
       )}
       {actions.error && <p role="alert">{actions.error.message}</p>}

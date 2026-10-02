@@ -63,14 +63,7 @@ async function replayEventsAfter(storage, sessionId, after, res) {
   return cursor;
 }
 
-function createRunEventRoutes({
-  runtime,
-  storage,
-  getSession,
-  sendJson,
-  readJsonBody,
-  prepareRun,
-}) {
+function createRunEventRoutes({ runtime, storage, getSession, sendJson }) {
   if (!runtime) throw new TypeError("runtime is required");
 
   return async function handleRunEventRoutes(req, res, url) {
@@ -83,36 +76,14 @@ function createRunEventRoutes({
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      let body;
-      try {
-        body = await readJsonBody(req);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
         return true;
       }
-      try {
-        if (!getSession(sessionId)) {
-          sendJson(res, 404, { error: "Session not found or its Project is archived." });
-        } else if (body.projectDir !== undefined) {
-          sendJson(res, 400, {
-            error: "projectDir is bound by the Session Project and cannot be changed.",
-          });
-        } else if (body.useWorktree || body.duty || body.internalPurpose) {
-          sendJson(res, 409, {
-            error: "运行入口只用于整理草稿；执行必须提交委托。",
-            code: "DELEGATION_SUBMISSION_REQUIRED",
-          });
-        } else {
-          const result = await prepareRun(sessionId, {
-            prompt: body.prompt,
-            clientTurnId: body.clientTurnId,
-            agent: body.agent,
-          });
-          sendJson(res, 202, result);
-        }
-      } catch (error) {
-        sendJson(res, error.statusCode || 400, { error: error.message, code: error.code });
-      }
+      sendJson(res, 409, {
+        error: "请通过 Task 的 prepare 或 submit 入口启动。",
+        code: "TASK_ENTRY_REQUIRED",
+      });
       return true;
     }
 

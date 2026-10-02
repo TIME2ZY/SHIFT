@@ -21,6 +21,7 @@ const { createStorageMetadataRepository } = require("./storage-metadata-reposito
 const { createThreadRepository } = require("./thread-repository");
 const { createTraceRunRepository } = require("./trace-run-repository");
 const { createWindowRepository } = require("./window-repository");
+const { createTaskRepository } = require("./task-repository");
 const { createCollaborationTaskRepository } = require("./collaboration-task-repository");
 const { createThreadSeatRepository } = require("./thread-seat-repository");
 const { createInvocationDutyBindingRepository } = require("./invocation-duty-binding-repository");
@@ -48,6 +49,7 @@ function createStorage(options = {}) {
     observabilityEvidence,
     observability: createObservabilityRepository(db, { evidence: observabilityEvidence }),
     executions: createExecutionReadModel(db),
+    tasks: createTaskRepository(db),
     collaborationTasks: createCollaborationTaskRepository(db),
     threadSeats: createThreadSeatRepository(db),
     invocationDutyBindings: createInvocationDutyBindingRepository(db),

@@ -87,6 +87,7 @@ async function withSealServer(spawnRunner, fn) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     await fn({ baseUrl, storage, tmpDir, projectKey });
   } finally {
@@ -218,7 +219,10 @@ test("draft preparation suppresses Agent-authored handoffs and keeps durable out
       assert.equal(invocations.length, 1);
       assert.equal(invocations[0].state, "completed");
       assert.equal(storage.handoffs.listForThread(session.id).length, 0);
-      assert.equal(storage.collaborationTasks.get(session.id).delegationState, "draft");
+      assert.equal(
+        storage.tasks.list().find((task) => task.preparationThreadId === session.id).state,
+        "draft"
+      );
     }
   );
 });
@@ -289,6 +293,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       body: JSON.stringify({ projectKey }),

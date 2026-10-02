@@ -19,7 +19,6 @@ const {
   renderOutcomeEvidenceBlock,
 } = require("../agents/workflow-gates");
 const { projectTaskContext } = require("../storage/collaboration-read-model");
-const { executionInstructions } = require("../agents/delegation-planning");
 
 /**
  * Assemble the full prompt for one worklist entry.
@@ -162,7 +161,7 @@ async function assemblePrompt(ctx, turnRunState, entry) {
     ctx.preparationOnly ? null : outcomeEvidenceBlock,
     taskContext,
   ].filter(Boolean);
-  if (taskSnapshot?.submittedAt) promptParts.push(executionInstructions(taskSnapshot));
+  if (ctx.teamInstructions) promptParts.push(ctx.teamInstructions);
   if (i === 0) {
     promptParts.push(bootstrapPacket, augmentedPrompt);
   } else {

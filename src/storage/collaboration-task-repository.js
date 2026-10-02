@@ -1,6 +1,6 @@
 "use strict";
 
-const { createDelegationQueue, failure } = require("./delegation-queue");
+const { failure } = require("./task-repository");
 
 const {
   COLLAB_ACTOR_KINDS,
@@ -68,6 +68,40 @@ function createCollaborationTaskRepository(db) {
   const deleteEvents = db.prepare("DELETE FROM collaboration_task_events WHERE thread_id = ?");
   const deleteTask = db.prepare("DELETE FROM collaboration_tasks WHERE thread_id = ?");
 
+  // Read projection of a software TeamRun's frozen node. Never a second task authority.
+  function binding(threadId) {
+    const row = db
+      .prepare(
+        `SELECT r.id,r.plan_id,r.team_json,r.baseline_json,n.spec_json FROM team_runs r
+      JOIN plan_nodes n ON n.plan_id=r.plan_id AND n.node_id=r.node_id WHERE r.thread_id=?`
+      )
+      .get(threadId);
+    if (!row) return null;
+    const node = JSON.parse(row.spec_json);
+    const completedIds = JSON.parse(row.baseline_json || "{}").completedNodeIds || [];
+    const previous = db
+      .prepare("SELECT node_id,spec_json FROM plan_nodes WHERE plan_id=?")
+      .all(row.plan_id)
+      .filter((entry) => completedIds.includes(entry.node_id))
+      .map((entry) => JSON.parse(entry.spec_json));
+    return {
+      runId: row.id,
+      team: JSON.parse(row.team_json),
+      contract: {
+        goal: node.description,
+        deliverables: node.deliverables,
+        acceptanceCriteria: [
+          ...new Set([
+            ...node.acceptanceCriteria,
+            ...previous.flatMap((entry) => entry.acceptanceCriteria),
+          ]),
+        ],
+      },
+    };
+  }
+  function read(row, events) {
+    return row ? { ...mapTask(row, events), executionBinding: binding(row.thread_id) } : null;
+  }
   const saveTransaction = db.transaction((task, event) => {
     const threadId = requiredString(task?.threadId, "thread id");
     const current = find.get(threadId);
@@ -76,7 +110,8 @@ function createCollaborationTaskRepository(db) {
     }
     const record = normalizeTask(task, current);
     if (
-      current?.submitted_at &&
+      binding(threadId) &&
+      current?.goal_hash &&
       (record.goal !== current.goal ||
         record.goalHash !== current.goal_hash ||
         record.goalNormalized !== current.goal_normalized ||
@@ -87,14 +122,14 @@ function createCollaborationTaskRepository(db) {
     }
     upsert.run(record);
     if (event) insertEvent.run(normalizeEvent(record.threadId, event));
-    return mapTask(find.get(record.threadId), listEvents.all(record.threadId));
+    return read(find.get(record.threadId), listEvents.all(record.threadId));
   });
 
   const repository = {
     get(threadId) {
       const id = requiredString(threadId, "thread id");
       const row = find.get(id);
-      return row ? mapTask(row, listEvents.all(id)) : null;
+      return read(row, listEvents.all(id));
     },
 
     save(task, event = null) {
@@ -113,11 +148,6 @@ function createCollaborationTaskRepository(db) {
       })();
     },
   };
-  repository.delegations = createDelegationQueue({
-    db,
-    get: repository.get,
-    save: repository.save,
-  });
   return repository;
 }
 
@@ -236,18 +266,6 @@ function mapTask(row, events = []) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: Number(row.version || 1),
-    delegationState: row.delegation_state || null,
-    contract: parseNullableObject(row.contract_json),
-    contractHash: row.contract_hash || null,
-    team: parseNullableObject(row.team_json),
-    queueSeq: row.queue_seq || null,
-    parentThreadId: row.parent_thread_id || null,
-    submittedAt: row.submitted_at || null,
-    executionTraceId: row.execution_trace_id || null,
-    delegationReason: row.delegation_reason || null,
-    result: parseNullableObject(row.result_json),
-    repairCount: row.repair_count || 0,
-    deadlineAt: row.deadline_at || null,
     history: events.map(mapEvent),
   };
 }

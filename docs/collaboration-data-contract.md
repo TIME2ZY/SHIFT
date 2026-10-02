@@ -1,34 +1,45 @@
 # Collaboration Data Contract
 
-> **状态：** ADR-007 核心契约已实现；Provider availability 仍是派生运行信息。
+> **状态：** ADR-009 平台契约与 ADR-007 软件团队契约已实现；Provider availability 仍是派生运行信息。
 >
-> **范围：** Thread Seat、Invocation Duty、协作任务、Human 事件与验收证据。
+> **范围：** 平台 Task/Plan/Node/TeamRun 与软件团队内部 Seat/Duty/证据。
 >
 > **当前实现：** 代码锚点与尚存的兼容边界见 `docs/architecture-map.md`。
 
 ## 1. 所有权
 
-ADR-009 增加委托准备、冻结、Team 与全局队列：仍由 collaboration_tasks / collaboration_task_events 持久化。
-delegationState 表达执行生命周期；taskStatus 表达原有 Agent 证据验收，两者不能互相猜测完成。
-委托合同包含 workflowId、goal、deliverables、acceptanceCriteria、subtasks（稳定 id、title、description）。
-提交事务检查 expectedRevision，冻结合同及 hash、保存 Duty→Seat Team、分配全局 FIFO 序号并写事件。
-发布后禁止 goal/合同/Team 被普通 save 或 task_goal 修改；技术方案及证据仍由既有 Registry 写入。
-一次委托绑定一个 Thread；parentThreadId 引用关联新委托的来源。无用户项目时绑定平台生成的任务目录。
-队列仅调度委托，handoff 仍由 acceptHandoff 仲裁，二者不共用业务实体。
+ADR-009 将平台独立为 Task → 冻结 Plan → 可执行 Node → TeamRun → Artifact/Acceptance。Task UUID 不等于 Thread id，可以无 Project/Thread 创建。Thread 只绑定准备对话或一次团队尝试。
+
+| 平台对象        | SQLite 权威表                     | 唯一写入口                                  |
+| --------------- | --------------------------------- | ------------------------------------------- |
+| Task / 冻结计划 | tasks / task_plans                | task-repository.create/saveDraft/submit     |
+| 节点与尝试      | plan_nodes / team_runs            | task-repository.claimNext/bindRun/finishRun |
+| 成果与验收      | task_artifacts / task_acceptances | finishRun 同一事务                          |
+| 平台事件        | task_events                       | repository 用例内写入                       |
+
+计划包含 goal/deliverables/acceptanceCriteria/subtasks；节点包含 id/title/description/workflowId/capabilities/dependsOn/deliverables/acceptanceCriteria。验证依赖存在、无环和总体验收条件/交付物的节点覆盖。
+提交 CAS 草稿 revision，保存规范内容 hash、sourceRevision 与各节点 Team 绑定，FIFO seq 唯一。重复提交相同 sourceRevision 返回原 Plan，其他版本冲突。运行中不能修改计划；相关变更新建 parentTaskId 草稿。
+TeamRun 唯一 (planId,nodeId,attempt)，SQLite 唯一全局运行槽；Task FIFO 与依赖就绪序决定领取。准备调用共享同一个进程槽。
+依赖输入只包含完成节点的冻结成果与 Acceptance，带 contentHash。回执 hash 使用对象键排序的规范 JSON。完成事务检查匹配节点全部验收条件、非空证据、被选 Team 角色的 assessedBy、非空成果和内容版本，保存 Artifact ids 与 Acceptance；所有节点通过才完成 Task。通用平台不解释软件证据或 Git。
+取消意图属于 Task.cancelling，Run/Node 保持 running 直到已有 executor 收口，之后统一 cancelled；服务中断记录 unknownSideEffect，失败尝试的产物不能成为依赖输入。
+
+以下 Seat、Duty、collaboration_tasks 和 handoff 协议是软件 Team 内部状态，不是平台 Task。软件范围和 Team 由 TeamRun/PlanNode 的只读 join 得出 executionBinding；不复制通用合同或调度状态。旧 delegation 队列列在 v33 删除，来源与结果作为 legacySource 和离线快照保留，旧提交不自动执行。
+
+软件共享工作树的组合验收：每次尝试 baseline 固定此前已完成的软件节点 id；团队自己的冻结范围保持本节点目标，内部验收条件还包含这些节点原有条件，须在当前工作树重新核验。引用通过 PlanNode 只读投影得到，不复制合同；旧尝试的条件集合不会随之后节点完成而增长。通用平台回执仍只匹配当前节点条件，累计复查属于软件 Team 责任。
 
 runtime_server_lease 记录拥有当前 SHIFT_HOME 的服务进程身份；启动须原子领取，存活服务不可被第二个服务的恢复流程覆盖。
 process.spawn_intent / process.bound / process.exited 经既有 EventStore 写入，进程读模型只做投影。
 重启按 pid 与内核创建标识核对身份，再终止遗留进程；PID 已复用时不得误杀，无身份或无法确认停止时保留可观察阻塞。
 
-| 业务事实                | 权威源                            | 唯一写入口目标                            | 派生读模型                     |
-| ----------------------- | --------------------------------- | ----------------------------------------- | ------------------------------ |
-| Thread enabled Seats    | SQLite `thread_seats`             | Thread Seat service                       | Session / task card            |
-| Invocation DutyBinding  | SQLite invocation binding         | `durableRecorder.startInvocation` 事务    | execution timeline / task card |
-| Task goal and status    | SQLite collaboration task         | collaboration task registry/service       | collaboration read model       |
-| Approval and acceptance | SQLite collaboration task + event | collaboration task registry               | acceptance card / timeline     |
-| Handoff lifecycle       | SQLite handoffs                   | existing `finalizeA2ARoutes` + repository | handoff timeline               |
-| Provider availability   | runtime probe cache               | provider discovery service                | Seat picker                    |
-| Git evidence            | Git worktree                      | existing delivery verifier records refs   | task / acceptance card         |
+| 业务事实                  | 权威源                            | 唯一写入口目标                            | 派生读模型                     |
+| ------------------------- | --------------------------------- | ----------------------------------------- | ------------------------------ |
+| Thread enabled Seats      | SQLite `thread_seats`             | Thread Seat service                       | Session / task card            |
+| Invocation DutyBinding    | SQLite invocation binding         | `durableRecorder.startInvocation` 事务    | execution timeline / task card |
+| Software scope and status | SQLite collaboration task         | collaboration task registry/service       | collaboration read model       |
+| Approval and acceptance   | SQLite collaboration task + event | collaboration task registry               | acceptance card / timeline     |
+| Handoff lifecycle         | SQLite handoffs                   | existing `finalizeA2ARoutes` + repository | handoff timeline               |
+| Provider availability     | runtime probe cache               | provider discovery service                | Seat picker                    |
+| Git evidence              | Git worktree                      | existing delivery verifier records refs   | task / acceptance card         |
 
 表名和函数名中标记为“目标”的项目可以在实现中调整，但同一业务事实只能保留一个公开写入口。
 任何命名调整都必须同步更新 ADR、测试和架构地图。

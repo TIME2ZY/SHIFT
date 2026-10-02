@@ -135,13 +135,14 @@ function createChatRunExecutor({
         : null;
     const turnPrompt = existingUserMessage?.content || rawPrompt;
 
+    const workspaceOwner = body.internalWorkspaceId || sessionId;
     let sessionWorktree = session.worktree;
     if (useWorktree) {
       if (!sessionWorktree) {
         try {
           sessionWorktree = worktreeManager.ensureWorktree({
             baseDir: sessionProjectDir,
-            sessionId,
+            sessionId: workspaceOwner,
           });
           session = setSessionWorktree(sessionId, sessionWorktree);
         } catch (error) {
@@ -150,13 +151,13 @@ function createChatRunExecutor({
       } else {
         const health =
           typeof worktreeManager.checkHealth === "function"
-            ? worktreeManager.checkHealth(sessionId)
+            ? worktreeManager.checkHealth(workspaceOwner)
             : { ok: true };
         if (!health.ok) {
           try {
             sessionWorktree = worktreeManager.ensureWorktree({
               baseDir: sessionProjectDir,
-              sessionId,
+              sessionId: workspaceOwner,
             });
             session = setSessionWorktree(sessionId, sessionWorktree);
           } catch (rebuildError) {
@@ -165,7 +166,7 @@ function createChatRunExecutor({
         }
       }
     } else if (sessionWorktree && typeof worktreeManager.checkHealth === "function") {
-      const health = worktreeManager.checkHealth(sessionId);
+      const health = worktreeManager.checkHealth(workspaceOwner);
       if (!health.ok)
         return fail(409, {
           error: "Bound worktree is unhealthy; project execution was not started.",
@@ -230,7 +231,7 @@ function createChatRunExecutor({
       }
       if (targetGitRoot && targetGitRoot === selfGitRoot) {
         try {
-          sessionWorktree = await worktreeManager.startPreview(sessionId);
+          sessionWorktree = await worktreeManager.startPreview(workspaceOwner);
           session = setSessionWorktree(sessionId, sessionWorktree);
         } catch (error) {
           console.warn("Preview server failed to start:", error.message);
@@ -423,6 +424,7 @@ function createChatRunExecutor({
     const skipPersist = new Set(["agent-event", "message"]);
     const threadCtx = {
       preparationOnly: body.internalPurpose === "prepare",
+      teamInstructions: body.internalPurpose === "team" ? body.internalTaskPrompt : null,
       availability,
       sessionId,
       traceId,
@@ -470,6 +472,7 @@ function createChatRunExecutor({
 
     const workCtx = {
       preparationOnly: body.internalPurpose === "prepare",
+      teamInstructions: body.internalPurpose === "team" ? body.internalTaskPrompt : null,
       availability,
       res: detachedRes,
       sendSse: emitUi,
@@ -682,8 +685,8 @@ function createChatRunExecutor({
       }
     })();
 
-    runtime?.attachPromise(sessionId, promise);
-    promise.catch((error) => {
+    const completion = runtime?.attachPromise(sessionId, promise) || promise;
+    completion.catch((error) => {
       log.error?.(`[chat-runtime] background run failed: ${error.message}`);
       publishBackgroundFailure(error);
     });
@@ -692,7 +695,7 @@ function createChatRunExecutor({
       ok: true,
       status: 202,
       json: { traceId, sessionId },
-      promise,
+      promise: completion,
     };
   }
 

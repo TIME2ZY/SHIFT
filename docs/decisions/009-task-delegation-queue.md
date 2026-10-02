@@ -1,82 +1,54 @@
 ---
-title: "ADR-009: Task Delegation and Durable Execution Queue"
+title: "ADR-009: Task Platform and Built-in Team Runtime"
 status: accepted
 decision_id: ADR-009
 created: 2026-10-02
-scope: delegation preparation, frozen contracts, team binding, queue and delivery
-related:
-  - ./001-storage-truth-boundary.md
-  - ./002-multi-agent-reliability-contracts.md
-  - ./007-seat-duty-evidence-workflow.md
+scope: task, frozen plan, executable nodes, team runs and acceptance
 ---
 
-# ADR-009：任务委托与持久执行队列
+# ADR-009：任务平台与内置团队运行时
 
-## 产品与边界
+## 产品决定
 
-SHIFT 面向已经配置本机 Agent CLI 的个人用户。用户委托目标，平台组织执行。
-第一阶段实现通用委托骨架，并接入内置 software_delivery 工作流；材料分析、桌面封装和发布留在后续阶段。
+SHIFT 是面向已配置本机 Agent CLI 的个人用户的任务委托平台。用户描述目标，主 Agent 整理可编辑计划，平台选择能力与团队。提交冻结范围；执行期间只能停止，需求变化创建关联草稿。第一阶段建立框架并接入软件交付团队；材料、Windows 桌面和发布分别在后续阶段实现。
 
-准备期由主 Agent 整理目标、交付物、验收条件及可见分任务，用户可编辑草稿。
-提交是建立初始委托合同，不是运行中的人工方案批准。
-提交后冻结合同，平台独立选择、记录 Team；内部 discuss/plan/implement/review/fix/deliver/accept 继续依 ADR-007 推进。
-用户不能修改执行中目标、增加审批闸门或自行写入完成；需求变化建立关联新委托。
+本决定替代此前“一个 Thread 就是一个委托、在 collaboration_tasks 上附加队列”的实现，也覆盖 ADR-007 中将软件角色链作为平台通用模型的部分。ADR-007 的软件证据协议保留在 software_delivery 团队内部。
 
-## 权威对象与状态
+## 独立对象与权威入口
 
-每个委托对应一个内部 Thread。历史和新委托以 parentThreadId 关联，不复用已提交 Thread 的目标。
-项目是可选上下文：没有选择项目时，平台建立独立任务目录并绑定内部 Project，Thread 的目录绑定约束继续有效。
-软件任务默认在任务专属 Git worktree 执行，用户提供的源项目保持原有目录绑定。
+SQLite 是唯一在线业务真相源。task_repository 独占 Task、Plan、Node、TeamRun、Artifact、Acceptance 与规范事件的写入。Task 使用独立 UUID，可无 Project、无 Thread 存在。Thread 只承担准备对话或某次 TeamRun 的观察记录。Project 是可选输入上下文；软件团队执行时才需要 Git 工作空间。
 
-现有 collaboration_tasks / collaboration_task_events 是唯一任务写入路径。
-delegation_state 独立表达 draft | queued | running | cancelling | completed | failed | cancelled。
-原 task_status 继续表达 Agent 证据验收 active | waiting_human | accepted | rejected，
-它不是第二套执行调度状态；completed 必须依据 accepted 及真实完成证据产生。
+Task：id、parentTaskId、可选 projectKey、draft plan、revision、state、FIFO seq、preparationThreadId。状态 draft / queued / running / cancelling / completed / failed / cancelled。
+Plan：提交时生成独立 id、来源草稿 revision、不可变目标/交付物/条件、规范内容 hash。每个 Task 第一版只提交一次。
+Node：稳定的计划内 id、顺序、workflowId、所需 capabilities、dependsOn、范围、交付物和验收条件；发布时实例化独立状态 pending / running / completed / failed / cancelled。提交前验证依赖存在且无环，并验证总体验收条件被分任务覆盖。
+TeamRun：独立 UUID、task/plan/node、attempt、选择的成员与职责绑定、thread/trace 引用、started/terminal。唯一 (plan,node,attempt)，全局一个 active 槽。领取、尝试创建、节点转态与事件同事务。
+Artifact：只存通用 kind、locator、contentHash、metadata、摘要及 run 归属，文件和 Git 内容仍以工作空间为准。
+Acceptance：绑定 run 与其 artifact ids，判定及 verified / agent_reviewed 证据等级。平台仅接受 Team Runtime 返回的结构化成果，文本和 CLI exit 不能自行写 completed。所有节点验收通过才能完成 Task；平台不解释 commit/PR/CI。
 
-草稿 contract 包含 workflowId、goal、deliverables、acceptanceCriteria 和带稳定 id 的 subtasks。
-提交时，在同一 SQLite 事务中检查 expectedRevision、冻结合同及 hash、保存 Team 和 FIFO 序号、写规范事件。
-已提交合同不可由 registry.save、task_goal、旧 HTTP run 请求或模型输出覆盖。
-内部技术方案和修复可以变化，但不能扩大合同或改变可见分任务。
-同一 task 的重复提交只复用原队列记录。
+## 分配与执行
 
-## Team 与调度
+Agent catalog 把已配置 Provider、可用性探测和适配器已知能力组成候选集；unknown 明确展示，不能冒充已探测 available。Team 定义声明 workflowId、能力要求、角色与执行函数。能力匹配和成员选择由平台完成，软件 Duty 列表仅存在于软件定义。第一版只有内置 software_delivery，对未知 workflow 明确拒绝，不开放自定义插件 UI。
 
-主 Agent 提出任务和能力需求，平台负责校验并选择 enabled、可路由的本机 Seat。
-已检测 available 优先，unknown 明确记为尚未验证；不可用、未登录或禁用 Seat 不参与。
-Team 保存每个 Duty 的 Seat/Provider 绑定和选择依据；能选择不同审查 Seat 时优先分离，
-只有一个可用 Seat 时明确记录 solo_fallback。不新增 Provider 或模型服务。
+主 Agent 输出有依赖与能力要求的执行计划，不指定具体 Agent。缺少材料时正文提问，Task 维持 draft/needs_input，界面通过消息只读投影展示反馈；没有计划围栏不当作执行失败。发布校验全部节点与可用成员并冻结选择。全局串行：先取最早 Task，再按依赖就绪和计划顺序领取节点，完成该 Task 后处理下一 Task。准备调用共享全局进程槽，草稿编辑和发布不占槽。
 
-全局 FIFO 一次执行一个委托。领取通过 SQLite immediate transaction 及唯一 active slot 仲裁，
-内存仅唤醒消费者。内部 handoff worklist 继续承担一次委托内的因果调度，不能用作全局队列。
-发布与执行只走该调度入口；已有 HTTP/SSE 和 durable invocation 起止复用，不建立另一套 CLI executor。
-旧发送消息直接执行路径收窄为准备期主 Agent 分析，发布后拒绝新消息改变任务。
+Scheduler 只处理通用运行结果、重试次数、墙钟期限、取消和恢复。软件 Team Runtime 内部调用现有单一 chatRunExecutor，复用 durable invocation、进程身份、SSE 和 handoff，并将软件证据转成通用成果。每次尝试有独立观察 Thread。同一 Task 的软件节点共用以 Task id 管理的工作树，串行积累修改；依赖输入为每个声明前置节点的 runId、冻结 Artifact（id/kind/locator/contentHash/metadata）与 Acceptance 回执。软件产物定位于工作树加不可变 commitSha，后续节点可据此复核原版本。跨 Task 隔离。
 
-## 失败、停止与恢复
+软件团队沿用方案、实现计划、review、delivery、accept 证据门禁；平台只能看通用 Acceptance。独立审查 Provider 优先，只有一个可用 Provider 时记录 solo_fallback。本阶段软件交付仍要求既有 Git/PR/CI 证据；没有远端时明确失败并保留代码，不伪造交付。
 
-有界修复只针对冻结范围内的证据缺口，平台默认重试次数和墙钟期限。
-缺材料、范围变化、达到期限或重试耗尽时明确失败，保留成果，支持关联新草稿。
-取消 queued 任务直接持久化 cancelled；运行任务先写 cancelling，停止进程并等待已有终态闭环后写 cancelled。
-准备期分析同样用既有 durable started/terminal 记录，但不能触发 handoff 或进入实际实现。
-准备期仅选择目前能强制只读的 Codex 或 Claude Code：Codex 使用 read-only 沙箱，Claude Code
-限制 Read/Glob/Grep 并禁用外部 MCP 配置；其他 Provider 可参与提交后的执行 Team。
-旧 /runs 请求不再指定执行席位，响应明确返回平台选择的 selectedAgent 和 purpose=prepare。
+软件共享工作树的组合验收：每次尝试 baseline 固定此前已完成的软件节点 id；团队自己的冻结范围保持本节点目标，内部验收条件还包含这些节点原有条件，须在当前工作树重新核验。引用通过 PlanNode 只读投影得到，不复制合同；旧尝试的条件集合不会随之后节点完成而增长。通用平台回执仍只匹配当前节点条件，累计复查属于软件 Team 责任。
 
-第一阶段的软件交付沿用现有 commit/PR/CI 验收证据。独立任务目录没有远端时仍能保留代码成果，
-但不伪造 PR/CI 或将其标记为已交付；本阶段不引入另一套本地完成口径。
+## 并发、失败与恢复
 
-启动先收口旧 invocation/trace/handoff，再将遗留 running/cancelling 委托记为中断失败或取消；
-不伪造成功、不自动重复未知外部副作用。queued 保留 FIFO 顺序。
-进程收口失败或身份不明必须可观察，不能把仍可能写文件的执行当作已安全停止。
+草稿更新/准备结果采用 expectedRevision；准备开始绑定 Thread 后采样 revision，结果必须 CAS 到同一 revision，用户期间的编辑优先。发布幂等键为 Task id 与来源草稿 revision，重复提交相同 revision 复用同一冻结 Plan，其他版本拒绝。回执使用按对象键排序的规范 JSON hash，键顺序变化可重放，内容或产物顺序变化显式冲突。取消意图唯一持久化在 Task.cancelling；Run/Node 仍为 running，表示正在等待进程收口。停止先 SIGTERM，再由既有 child-stream 的有界 grace 升级 SIGKILL，等待 close 与 durable 终态后收口 run/node/task，才释放槽。无法确认退出或退出持久化失败时保留可观察 recoveryBlocked，不因超时释放槽。取消待执行任务不启动子进程。
 
-## 验证与路径收口
+软件尝试记录 baseline（headSha、porcelain、目录、continue_workspace）。重试继续检查已有脏工作树，不自动 reset 用户或前次成果；提示明确避免重复外部副作用。失败尝试产物保留但无 Acceptance，不能作为后继输入；中断运行标记 unknownSideEffect，绝不自动重试。任何节点取消导致 Task 取消，未启动节点同时取消。默认有限重试只处理 Team 标识的可修复验收缺口；启动或外部执行失败不盲重试。进程中断将 active run、节点、Task 明确记失败，不重复未知副作用；未领取任务保持 FIFO。服务启动必须先核验遗留进程，未知身份阻止调度。
 
-覆盖重复提交、过期草稿、合同冻结、不可用成员、单全局执行槽、FIFO、取消、
-提交与启动之间的中断、已开始运行的中断、无证据不能完成以及重启后排队保留。
-保留 invocation/handoff/SSE 可靠性回归；替换保护旧直接执行接口的测试。
-架构地图在实现完成后同步唯一写入口与调用路径。
+## 迁移和路径删除
 
-## 回滚
+v33 向前迁移独立任务表，旧委托只迁移为可查看的草稿或终态，不自动重跑旧提交。旧 display-only subtasks 的提交任务保留 legacySource（来源 Thread id 与历史结果）并标注迁移原因，原行快照进入离线 archive。来源只用于回看，不参与任务身份、队列或领取。移除 collaborationTasks.delegations、旧 orchestrator/team/progress 和 Session /runs 准备写入口。软件协作表只保存团队内部证据，通过 TeamRun/Node 的只读 join 获取冻结范围与选择，不复制平台合同或状态。清除 v32 队列字段与索引，保留运行服务 lease。
 
-数据库迁移是向前兼容的附加字段，回滚运行代码不删除任务或成果；
-旧代码不应处理已有 queued/running 任务，回滚前须停止并收口运行。
-通过数据库备份恢复整体版本，不双写或依靠 JSON 仲裁。
+## 验证
+
+验证 Task 可无 Thread/Project 创建、DAG 与条件覆盖、冻结/乐观锁/发布幂等、每节点独立 attempt、依赖成果传递、不同团队的通用完成、FIFO、有限重试、取消收口、故障恢复及软件真实证据桥接。替换旧包装语义测试，保留底层 invocation/handoff/SSE 回归。
+
+回滚前停止服务并备份数据库；v33 删除旧队列列，不能仅回退运行代码。通过数据库备份与代码版本一起回滚，保留工作树成果。

@@ -20,7 +20,7 @@ export function useTaskQuery(id: string | null) {
       apiRequest<{
         task: DelegationTask;
         busy: boolean;
-        preparingThreadId: string | null;
+        preparingTaskId: string | null;
         recoveryBlocked: boolean;
       }>("/api/tasks/" + id),
     refetchInterval: 1500,
@@ -32,7 +32,7 @@ export function useTaskActions() {
   return useMutation({
     mutationFn: async (
       input:
-        | { action: "create"; projectKey?: string; parentThreadId?: string }
+        | { action: "create"; projectKey?: string; parentTaskId?: string }
         | { action: "prepare"; id: string; prompt: string }
         | { action: "save"; id: string; contract: DelegationContract; expectedRevision: number }
         | { action: "submit"; id: string; expectedRevision: number }

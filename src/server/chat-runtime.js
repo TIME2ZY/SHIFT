@@ -124,12 +124,13 @@ function createChatRuntime({ eventStore } = {}) {
   function attachPromise(sessionId, promise) {
     const record = runs.get(sessionId);
     if (!record) return promise;
-    record.promise = track(promise).finally(() => {
+    record.promise = Promise.resolve(promise).finally(() => {
       const current = runs.get(sessionId);
       if (current && current.controller === record.controller) {
         runs.delete(sessionId);
       }
     });
+    track(record.promise);
     return record.promise;
   }
 
