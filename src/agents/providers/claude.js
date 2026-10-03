@@ -409,6 +409,7 @@ const claudeProvider = {
     // Headless with no human to answer prompts; matches the other CLIs'
     // full-access posture (codex -a never, grok --always-approve).
     args.push("--dangerously-skip-permissions");
+    if (config.preparationOnly) args.push("--tools", "Read,Glob,Grep");
     if (config.model) args.push("--model", config.model);
     if (config.reasoningEffort) {
       const effort = String(config.reasoningEffort).trim().toLowerCase();
@@ -431,7 +432,8 @@ const claudeProvider = {
     // The shift_context stdio server gives the seat in-turn memory write,
     // recall search, and platform skills, matching every other adapter.
     // --mcp-config accepts an inline JSON string, so no temp file is needed.
-    args.push("--mcp-config", createClaudeShiftContextArg());
+    if (!config.preparationOnly) args.push("--mcp-config", createClaudeShiftContextArg());
+    else args.push("--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}');
     if (config.resumeSessionId) args.push("--resume", config.resumeSessionId);
     // --mcp-config is variadic (<configs...>) and would swallow the prompt as
     // another config path; -- ends option parsing and keeps the prompt positional.

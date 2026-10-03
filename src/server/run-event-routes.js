@@ -1,6 +1,5 @@
 "use strict";
 
-const { ENV } = require("../shared/brand");
 const { assertValidOpaqueId } = require("../shared/id-policy");
 const { toSseFrame } = require("./chat-runtime");
 const { setImmediate: yieldToIo } = require("node:timers/promises");
@@ -64,7 +63,7 @@ async function replayEventsAfter(storage, sessionId, after, res) {
   return cursor;
 }
 
-function createRunEventRoutes({ runtime, storage, getSession, sendJson, readJsonBody }) {
+function createRunEventRoutes({ runtime, storage, getSession, sendJson }) {
   if (!runtime) throw new TypeError("runtime is required");
 
   return async function handleRunEventRoutes(req, res, url) {
@@ -77,21 +76,14 @@ function createRunEventRoutes({ runtime, storage, getSession, sendJson, readJson
         sendJson(res, 400, { error: error.message });
         return true;
       }
-      let body;
-      try {
-        body = await readJsonBody(req);
-      } catch (error) {
-        sendJson(res, 400, { error: error.message });
+      if (!getSession(sessionId)) {
+        sendJson(res, 404, { error: "Session not found." });
         return true;
       }
-      const protocol = req.headers["x-forwarded-proto"] || "http";
-      const host = req.headers.host || "127.0.0.1";
-      const result = await runtime.startRun({
-        body: { ...body, sessionId },
-        apiUrl: process.env[ENV.API_URL] || `${protocol}://${host}`,
-        host,
+      sendJson(res, 409, {
+        error: "请通过 Task 的 prepare 或 submit 入口启动。",
+        code: "TASK_ENTRY_REQUIRED",
       });
-      sendJson(res, result.status, result.json);
       return true;
     }
 

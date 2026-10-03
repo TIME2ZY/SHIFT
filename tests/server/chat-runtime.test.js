@@ -27,6 +27,19 @@ test("attachPromise does not emit unhandledRejection after the original promise 
   }
 });
 
+test("execution completion releases ownership before its caller resumes and preserves failures", async () => {
+  const runtime = createChatRuntime();
+  runtime.claim("s1", { traceId: "t1", controller: new AbortController() });
+  await runtime.attachPromise("s1", Promise.resolve());
+  assert.equal(runtime.runs.size, 0, "the scheduler can claim the next run immediately");
+
+  runtime.claim("s1", { traceId: "t2", controller: new AbortController() });
+  await assert.rejects(runtime.attachPromise("s1", Promise.reject(new Error("terminal failed"))), {
+    message: "terminal failed",
+  });
+  assert.equal(runtime.runs.size, 0);
+});
+
 test("closeSession ends only that session's subscribers", () => {
   const runtime = createChatRuntime();
   let closed = 0;

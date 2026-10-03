@@ -89,6 +89,16 @@ function createTraceRunRepository(db) {
       return mapTrace(findById.get(id));
     },
 
+    findByClientTurnId(threadId, clientTurnId) {
+      return mapTrace(
+        db
+          .prepare(
+            "SELECT * FROM trace_runs WHERE thread_id = ? AND client_turn_id = ? ORDER BY request_attempt LIMIT 1"
+          )
+          .get(threadId, clientTurnId)
+      );
+    },
+
     listActive() {
       return listActive.all().map(mapTrace);
     },

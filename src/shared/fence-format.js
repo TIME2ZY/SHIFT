@@ -87,7 +87,14 @@ const TASK_GOAL = defineFence("task_goal", {
   required: ["goal_hash", "text", "source_message_id"],
 });
 
+const DELEGATION_PLAN = defineFence("delegation_plan", {
+  scalars: ["workflowId", "goal"],
+  lists: ["deliverables", "acceptanceCriteria", "subtasks"],
+  required: ["workflowId", "goal", "deliverables", "acceptanceCriteria", "subtasks"],
+});
+
 const FENCES = Object.freeze([
+  DELEGATION_PLAN,
   HANDOFF,
   SOLUTION_BASELINE,
   IMPLEMENTATION_PLAN,
@@ -119,6 +126,7 @@ function fenceAllowedKeys(fence) {
 }
 
 module.exports = {
+  DELEGATION_PLAN,
   HANDOFF,
   SOLUTION_BASELINE,
   IMPLEMENTATION_PLAN,

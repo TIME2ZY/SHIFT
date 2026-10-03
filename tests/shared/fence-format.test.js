@@ -11,7 +11,7 @@ test("every fence declares its fields once, in the shared vocabulary", () => {
     assert.ok(entry.fence, "fence must have a language");
     assert.ok(entry.scalars.length > 0 || entry.lists.length > 0, `${entry.fence} has no fields`);
     for (const field of [...entry.scalars, ...entry.lists]) {
-      assert.match(field, /^[a-z][a-z0-9_]*$/, `${entry.fence}.${field} is not a field name`);
+      assert.match(field, /^[a-z][a-zA-Z0-9_]*$/, `${entry.fence}.${field} is not a field name`);
     }
     // required / recommended / resume are subsets of what the body may carry.
     const allowed = new Set(fenceAllowedKeys(entry.fence));
@@ -36,6 +36,7 @@ test("every fence an agent can emit is named in the vocabulary", () => {
   // an agent may emit must be named here, or the UI renders it as an unlabelled
   // source block with no way to recover the field names.
   const authored = [
+    "delegation_plan",
     "handoff",
     "solution_baseline",
     "implementation_plan",

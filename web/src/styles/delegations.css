@@ -1,0 +1,134 @@
+.delegation-console {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  color: var(--text-primary);
+}
+.delegation-console header {
+  margin-bottom: 18px;
+}
+.delegation-console label {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.delegation-console textarea,
+.delegation-console input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+.delegation-console textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.delegation-console button,
+.delegation-create {
+  padding: 9px 14px;
+  margin: 6px 8px 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+.delegation-console button:disabled,
+.delegation-create:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.delegation-create {
+  flex: 0 0 auto;
+  margin: 0 12px 8px;
+  min-height: 40px;
+}
+.react-agent-select:not([role="radio"]) {
+  cursor: default;
+}
+.delegation-console fieldset {
+  border: 1px solid var(--border);
+  padding: 16px;
+  margin-top: 20px;
+  border-radius: 10px;
+}
+.delegation-console li {
+  padding: 8px 0;
+}
+.delegation-console p {
+  line-height: 1.65;
+}
+.delegation-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.delegation-console code {
+  overflow-wrap: anywhere;
+}
+.delegation-context {
+  padding: 0 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.delegation-task-list {
+  flex: 2 1 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 6px;
+  padding: 0 12px;
+}
+.delegation-task-list button {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.delegation-task-list button[data-active] {
+  border-color: var(--border);
+  background: var(--surface);
+}
+.delegation-task-list strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.delegation-task-list small {
+  opacity: 0.7;
+}
+.delegation-details {
+  flex-shrink: 0;
+  max-height: 50vh;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+.delegation-details summary {
+  padding: 12px 24px;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .delegation-console {
+    padding: 16px;
+  }
+}
+.react-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+.react-sidebar > :not(.delegation-task-list):not(.react-session-list) {
+  flex-shrink: 0;
+}
+.react-sidebar .react-session-list {
+  flex: 1 1 0;
+}

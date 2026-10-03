@@ -1,5 +1,7 @@
 "use strict";
 
+const { failure } = require("./task-repository");
+
 const {
   COLLAB_ACTOR_KINDS,
   COLLAB_TASK_STATES,
@@ -66,19 +68,68 @@ function createCollaborationTaskRepository(db) {
   const deleteEvents = db.prepare("DELETE FROM collaboration_task_events WHERE thread_id = ?");
   const deleteTask = db.prepare("DELETE FROM collaboration_tasks WHERE thread_id = ?");
 
+  // Read projection of a software TeamRun's frozen node. Never a second task authority.
+  function binding(threadId) {
+    const row = db
+      .prepare(
+        `SELECT r.id,r.plan_id,r.team_json,r.baseline_json,n.spec_json FROM team_runs r
+      JOIN plan_nodes n ON n.plan_id=r.plan_id AND n.node_id=r.node_id WHERE r.thread_id=?`
+      )
+      .get(threadId);
+    if (!row) return null;
+    const node = JSON.parse(row.spec_json);
+    const completedIds = JSON.parse(row.baseline_json || "{}").completedNodeIds || [];
+    const previous = db
+      .prepare("SELECT node_id,spec_json FROM plan_nodes WHERE plan_id=?")
+      .all(row.plan_id)
+      .filter((entry) => completedIds.includes(entry.node_id))
+      .map((entry) => JSON.parse(entry.spec_json));
+    return {
+      runId: row.id,
+      team: JSON.parse(row.team_json),
+      contract: {
+        goal: node.description,
+        deliverables: node.deliverables,
+        acceptanceCriteria: [
+          ...new Set([
+            ...node.acceptanceCriteria,
+            ...previous.flatMap((entry) => entry.acceptanceCriteria),
+          ]),
+        ],
+      },
+    };
+  }
+  function read(row, events) {
+    return row ? { ...mapTask(row, events), executionBinding: binding(row.thread_id) } : null;
+  }
   const saveTransaction = db.transaction((task, event) => {
     const threadId = requiredString(task?.threadId, "thread id");
-    const record = normalizeTask(task, find.get(threadId));
+    const current = find.get(threadId);
+    if (current && task.version !== undefined && task.version !== current.version) {
+      throw failure("TASK_REVISION_CONFLICT", "任务已更新，请刷新后重试。");
+    }
+    const record = normalizeTask(task, current);
+    if (
+      binding(threadId) &&
+      current?.goal_hash &&
+      (record.goal !== current.goal ||
+        record.goalHash !== current.goal_hash ||
+        record.goalNormalized !== current.goal_normalized ||
+        parseObject(record.artifactsJson).userGoal?.hash !== current.goal_hash ||
+        parseObject(record.artifactsJson).userGoal?.text !== current.goal_normalized)
+    ) {
+      throw failure("TASK_FROZEN", "已提交目标不可修改，请建立关联新任务。");
+    }
     upsert.run(record);
     if (event) insertEvent.run(normalizeEvent(record.threadId, event));
-    return mapTask(find.get(record.threadId), listEvents.all(record.threadId));
+    return read(find.get(record.threadId), listEvents.all(record.threadId));
   });
 
-  return {
+  const repository = {
     get(threadId) {
       const id = requiredString(threadId, "thread id");
       const row = find.get(id);
-      return row ? mapTask(row, listEvents.all(id)) : null;
+      return read(row, listEvents.all(id));
     },
 
     save(task, event = null) {
@@ -97,6 +148,7 @@ function createCollaborationTaskRepository(db) {
       })();
     },
   };
+  return repository;
 }
 
 function normalizeTask(input = {}, current = null) {

@@ -23,6 +23,14 @@ const callbackRoutes = require("./callback-routes");
 const chatRoutes = require("./chat-routes");
 const { createChatRuntime } = require("./chat-runtime");
 const { createRunEventRoutes } = require("./run-event-routes");
+const { createTaskRoutes } = require("./task-routes");
+const { createTaskPlatform } = require("../tasks/platform");
+const { createTaskScheduler } = require("../tasks/scheduler");
+const { createAgentCatalog } = require("../agents/agent-catalog");
+const { createTeamCatalog } = require("../teams/catalog");
+const { createSoftwareDeliveryTeam } = require("../teams/software-delivery");
+const { createTaskWorkspace } = require("../worktree/task-workspace");
+const { processIdentity, reconcileOwnedProcesses } = require("../agents/process-ownership");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
 
 const { initializeCatalogSeats } = require("../agents/duty-routing");
@@ -120,6 +128,11 @@ function createServer(options = {}) {
     {
       ...options,
       memoryDbFile: options.memoryDbFile || appPaths.databaseFile,
+      runtimeIdentity: processIdentity(process.pid),
+      isRuntimeOwnerAlive: (identity) => {
+        const current = processIdentity(identity.pid);
+        return current?.token === identity.token && current?.platform === identity.platform;
+      },
     },
     logger
   );
@@ -142,7 +155,10 @@ function createServer(options = {}) {
   });
   const collabTaskRegistry = createCollabTaskRegistry({
     repository: storageContext.storage?.collaborationTasks || null,
-    readWorkspace: (threadId) => worktreeManager.getStatus(threadId),
+    readWorkspace: (threadId) =>
+      worktreeManager.getStatus(
+        storageContext.storage.tasks.findRunByThread(threadId)?.taskId || threadId
+      ),
   });
   const activeInvocations = new Map();
   const chatRuntime = createChatRuntime({ eventStore });
@@ -330,6 +346,57 @@ function createServer(options = {}) {
     logger,
   });
   chatRuntime.attachExecutor(chatRunExecutor);
+  const startTaskInvocation = (input) =>
+    chatRuntime.startRun({
+      ...input,
+      apiUrl: `http://127.0.0.1:${server.address()?.port || 8787}`,
+    });
+  const agentCatalog = createAgentCatalog({ agents: AGENTS, availability });
+  const teamCatalog = createTeamCatalog({
+    agents: agentCatalog,
+    definitions: [
+      createSoftwareDeliveryTeam({
+        startRun: startTaskInvocation,
+        getSession: getSessionDurable,
+        createSession: createSessionDurable,
+        projects: storageContext.storage.projects,
+        createWorkspace: (id) => createTaskWorkspace(appPaths.shiftHome, id),
+        traces: storageContext.storage.traces,
+        registry: collabTaskRegistry,
+        runtime: chatRuntime,
+        workspace: worktreeManager,
+        setSessionWorktree: updateWorktreeDurable,
+      }),
+    ],
+  });
+  const taskScheduler = createTaskScheduler({
+    repository: storageContext.storage.tasks,
+    teams: teamCatalog,
+    canDispatch: () =>
+      chatRuntime.runs.size === 0 &&
+      storageContext.storage.invocations.listActive().length === 0 &&
+      storageContext.storage.processOwnership.listOpen().length === 0,
+    logger,
+  });
+  const taskPlatform = createTaskPlatform({
+    repository: storageContext.storage.tasks,
+    scheduler: taskScheduler,
+    teams: teamCatalog,
+    catalog: agentCatalog,
+    startRun: startTaskInvocation,
+    runtime: chatRuntime,
+    getSession: getSessionDurable,
+    createSession: createSessionDurable,
+    projects: storageContext.storage.projects,
+    createWorkspace: (id) => createTaskWorkspace(appPaths.shiftHome, id),
+    traces: storageContext.storage.traces,
+    logger,
+  });
+  const handleTaskRoutes = createTaskRoutes({
+    platform: taskPlatform,
+    sendJson,
+    readJsonBody,
+  });
   const handleRunEventRoutes = createRunEventRoutes({
     runtime: chatRuntime,
     storage: storageContext.storage,
@@ -385,6 +452,8 @@ function createServer(options = {}) {
       return;
     }
 
+    if (await handleTaskRoutes(req, res, url)) return;
+
     if (await handleMemoryRoutes(req, res, url)) {
       return;
     }
@@ -415,7 +484,27 @@ function createServer(options = {}) {
   const server = http.createServer(
     createSafeRequestListener(handleRequest, { sendJson, sendSse, logger })
   );
-  server.once("listening", () => availability.start());
+  server.once("listening", () => {
+    availability.start();
+    void Promise.resolve()
+      .then(() =>
+        reconcileOwnedProcesses(storageContext.storage.processOwnership.listOpen(), {
+          recordExit: (entry, reason) => {
+            const recorded = eventStore.append({
+              ...entry,
+              kind: "process.exited",
+              payload: { reason, startupReconciled: true },
+            });
+            if (!recorded?.ok) throw new Error("Failed to persist process recovery.");
+          },
+        })
+      )
+      .then((blockers) => {
+        if (blockers.length) logger.error?.("[process-recovery] " + JSON.stringify(blockers));
+        else taskPlatform.allowRecoveredQueue();
+      })
+      .catch((error) => logger.error?.("[process-recovery] " + error.message));
+  });
   let storageClosePromise = null;
   function closeStorageContext() {
     availability.close();
@@ -423,6 +512,7 @@ function createServer(options = {}) {
     _previewManagers.delete(worktreeManager);
     storageClosePromise = (async () => {
       try {
+        await taskPlatform.close();
         await chatRuntime.shutdown();
         await storageContext.close();
       } catch (error) {

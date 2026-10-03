@@ -87,6 +87,7 @@ async function withSealServer(spawnRunner, fn) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     await fn({ baseUrl, storage, tmpDir, projectKey });
   } finally {
@@ -191,7 +192,7 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
   );
 });
 
-test("A2A fresh sessions restore scoped seals and expose prepared-input evidence", async () => {
+test("draft preparation suppresses Agent-authored handoffs and keeps durable output", async () => {
   const prompts = [];
   await withSealServer(
     (_cmd, args) => {
@@ -213,23 +214,15 @@ test("A2A fresh sessions restore scoped seals and expose prepared-input evidence
         agent: "codex",
         prompt: "Original requirement: do not discard user changes",
       }).then((r) => r.text());
-      assert.equal(prompts.length, 3);
-      assert.match(prompts[2], /Original requirement: do not discard user changes/);
-      assert.match(prompts[2], /Window Seal Resume/);
+      assert.equal(prompts.length, 1);
       const invocations = storage.invocations.listForThread(session.id);
-      assert.ok(invocations.every((i) => i.state === "completed"));
-      const restoration = storage.invocations
-        .listRecoveryEvents(session.id)
-        .find((e) => e.kind === "context-restored" && e.invocationId === invocations.at(-1).id);
-      assert.ok(restoration);
-      const sources = restoration.payload.seals.map((s) =>
-        storage.invocations.get(s.sourceInvocationId)
+      assert.equal(invocations.length, 1);
+      assert.equal(invocations[0].state, "completed");
+      assert.equal(storage.handoffs.listForThread(session.id).length, 0);
+      assert.equal(
+        storage.tasks.list().find((task) => task.preparationThreadId === session.id).state,
+        "draft"
       );
-      assert.ok(sources.every((source) => source.agentId === "codex"));
-      const { collaboration } = await apiFetch(
-        `${baseUrl}/api/sessions/${session.id}/collaboration`
-      ).then((r) => r.json());
-      assert.ok(collaboration.recovery.some((seal) => seal.restorations.length > 0));
     }
   );
 });
@@ -300,6 +293,7 @@ test("tiny capacity: spawn once and never leave only empty assistant", async () 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       body: JSON.stringify({ projectKey }),

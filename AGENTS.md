@@ -6,33 +6,35 @@
 
 ## 1. 项目定位
 
-SHIFT 是本地多 Agent 协作控制台：不提供模型，只编排本机已安装的 Agent CLI/ACP；用 SQLite 持久化会话与协作状态；在浏览器展示执行过程。
+SHIFT 是本地任务委托平台：编排本机已安装 Agent CLI/ACP，平台理解目标、发布冻结计划、按能力选择团队并调度执行。SQLite 持久化 Task、Plan、Node、TeamRun、Artifact、Acceptance 和会话；第一阶段用浏览器展示，Windows 桌面在后续阶段实现。
 
 项目优先保证主链路可靠，不以抽象层数量、文件数量、diff 行数或测试数量衡量质量。
 
 ### 必须守住的主链路
 
 ```text
-1. 创建 thread，并绑定 project_dir
-2. 用户发送消息，系统选择或解析 Agent
-3. 启动 invocation，并明确记录 started
-4. 通过 SSE 输出 text / tool / progress
-5. invocation 进入 completed | failed | aborted 之一，禁止无故长期 active
-6. 消息、invocation 和规范事件写入 SQLite
-7. 刷新或重启后可以恢复会话
-8. 可选的 @Agent handoff 只消费一次，并产生可追踪的目标 invocation；策略通过后直接入队
-9. 任务完成由 accept Duty 的证据与平台核验写入，不要求 Human 批准
+1. 创建独立 Task（Project、准备 Thread 均可为空）
+2. 主 Agent 理解目标并生成可编辑的节点计划
+3. 提交冻结 Plan、依赖、范围与能力要求，平台选择 Team 并持久化 FIFO
+4. 调度器事务领取就绪 Node 并创建唯一 TeamRun attempt
+5. Team Runtime 调用既有单一 invocation executor，started 在执行前持久化
+6. 通过 HTTP/SSE 观察 text / tool / progress，Thread 是观察上下文
+7. invocation、TeamRun、Node、Task 显式收口，禁止无解释长期 active
+8. 每节点产物和验收回执事务写入 SQLite，所有节点通过才能完成 Task
+9. 重启核验旧进程并收口中断运行，已排队任务保持顺序
 ```
 
-任何改动都应说明它如何影响这条主链路。不得为新功能旁路出另一套启动、流式、终态或持久化流程。
+平台调度不依赖软件 Duty 或 Git/PR/CI。现有软件协作链是 software_delivery Team 内部实现；它复用 durable invocation、handoff 和证据门禁。不得旁路出第二套进程、流式或终态持久化路径。
+
+用户提交建立初始委托范围，之后不修改运行目标。变更创建关联草稿；提交不等于团队内部阶段或成果的人审批。
 
 ### Agent 闭环，禁止人审批门禁
 
-SHIFT 是 Agent 编排平台。用户提出最初目标、选择席位、停止运行；之后主链路由 Seat、Duty、结构化合同和证据门禁推进。
+SHIFT 是 Agent 编排平台。用户提出目标、编辑初始计划、提交或停止任务；平台选择团队，之后由 Team Runtime、结构化合同和证据推进。
 
 - 不得把 Human 确认、批准或验收做成启动、交接、阶段推进或完成的必经闸门。
 - handoff 在策略通过后必须直接进入既有 `acceptHandoff` / enqueue 路径，不得插入预览弹窗、确认 API 或请求内等待。
-- 方案批准由 `discuss` / `accept` Duty 的 implement 交接完成；最终完成由 `accept` Duty 的 `final_acceptance` 加上平台证据核验写入。
+- 软件团队内部方案批准由 `discuss` / `accept` Duty 的 implement 交接完成；该 Team 返回经 `final_acceptance` 和 Git/PR/CI 核验的通用成果回执。其他 Team 使用自己的验收协议。
 - 禁止新增 Human-only 完成写入口，禁止用 `waiting_human` 表达交接或验收必经状态。
 - UI 只展示证据和状态，不得成为审批闸门。用户消息不是审批。
 
@@ -45,7 +47,9 @@ SHIFT 是 Agent 编排平台。用户提出最初目标、选择席位、停止�
 ```text
 web/                  UI，仅通过 HTTP/SSE API 访问后端
 src/server/           传输、鉴权、路由与 composition root
-src/agents/           Provider、进程、handoff 与协作策略
+src/tasks/            主 Agent 准备、任务发布与通用持久调度
+src/teams/            内置流程定义和 Team Runtime（软件证据不进入通用 Task）
+src/agents/           Agent 能力目录、Provider、进程、handoff 与软件协作策略
 src/session/          上下文窗口、seal 与会话生命周期
 src/storage/          SQLite、repository、持久化服务与派生读模型
 src/storage/offline/  迁移、审计与 eval，禁止进入在线热路径
@@ -57,7 +61,9 @@ tests/                回归测试，负责钉住意图
 
 依赖约束：
 
-- `server` 可以组装 agents、session、storage、worktree 和 shared。
+- `server` 可以组装 tasks、teams、agents、session、storage、worktree 和 shared。
+- `tasks` 只通过显式 repository、catalog、Team Runtime 与 executor 接口执行，不解释软件 Duty 或 Git 验收。
+- `teams` 拥有流程特有证据和执行策略，通过单一 executor 启动 Agent。
 - `agents` 只能通过显式接口访问 storage；可以依赖 shared。
 - `storage` 不得依赖 server 或 web。
 - `shared` 不得依赖任何业务层。
@@ -252,7 +258,7 @@ npm run verify:pr
 - 顺手新增 Agent Provider。
 - 远程多租户 SaaS。
 - 为追求整洁而整仓重写。
-- 扩大既有协作 phase 或增加平行工作流。
+- 在软件团队内无计划地扩大既有协作 phase，或旁路通用 Task 调度器启动另一套默认编排。
 - 未经验证的 embedding、gate、metrics 管道或抽象层。
 - 以减少行数、文件数或测试数为目标的重构。
 - 在交接、方案批准、审查、交付或最终完成上新增 Human 审批、确认弹窗或必经等待。
