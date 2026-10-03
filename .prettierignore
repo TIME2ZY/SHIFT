@@ -7,4 +7,3 @@ package-lock.json
 dist/
 build/
 .cat-cafe/
-work/claude-delegate/

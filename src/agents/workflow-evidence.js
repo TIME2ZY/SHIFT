@@ -10,7 +10,6 @@ const {
 } = require("./workflow-gates");
 
 function processWorkflowEvidenceOutput(input = {}) {
-  if (input.preparationOnly) return [];
   const agent = String(input.agent || "").toLowerCase();
   const duty = String(input.duty || "").toLowerCase();
   const content = String(input.content || "");

@@ -15,13 +15,7 @@ const { createStorage } = require("../../src/storage");
 
 test("audit retirement removes pending and delivered copies while preserving execution facts", () => {
   const db = openMemoryDatabase({ file: ":memory:", migrations: MIGRATIONS.slice(0, 30) });
-  // Seed the old schema through its repositories; current online composition requires v32.
-  const threads = require("../../src/storage/thread-repository").createThreadRepository(db);
-  const windows = require("../../src/storage/window-repository").createWindowRepository(db);
-  const invocations = require("../../src/storage/invocation-repository").createInvocationRepository(
-    db
-  );
-  const storage = { threads, windows, invocations, close: () => db.close() };
+  const storage = createStorage({ db });
   try {
     storage.threads.create({ id: "audit-retirement" });
     const window = storage.windows.create({
@@ -61,7 +55,7 @@ test("audit retirement removes pending and delivered copies while preserving exe
     assert.ok(storage.invocations.get("audit-invocation"));
     assert.ok(storage.threads.get("audit-retirement"));
     assert.deepEqual(db.pragma("foreign_key_check"), []);
-    assert.equal(applyMigrations(db), MIGRATIONS.length);
+    assert.equal(applyMigrations(db), 31);
   } finally {
     storage.close();
   }

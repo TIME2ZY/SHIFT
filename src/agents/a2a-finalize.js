@@ -45,21 +45,6 @@ const {
  * }}
  */
 function finalizeA2ARoutes(input = {}) {
-  const binding = input.collabTaskRegistry?.getTask(
-    input.sessionId || input.threadId
-  )?.executionBinding;
-  if (input.a2aState?.preparationOnly) {
-    return {
-      mentions: [],
-      enqueued: [],
-      skipped: [],
-      repairs: [],
-      handoffByTarget: {},
-      handoffQualityByTarget: {},
-      mode: "preparation",
-      metrics: null,
-    };
-  }
   const text = typeof input.text === "string" ? input.text : "";
   const fromAgent = String(input.fromAgent || "unknown");
   const threadId = input.threadId;
@@ -106,7 +91,7 @@ function finalizeA2ARoutes(input = {}) {
   const mode = input.policyMode || resolveHandoffPolicyMode();
   const mentionParser =
     typeof input.parseMentions === "function" ? input.parseMentions : parseA2AMentions;
-  const mentions = mentionParser(text, binding ? null : fromAgent, routableAgents).filter(
+  const mentions = mentionParser(text, fromAgent, routableAgents).filter(
     (id) => !input.availability || input.availability.isRoutable(id)
   );
 
@@ -149,16 +134,6 @@ function finalizeA2ARoutes(input = {}) {
       ],
     });
     const duty = normalizeDuty(quality.intent || "discuss");
-    const assigned = binding?.team?.bindings?.[duty];
-    const teamSkip =
-      assigned && assigned.providerId !== targetAgent
-        ? {
-            skip: true,
-            reason: "team_binding_mismatch",
-            message: "交接目标与平台绑定的 Team 职责不匹配。",
-            state: "running",
-          }
-        : { skip: false };
     const fromDuty = input.fromDuty || null;
     const dutyBinding = buildDutyBinding({
       seat: targetSeat,
@@ -233,15 +208,13 @@ function finalizeA2ARoutes(input = {}) {
       }
     }
 
-    const taskSkip = teamSkip.skip
-      ? teamSkip
-      : evidenceSkip.skip
-        ? evidenceSkip
-        : implementationSkip.skip
-          ? implementationSkip
-          : reviewSkip.skip
-            ? reviewSkip
-            : worktreeSkip;
+    const taskSkip = evidenceSkip.skip
+      ? evidenceSkip
+      : implementationSkip.skip
+        ? implementationSkip
+        : reviewSkip.skip
+          ? reviewSkip
+          : worktreeSkip;
     const policyInput = {
       quality,
       useWorktree,

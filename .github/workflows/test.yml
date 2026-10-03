@@ -12,7 +12,7 @@ concurrency:
 jobs:
   check-and-test:
     name: Verify pull request
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       # Product and CI share the same authority path. Legacy-mode tests must
@@ -20,11 +20,7 @@ jobs:
       SHIFT_STORAGE_MODE: sqlite
 
     strategy:
-      fail-fast: false
       matrix:
-        # Node 20's bundled node-gyp recognizes VS 2022, not the VS 18
-        # installation on windows-latest. Native SQLite must build reliably.
-        os: [ubuntu-latest, windows-2022]
         node-version: [20, 22]
 
     steps:
@@ -41,12 +37,7 @@ jobs:
         run: npm ci
 
       - name: Install Chrome for browser acceptance
-        if: runner.os == 'Linux'
         run: npx playwright install --with-deps chrome
-
-      - name: Install Chrome for Windows browser acceptance
-        if: runner.os == 'Windows'
-        run: npx playwright install chrome
 
       - name: Verify pull request
         run: npm run verify:pr

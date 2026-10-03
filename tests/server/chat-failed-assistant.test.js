@@ -94,7 +94,6 @@ test("failed provider runs persist streamed assistant text", async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  require("../helpers/chat-run-client").registerTaskTestStorage(baseUrl, storage);
   try {
     const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
       method: "POST",

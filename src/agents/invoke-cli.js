@@ -174,11 +174,10 @@ function invoke(cli, prompt, options = {}) {
     },
   };
   config = applyImplementationPermissionGate(config, process.env);
-  config = require("./preparation-permissions").applyPreparationPermissions(config, process.env);
   const providerId = config.providerId;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
-  const resumeSessionId = config.preparationOnly ? "" : process.env.INVOKE_SESSION_ID || "";
+  const resumeSessionId = process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const transport = resolvedCli.transport || getProviderAdapter(providerId).protocol || "cli";
   const workspaceCwd = process.env[ENV.WORKTREE_DIR] || process.cwd();

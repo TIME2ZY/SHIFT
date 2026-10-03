@@ -98,17 +98,6 @@ const VERDICT_LABELS: Record<string, string> = {
 
 export const CONTRACT_FENCES: FenceSpec[] = [
   defineFence({
-    lang: "delegation_plan",
-    title: "委托草稿",
-    json: true,
-    scalars: { workflowId: { label: "流程" }, goal: { label: "目标", long: true } },
-    lists: {
-      deliverables: { label: "交付物" },
-      acceptanceCriteria: { label: "完成条件" },
-      subtasks: { label: "分任务" },
-    },
-  }),
-  defineFence({
     lang: "handoff",
     title: "交接",
     scalars: {

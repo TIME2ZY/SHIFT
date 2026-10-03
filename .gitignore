@@ -29,7 +29,6 @@ src/session/data/
 .reasonix/
 .playwright-cli/
 output/
-work/claude-delegate/
 
 # IDE & OS
 .vscode/

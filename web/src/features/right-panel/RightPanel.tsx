@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { SessionRun } from "../../runtime/types";
 import type { AgentSummary } from "../agents/types";
 import { useRefreshAgentMutation } from "../agents/queries";
@@ -10,9 +10,11 @@ import { useUsageQuery } from "../usage/queries";
 interface RightPanelProps {
   sessionId: string | null;
   agents: AgentSummary[];
+  selectedAgentId: string;
   run: SessionRun | null;
   open: boolean;
   onClose(): void;
+  onAgentChange(agentId: string): void;
 }
 
 function activityStatus(agentId: string, run: SessionRun | null): AgentActivityStatus {
@@ -28,11 +30,20 @@ function activityStatus(agentId: string, run: SessionRun | null): AgentActivityS
   return "idle";
 }
 
-export function RightPanel({ sessionId, agents, run, open, onClose }: RightPanelProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
+export function RightPanel({
+  sessionId,
+  agents,
+  selectedAgentId,
+  run,
+  open,
+  onClose,
+  onAgentChange,
+}: RightPanelProps) {
   const [compactLayout, setCompactLayout] = useState(
     () => window.matchMedia?.("(max-width: 1050px)").matches ?? false
   );
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const rosterRef = useRef<HTMLDivElement>(null);
   const usage = useUsageQuery(sessionId, !compactLayout || open);
   const refresh = useRefreshAgentMutation();
   const collaboration = useCollaborationQuery(sessionId, !compactLayout || open);
@@ -43,6 +54,11 @@ export function RightPanel({ sessionId, agents, run, open, onClose }: RightPanel
         return agent ? [{ ...agent, label: seat.label || agent.label }] : [];
       })
     : agents;
+  // Seats that can actually accept work drive both roving tabindex and arrows.
+  const selectableAgents = enabledAgents.filter((agent) => agent.routable !== false);
+  const hasSelection =
+    Boolean(sessionId) && selectableAgents.some((agent) => agent.id === selectedAgentId);
+
   /* One obvious action for the whole roster; the per-seat button stays as an
      escape hatch and only surfaces where it is needed. */
   const refreshAll = () => {
@@ -51,10 +67,51 @@ export function RightPanel({ sessionId, agents, run, open, onClose }: RightPanel
     }
   };
 
+  function rosterTabIndexFor(agent: AgentSummary): 0 | -1 {
+    if (!sessionId || agent.routable === false) return -1;
+    if (agent.id === selectedAgentId) return 0;
+    // Nothing selected yet: the first selectable seat holds the tab stop.
+    if (!hasSelection && selectableAgents[0]?.id === agent.id) return 0;
+    return -1;
+  }
+
+  function handleRosterKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!sessionId) return;
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('[role="radio"]')) return;
+    const ids = selectableAgents.map((agent) => agent.id);
+    if (ids.length < 2) return;
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "ArrowRight" &&
+      event.key !== "ArrowLeft" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const index = ids.indexOf(selectedAgentId);
+    let next: number;
+    if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = ids.length - 1;
+    else {
+      const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+      const current = index === -1 ? (forward ? -1 : 0) : index;
+      next = forward ? (current + 1) % ids.length : (current - 1 + ids.length) % ids.length;
+    }
+    onAgentChange(ids[next]);
+    // Elements with tabindex=-1 are still programmatically focusable, so the
+    // focus lands immediately and the tab stop follows on re-render.
+    rosterRef.current?.querySelector<HTMLDivElement>(`[data-agent-id="${ids[next]}"]`)?.focus();
+  }
+
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 1050px)");
     if (!media) return;
     const sync = () => setCompactLayout(media.matches);
+    sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
@@ -105,7 +162,7 @@ export function RightPanel({ sessionId, agents, run, open, onClose }: RightPanel
           <p className="react-seat-availability-summary">
             <strong>{enabledAgents.filter((agent) => agent.routable !== false).length}</strong>
             <span> / {enabledAgents.length} 席位可接活</span>
-            <small>平台按可用席位组织执行团队</small>
+            <small>不可用席位保留，恢复后可再次选择</small>
           </p>
         ) : null}
         {refresh.error ? (
@@ -126,20 +183,30 @@ export function RightPanel({ sessionId, agents, run, open, onClose }: RightPanel
             用量暂不可用，Agent 信息不受影响。
           </p>
         ) : null}
-        <div className="react-agent-cards" aria-label="本线程席位">
+        <div
+          ref={rosterRef}
+          className="react-agent-cards"
+          role="radiogroup"
+          aria-label="本线程席位"
+          onKeyDown={handleRosterKeyDown}
+        >
           {enabledAgents.map((agent) => (
             <AgentUsageCard
               agent={agent}
               usage={usage.data?.agents.find((item) => item.agentId === agent.id)}
               status={activityStatus(agent.id, run)}
-              selected={collaboration.data?.collaboration?.currentSeat?.providerId === agent.id}
+              selected={selectedAgentId === agent.id}
               disabled={!sessionId || agent.routable === false}
-              rosterTabIndex={-1}
+              rosterTabIndex={rosterTabIndexFor(agent)}
               onRefresh={() => refresh.mutate(agent.id)}
               refreshing={
                 agent.availability?.checking ||
                 (refresh.isPending && refresh.variables === agent.id)
               }
+              onSelect={(agentId) => {
+                onAgentChange(agentId);
+                if (compactLayout) onClose();
+              }}
               key={agent.id}
             />
           ))}

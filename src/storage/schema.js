@@ -1211,34 +1211,6 @@ const MIGRATIONS = Object.freeze([
     `,
   },
   { version: 31, name: "retire_canonical_audit", sql: `DROP TABLE storage_outbox;` },
-  {
-    version: 32,
-    name: "task_delegation_queue",
-    sql: `
-      ALTER TABLE collaboration_tasks ADD COLUMN delegation_state TEXT
-        CHECK (delegation_state IN ('draft','queued','running','cancelling','completed','failed','cancelled'));
-      ALTER TABLE collaboration_tasks ADD COLUMN contract_json TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN contract_hash TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN team_json TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN queue_seq INTEGER;
-      ALTER TABLE collaboration_tasks ADD COLUMN parent_thread_id TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN submitted_at TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN execution_trace_id TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN delegation_reason TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN result_json TEXT;
-      ALTER TABLE collaboration_tasks ADD COLUMN repair_count INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE collaboration_tasks ADD COLUMN deadline_at TEXT;
-      CREATE UNIQUE INDEX delegation_queue_seq ON collaboration_tasks(queue_seq) WHERE queue_seq IS NOT NULL;
-      CREATE UNIQUE INDEX delegation_active_slot ON collaboration_tasks((1))
-        WHERE delegation_state IN ('running', 'cancelling');
-      CREATE TABLE runtime_server_lease (slot INTEGER PRIMARY KEY CHECK(slot = 1), identity_json TEXT NOT NULL);
-    `,
-  },
-  {
-    version: 33,
-    name: "independent_task_platform",
-    up: (db) => require("./offline/task-platform-cutover").migrateTaskPlatform(db),
-  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

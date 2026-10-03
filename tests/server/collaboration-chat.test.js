@@ -1,456 +1,455 @@
 "use strict";
+
 const assert = require("node:assert/strict");
-const test = require("node:test");
+const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { EventEmitter } = require("node:events");
 const { PassThrough } = require("node:stream");
+const test = require("node:test");
+
 const { createServer } = require("../../src/server");
 const { createStorage } = require("../../src/storage");
-const { createRuntimePaths } = require("../../src/shared/runtime-paths");
-const { collectSessionEvents } = require("../helpers/chat-run-client");
-const TOKEN = "delegation-test";
-const SHA = "a".repeat(40);
-const contract = {
-  goal: "Add export",
-  deliverables: ["export"],
-  acceptanceCriteria: ["Exports valid data"],
-  subtasks: [
-    {
-      id: "export",
-      title: "Export",
-      description: "Add export",
-      workflowId: "software_delivery",
-      capabilities: ["software"],
-      dependsOn: [],
-      deliverables: ["export"],
-      acceptanceCriteria: ["Exports valid data"],
-    },
-  ],
-};
+const { hashUserGoal } = require("../../src/agents/workflow-gates");
+
+const { startAndCollect } = require("../helpers/chat-run-client");
+
+const UI_TOKEN = "collaboration-chat-test-token";
+
+function apiFetch(url, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Shift-UI-Token", UI_TOKEN);
+  if (init.method === "POST") headers.set("content-type", "application/json");
+  return fetch(url, { ...init, headers });
+}
+
+function startChat(baseUrl, body) {
+  return startAndCollect(baseUrl, body, {
+    headers: { "X-Shift-UI-Token": UI_TOKEN },
+  });
+}
+
+async function chat(baseUrl, body) {
+  const response = await startChat(baseUrl, body);
+  assert.equal(response.status, 200);
+  return response.text();
+}
+
 function spawnText(text) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
-  child.kill = () => {
-    process.nextTick(() => child.emit("close", null, "SIGTERM"));
-    return true;
-  };
+  child.kill = () => true;
   process.nextTick(() => {
-    child.stdout.write(JSON.stringify({ type: "text.delta", text }) + "\n");
+    child.stdout.write(`${JSON.stringify({ type: "text.delta", text })}\n`);
+    child.stdout.end();
+    child.stderr.end();
     child.emit("close", 0, null);
   });
   return child;
 }
-const fence = (name, fields) =>
-  "```" +
-  name +
-  "\n" +
-  Object.entries(fields)
-    .map(
-      ([key, value]) =>
-        key +
-        ":" +
-        (Array.isArray(value) ? "\n" + value.map((item) => "  - " + item).join("\n") : " " + value)
-    )
-    .join("\n") +
-  "\n```";
-const handoff = (duty, what = "Continue frozen task", goal = contract.goal) =>
-  "@codex\n" +
-  fence("handoff", {
-    to: "codex",
-    intent: duty,
-    goal,
-    what,
-    why: "Continue next Duty",
-    next_action: "Use stored evidence",
-    files: ["export.js", SHA],
-    evidence: ["requested checks passed"],
-  });
-async function waitFor(read, predicate) {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const value = await read();
-    if (predicate(value)) return value;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error("Delegation did not settle");
+
+function agentFromArgs(args) {
+  const index = args.indexOf("--agent");
+  return index >= 0 ? String(args[index + 1] || "") : "";
 }
-async function fixture(t, spawnRunner, extra = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shift-delegation-api-"));
-  const storage = createStorage({ file: ":memory:" });
-  storage.metadata.activateCleanCutover();
-  const projectKey = storage.projects.openDirectory(dir).projectKey;
-  const workspace = {
-    ensureWorktree: ({ sessionId }) => ({
-      sessionId,
-      baseDir: dir,
-      worktreeDir: dir,
-      branch: `codex/session-${sessionId}`,
-      status: "active",
-    }),
-    getStatus: () => ({ headSha: SHA, porcelain: [], clean: true }),
-    getDiff: () => "",
-    discardWorktree: () => ({ ok: true }),
+
+function worktreeManager(baseDir) {
+  return {
+    ensureWorktree({ sessionId }) {
+      return {
+        sessionId,
+        baseDir,
+        worktreeDir: baseDir,
+        branch: `codex/session-${sessionId}`,
+        status: "active",
+        createdAt: "2026-08-27T00:00:00.000Z",
+      };
+    },
+    getStatus() {
+      throw new Error("No managed worktree");
+    },
+    getDiff() {
+      return "";
+    },
+    discardWorktree() {
+      return { ok: true };
+    },
     stopAllPreviews() {},
   };
+}
+
+const USER_PLAN_PROMPT = "确认 utcOffset clone 问题，然后交给 Grok 出方案。";
+const USER_APPROVE_PROMPT = "批准该方案并交给 Grok 实现。本轮不要改文件。";
+
+const PLAN_HANDOFF = [
+  "```solution_baseline\n",
+  `user_goal_hash: ${hashUserGoal(USER_PLAN_PROMPT)}\n`,
+  "summary: Fix utcOffset clone without mutating the original instance\n",
+  "constraints:\n",
+  "  - Keep the public utcOffset API\n",
+  "non_goals:\n",
+  "  - Do not rewrite timezone parsing\n",
+  "acceptance_criteria:\n",
+  "  - Cloning keepLocalTime offsets leaves the original instance unchanged\n",
+  "```\n",
+  "\n",
+  "@Grok 请提交具体修改方案\n",
+  "```handoff\n",
+  "to: grok\n",
+  "intent: plan\n",
+  "goal: Fix utcOffset clone\n",
+  "what: 已确认原实例会被 mutate\n",
+  "why: 需要一份可批准的实现方案\n",
+  "next_action: 提交 implementation_plan\n",
+  "```",
+].join("");
+
+const IMPLEMENTATION_PLAN = [
+  "```implementation_plan\n",
+  "summary: Clone the Dayjs instance before applying utcOffset\n",
+  "files:\n",
+  "  - src/index.js\n",
+  "changes:\n",
+  "  - Keep the original instance unchanged when keepLocalTime is true\n",
+  "tests:\n",
+  "  - utcOffset clone regression\n",
+  "```\n",
+  "方案已提交，等待 Codex 批准。",
+].join("");
+
+const IMPLEMENT_HANDOFF = [
+  "@Grok 方案已批准，请按当前 plan 实现。\n",
+  "```handoff\n",
+  "to: grok\n",
+  "intent: implement\n",
+  "goal: Fix utcOffset clone\n",
+  "what: Codex 已批准待审方案\n",
+  "why: plan hash 已绑定\n",
+  "next_action: 按批准方案实现，本轮先确认不改文件\n",
+  "```",
+].join("");
+
+test("each Provider persists plan Duty output through the chat API", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-plan-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
   const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
+    storageMode: "sqlite",
     storage,
-    runtimePaths: createRuntimePaths({ env: { SHIFT_HOME: path.join(dir, "home") } }),
-    uiToken: TOKEN,
-    worktreeManager: workspace,
-    availabilityProbe: async (id) => ({ status: id === "codex" ? "available" : "unavailable" }),
-    spawnRunner: (...args) => spawnRunner(storage, ...args),
-    logger: { info() {}, warn() {}, error() {}, log() {} },
-    ...extra,
+    spawnRunner: () => spawnText(IMPLEMENTATION_PLAN),
+    worktreeManager: worktreeManager(tmpDir),
+    uiToken: UI_TOKEN,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => {
-    await server.shutdown();
-    if (storage.db.open) storage.close();
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const api = async (suffix, method = "GET", body) => {
-    const response = await fetch(base + suffix, {
-      method,
-      headers: { "X-Shift-UI-Token": TOKEN, "content-type": "application/json" },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    return { status: response.status, ...(await response.json()) };
-  };
-  await waitFor(
-    () => api("/api/tasks"),
-    (value) => !value.recoveryBlocked
-  );
-  const create = async () => (await api("/api/tasks", "POST", { projectKey })).task;
-  const save = async (id, spec = contract) => {
-    const current = (await api("/api/tasks/" + id)).task;
-    return (
-      await api("/api/tasks/" + id, "PATCH", { contract: spec, expectedRevision: current.revision })
-    ).task;
-  };
-  const submit = async (id, spec = contract) => {
-    const draft = await save(id, spec);
-    return api(`/api/tasks/${id}/submit`, "POST", { expectedRevision: draft.revision });
-  };
-  const settled = (id) =>
-    waitFor(
-      () => api("/api/tasks/" + id),
-      (value) => ["completed", "failed", "cancelled"].includes(value.task.state)
-    );
-  return { storage, api, create, save, submit, settled, base };
-}
-test("prepare uses existing durable stream, network retry replays, submission freezes edited draft", async (t) => {
-  let calls = 0;
-  const f = await fixture(t, () => {
-    calls++;
-    return spawnText("```delegation_plan\n" + JSON.stringify(contract) + "\n```");
-  });
-  const draft = await f.create();
-  const id = draft.id;
-  const prepared = await f.api(`/api/tasks/${id}/prepare`, "POST", {
-    prompt: "Add export",
-    clientTurnId: "prepare-1",
-  });
-  assert.equal(prepared.status, 202);
-  const stream = await collectSessionEvents(f.base, prepared.sessionId, {
-    headers: { "X-Shift-UI-Token": TOKEN },
-    traceId: prepared.traceId,
-  });
-  assert.match(stream.text, /event: agent-start/);
-  await waitFor(
-    () => f.api("/api/tasks/" + id),
-    (value) => !value.preparingTaskId
-  );
-  const repeat = await f.api(`/api/tasks/${id}/prepare`, "POST", {
-    prompt: "different",
-    clientTurnId: "prepare-1",
-  });
-  assert.equal(repeat.traceId, prepared.traceId);
-  assert.equal(calls, 1);
-  const saved = await f.save(id);
-  const stale = await f.api("/api/tasks/" + id, "PATCH", {
-    contract,
-    expectedRevision: saved.revision - 1,
-  });
-  assert.equal(stale.code, "TASK_REVISION_CONFLICT");
-  const submitted = await f.api(`/api/tasks/${id}/submit`, "POST", {
-    expectedRevision: saved.revision,
-  });
-  assert.equal(submitted.status, 202);
-  const frozen = await f.api("/api/tasks/" + id, "PATCH", {
-    contract: { ...contract, goal: "different" },
-    expectedRevision: submitted.task.revision,
-  });
-  assert.equal(frozen.code, "TASK_FROZEN");
-  await f.settled(id);
-  assert.equal(f.storage.tasks.get(id).state, "failed");
-  assert.equal(
-    f.storage.invocations.listForThread(prepared.sessionId).every((row) => row.state !== "active"),
-    true
-  );
-});
-test("software nodes share an isolated Task workspace but have independent Team Runs and acceptance", async (t) => {
-  const duties = [];
-  const review = {
-    verdict: "approve",
-    summary: "No blocking findings",
-    findings: ["none"],
-    tests: ["export regression passed"],
-  };
-  const receipt = {
-    commit_sha: SHA,
-    pr_url: "https://github.com/acme/repo/pull/7",
-    base_branch: "master",
-    verification: ["export regression passed", "CI passed"],
-  };
-  const verification = {
-    verified: true,
-    commitSha: SHA,
-    prUrl: receipt.pr_url,
-    baseBranch: "master",
-    branch: "codex/session-test",
-    commitSubject: "feat(export): export valid data",
-    commitBody: "Add export to deliver the frozen user goal.",
-    prTitle: "Export data with verified delivery",
-    prBody: [
-      "## 意图",
-      "Add export",
-      "## 主链路影响",
-      "Retains durable execution",
-      "## 路径变化（公开入口 / 双写）",
-      "One write path",
-      "## 测试（旧接口测试是否处理）",
-      "Export passed",
-      "## 风险与回滚",
-      "Revert commit",
-      "来自 test-model",
-    ].join("\n\n"),
-    ciStatus: "success",
-  };
-  const f = await fixture(
-    t,
-    (storage, _command, args, options) => {
-      const run = storage.tasks
-        .list()
-        .find((row) => row.state === "running")
-        .runs.at(-1);
-      const task = storage.collaborationTasks.get(run.threadId);
-      const scope = task.executionBinding.contract;
-      const route = (duty) => handoff(duty, "Continue node", scope.goal);
-      if (run.nodeId === "report")
-        assert.equal(
-          fs.readFileSync(path.join(options.cwd, "export-result.txt"), "utf8"),
-          "first node artifact"
-        );
-
-      const duty = args.at(-1).match(/"currentDuty":"([^"]+)"/)?.[1];
-      duties.push(duty);
-      assert.match(args.at(-1), /冻结范围/);
-      let text;
-      if (duty === "discuss")
-        text = task.artifacts.implementationPlan
-          ? route("implement")
-          : fence("solution_baseline", {
-              user_goal_hash: task.goalHash,
-              summary: "Add export",
-              constraints: ["Keep existing API"],
-              non_goals: ["No redesign"],
-              acceptance_criteria: scope.acceptanceCriteria,
-            }) +
-            "\n" +
-            route("plan");
-      else if (duty === "plan")
-        text =
-          fence("implementation_plan", {
-            summary: "Add export",
-            files: ["export.js"],
-            changes: ["Export valid data"],
-            tests: ["export regression"],
-            risks: ["none"],
-          }) +
-          "\n" +
-          route("discuss");
-      else if (duty === "implement") {
-        if (run.nodeId === "export")
-          fs.writeFileSync(path.join(options.cwd, "export-result.txt"), "first node artifact");
-        text = route("review");
-      } else if (duty === "review") text = fence("code_review", review) + "\n" + route("deliver");
-      else if (duty === "deliver")
-        text =
-          fence("code_review", review) +
-          "\n" +
-          fence("delivery_receipt", receipt) +
-          "\n" +
-          route("accept");
-      else
-        text = fence("final_acceptance", {
-          verdict: "accept",
-          user_goal_hash: task.goalHash,
-          solution_hash: task.artifacts.solutionBaseline?.hash,
-          implementation_plan_hash: task.artifacts.implementationPlan?.hash,
-          commit_sha: SHA,
-          checks: scope.acceptanceCriteria.map(
-            (value) => value + " => pass: export regression passed"
-          ),
-          gaps: ["none"],
-        });
-      return spawnText(text);
-    },
-    {
-      deliveryVerifier: {
-        verifyWorktreeHandoff: () => ({ verified: true }),
-        verify: () => verification,
-      },
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const agent of ["codex", "gemini", "grok", "opencode", "claude"]) {
+      const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        body: JSON.stringify({ projectKey }),
+      }).then((response) => response.json());
+      for (const seat of storage.threadSeats.listForThread(session.id)) {
+        storage.threadSeats.configure(seat.seatId, { enabled: seat.providerId === agent });
+      }
+      const response = await startChat(baseUrl, {
+        sessionId: session.id,
+        agent,
+        prompt: "提交实现方案",
+        duty: "plan",
+        useWorktree: true,
+      });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /event: implementation-plan-submitted/, agent);
+      const task = storage.collaborationTasks.get(session.id);
+      assert.equal(task.implementationGate.status, "pending_approval", agent);
+      assert.equal(task.artifacts.implementationPlan.proposedBy, agent);
+      const { collaboration } = await apiFetch(
+        `${baseUrl}/api/sessions/${session.id}/collaboration`
+      ).then((r) => r.json());
+      assert.equal(collaboration.currentDuty, "plan");
+      assert.equal(collaboration.blocker.reason, "implementation_plan_not_approved");
     }
-  );
-  const draft = await f.create();
-  const spec = {
-    ...contract,
-    deliverables: ["export", "report"],
-    acceptanceCriteria: [...contract.acceptanceCriteria, "Report export counts"],
-    subtasks: [
-      contract.subtasks[0],
-      {
-        id: "report",
-        title: "Count report",
-        description: "Produce export count report",
-        workflowId: "software_delivery",
-        capabilities: ["software"],
-        dependsOn: ["export"],
-        deliverables: ["report"],
-        acceptanceCriteria: ["Report export counts"],
-      },
-    ],
-  };
-  await f.submit(draft.id, spec);
-  const result = (await f.settled(draft.id)).task;
-  assert.equal(
-    result.state,
-    "completed",
-    JSON.stringify({
-      duties,
-      reason: result.reason,
-      history: f.storage.collaborationTasks.get(result.runs.at(-1).threadId).history,
-    })
-  );
-  assert.deepEqual(duties, [
-    ...["discuss", "plan", "discuss", "implement", "review", "deliver", "accept"],
-    ...["discuss", "plan", "discuss", "implement", "review", "deliver", "accept"],
-  ]);
-  assert.equal(result.runs.length, 2);
-  assert.notEqual(result.runs[0].threadId, result.runs[1].threadId);
-  assert.equal(result.artifacts[0].locator, result.artifacts[1].locator);
-  assert.equal(result.acceptances.length, 2);
-  assert.equal(result.runs[1].baseline.mode, "continue_workspace");
-  assert.deepEqual(result.runs[1].baseline.completedNodeIds, ["export"]);
-  assert.deepEqual(
-    f.storage.collaborationTasks.get(result.runs[1].threadId).executionBinding.contract
-      .acceptanceCriteria,
-    ["Report export counts", "Exports valid data"]
-  );
-  assert.deepEqual(
-    f.storage.collaborationTasks.get(result.runs[0].threadId).executionBinding.contract
-      .acceptanceCriteria,
-    ["Exports valid data"]
-  );
-  assert.equal(result.acceptances[0].evidenceLevel, "verified");
-  assert.equal(result.artifacts[0].metadata.delivery.commitSha, SHA);
-  const invocations = result.runs.flatMap((run) =>
-    f.storage.invocations.listForThread(run.threadId)
-  );
-  assert.equal(invocations.length, 14);
-  assert.ok(invocations.every((row) => row.state === "completed"));
-  const hops = result.runs.flatMap((run) => f.storage.handoffs.listForThread(run.threadId));
-  assert.equal(hops.length, 12);
-  assert.ok(hops.every((row) => row.targetInvocationId && row.completeStatus === "completed"));
-  assert.equal(f.storage.memories.listForThread(result.runs[0].threadId).length, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
-test("submitted self-provider hops honor depth and preserve explicit unfinished outcome", async (t) => {
-  const previous = process.env.MAX_A2A_DEPTH;
+
+test("chat hops honor the depth limit and finish every accepted target", async () => {
+  const previousDepth = process.env.MAX_A2A_DEPTH;
   process.env.MAX_A2A_DEPTH = "2";
-  t.after(() => {
-    if (previous === undefined) delete process.env.MAX_A2A_DEPTH;
-    else process.env.MAX_A2A_DEPTH = previous;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-depth-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const spawned = [];
+  const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
+    storageMode: "sqlite",
+    storage,
+    uiToken: UI_TOKEN,
+    spawnRunner(_command, args) {
+      const agent = agentFromArgs(args);
+      spawned.push(agent);
+      if (spawned.length > 4) return spawnText("Stop the test chain.");
+      const target = agent === "codex" ? "gemini" : "codex";
+      return spawnText(
+        [
+          `@${target} continue`,
+          "```handoff",
+          `to: ${target}`,
+          "intent: discuss",
+          "what: Compare the options",
+          "why: Verify the reasoning",
+          "next_action: Read the evidence",
+          "```",
+        ].join("\n")
+      );
+    },
   });
-  let runs = 0;
-  const f = await fixture(t, () => spawnText(handoff("discuss", "Compare option " + ++runs)));
-  const draft = await f.create();
-  await f.submit(draft.id);
-  const result = (await f.settled(draft.id)).task;
-  assert.equal(runs, 9);
-  const invocations = result.runs.flatMap((run) =>
-    f.storage.invocations.listForThread(run.threadId)
-  );
-  assert.ok(invocations.every((row) => row.state === "completed"));
-  assert.ok(
-    invocations.some((row) =>
-      f.storage.invocations
-        .listEvents(row.id)
-        .some((event) => event.kind === "a2a-skipped" && event.payload.reason === "max_depth")
-    )
-  );
-  assert.equal(f.storage.tasks.get(draft.id).reason, "acceptance_incomplete");
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    }).then((response) => response.json());
+    const response = await startChat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: "Compare the options",
+    });
+    const stream = await response.text();
+    assert.deepEqual(spawned, ["codex", "gemini", "codex"]);
+    assert.match(stream, /"reason":"max_depth"/);
+    const { traces } = await apiFetch(`${baseUrl}/api/sessions/${session.id}/traces`).then((r) =>
+      r.json()
+    );
+    const { trace } = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/traces/${traces[0].traceId}`
+    ).then((r) => r.json());
+    assert.equal(trace.state, "completed");
+    assert.equal(trace.invocations.length, 3);
+    assert.ok(trace.invocations.every((invocation) => invocation.state === "completed"));
+    assert.deepEqual(
+      trace.handoffs.map((handoff) => handoff.depth),
+      [1, 2]
+    );
+    assert.ok(trace.handoffs.every((handoff) => handoff.targetInvocationId));
+    assert.ok(trace.handoffs.every((handoff) => handoff.completeStatus === "completed"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (previousDepth === undefined) delete process.env.MAX_A2A_DEPTH;
+    else process.env.MAX_A2A_DEPTH = previousDepth;
+  }
 });
 
-test("a stale main-Agent result cannot overwrite edits made during preparation", async (t) => {
-  let child;
-  const f = await fixture(t, () => {
-    child = new EventEmitter();
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.kill = () => {
-      child.emit("close", null, "SIGTERM");
-      return true;
-    };
-    return child;
+test("chat hops from Codex plan to Grok and exposes collaboration via HTTP", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-chat-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+  const spawned = [];
+  const prompts = [];
+  const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
+    storageMode: "sqlite",
+    storage,
+    spawnRunner(_command, args) {
+      const agent = agentFromArgs(args);
+      spawned.push(agent);
+      prompts.push(args[args.length - 1]);
+      if (agent === "codex" && spawned.filter((id) => id === "codex").length === 1) {
+        return spawnText(PLAN_HANDOFF);
+      }
+      if (agent === "grok" && spawned.filter((id) => id === "grok").length === 1) {
+        return spawnText(IMPLEMENTATION_PLAN);
+      }
+      if (agent === "codex") return spawnText(IMPLEMENT_HANDOFF);
+      return spawnText("确认已批准，本轮不改文件。");
+    },
+    worktreeManager: worktreeManager(tmpDir),
+    uiToken: UI_TOKEN,
   });
-  const task = await f.create();
-  const started = await f.api(`/api/tasks/${task.id}/prepare`, "POST", {
-    prompt: "Plan export",
-    clientTurnId: "stale-plan",
-  });
-  assert.equal(started.status, 202);
-  await waitFor(() => child, Boolean);
-  const current = (await f.api(`/api/tasks/${task.id}`)).task;
-  const saved = await f.api(`/api/tasks/${task.id}`, "PATCH", {
-    contract: { ...contract, goal: "User edited scope" },
-    expectedRevision: current.revision,
-  });
-  assert.equal(saved.status, 200);
-  child.stdout.write(
-    JSON.stringify({
-      type: "text.delta",
-      text: "```delegation_plan\n" + JSON.stringify(contract) + "\n```",
-    }) + "\n"
-  );
-  child.emit("close", 0, null);
-  const finished = await waitFor(
-    () => f.api(`/api/tasks/${task.id}`),
-    (value) => !value.preparingTaskId
-  );
-  assert.equal(finished.task.contract.goal, "User edited scope");
-  assert.equal(finished.task.reason, "TASK_REVISION_CONFLICT");
-  assert.notEqual(task.id, started.sessionId);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    }).then((response) => response.json());
+
+    const before = await apiFetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+      (response) => response.json()
+    );
+    assert.equal(before.collaboration, null);
+
+    const planStream = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: USER_PLAN_PROMPT,
+      useWorktree: true,
+      duty: "discuss",
+    });
+    assert.match(planStream, /event: handoff-captured/);
+    assert.match(planStream, /event: a2a-route/);
+    assert.match(planStream, /event: implementation-plan-submitted/);
+    assert.deepEqual(spawned, ["codex", "grok"]);
+    assert.match(prompts[1], /Keep the public utcOffset API/);
+
+    const pending = await apiFetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+      (response) => response.json()
+    );
+    assert.equal(pending.collaboration.phase, "implement");
+    assert.deepEqual(pending.collaboration.blocker, {
+      type: "waiting_approval",
+      reason: "implementation_plan_not_approved",
+    });
+    assert.equal(pending.collaboration.currentDuty, "plan");
+    assert.equal(pending.collaboration.currentSeat.providerId, "grok");
+
+    const tracesAfterPlan = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/traces?limit=20`
+    ).then((response) => response.json());
+    const planTraceId = tracesAfterPlan.traces[0].traceId;
+    const planTrace = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/traces/${planTraceId}`
+    ).then((response) => response.json());
+    assert.equal(planTrace.trace.invocations.length, 2);
+    assert.ok(planTrace.trace.invocations.every((row) => row.state !== "active"));
+    const accepted = (planTrace.trace.handoffs || []).filter(
+      (row) => row.routeStatus === "accepted"
+    );
+    assert.equal(accepted.length, 1);
+    assert.equal(accepted[0].targetAgent, "grok");
+    assert.ok(accepted[0].targetInvocationId);
+
+    const approveStream = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "codex",
+      prompt: USER_APPROVE_PROMPT,
+      useWorktree: true,
+      duty: "discuss",
+    });
+    assert.match(approveStream, /event: handoff-captured/);
+    assert.deepEqual(spawned, ["codex", "grok", "codex", "grok"]);
+
+    const approved = await apiFetch(`${baseUrl}/api/sessions/${session.id}/collaboration`).then(
+      (response) => response.json()
+    );
+    assert.equal(approved.collaboration.phase, "implement");
+    assert.equal(approved.collaboration.blocker, null);
+    assert.equal(approved.collaboration.nextAction, "完成实现并留下验证证据。");
+
+    const tracesAfterApprove = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/traces?limit=20`
+    ).then((response) => response.json());
+    const allInvocations = [];
+    for (const row of tracesAfterApprove.traces) {
+      const detail = await apiFetch(
+        `${baseUrl}/api/sessions/${session.id}/traces/${row.traceId}`
+      ).then((response) => response.json());
+      allInvocations.push(...(detail.trace.invocations || []));
+    }
+    assert.ok(allInvocations.length >= 4);
+    assert.ok(allInvocations.every((row) => row.state !== "active"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
-test("main-Agent clarification is a visible draft result, not an execution failure", async (t) => {
-  const f = await fixture(t, () => spawnText("需要输出 CSV 还是 JSON？"));
-  const task = await f.create();
-  const started = await f.api(`/api/tasks/${task.id}/prepare`, "POST", {
-    prompt: "Export",
-    clientTurnId: "clarify",
+test("duplicate plan loop emits plan-warning and terminates runaway worklist", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "collaboration-loop-"));
+  const storage = createStorage({ file: ":memory:" });
+  storage.metadata.activateCleanCutover();
+  const projectKey = storage.projects.openDirectory(tmpDir).projectKey;
+
+  const server = createServer({
+    availabilityProbe: async () => ({ status: "unknown", reason: null }),
+    storageMode: "sqlite",
+    storage,
+    spawnRunner: () => spawnText(IMPLEMENTATION_PLAN),
+    worktreeManager: worktreeManager(tmpDir),
+    uiToken: UI_TOKEN,
   });
-  assert.equal(started.status, 202);
-  const current = await waitFor(
-    () => f.api(`/api/tasks/${task.id}`),
-    (value) => !value.preparingTaskId
-  );
-  assert.equal(current.task.state, "draft");
-  assert.equal(current.task.reason, "needs_input");
-  assert.equal(current.task.contract, null);
-  assert.equal(current.task.preparationMessage.content, "需要输出 CSV 还是 JSON？");
-  assert.equal(f.storage.collaborationTasks.get(started.sessionId), null);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const { session } = await apiFetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ projectKey }),
+    }).then((response) => response.json());
+
+    for (const seat of storage.threadSeats.listForThread(session.id)) {
+      storage.threadSeats.configure(seat.seatId, { enabled: seat.providerId === "grok" });
+    }
+
+    // 1st submission -> accepted
+    const stream1 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream1, /event: implementation-plan-submitted/);
+
+    // 2nd submission -> reused
+    const stream2 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream2, /event: implementation-plan-submitted/);
+
+    // 3rd submission -> reused
+    const stream3 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream3, /event: implementation-plan-submitted/);
+
+    // 4th submission -> exceeds maxPlanRepeats (3) -> triggers loop detection
+    const stream4 = await chat(baseUrl, {
+      sessionId: session.id,
+      agent: "grok",
+      prompt: "提交实现方案",
+      duty: "plan",
+      useWorktree: true,
+    });
+    assert.match(stream4, /event: implementation-plan-loop-detected/);
+    assert.match(stream4, /event: plan-warning/);
+
+    const task = storage.collaborationTasks.get(session.id);
+    assert.equal(task.implementationGate.loopDetected, true);
+
+    const { collaboration } = await apiFetch(
+      `${baseUrl}/api/sessions/${session.id}/collaboration`
+    ).then((r) => r.json());
+    assert.equal(collaboration.blocker.type, "loop_detected");
+    assert.equal(collaboration.blocker.reason, "duplicate_plan_loop_detected");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await server.closeStorageContext?.();
+    storage.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

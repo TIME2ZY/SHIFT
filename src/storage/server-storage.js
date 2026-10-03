@@ -54,28 +54,6 @@ function createServerStorage(options = {}, logger = console) {
     throw new Error(`SHIFT_STORAGE_MODE=sqlite requires an active clean epoch (${error.message})`);
   }
 
-  const runtimeIdentity = options.runtimeIdentity || null;
-  if (runtimeIdentity) {
-    try {
-      storage.db
-        .transaction(() => {
-          const previous = storage.db
-            .prepare("SELECT identity_json FROM runtime_server_lease WHERE slot = 1")
-            .get();
-          if (previous && options.isRuntimeOwnerAlive(JSON.parse(previous.identity_json))) {
-            throw new Error("This SHIFT_HOME is already owned by another running server.");
-          }
-          storage.db
-            .prepare("INSERT OR REPLACE INTO runtime_server_lease(slot,identity_json) VALUES(1,?)")
-            .run(JSON.stringify(runtimeIdentity));
-        })
-        .immediate();
-    } catch (error) {
-      if (ownsStorage) storage.close();
-      throw error;
-    }
-  }
-
   const eventStore = createEventStore({
     storage,
     logger,
@@ -165,10 +143,6 @@ function createServerStorage(options = {}, logger = console) {
       } catch (error) {
         logger.error?.(`[sqlite-storage] recorder close failed: ${error.message}`);
       }
-      if (runtimeIdentity && storage.db.open)
-        storage.db
-          .prepare("DELETE FROM runtime_server_lease WHERE slot = 1 AND identity_json = ?")
-          .run(JSON.stringify(runtimeIdentity));
       try {
         eventStore.close();
       } catch (error) {

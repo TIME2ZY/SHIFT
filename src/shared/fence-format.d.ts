@@ -49,10 +49,6 @@ export type TaskGoalListField = never;
 
 /** Field names per fence language. The web registry is checked against this. */
 export interface FenceFieldMap {
-  delegation_plan: {
-    scalars: "workflowId" | "goal";
-    lists: "deliverables" | "acceptanceCriteria" | "subtasks";
-  };
   handoff: { scalars: HandoffScalarField; lists: HandoffListField };
   solution_baseline: {
     scalars: SolutionBaselineScalarField;
@@ -78,7 +74,6 @@ export interface FenceFieldMap {
 export type FenceLang = keyof FenceFieldMap;
 
 export declare const HANDOFF: FenceVocabulary;
-export declare const DELEGATION_PLAN: FenceVocabulary;
 export declare const SOLUTION_BASELINE: FenceVocabulary;
 export declare const IMPLEMENTATION_PLAN: FenceVocabulary;
 export declare const CODE_REVIEW: FenceVocabulary;

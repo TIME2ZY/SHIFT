@@ -13,6 +13,33 @@ import type { TraceSummary } from "../observability/types";
 import { MessageProcessDetails } from "./MessageProcessDetails";
 import { Skeleton } from "../../shared/ui/Skeleton";
 
+interface QuickPrompt {
+  title: string;
+  description: string;
+  prompt: string;
+  useWorktree?: true;
+}
+
+const EMPTY_CHAT_QUICK_PROMPTS: QuickPrompt[] = [
+  {
+    title: "收敛问题与方案",
+    description: "先确认目标与约束，再整理实施方案",
+    prompt:
+      "请先确认问题和约束，再提交 implementation_plan；需要协作时选择当前可路由席位。本轮不要改代码。",
+  },
+  {
+    title: "交叉验证实现方向",
+    description: "比较实现方向与反例，选择可用席位交叉验证",
+    prompt: "针对当前目标提出两个实现方向和反例；有其他可路由席位时交叉验证，否则自行检查并收敛。",
+  },
+  {
+    title: "在隔离 worktree 中实现",
+    description: "按已批准方案改代码，再完成审查与验证",
+    prompt: "请按已批准方案在隔离 worktree 中实现，完成后选择可路由席位审查；单席位时自审。",
+    useWorktree: true,
+  },
+];
+
 interface MessageListProps {
   sessionId: string | null;
   messages: PersistedMessage[];
@@ -22,6 +49,8 @@ interface MessageListProps {
   isLoading: boolean;
   error: Error | null;
   onRetry(): void;
+  /** Fill the composer when user clicks a recommended starter prompt. */
+  onUsePrompt?(prompt: QuickPrompt): void;
 }
 
 interface MessageNavigationItem {
@@ -274,6 +303,7 @@ export function MessageList({
   isLoading,
   error,
   onRetry,
+  onUsePrompt,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
@@ -549,8 +579,31 @@ export function MessageList({
       >
         {empty ? (
           <section className="react-chat-empty">
-            <h2>暂无执行记录</h2>
-            <p>主 Agent 整理草稿和团队执行后，这里会显示消息、工具过程与交接记录。</p>
+            <h2>开始一个任务</h2>
+            <p>
+              在下面说清目标，用 <code>@席位</code> 点名接手的角色。要改代码时打开
+              <b>「隔离改代码」</b>
+              ，实现发生在本会话的 worktree，不动你正在看的目录。
+            </p>
+            <div className="react-chat-quick-prompts">
+              <span>开局</span>
+              <ul>
+                {EMPTY_CHAT_QUICK_PROMPTS.map((item) => (
+                  <li key={item.title}>
+                    <button
+                      type="button"
+                      className="react-prompt-card"
+                      disabled={!onUsePrompt}
+                      onClick={() => onUsePrompt?.(item)}
+                      aria-label={`使用推荐提示：${item.title}`}
+                    >
+                      <strong>{item.title}</strong>
+                      <small>{item.description}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </section>
         ) : null}
 

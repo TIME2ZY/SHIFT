@@ -153,15 +153,9 @@ async function assemblePrompt(ctx, turnRunState, entry) {
   turnRunState.recoveryEvidence = recoveryEvidence;
   turnRunState.taskSnapshot = taskSnapshot;
 
-  const promptParts = [
-    identityBlock,
-    ctx.preparationOnly
-      ? "本轮仅整理委托草稿，禁止 handoff、实施、验收或写文件。"
-      : collaborationBlock,
-    ctx.preparationOnly ? null : outcomeEvidenceBlock,
-    taskContext,
-  ].filter(Boolean);
-  if (ctx.teamInstructions) promptParts.push(ctx.teamInstructions);
+  const promptParts = [identityBlock, collaborationBlock, outcomeEvidenceBlock, taskContext].filter(
+    Boolean
+  );
   if (i === 0) {
     promptParts.push(bootstrapPacket, augmentedPrompt);
   } else {
