@@ -12,6 +12,7 @@ test("Codex preparation uses read-only sandbox; Claude exposes only read tools w
     );
     assert.deepEqual(codex.args.slice(0, 4), ["-s", "read-only", "-a", "never"]);
     assert.equal(codex.args.at(-1), "-");
+    assert.ok(codex.args.includes("--skip-git-repo-check"));
     assert.equal(codex.stdinText, "prepare");
     const claude = getProviderAdapter("claude").buildInvocation(
       applyReadOnlyPermissions({ providerId: "claude" }, env),

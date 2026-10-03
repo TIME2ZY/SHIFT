@@ -3,6 +3,7 @@
 // Real CLI smoke in an isolated home. --materials submits only local report execution.
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const net = require("node:net");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
@@ -27,7 +28,10 @@ async function main() {
     });
   });
   const output = path.join(ROOT, "output", "live", "delegation-smoke-" + Date.now());
-  const runtimePaths = createRuntimePaths({ env: { SHIFT_HOME: path.join(output, "home") } });
+  fs.mkdirSync(output, { recursive: true });
+  const runtimePaths = createRuntimePaths({
+    env: { SHIFT_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "shift-delegation-home-")) },
+  });
   initializeRuntimeHome({ runtimePaths });
   const token = crypto.randomBytes(24).toString("hex");
   const server = createServer({

@@ -731,7 +731,7 @@ Canonical JSONL 归档退役说明与「P2 结构拆分与前端守卫（2026-09
 - tasks/files 保存规范化 UTF-8 快照（去 BOM、CRLF/CR→LF），hash 基于保存字节，行号按 LF 从 1 开始。原用户文件不再读取；任务根目录、子目录和文件拒绝 symlink/越界，读取核对 owner/locator/hash。文件内容属于文件系统，引用和验收属于 SQLite。
 - 准备与材料调用使用普通目录身份（skipGit），避免任务目录位于宿主 Git 内时被解析到仓库根；软件 Team 独占 Git 初始化/worktree。
 - teams/materials-analysis → chat-runtime → chat-routes → chat-worklist：analyze/write/review 在一个 Task 槽中运行，每次有独立 Trace/Invocation，TeamRun 固定首个 traceId，回执保存全部 traceIds。execution-profile 校验 Team 和成员，通用调用只绑定 workflow/role，duty/skillName 为 null。
-- invocation-permissions 替代 preparation-permissions；prepare/materials 均强制支持只读的 Codex/Claude，禁用 resume，跳过软件技能、协作提示词、门禁及 handoff。只读调用不注册平台 MCP 回调。大提示词由 child-stream→invoke-cli stdin 传送，Provider 同样用 stdin，复用原流式/进程/终态链。
+- invocation-permissions 替代 preparation-permissions；prepare/materials 均强制支持只读的 Codex/Claude，禁用 resume，跳过软件技能、协作提示词、门禁及 handoff。只读调用不注册平台 MCP 回调，Codex 显式 skip-git-repo-check 以支持普通目录。大提示词由 child-stream→invoke-cli stdin 传送，Provider 同样用 stdin，复用原流式/进程/终态链。
 - materials-report 校验唯一 JSON 围栏、全部结论的来源 id/行号/原文；不筛掉无效结论。源版本通过后渲染完整 Markdown 给 review，接受后保存同一报告字节；再次检查源 hash。Artifact 为 markdown_report/SHA256，整体 agent_reviewed，机械 sourceChecks 单独记录；solo_fallback 明示，成功退出不等于验收。
 - 调用前后和平台核验/写报告之间检查取消，异常先停止并等待 executor，再允许队列继续；重启仍走原进程核验与 Task 中断收口，不重放未知副作用。
 - TaskConsole → MaterialsEditor/ReportArtifact：HTTP 上传/移除与冻结版本，sanitized Markdown 预览，authenticatedFetch 下载；成果 API 按 Task+Artifact id 取 SQLite 引用并核对报告 hash，不接受任意文件路径。

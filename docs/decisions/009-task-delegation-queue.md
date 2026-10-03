@@ -59,7 +59,7 @@ v33 向前迁移独立任务表，旧委托只迁移为可查看的草稿或终�
 
 材料 Team 的 analyze、write、review 由平台按能力绑定成员。长提示词在既有执行器通过 stdin 管道传递，绕过 Windows 命令行长度上限；只读 Codex/Claude 同样通过 stdin 收材料。三个调用仍走既有 invocation executor，分别记录 workflow/role 绑定和 durable Trace；软件 Duty 可为空，与 workflow/role 互斥。软件专属技能、协作提示词、权限门禁、证据及 handoff 只对 software_delivery 生效。准备与材料调用使用明确的只读执行配置，不接受 CLI 交接；三个角色的推进属于 Team 内部执行，沿用同一 Task 槽、取消和恢复协议；调用前后、核验及写报告前后检查取消，异常必须停止并等待所属 executor 收口再释放槽。TeamRun.traceId 固定为首次调用，Acceptance 保存全部 traceIds，后续调用通过同一观察 Thread 归属尝试。优先选择不同成员复核，单成员回退显式记录。
 
-材料源作为带行号的数据注入提示词，禁止将材料内的指令当成操作授权。Agent CLI 全部使用已支持的强制只读 Provider（Codex/Claude）；Agent 输出结构化报告，不直接写成果文件。write 返回带来源引用的段落，review 判断全部节点条件是否达成。平台在复核前检查所有引用 id、行号、原文片段和源文件 SHA256，任一无效就拒绝整份成果。平台确定性生成 Markdown，review 审查这份完整报告；接受后保存同一份字节，不在复核后筛选或改写结论。报告 SHA256 固定到 Artifact；Acceptance 为 agent_reviewed，机械检查结果另记入 evidence，不能把结论判断冒充 verified。
+材料源作为带行号的数据注入提示词，禁止将材料内的指令当成操作授权。Agent CLI 全部使用已支持的强制只读 Provider（Codex/Claude）；Codex 只读调用添加 skip-git-repo-check，支持没有 Git 仓库的任务目录；Agent 输出结构化报告，不直接写成果文件。write 返回带来源引用的段落，review 判断全部节点条件是否达成。平台在复核前检查所有引用 id、行号、原文片段和源文件 SHA256，任一无效就拒绝整份成果。平台确定性生成 Markdown，review 审查这份完整报告；接受后保存同一份字节，不在复核后筛选或改写结论。报告 SHA256 固定到 Artifact；Acceptance 为 agent_reviewed，机械检查结果另记入 evidence，不能把结论判断冒充 verified。
 
 输入与成果文件内容是文件真相源，SQLite 只保存引用和冻结版本。未引用文件不形成业务事实；写文件后 CAS 失败可留下未引用文件，不能进入计划或成果读取。输入/成果读入口校验所属 Task、服务管理目录的真实路径、普通文件与哈希；拒绝目录穿越、符号链接越界和版本漂移。成果预览/下载只按 Task+Artifact id 读取，不接受任意文件路径。
 

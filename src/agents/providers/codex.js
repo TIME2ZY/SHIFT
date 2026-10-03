@@ -504,6 +504,7 @@ const codexProvider = {
       args.push(config.resumeSessionId, prompt);
     } else {
       args.push("exec", "--json");
+      if (config.readOnlyInvocation) args.push("--skip-git-repo-check");
       if (finalOutputPath) args.push("--output-last-message", finalOutputPath);
       args.push(prompt);
     }
