@@ -5,10 +5,10 @@ const { DUTIES, ENFORCEMENT_LEVELS, ROUTING_REASONS } = require("../shared/colla
 function createInvocationDutyBindingRepository(db) {
   const insert = db.prepare(`
     INSERT INTO invocation_duty_bindings (
-      invocation_id, thread_id, seat_id, duty, skill_name,
+      invocation_id, thread_id, seat_id, duty, workflow_id, role_id, skill_name,
       routing_reason, enforcement_level, created_at
     ) VALUES (
-      @invocationId, @threadId, @seatId, @duty, @skillName,
+      @invocationId, @threadId, @seatId, @duty, @workflowId, @roleId, @skillName,
       @routingReason, @enforcementLevel, @createdAt
     )
   `);
@@ -28,7 +28,12 @@ function createInvocationDutyBindingRepository(db) {
       const invocationId = requiredString(input.invocationId, "invocation id");
       const threadId = requiredString(input.threadId, "thread id");
       const seatId = requiredString(input.seatId, "seat id");
-      const duty = allowedValue(input.duty, DUTIES, "duty");
+      const workflowId = input.workflowId ? requiredString(input.workflowId, "workflow id") : null;
+      const roleId = workflowId ? requiredString(input.roleId, "role id") : null;
+      if (workflowId && (input.duty != null || input.skillName != null))
+        throw new Error("Workflow roles cannot carry a software Duty or skill.");
+      if (!workflowId && input.roleId) throw new Error("Workflow id is required for a role.");
+      const duty = workflowId ? null : allowedValue(input.duty, DUTIES, "duty");
       const routingReason = allowedValue(input.routingReason, ROUTING_REASONS, "routing reason");
       const enforcementLevel = allowedValue(
         input.enforcementLevel,
@@ -55,7 +60,9 @@ function createInvocationDutyBindingRepository(db) {
         threadId,
         seatId,
         duty,
-        skillName: requiredString(input.skillName, "skill name"),
+        workflowId,
+        roleId,
+        skillName: workflowId ? null : requiredString(input.skillName, "skill name"),
         routingReason,
         enforcementLevel,
         createdAt: input.createdAt || new Date().toISOString(),
@@ -80,6 +87,7 @@ function mapBinding(row) {
     threadId: row.thread_id,
     seatId: row.seat_id,
     duty: row.duty,
+    ...(row.workflow_id ? { workflowId: row.workflow_id, roleId: row.role_id } : {}),
     skillName: row.skill_name,
     routingReason: row.routing_reason,
     enforcementLevel: row.enforcement_level,

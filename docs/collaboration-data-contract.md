@@ -46,6 +46,10 @@ process.spawn_intent / process.bound / process.exited 经既有 EventStore 写�
 
 ## 2. Thread Seat
 
+第二阶段补充：task_inputs 保存 id/task_id/owner_task_id/name/locator/content_hash/byte_length；输入添加/移除只由 task-repository 的草稿 CAS 入口写入，Plan.inputs_json 固定提交时的引用。内容位于任务管理目录，读取必须核验 SHA256。Task 的 inputs 是冻结 Plan 或草稿输入引用的只读投影，关联草稿继承源版本及 ownerTaskId；联合主键 (task_id,id) 允许引用同一源材料。BOM 去除、CRLF/CR 转为 LF 后按保存字节算 hash，以 LF 分行提供 1-based 行号。
+
+Invocation binding 为两种互斥形式：软件调用 duty/skillName，或准备、材料调用 workflowId/roleId（duty、skillName 均为 null）。二者复用 invocation_duty_bindings 和 durableRecorder.startInvocation 单一原子写入口；通用角色不进入软件 collaboration task。材料成果的 Acceptance.evidence 包含 assessedBy、traceIds、independentReview、reportHash、review 与 sourceChecks，但整体等级仍是 agent_reviewed。
+
 目标记录：
 
 ```text
@@ -78,9 +82,11 @@ DutyBinding {
   invocationId: string
   threadId: string
   seatId: string
-  duty: discuss | plan | implement | fix | review | deliver | accept | recall
-  skillName: string
-  routingReason: explicit_mention | handoff_to | sticky | affinity | solo_fallback
+  duty: discuss | plan | implement | fix | review | deliver | accept | recall | null
+  workflowId?: string
+  roleId?: string
+  skillName: string | null
+  routingReason: capability_match | explicit_mention | handoff_to | sticky | affinity | solo_fallback
   enforcementLevel: enforced | advisory | unavailable
   createdAt: timestamp
 }
@@ -89,6 +95,8 @@ DutyBinding {
 不变量：
 
 - 每个 started/active invocation 恰好一条绑定。
+- 软件 duty/skillName 非空且 workflowId/roleId 为空；通用 duty/skillName 为空且 workflowId/roleId 非空，DB CHECK 保证互斥。
+- 准备绑定 task_preparation/plan；材料绑定 materials_analysis/analyze|write|review。capability_match 表示平台能力选择；单席位复核记录 solo_fallback。
 - binding 与 invocation start 同事务提交。
 - binding 创建后不可改写；重试产生新的 invocation 和 binding。
 - `seatId` 必须属于相同 Thread，且路由决策时处于 enabled 状态。

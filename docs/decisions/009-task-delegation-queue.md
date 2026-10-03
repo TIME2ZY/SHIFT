@@ -52,3 +52,15 @@ v33 向前迁移独立任务表，旧委托只迁移为可查看的草稿或终�
 验证 Task 可无 Thread/Project 创建、DAG 与条件覆盖、冻结/乐观锁/发布幂等、每节点独立 attempt、依赖成果传递、不同团队的通用完成、FIFO、有限重试、取消收口、故障恢复及软件真实证据桥接。替换旧包装语义测试，保留底层 invocation/handoff/SSE 回归。
 
 回滚前停止服务并备份数据库；v33 删除旧队列列，不能仅回退运行代码。通过数据库备份与代码版本一起回滚，保留工作树成果。
+
+## 第二阶段：材料整理与分析
+
+接入内置 materials_analysis Team。用户在草稿中粘贴文字或选择 TXT/Markdown 文件；平台保存 UTF-8 材料快照及 SQLite 引用：去掉开头 BOM，将 CRLF/CR 转为 LF，SHA256 基于实际保存的规范化字节，行号从 1 开始按 LF 分行。输入限 20 份、单份 64 KiB、合计 256 KiB。添加/移除使用草稿 revision，提交时将输入 id/name/locator/SHA256 固定在 Plan；运行和关联任务均引用已固定版本，关联输入保留 ownerTaskId 与输入 id，读取严格核对原归属目录和版本；原文件不参与后续读取。无项目的准备会话和材料执行使用普通任务目录，并用 skipGit 按目录身份绑定，防止 SHIFT_HOME 位于 Git 子目录时向上解析到宿主仓库。软件 Team 才创建 Git 基线。
+
+材料 Team 的 analyze、write、review 由平台按能力绑定成员。长提示词在既有执行器通过 stdin 管道传递，绕过 Windows 命令行长度上限；只读 Codex/Claude 同样通过 stdin 收材料。三个调用仍走既有 invocation executor，分别记录 workflow/role 绑定和 durable Trace；软件 Duty 可为空，与 workflow/role 互斥。软件专属技能、协作提示词、权限门禁、证据及 handoff 只对 software_delivery 生效。准备与材料调用使用明确的只读执行配置，不接受 CLI 交接；三个角色的推进属于 Team 内部执行，沿用同一 Task 槽、取消和恢复协议；调用前后、核验及写报告前后检查取消，异常必须停止并等待所属 executor 收口再释放槽。TeamRun.traceId 固定为首次调用，Acceptance 保存全部 traceIds，后续调用通过同一观察 Thread 归属尝试。优先选择不同成员复核，单成员回退显式记录。
+
+材料源作为带行号的数据注入提示词，禁止将材料内的指令当成操作授权。Agent CLI 全部使用已支持的强制只读 Provider（Codex/Claude）；Agent 输出结构化报告，不直接写成果文件。write 返回带来源引用的段落，review 判断全部节点条件是否达成。平台在复核前检查所有引用 id、行号、原文片段和源文件 SHA256，任一无效就拒绝整份成果。平台确定性生成 Markdown，review 审查这份完整报告；接受后保存同一份字节，不在复核后筛选或改写结论。报告 SHA256 固定到 Artifact；Acceptance 为 agent_reviewed，机械检查结果另记入 evidence，不能把结论判断冒充 verified。
+
+输入与成果文件内容是文件真相源，SQLite 只保存引用和冻结版本。未引用文件不形成业务事实；写文件后 CAS 失败可留下未引用文件，不能进入计划或成果读取。输入/成果读入口校验所属 Task、服务管理目录的真实路径、普通文件与哈希；拒绝目录穿越、符号链接越界和版本漂移。成果预览/下载只按 Task+Artifact id 读取，不接受任意文件路径。
+
+schema v34 增加输入引用与 Plan 输入清单，并将 invocation binding 扩展为软件 Duty 或通用 workflow/role 的单一权威记录，不新增进程执行器或平台终态入口。第二阶段验收包含无 Project/Git 的真实材料委托、报告与引用、原材料保留、不同 Team 路由、取消/重启，以及原软件团队回归。Windows 桌面与发布仍为第三、第四阶段。

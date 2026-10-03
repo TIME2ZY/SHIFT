@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 "use strict";
-// Real CLI preparation smoke: isolated home, no submitted execution or remote publishing.
+// Real CLI smoke in an isolated home. --materials submits only local report execution.
 const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
 const crypto = require("node:crypto");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { createServer } = require("../../src/server");
 const { ROOT, createRuntimePaths } = require("../../src/shared/runtime-paths");
 const { initializeRuntimeHome } = require("../../src/storage/offline/runtime-home");
 const { proxyEnvVars } = require("../../src/agents/proxy");
 
 async function main() {
+  const materials = process.argv.includes("--materials");
   await new Promise((resolve, reject) => {
     const socket = net.connect({ host: "127.0.0.1", port: 7897 });
     socket.setTimeout(2000);
@@ -61,10 +62,19 @@ async function main() {
   try {
     while ((await api("/api/tasks")).recoveryBlocked)
       await new Promise((resolve) => setTimeout(resolve, 25));
-    const { task } = await api("/api/tasks", "POST", {});
+    let { task } = await api("/api/tasks", "POST", {});
+    if (materials)
+      task = (
+        await api(`/api/tasks/${task.id}/inputs`, "POST", {
+          name: "季度材料.md",
+          content: "季度摘要\r\n本季度收入增长 12%。\r\n新增客户 35 个。",
+          expectedRevision: task.revision,
+        })
+      ).task;
     const started = await api(`/api/tasks/${task.id}/prepare`, "POST", {
-      prompt:
-        "请规划一个无依赖的 JavaScript CSV 导出函数。交付一个函数和单元测试；支持逗号与双引号转义。只整理目标、交付物、验收条件和分任务，不写文件。",
+      prompt: materials
+        ? "只根据所附季度材料制作一份带原文行号和引用的简短中文 Markdown 分析报告，所有结论须有材料依据。使用单个 materials_analysis 节点。"
+        : "请规划一个无依赖的 JavaScript CSV 导出函数。交付一个函数和单元测试；支持逗号与双引号转义。只整理目标、交付物、验收条件和分任务，不写文件。",
       clientTurnId: "smoke-prepare",
     });
     const deadline = Date.now() + 100000;
@@ -79,27 +89,63 @@ async function main() {
       throw new Error("Live preparation deadline exceeded");
     }
     const { session } = await api("/api/sessions/" + started.sessionId);
-    const git = spawnSync("git", ["-C", session.projectDir, "status", "--porcelain"], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
+    const sourceWorkspaceUnchanged = fs
+      .readdirSync(session.projectDir)
+      .every((name) => materials && name === "inputs");
     const { traces } = await api(`/api/sessions/${started.sessionId}/traces`);
+    let reportVerified = true,
+      executionTraces = [];
+    if (materials && current.task.contract) {
+      await api(`/api/tasks/${task.id}/submit`, "POST", {
+        expectedRevision: current.task.revision,
+      });
+      const until = Date.now() + 300000;
+      do {
+        current = await api("/api/tasks/" + task.id);
+        if (!current.busy && ["completed", "failed", "cancelled"].includes(current.task.state))
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } while (Date.now() < until);
+      if (current.busy) {
+        await api(`/api/tasks/${task.id}/cancel`, "POST", {});
+        throw new Error("Live materials deadline exceeded");
+      }
+      const artifact = current.task.artifacts[0];
+      if (artifact) {
+        const preview = await api(`/api/tasks/${task.id}/artifacts/${artifact.id}`);
+        reportVerified =
+          preview.markdown.includes("12%") &&
+          preview.markdown.includes("材料来源") &&
+          current.task.acceptances[0]?.evidenceLevel === "agent_reviewed" &&
+          current.task.acceptances[0]?.evidence.sourceChecks.every((check) => check.verified) &&
+          fs.readFileSync(current.task.inputs[0].locator, "utf8") ===
+            "季度摘要\n本季度收入增长 12%。\n新增客户 35 个。";
+        executionTraces = (await api(`/api/sessions/${current.task.runs[0].threadId}/traces`))
+          .traces;
+      } else reportVerified = false;
+    }
     const platformSlotReleased = !current.busy && !current.recoveryBlocked;
     const passed =
       Boolean(current.task.contract) &&
       platformSlotReleased &&
       traces.some((trace) => trace.traceId === started.traceId && trace.state === "completed") &&
-      git.status === 0 &&
-      !git.stdout.trim();
+      sourceWorkspaceUnchanged &&
+      reportVerified &&
+      (!materials ||
+        (current.task.state === "completed" &&
+          executionTraces.length === 3 &&
+          executionTraces.every((trace) => trace.state === "completed")));
     const report = {
       passed,
       selectedAgent: started.selectedAgent,
       contract: current.task.contract,
       reason: current.task.reason,
       traceStates: traces.map((trace) => trace.state),
-      sourceWorkspaceUnchanged: git.status === 0 && !git.stdout.trim(),
+      sourceWorkspaceUnchanged,
+      reportVerified,
+      executionTraceStates: executionTraces.map((trace) => trace.state),
       platformSlotReleased,
-      submitted: false,
+      submitted: materials,
     };
     fs.writeFileSync(path.join(output, "result.json"), JSON.stringify(report, null, 2));
     console.log(

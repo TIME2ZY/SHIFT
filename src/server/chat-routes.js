@@ -5,6 +5,7 @@ const { createRunObservability } = require("../agents/run-observability");
 const { looksLikeDecisionLanguage } = require("../storage/decision-language");
 const { invocationUsageDelta, contextCharsFromEvent } = require("./chat-usage");
 const { runChatWorklist } = require("./chat-worklist");
+const { resolveExecutionProfile } = require("../agents/execution-profile");
 const { prepareSkillDelivery: defaultPrepareSkillDelivery } = require("./skills");
 const {
   buildDutyBinding,
@@ -116,18 +117,37 @@ function createChatRunExecutor({
     if (availabilityError) {
       return fail(503, availabilityError);
     }
+    let profile;
+    try {
+      profile = resolveExecutionProfile({ body, storage, sessionId, agentId: requestedAgent });
+    } catch (error) {
+      return fail(error.statusCode || 409, { error: error.message, code: error.code });
+    }
+    const taskRegistry = profile.software ? collabTaskRegistry : null;
     let requestedDuty;
     try {
-      requestedDuty = initialDuty({ requestedDuty: body.duty, useWorktree });
+      requestedDuty = profile.software
+        ? initialDuty({ requestedDuty: body.duty, useWorktree })
+        : null;
     } catch (error) {
       return fail(400, { error: error.message, code: "INVALID_DUTY" });
     }
-    const initialDutyBinding = buildDutyBinding({
-      seat: initialSeat,
-      duty: requestedDuty,
-      routingReason: "explicit_mention",
-      agentConfig: AGENTS[requestedAgent],
-    });
+    const initialDutyBinding = profile.software
+      ? buildDutyBinding({
+          seat: initialSeat,
+          duty: requestedDuty,
+          routingReason: "explicit_mention",
+          agentConfig: AGENTS[requestedAgent],
+        })
+      : {
+          seatId: initialSeat.seatId,
+          duty: null,
+          skillName: null,
+          workflowId: profile.workflowId,
+          roleId: profile.roleId,
+          routingReason: profile.routingReason,
+          enforcementLevel: "advisory",
+        };
     const sessionProjectDir = session.projectDir;
     const existingUserMessage =
       clientTurnId && typeof findUserMessageByClientTurnId === "function"
@@ -274,14 +294,21 @@ function createChatRunExecutor({
       path.resolve(runWorkspace.worktreeDir) !== path.resolve(sessionProjectDir);
     let skillDelivery;
     try {
-      skillDelivery = prepareSkillDelivery({
-        workspaceDir: runWorkspace.worktreeDir,
-        projectDir: sessionProjectDir,
-        useWorktree,
-        isolated: isolatedWorkspace,
-        rawPrompt: turnPrompt,
-        skillNames: activeSkillNames(initialDutyBinding),
-      });
+      skillDelivery = !profile.software
+        ? {
+            skillNames: [],
+            nativeDelivery: false,
+            augmentedPrompt: turnPrompt,
+            materialize: { errors: [] },
+          }
+        : prepareSkillDelivery({
+            workspaceDir: runWorkspace.worktreeDir,
+            projectDir: sessionProjectDir,
+            useWorktree,
+            isolated: isolatedWorkspace,
+            rawPrompt: turnPrompt,
+            skillNames: activeSkillNames(initialDutyBinding),
+          });
     } catch (error) {
       log.warn?.(`[skills] delivery failed: ${error.message}`);
       skillDelivery = augmentPrompt(turnPrompt, useWorktree, {
@@ -370,13 +397,9 @@ function createChatRunExecutor({
         ? findUserMessageByClientTurnId(sessionId, clientTurnId)
         : sessionAfterUser?.messages?.[sessionAfterUser.messages.length - 1]);
     const userMessageId = persistedUserMessage?.id || null;
-    if (
-      body.internalPurpose !== "prepare" &&
-      collabTaskRegistry &&
-      typeof collabTaskRegistry.captureUserGoal === "function"
-    ) {
-      const currentTask = collabTaskRegistry.getTask(sessionId);
-      collabTaskRegistry.captureUserGoal(sessionId, {
+    if (taskRegistry && typeof taskRegistry.captureUserGoal === "function") {
+      const currentTask = taskRegistry.getTask(sessionId);
+      taskRegistry.captureUserGoal(sessionId, {
         text: turnPrompt,
         messageId: userMessageId,
         force: !existingUserMessage && currentTask?.phase === "done",
@@ -423,8 +446,9 @@ function createChatRunExecutor({
     };
     const skipPersist = new Set(["agent-event", "message"]);
     const threadCtx = {
-      preparationOnly: body.internalPurpose === "prepare",
-      teamInstructions: body.internalPurpose === "team" ? body.internalTaskPrompt : null,
+      executionProfile: profile,
+      preventHandoff: !profile.software,
+      teamInstructions: profile.software ? body.internalTaskPrompt : null,
       availability,
       sessionId,
       traceId,
@@ -447,8 +471,8 @@ function createChatRunExecutor({
           dutyBinding: initialDutyBinding,
         },
       ],
-      collabTaskRegistry,
-      deliveryVerifier,
+      collabTaskRegistry: taskRegistry,
+      deliveryVerifier: profile.software ? deliveryVerifier : null,
       runWorkspace,
       threadSeats: storage?.threadSeats || null,
       agents: AGENTS,
@@ -471,8 +495,8 @@ function createChatRunExecutor({
     callbacks.registerThread(sessionId, threadCtx);
 
     const workCtx = {
-      preparationOnly: body.internalPurpose === "prepare",
-      teamInstructions: body.internalPurpose === "team" ? body.internalTaskPrompt : null,
+      executionProfile: profile,
+      teamInstructions: profile.software ? body.internalTaskPrompt : null,
       availability,
       res: detachedRes,
       sendSse: emitUi,
@@ -492,8 +516,8 @@ function createChatRunExecutor({
       durable,
       events,
       memories,
-      collabTaskRegistry,
-      deliveryVerifier,
+      collabTaskRegistry: taskRegistry,
+      deliveryVerifier: profile.software ? deliveryVerifier : null,
       log,
       worklist,
       maxDepth,

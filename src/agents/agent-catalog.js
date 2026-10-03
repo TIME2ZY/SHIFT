@@ -1,6 +1,6 @@
 "use strict";
 const { getProviderAdapter } = require("./providers");
-const { READ_ONLY_PLANNERS } = require("./preparation-permissions");
+const { READ_ONLY_PROVIDERS } = require("./invocation-permissions");
 function createAgentCatalog({ agents = {}, availability } = {}) {
   function list() {
     return Object.entries(agents)
@@ -9,7 +9,9 @@ function createAgentCatalog({ agents = {}, availability } = {}) {
         label: config.label || id,
         capabilities: [
           ...(getProviderAdapter(config.providerId || id).capabilities.tools ? ["software"] : []),
-          ...(READ_ONLY_PLANNERS.includes(config.providerId || id) ? ["read_only_planning"] : []),
+          ...(READ_ONLY_PROVIDERS.includes(config.providerId || id)
+            ? ["read_only_planning", "analysis"]
+            : []),
         ],
         capabilitySource: "provider_adapter",
         availabilityStatus: availability?.get(id)?.status || "unknown",

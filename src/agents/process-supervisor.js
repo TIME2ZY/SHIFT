@@ -25,6 +25,7 @@ const STDERR_BUFFER_LIMIT = 8192;
 function superviseProviderProcess({
   command,
   args,
+  stdinText,
   cwd = process.cwd(),
   env = process.env,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -63,7 +64,7 @@ function superviseProviderProcess({
     const child = spawnFn(command, args, {
       cwd,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdinText === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
 
     // Decode complete UTF-8 code points across Buffer boundaries. Without a
@@ -292,6 +293,15 @@ function superviseProviderProcess({
       finishProvider({ terminal: true, ok: true, exitCode: 0, signal: null });
     });
 
+    if (stdinText !== undefined && child.stdin) {
+      child.stdin.on("error", (error) => {
+        if (closed) return; // Pipe cleanup after the recorded terminal has no business effect.
+        failedToStart = true;
+        process.exitCode = 1;
+        terminate("SIGTERM", "Provider input pipe failed: " + error.message);
+      });
+      child.stdin.end(stdinText, "utf8");
+    }
     return child;
   };
 

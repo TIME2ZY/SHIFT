@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useIsMutating } from "@tanstack/react-query";
+import { MaterialsEditor } from "./MaterialsEditor";
+import { ReportArtifact } from "./ReportArtifact";
 import { useTaskActions, useTaskQuery } from "./queries";
 import type { DelegationContract, DelegationState } from "./types";
 
@@ -22,6 +25,7 @@ export function TaskConsole({
 }) {
   const query = useTaskQuery(taskId);
   const actions = useTaskActions();
+  const inputPending = useIsMutating({ mutationKey: ["task-inputs", taskId] }) > 0;
   const task = query.data?.task;
   const [request, setRequest] = useState("");
   const [draft, setDraft] = useState<DelegationContract | null>(null);
@@ -46,7 +50,7 @@ export function TaskConsole({
       </section>
     );
   const editable = task.state === "draft";
-  const pending = actions.isPending;
+  const pending = actions.isPending || inputPending;
   const preparing = query.data?.preparingTaskId === task.id;
   const updateList = (key: "deliverables" | "acceptanceCriteria", value: string) => {
     if (draft) setDraft({ ...draft, [key]: value.split("\n") });
@@ -60,6 +64,7 @@ export function TaskConsole({
       {query.data?.recoveryBlocked && (
         <p role="alert">上次运行中断，正在等待遗留进程核验；排队任务保留。</p>
       )}
+      <MaterialsEditor key={task.id} task={task} disabled={pending || preparing} />
       {editable ? (
         <>
           <label>
@@ -362,6 +367,7 @@ export function TaskConsole({
             <p key={acceptance.runId}>
               验收：{acceptance.evidenceLevel === "verified" ? "平台证据核验" : "Agent 审查"} ·{" "}
               {acceptance.criteria.join("；")}
+              {acceptance.evidence.sourceChecks ? " · 原文引用已核验" : ""}
             </p>
           ))}
           {["queued", "running", "cancelling"].includes(task.state) && (
@@ -378,19 +384,23 @@ export function TaskConsole({
           {task.artifacts.length > 0 && (
             <div>
               <h3>成果</h3>
-              {task.artifacts.map((artifact) => (
-                <article key={artifact.id}>
-                  <p className="delegation-result">{artifact.summary}</p>
-                  <p>
-                    {artifact.kind}：<code>{artifact.locator}</code>
-                  </p>
-                  {artifact.contentHash && (
+              {task.artifacts.map((artifact) =>
+                artifact.kind === "markdown_report" ? (
+                  <ReportArtifact key={artifact.id} taskId={task.id} artifact={artifact} />
+                ) : (
+                  <article key={artifact.id}>
+                    <p className="delegation-result">{artifact.summary}</p>
                     <p>
-                      版本：<code>{artifact.contentHash}</code>
+                      {artifact.kind}：<code>{artifact.locator}</code>
                     </p>
-                  )}
-                </article>
-              ))}
+                    {artifact.contentHash && (
+                      <p>
+                        版本：<code>{artifact.contentHash}</code>
+                      </p>
+                    )}
+                  </article>
+                )
+              )}
             </div>
           )}
           {task.legacySource && (

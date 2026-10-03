@@ -1,5 +1,6 @@
 "use strict";
 const { randomUUID, createHash } = require("node:crypto");
+const { createTaskInputs } = require("./task-inputs");
 const {
   normalizeDelegationContract,
   DEFAULT_DELEGATION_POLICY,
@@ -25,6 +26,7 @@ function hash(value) {
 function createTaskRepository(db) {
   const find = db.prepare("SELECT * FROM tasks WHERE id=?");
   const transaction = (work) => db.transaction(work).immediate();
+  const inputs = createTaskInputs({ db, transaction, draft, event, get });
   function requireTask(id) {
     const row = find.get(id);
     if (!row) throw failure("TASK_NOT_FOUND", "任务不存在。", 404);
@@ -66,6 +68,7 @@ function createTaskRepository(db) {
       revision: row.revision,
       state: row.state,
       contract: JSON.parse(plan?.spec_json || row.draft_json || "null"),
+      inputs: plan ? JSON.parse(plan.inputs_json) : inputs.list(id),
       plan: plan
         ? {
             id: plan.id,
@@ -166,15 +169,29 @@ function createTaskRepository(db) {
           "INSERT INTO tasks(id,parent_task_id,project_key,draft_json,state,created_at,updated_at) VALUES (?,?,?,?,'draft',?,?)"
         ).run(id, parentTaskId, projectKey, source ? JSON.stringify(source) : null, now, now);
         event(id, "task_created", { parentTaskId, projectKey });
+        if (parent) inputs.inherit(id, get(parentTaskId).inputs);
         return get(id);
       });
     },
     get,
+    addInput: inputs.add,
+    removeInput: inputs.remove,
     findRunByThread(threadId) {
       const row = db
-        .prepare("SELECT id,task_id,node_id FROM team_runs WHERE thread_id=?")
+        .prepare(
+          "SELECT r.id,r.task_id,r.node_id,r.state,n.spec_json,r.team_json FROM team_runs r JOIN plan_nodes n ON n.plan_id=r.plan_id AND n.node_id=r.node_id WHERE r.thread_id=?"
+        )
         .get(threadId);
-      return row ? { id: row.id, taskId: row.task_id, nodeId: row.node_id } : null;
+      return row
+        ? {
+            id: row.id,
+            taskId: row.task_id,
+            nodeId: row.node_id,
+            state: row.state,
+            workflowId: JSON.parse(row.spec_json).workflowId,
+            team: JSON.parse(row.team_json),
+          }
+        : null;
     },
     list() {
       return db
@@ -241,13 +258,17 @@ function createTaskRepository(db) {
           spec = normalizeDelegationContract(JSON.parse(row.draft_json || "null"));
         const planId = randomUUID(),
           now = new Date().toISOString();
-        db.prepare("INSERT INTO task_plans VALUES (?,?,?,?,?,?)").run(
+        const sourceInputs = inputs.list(id);
+        db.prepare(
+          "INSERT INTO task_plans(id,task_id,spec_json,content_hash,source_revision,created_at,inputs_json) VALUES (?,?,?,?,?,?,?)"
+        ).run(
           planId,
           id,
           JSON.stringify(spec),
-          hash(spec),
+          hash({ spec, inputs: sourceInputs }),
           revision,
-          now
+          now,
+          JSON.stringify(sourceInputs)
         );
         for (const [ordinal, node] of spec.subtasks.entries()) {
           const team = selections[node.id];

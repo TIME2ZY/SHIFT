@@ -1239,6 +1239,39 @@ const MIGRATIONS = Object.freeze([
     name: "independent_task_platform",
     up: (db) => require("./offline/task-platform-cutover").migrateTaskPlatform(db),
   },
+  {
+    version: 34,
+    name: "materials_inputs_and_workflow_bindings",
+    sql: `
+    ALTER TABLE task_plans ADD COLUMN inputs_json TEXT NOT NULL DEFAULT '[]';
+    CREATE TABLE task_inputs (
+      task_id TEXT NOT NULL REFERENCES tasks(id), id TEXT NOT NULL,
+      owner_task_id TEXT NOT NULL REFERENCES tasks(id), name TEXT NOT NULL,
+      locator TEXT NOT NULL, content_hash TEXT NOT NULL, byte_length INTEGER NOT NULL,
+      created_at TEXT NOT NULL, PRIMARY KEY(task_id,id)
+    );
+    CREATE TABLE invocation_bindings_v34 (
+      invocation_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, seat_id TEXT NOT NULL,
+      duty TEXT CHECK(duty IN ('discuss','plan','implement','fix','review','deliver','accept','recall')),
+      workflow_id TEXT, role_id TEXT,
+      skill_name TEXT,
+      routing_reason TEXT NOT NULL CHECK(routing_reason IN ('capability_match','explicit_mention','handoff_to','sticky','affinity','solo_fallback')),
+      enforcement_level TEXT NOT NULL CHECK(enforcement_level IN ('enforced','advisory')),
+      created_at TEXT NOT NULL,
+      CHECK((duty IS NOT NULL AND workflow_id IS NULL AND role_id IS NULL AND skill_name IS NOT NULL AND length(trim(skill_name)) > 0) OR
+        (duty IS NULL AND skill_name IS NULL AND workflow_id IS NOT NULL AND role_id IS NOT NULL AND length(trim(workflow_id)) > 0 AND length(trim(role_id)) > 0)),
+      FOREIGN KEY(invocation_id,thread_id) REFERENCES invocations(id,thread_id) ON DELETE CASCADE,
+      FOREIGN KEY(seat_id,thread_id) REFERENCES thread_seats(seat_id,thread_id) ON DELETE RESTRICT,
+      FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
+    );
+    INSERT INTO invocation_bindings_v34(invocation_id,thread_id,seat_id,duty,skill_name,routing_reason,enforcement_level,created_at)
+      SELECT invocation_id,thread_id,seat_id,duty,skill_name,routing_reason,enforcement_level,created_at FROM invocation_duty_bindings;
+    DROP TABLE invocation_duty_bindings;
+    ALTER TABLE invocation_bindings_v34 RENAME TO invocation_duty_bindings;
+    CREATE INDEX invocation_duty_bindings_thread_created ON invocation_duty_bindings(thread_id,created_at);
+    CREATE INDEX invocation_duty_bindings_seat_created ON invocation_duty_bindings(seat_id,created_at);
+  `,
+  },
 ]);
 
 function migrateRemoveMemorySuggestions(db) {

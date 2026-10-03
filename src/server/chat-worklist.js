@@ -302,7 +302,7 @@ async function runChatWorklist(ctx) {
             }
           : {}),
         INVOKE_SESSION_ID: turnRunState.resumeSessionId,
-        INVOKE_PURPOSE: ctx.preparationOnly ? "prepare" : "execute",
+        INVOKE_PURPOSE: ctx.executionProfile?.purpose || "execute",
         INVOKE_WORKSPACE_KEY: workspaceKey,
       };
 
@@ -397,7 +397,7 @@ async function runChatWorklist(ctx) {
           taskVersion: turnRunState.taskSnapshot?.version,
         });
         const trackProcess = Boolean(
-          ctx.preparationOnly || collabTaskRegistry?.getTask(sessionId)?.executionBinding
+          ctx.executionProfile || collabTaskRegistry?.getTask(sessionId)?.executionBinding
         );
         const processEvent = (kind, payload = {}) => {
           const written = events.append({

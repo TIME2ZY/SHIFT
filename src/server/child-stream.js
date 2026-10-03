@@ -77,10 +77,13 @@ function runChildStream({
     childEnv.PYTHONIOENCODING = childEnv.PYTHONIOENCODING || "utf-8";
     childEnv.PYTHONUTF8 = childEnv.PYTHONUTF8 || "1";
 
-    const child = spawnRunner(process.execPath, args, {
+    // Windows CreateProcess has a 32K command-line limit; keep large prompts in the pipe.
+    const stdinText = args.at(-1)?.length > 12000 ? args.at(-1) : null;
+    const spawnArgs = stdinText === null ? args : [...args.slice(0, -1), "--prompt-stdin"];
+    const child = spawnRunner(process.execPath, spawnArgs, {
       cwd: workDir,
       env: childEnv,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdinText === null ? "ignore" : "pipe", "pipe", "pipe"],
     });
 
     const emitStreamError = (payload) => {
@@ -282,6 +285,10 @@ function runChildStream({
       } catch (error) {
         failStream("process ownership", error);
       }
+    }
+    if (stdinText !== null && child.stdin) {
+      child.stdin.on("error", (error) => failStream("stdin stream", error));
+      child.stdin.end(stdinText, "utf8");
     }
   });
 }

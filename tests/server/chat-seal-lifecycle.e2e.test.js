@@ -159,7 +159,8 @@ test("PRE-seal: full window rotates before spawn; one spawn; non-empty assistant
         .at(-1);
       assert.ok(restoration, "prepared recovery is durable, not inferred from session rotation");
       assert.equal(restoration.payload.stage, "prompt_prepared");
-      assert.match(prompts[0], /Current Task Context/);
+      assert.match(prompts[0], /流程 task_preparation，角色 plan/);
+      assert.doesNotMatch(prompts[0], /Current Task Context/);
       for (const source of restoration.payload.seals) {
         const seal = recoveryEvents.find((event) => event.payload?.id === source.sealId);
         assert.ok(seal);

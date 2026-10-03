@@ -201,7 +201,7 @@ function baseDeps(res, overrides = {}) {
       sealAndRotateWindow: () => null,
     },
     eventStore: {
-      append: () => ({ ok: false, event: null, sqlite: false }),
+      append: () => ({ ok: true, event: null, sqlite: false }),
     },
     memoryCapture: {
       captureHandoff: () => ({ captured: false }),
@@ -263,7 +263,7 @@ test("startRun rejects a supported agent whose Seat is disabled", async () => {
     })
   );
   const result = await executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "hi" },
+    body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "hi" },
   });
   assert.equal(result.status, 409);
   assert.deepEqual(result.json, {
@@ -290,12 +290,12 @@ test("a slower older chat request cannot abort the newer request", async () => {
   });
   const executor = chatRoutes.createChatRunExecutor(deps);
   const first = executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "older" },
+    body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "older" },
   });
   await Promise.resolve();
 
   const second = executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "newer" },
+    body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "newer" },
   });
   await Promise.resolve();
 
@@ -340,7 +340,9 @@ test("chat preparation failure closes the durable trace", async () => {
   );
 
   await assert.rejects(
-    executor.startRun({ body: { sessionId: "s1", agent: "codex", prompt: "go" } }),
+    executor.startRun({
+      body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "go" },
+    }),
     /recall unavailable/
   );
   assert.deepEqual(completed, [
@@ -412,7 +414,7 @@ test("trace terminal state reflects final invocation outcome rather than earlier
   );
 
   const res = await executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "run multi" },
+    body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "run multi" },
   });
   await res.promise;
   assert.equal(completedTraces.length, 1);
@@ -483,7 +485,7 @@ test("user abort intent forces invocation and trace terminal state to aborted", 
   );
 
   const res = await executor.startRun({
-    body: { sessionId: "s1", agent: "codex", prompt: "run abort" },
+    body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "run abort" },
   });
   await res.promise;
 
@@ -566,7 +568,7 @@ for (const failToolWrite of [false, true]) {
     );
 
     const res = await executor.startRun({
-      body: { sessionId: "s1", agent: "codex", prompt: "run tool" },
+      body: { sessionId: "s1", agent: "codex", internalPurpose: "prepare", prompt: "run tool" },
     });
     await res.promise;
 

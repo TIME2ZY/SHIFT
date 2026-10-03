@@ -39,6 +39,7 @@ function fixture({
     state: state,
     revision: 8,
     contract: clarification ? null : contract,
+    inputs: [],
     plan: null,
     queueSeq: null,
     parentTaskId: null,

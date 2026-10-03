@@ -30,6 +30,8 @@ const { createAgentCatalog } = require("../agents/agent-catalog");
 const { createTeamCatalog } = require("../teams/catalog");
 const { createSoftwareDeliveryTeam } = require("../teams/software-delivery");
 const { createTaskWorkspace } = require("../worktree/task-workspace");
+const { createTaskFiles } = require("../tasks/files");
+const { createMaterialsAnalysisTeam } = require("../teams/materials-analysis");
 const { processIdentity, reconcileOwnedProcesses } = require("../agents/process-ownership");
 const { createCollabTaskRegistry } = require("../agents/collab-task-registry");
 
@@ -352,6 +354,7 @@ function createServer(options = {}) {
       apiUrl: `http://127.0.0.1:${server.address()?.port || 8787}`,
     });
   const agentCatalog = createAgentCatalog({ agents: AGENTS, availability });
+  const taskFiles = createTaskFiles({ shiftHome: appPaths.shiftHome });
   const teamCatalog = createTeamCatalog({
     agents: agentCatalog,
     definitions: [
@@ -366,6 +369,16 @@ function createServer(options = {}) {
         runtime: chatRuntime,
         workspace: worktreeManager,
         setSessionWorktree: updateWorktreeDurable,
+      }),
+      createMaterialsAnalysisTeam({
+        startRun: startTaskInvocation,
+        getSession: getSessionDurable,
+        createSession: createSessionDurable,
+        projects: storageContext.storage.projects,
+        files: taskFiles,
+        traces: storageContext.storage.traces,
+        invocations: storageContext.storage.invocations,
+        runtime: chatRuntime,
       }),
     ],
   });
@@ -388,7 +401,8 @@ function createServer(options = {}) {
     getSession: getSessionDurable,
     createSession: createSessionDurable,
     projects: storageContext.storage.projects,
-    createWorkspace: (id) => createTaskWorkspace(appPaths.shiftHome, id),
+    createWorkspace: (id) => taskFiles.directory(id),
+    files: taskFiles,
     traces: storageContext.storage.traces,
     logger,
   });

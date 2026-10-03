@@ -48,7 +48,7 @@ function finalizeA2ARoutes(input = {}) {
   const binding = input.collabTaskRegistry?.getTask(
     input.sessionId || input.threadId
   )?.executionBinding;
-  if (input.a2aState?.preparationOnly) {
+  if (input.a2aState?.preventHandoff) {
     return {
       mentions: [],
       enqueued: [],
@@ -56,7 +56,7 @@ function finalizeA2ARoutes(input = {}) {
       repairs: [],
       handoffByTarget: {},
       handoffQualityByTarget: {},
-      mode: "preparation",
+      mode: "workflow_owned",
       metrics: null,
     };
   }

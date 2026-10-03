@@ -317,7 +317,7 @@ function completeAssistantTurn(ctx, turnRunState, entry) {
   }
 
   const workflowEvidenceEvents = processWorkflowEvidenceOutput({
-    preparationOnly: ctx.preparationOnly,
+    workflowId: dutyBinding?.workflowId,
     seatId: dutyBinding?.seatId,
     invocationId,
     progressKey: deliveryVerifier?.getHeadSha?.(runWorkspace?.worktreeDir || ""),

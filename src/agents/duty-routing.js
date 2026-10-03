@@ -101,6 +101,7 @@ function resolveEnforcementLevel(agentConfig, duty) {
 }
 
 function activeSkillNames(binding) {
+  if (binding?.workflowId) return [];
   if (!binding?.skillName) return ["cross-agent-handoff"];
   return [...new Set([binding.skillName, "cross-agent-handoff"])];
 }

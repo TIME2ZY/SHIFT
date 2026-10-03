@@ -45,6 +45,15 @@ export interface TaskArtifact {
   contentHash: string | null;
   metadata: Record<string, unknown>;
 }
+export interface TaskInput {
+  id: string;
+  ownerTaskId: string;
+  name: string;
+  locator: string;
+  contentHash: string;
+  byteLength: number;
+  createdAt: string;
+}
 export interface TaskAcceptance {
   runId: string;
   verdict: "accepted";
@@ -62,6 +71,7 @@ export interface DelegationTask {
   revision: number;
   state: DelegationState;
   contract: DelegationContract | null;
+  inputs: TaskInput[];
   plan: { id: string; hash: string; sourceRevision: number; createdAt: string } | null;
   queueSeq: number | null;
   reason: string | null;

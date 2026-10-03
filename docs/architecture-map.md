@@ -49,7 +49,7 @@ Web App (web/src/app/App.tsx)
   └─ observability feature → 独立审计页（占用原工作区导航位置）
 
 持久化核心：
-  task-repository → tasks/task_plans/plan_nodes/team_runs/task_artifacts/task_acceptances/task_events（schema v33）
+  task-repository → tasks/task_plans/plan_nodes/team_runs/task_inputs/task_artifacts/task_acceptances/task_events（schema v34）
   collaboration-task-repository → 软件团队内部方案/交付证据；executionBinding 只读 join 冻结 Node/TeamRun
   process-ownership-repository → process.spawn_intent/bound/exited 事件的只读恢复投影
   runtime_server_lease → 同一数据库进程身份租约，第二个活服务不能收口第一个
@@ -63,7 +63,7 @@ Web App (web/src/app/App.tsx)
   execution-read-model → Session-scoped Trace / Invocation / Handoff durable timeline
   collaboration-read-model → Session-scoped 任务卡、Seat/Duty 与证据投影（只读，不回写）
   thread-seat-repository → Thread enabled Seat 配置与 chat/A2A 目标解析（schema v30）
-  invocation-duty-binding-repository → Invocation start 同事务写入的不可变 DutyBinding（schema v30）
+  invocation-duty-binding-repository → Invocation start 同事务写入的不可变软件 Duty 或 workflow/role 绑定（schema v34）
   memory-capture → 协作事件（handoff-captured 等），非产品记忆行
   recall-service → 从可信 Thread 解析活跃 Project，再查询 thread / project 分区投影
 ```
@@ -703,10 +703,10 @@ Seal 恢复由 bootstrap 收集实际注入包引用，context-restoration 在 p
 
 - task-routes → tasks/platform：创建 Task UUID，不创建 Thread/Project。prepare 才绑定只读准备 Thread，CAS revision 防止旧分析覆盖用户编辑。旧 Session /runs 写入口返回 TASK_ENTRY_REQUIRED；SSE/stop 观察基础设施保留。
 - tasks/planning 输出带 workflowId、capabilities、dependsOn、节点交付物和条件的计划；shared/delegation-contracts 校验 DAG 和全局条件覆盖，不限制软件 workflow。
-- agent-catalog 聚合 Provider 适配器能力与可用性；teams/catalog 按 Team 声明角色选择成员。第一阶段仅注册 software_delivery；通用调度通过契约可接其他 Team，测试用两个不同定义验证。
+- agent-catalog 聚合 Provider 适配器能力与可用性；teams/catalog 按 Team 声明角色选择成员。现注册 software_delivery 与 materials_analysis；软件走 Duty 交接，材料三个角色在同一 Team 内串行调用已有 executor。
 - task-repository.submit 冻结独立 Plan 与实际 plan_nodes，并事务保存节点 Team/FIFO/event。SQLite 的 Task 与 TeamRun 唯一 active slot 保证串行；claimNext 按依赖就绪与 ordinal 创建独立 attempt。
 - tasks/scheduler 只处理通用回执、有限重试、Task 期限、取消与恢复；软件 Git/PR/CI 留在 teams/software-delivery。所有节点验收通过才完成 Task，成功退出文本不构成完成。
-- 每次尝试新建观察 Thread，共用 Task id 持有的隔离工作树。baseline 记录 headSha/porcelain 与 continue_workspace；后继输入包含已验收前置节点 Artifact/Acceptance 与版本。
+- 每次尝试新建观察 Thread；软件尝试共用 Task id 持有的隔离工作树。baseline 记录 headSha/porcelain 与 continue_workspace；后继输入包含已验收前置节点 Artifact/Acceptance 与版本。
 - software-delivery 使用 chat-runtime → chat-routes → chat-worklist 单一 CLI 链；每跳保留 Team instructions，内部交接走既有 durable handoff。collaboration repository 从 TeamRun/PlanNode 得到只读 executionBinding，冻结 goal 和 baseline 条件，旧平台 queue 列已删除。
 - chat-routes 返回 chat-runtime.attachPromise 的收口 Promise；调用方恢复前先释放运行记录，同时保留终态写入异常。调度器检查 runtime、active invocation 与 process ownership，正常收口可继续执行，未知遗留运行阻止新领取。
 - 软件共享工作树的组合验收：每次尝试 baseline 固定此前已完成的软件节点 id；团队自己的冻结范围保持本节点目标，内部验收条件还包含这些节点原有条件，须在当前工作树重新核验。引用通过 PlanNode 只读投影得到，不复制合同；旧尝试的条件集合不会随之后节点完成而增长。通用平台回执仍只匹配当前节点条件，累计复查属于软件 Team 责任。
@@ -724,3 +724,14 @@ Canonical JSONL 归档退役说明与「P2 结构拆分与前端守卫（2026-09
 （`role-contracts.js`、`/api/chat`、`mirrorLastMessage`、storage_outbox、transcript 模块）
 确实零残留。下列三处描述已按当前实现修正：产品终态 reason 字面量的归属（见 §3.1）、
 产品记忆写入链的中间层级（见 §3.4）、三个 1000+ 行文件的模块边界（见本节）。
+
+### 材料团队主链路（2026-10-03）
+
+- task-routes 的 inputs POST/DELETE → tasks/platform → task-repository.addInput/removeInput：草稿 CAS 更新唯一 SQLite 引用，task-inputs 是仓库内私有用例 helper；submit 将清单与规范目标一起冻结到 Plan/hash。关联草稿保留输入 id 与 ownerTaskId。
+- tasks/files 保存规范化 UTF-8 快照（去 BOM、CRLF/CR→LF），hash 基于保存字节，行号按 LF 从 1 开始。原用户文件不再读取；任务根目录、子目录和文件拒绝 symlink/越界，读取核对 owner/locator/hash。文件内容属于文件系统，引用和验收属于 SQLite。
+- 准备与材料调用使用普通目录身份（skipGit），避免任务目录位于宿主 Git 内时被解析到仓库根；软件 Team 独占 Git 初始化/worktree。
+- teams/materials-analysis → chat-runtime → chat-routes → chat-worklist：analyze/write/review 在一个 Task 槽中运行，每次有独立 Trace/Invocation，TeamRun 固定首个 traceId，回执保存全部 traceIds。execution-profile 校验 Team 和成员，通用调用只绑定 workflow/role，duty/skillName 为 null。
+- invocation-permissions 替代 preparation-permissions；prepare/materials 均强制支持只读的 Codex/Claude，禁用 resume，跳过软件技能、协作提示词、门禁及 handoff。只读调用不注册平台 MCP 回调。大提示词由 child-stream→invoke-cli stdin 传送，Provider 同样用 stdin，复用原流式/进程/终态链。
+- materials-report 校验唯一 JSON 围栏、全部结论的来源 id/行号/原文；不筛掉无效结论。源版本通过后渲染完整 Markdown 给 review，接受后保存同一报告字节；再次检查源 hash。Artifact 为 markdown_report/SHA256，整体 agent_reviewed，机械 sourceChecks 单独记录；solo_fallback 明示，成功退出不等于验收。
+- 调用前后和平台核验/写报告之间检查取消，异常先停止并等待 executor，再允许队列继续；重启仍走原进程核验与 Task 中断收口，不重放未知副作用。
+- TaskConsole → MaterialsEditor/ReportArtifact：HTTP 上传/移除与冻结版本，sanitized Markdown 预览，authenticatedFetch 下载；成果 API 按 Task+Artifact id 取 SQLite 引用并核对报告 hash，不接受任意文件路径。

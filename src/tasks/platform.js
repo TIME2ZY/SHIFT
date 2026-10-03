@@ -3,6 +3,7 @@ const { preparationInstructions, parsePreparedContract } = require("./planning")
 const { assertValidOpaqueId } = require("../shared/id-policy");
 const { DEFAULT_DELEGATION_POLICY } = require("../shared/delegation-contracts");
 const { failure } = require("../storage/task-repository");
+const { materialContext } = require("./materials-report");
 function createTaskPlatform({
   repository,
   scheduler,
@@ -15,6 +16,7 @@ function createTaskPlatform({
   projects,
   createWorkspace,
   traces,
+  files,
   logger = console,
 }) {
   function get(id) {
@@ -32,6 +34,23 @@ function createTaskPlatform({
     list: repository.list,
     status: scheduler.status,
     saveDraft: (id, contract, revision) => repository.saveDraft(id, contract, revision),
+    addInput(id, { name, content, expectedRevision }) {
+      const task = get(id);
+      if (task.state !== "draft") throw failure("TASK_FROZEN", "材料范围已冻结。");
+      if (task.revision !== expectedRevision)
+        throw failure("TASK_REVISION_CONFLICT", "草稿已更新，请刷新。");
+      return repository.addInput(id, files.storeInput(id, { name, content }), expectedRevision);
+    },
+    removeInput: (id, inputId, revision) => repository.removeInput(id, inputId, revision),
+    report(id, artifactId) {
+      const artifact = get(id).artifacts.find((item) => item.id === artifactId);
+      if (!artifact) throw failure("ARTIFACT_NOT_FOUND", "成果不存在。", 404);
+      return {
+        markdown: files.readReport(id, artifact),
+        fileName: "report.md",
+        contentHash: artifact.contentHash,
+      };
+    },
     async prepare(id, { prompt, clientTurnId } = {}) {
       let current = get(id);
       if (clientTurnId) assertValidOpaqueId(clientTurnId, "clientTurnId");
@@ -54,13 +73,16 @@ function createTaskPlatform({
       if (!current.preparationThreadId) {
         const project = current.projectKey
           ? projects.requireActive(current.projectKey)
-          : projects.openDirectory(createWorkspace(id));
+          : projects.openDirectory(createWorkspace(id), { identityOptions: { skipGit: true } });
         current = repository.bindPreparation(
           id,
           createSession({ projectKey: project.projectKey }).id
         );
       }
       const observed = current;
+      const materials = current.inputs.length
+        ? materialContext(files.readInputs(current.inputs))
+        : "";
       let resolveStart, rejectStart;
       const start = new Promise((resolve, reject) => {
         resolveStart = resolve;
@@ -84,11 +106,14 @@ function createTaskPlatform({
             body: {
               sessionId: observed.preparationThreadId,
               agent: main.id,
-              duty: "discuss",
               prompt,
               clientTurnId,
               internalPurpose: "prepare",
-              internalTaskPrompt: preparationInstructions(observed.contract, teams.list()),
+              internalTaskPrompt: preparationInstructions(
+                observed.contract,
+                teams.list(),
+                materials
+              ),
             },
           });
           if (!started.ok)
@@ -140,6 +165,12 @@ function createTaskPlatform({
       if (scheduler.status().preparingTaskId === id)
         throw failure("TASK_PREPARING", "请等待主 Agent 分析完成。");
       if (!task.contract) throw failure("PLAN_REQUIRED", "请先整理或编辑计划。", 400);
+      if (
+        task.contract.subtasks.some((node) => node.workflowId === "materials_analysis") &&
+        !task.inputs.length
+      )
+        throw failure("INPUT_REQUIRED", "材料分析至少需要一份文本材料。", 400);
+      if (task.inputs.length) files.readInputs(task.inputs);
       const selections = Object.fromEntries(
         task.contract.subtasks.map((node) => [node.id, teams.select(node)])
       );

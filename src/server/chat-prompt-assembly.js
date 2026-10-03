@@ -154,12 +154,12 @@ async function assemblePrompt(ctx, turnRunState, entry) {
   turnRunState.taskSnapshot = taskSnapshot;
 
   const promptParts = [
-    identityBlock,
-    ctx.preparationOnly
-      ? "本轮仅整理委托草稿，禁止 handoff、实施、验收或写文件。"
-      : collaborationBlock,
-    ctx.preparationOnly ? null : outcomeEvidenceBlock,
-    taskContext,
+    ctx.executionProfile && !ctx.executionProfile.software
+      ? `你是 SHIFT 本机 Agent ${agent}，流程 ${ctx.executionProfile.workflowId}，角色 ${ctx.executionProfile.roleId}。只读执行本次要求，将结果输出到正文，禁止 handoff 或写文件。`
+      : identityBlock,
+    ctx.executionProfile?.software ? collaborationBlock : null,
+    ctx.executionProfile?.software ? outcomeEvidenceBlock : null,
+    ctx.executionProfile && !ctx.executionProfile.software ? null : taskContext,
   ].filter(Boolean);
   if (ctx.teamInstructions) promptParts.push(ctx.teamInstructions);
   if (i === 0) {
@@ -200,7 +200,8 @@ async function assemblePrompt(ctx, turnRunState, entry) {
       )
     );
   }
-  promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
+  if (!ctx.executionProfile || ctx.executionProfile.software)
+    promptParts.push(callbacks.buildCallbackInstructions(apiUrl, sessionId));
   // Published so the pre-call rotation branch below can append a fresh digest
   // header and re-join the same part list after resumeSessionId changes.
   turnRunState.promptParts = promptParts;

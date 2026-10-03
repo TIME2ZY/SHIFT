@@ -225,6 +225,7 @@ const HANDOFF_INTENTS = Object.freeze([
 const DUTIES = Object.freeze([...HANDOFF_INTENTS]);
 
 const ROUTING_REASONS = Object.freeze([
+  "capability_match",
   "explicit_mention",
   "handoff_to",
   "sticky",

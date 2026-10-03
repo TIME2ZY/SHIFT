@@ -1,10 +1,12 @@
 "use strict";
 const { normalizeDelegationContract } = require("../shared/delegation-contracts");
-function preparationInstructions(previous, workflows) {
+function preparationInstructions(previous, workflows, materials = "") {
   return [
     "你是 SHIFT 任务委托平台的主 Agent。本轮只理解目标、分析输入并拆解可执行计划，不写文件、不实施、不交接或发布任务。缺少必要信息时用正文向用户询问，先不输出计划。",
     "每个分任务将由平台选择的团队独立领取和验收。只安排实现用户目标所必需的节点，不把团队内部 discuss/review 等角色写成分任务。",
     "团队流程与能力：" + JSON.stringify(workflows),
+    materials,
+    "需要分析提供的材料并交付报告时使用 materials_analysis，能力为 analysis；软件实现使用 software_delivery，能力为 software。材料不足时澄清，不要使用软件团队生成分析报告。",
     "输出唯一 delegation_plan JSON 围栏。字段：goal,deliverables,acceptanceCriteria,subtasks。",
     "每个 subtask 具有 id,title,description,workflowId,capabilities,dependsOn,deliverables,acceptanceCriteria。依赖使用同计划内 id，必须无环；总体交付物与验收条件必须原样分配到至少一个节点。节点应是能单独交付的工作包，简单目标用单节点。不同软件节点将串行共享隔离工作树。不要指定 Agent 名称。",
     "已有草稿：" + JSON.stringify(previous),

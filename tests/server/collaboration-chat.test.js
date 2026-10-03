@@ -43,6 +43,62 @@ function spawnText(text) {
   });
   return child;
 }
+const materialsContract = {
+  goal: "分析季度材料",
+  deliverables: ["Markdown 报告"],
+  acceptanceCriteria: ["结论附原文来源"],
+  subtasks: [
+    {
+      id: "report",
+      title: "分析报告",
+      description: "总结材料中的增长数据",
+      workflowId: "materials_analysis",
+      capabilities: ["analysis"],
+      dependsOn: [],
+      deliverables: ["Markdown 报告"],
+      acceptanceCriteria: ["结论附原文来源"],
+    },
+  ],
+};
+function materialsOutput(role, inputId, invalid = false) {
+  if (role === "analyze") return "增长数据为 12%，见第二行。";
+  if (role === "write")
+    return (
+      "```materials_report\n" +
+      JSON.stringify({
+        title: "季度报告",
+        sections: [
+          {
+            heading: "增长",
+            claims: [
+              {
+                text: "本季度增长 12%。",
+                citations: [
+                  {
+                    inputId,
+                    startLine: 2,
+                    endLine: 2,
+                    quote: invalid ? "invented" : "增长 12%",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }) +
+      "\n```"
+    );
+  return (
+    "```materials_review\n" +
+    JSON.stringify({
+      verdict: "accepted",
+      criteria: materialsContract.acceptanceCriteria,
+      findings: [],
+      summary: "全部结论有来源且覆盖范围",
+    }) +
+    "\n```"
+  );
+}
 const fence = (name, fields) =>
   "```" +
   name +
@@ -101,7 +157,26 @@ async function fixture(t, spawnRunner, extra = {}) {
     uiToken: TOKEN,
     worktreeManager: workspace,
     availabilityProbe: async (id) => ({ status: id === "codex" ? "available" : "unavailable" }),
-    spawnRunner: (...args) => spawnRunner(storage, ...args),
+    spawnRunner: (command, args, options) => {
+      if (args.at(-1) !== "--prompt-stdin") return spawnRunner(storage, command, args, options);
+      const relay = new EventEmitter();
+      relay.stdin = new PassThrough();
+      relay.stdout = new PassThrough();
+      relay.stderr = new PassThrough();
+      let prompt = "",
+        child;
+      relay.kill = () => child?.kill();
+      relay.stdin.on("data", (chunk) => {
+        prompt += chunk.toString("utf8");
+      });
+      relay.stdin.on("finish", () => {
+        child = spawnRunner(storage, command, [...args.slice(0, -1), prompt], options);
+        child.stdout.pipe(relay.stdout);
+        child.stderr.pipe(relay.stderr);
+        child.on("close", (...values) => relay.emit("close", ...values));
+      });
+      return relay;
+    },
     logger: { info() {}, warn() {}, error() {}, log() {} },
     ...extra,
   });
@@ -142,6 +217,127 @@ async function fixture(t, spawnRunner, extra = {}) {
     );
   return { storage, api, create, save, submit, settled, base };
 }
+
+test("materials delegation needs no Project or Git, executes three durable roles and serves verified report", async (t) => {
+  const roles = [],
+    prompts = [];
+  const f = await fixture(t, (s, _command, args, options) => {
+    const invocation = s.invocations.listActive()[0],
+      binding = s.invocationDutyBindings.getForInvocation(invocation.id);
+    assert.equal(binding.duty, null);
+    assert.equal(binding.skillName, null);
+    assert.equal(binding.workflowId, "materials_analysis");
+    assert.equal(options.env.INVOKE_PURPOSE, "materials");
+    roles.push(binding.roleId);
+    prompts.push(args.at(-1));
+    assert.doesNotMatch(
+      args.at(-1),
+      /solution_baseline|implementation_plan|final_acceptance|MCP 回调工具说明/
+    );
+    return spawnText(materialsOutput(binding.roleId, s.tasks.list()[0].inputs[0].id));
+  });
+  let task = (await f.api("/api/tasks", "POST", {})).task;
+  const sourceTaskId = task.id;
+  assert.equal(task.projectKey, null);
+  const input = await f.api(`/api/tasks/${task.id}/inputs`, "POST", {
+    name: "季度.md",
+    content: "\uFEFF季度数据\r\n增长 12%",
+    expectedRevision: task.revision,
+  });
+  assert.equal(input.status, 201);
+  task = input.task;
+  await f.submit(task.id, materialsContract);
+  const result = (await f.settled(task.id)).task;
+  assert.equal(result.state, "completed", result.reason);
+  assert.deepEqual(roles, ["analyze", "write", "review"]);
+  assert.equal(result.projectKey, null);
+  assert.equal(result.acceptances[0].evidenceLevel, "agent_reviewed");
+  assert.equal(result.acceptances[0].evidence.sourceChecks[0].verified, true);
+  assert.equal(result.acceptances[0].evidence.independentReview, false);
+  const run = result.runs[0],
+    artifact = result.artifacts[0];
+  assert.equal(result.acceptances[0].evidence.traceIds.length, 3);
+  assert.equal(f.storage.collaborationTasks.get(run.threadId), null);
+  assert.equal(f.storage.handoffs.listForThread(run.threadId).length, 0);
+  assert.equal(f.storage.invocations.listActive().length, 0);
+  assert.equal(f.storage.processOwnership.listOpen().length, 0);
+  assert.equal(
+    fs.existsSync(path.join(path.dirname(result.inputs[0].locator), "..", ".git")),
+    false
+  );
+  assert.equal(fs.readFileSync(result.inputs[0].locator, "utf8"), "季度数据\n增长 12%");
+  const preview = await f.api(`/api/tasks/${task.id}/artifacts/${artifact.id}`);
+  assert.equal(preview.status, 200);
+  assert.match(preview.markdown, /季度.md · L2–L2/);
+  assert.ok(prompts[2].includes(preview.markdown), "reviewer saw the exact published report");
+  const response = await fetch(f.base + `/api/tasks/${task.id}/artifacts/${artifact.id}/download`, {
+    headers: { "X-Shift-UI-Token": TOKEN },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-disposition"), /attachment/);
+  assert.equal(await response.text(), preview.markdown);
+  const other = (await f.api("/api/tasks", "POST", { parentTaskId: sourceTaskId })).task;
+  assert.deepEqual(other.inputs, result.inputs);
+  assert.equal((await f.api(`/api/tasks/${other.id}/artifacts/${artifact.id}`)).status, 404);
+  assert.equal(
+    (await fetch(f.base + `/api/tasks/${task.id}/artifacts/${artifact.id}`)).status,
+    401
+  );
+  assert.equal(
+    (
+      await f.api(`/api/tasks/${task.id}/inputs`, "POST", {
+        name: "late",
+        content: "x",
+        expectedRevision: result.revision,
+      })
+    ).code,
+    "TASK_FROZEN"
+  );
+  fs.writeFileSync(artifact.locator, "tampered");
+  assert.equal(
+    (await f.api(`/api/tasks/${task.id}/artifacts/${artifact.id}`)).code,
+    "CONTENT_CHANGED"
+  );
+});
+test("invalid citations fail before review and cannot create accepted artifacts", async (t) => {
+  const roles = [];
+  const f = await fixture(t, (s) => {
+    const binding = s.invocationDutyBindings.getForInvocation(s.invocations.listActive()[0].id);
+    roles.push(binding.roleId);
+    return spawnText(materialsOutput(binding.roleId, s.tasks.list()[0].inputs[0].id, true));
+  });
+  let task = (await f.api("/api/tasks", "POST", {})).task;
+  task = (
+    await f.api(`/api/tasks/${task.id}/inputs`, "POST", {
+      name: "data",
+      content: "季度数据\n增长 12%",
+      expectedRevision: task.revision,
+    })
+  ).task;
+  await f.submit(task.id, materialsContract);
+  const result = (await f.settled(task.id)).task;
+  assert.equal(result.reason, "INVALID_MATERIALS_REPORT");
+  assert.deepEqual(roles, ["analyze", "write"]);
+  assert.deepEqual(result.artifacts, []);
+  assert.deepEqual(result.acceptances, []);
+});
+test("materials submit rejects absent inputs or changed frozen source bytes", async (t) => {
+  const f = await fixture(t, () => {
+    throw new Error("must not invoke");
+  });
+  let task = (await f.api("/api/tasks", "POST", {})).task;
+  assert.equal((await f.submit(task.id, materialsContract)).code, "INPUT_REQUIRED");
+  task = (await f.api("/api/tasks/" + task.id)).task;
+  task = (
+    await f.api(`/api/tasks/${task.id}/inputs`, "POST", {
+      name: "data",
+      content: "source",
+      expectedRevision: task.revision,
+    })
+  ).task;
+  fs.writeFileSync(task.inputs[0].locator, "changed");
+  assert.equal((await f.submit(task.id, materialsContract)).code, "CONTENT_CHANGED");
+});
 test("prepare uses existing durable stream, network retry replays, submission freezes edited draft", async (t) => {
   let calls = 0;
   const f = await fixture(t, () => {

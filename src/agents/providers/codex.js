@@ -477,6 +477,8 @@ const codexProvider = {
   resolveProxy,
   buildEnvironment: buildCodexEnvironment,
   buildInvocation(config, prompt, context = {}) {
+    const stdinText = config.readOnlyInvocation ? prompt : undefined;
+    if (stdinText !== undefined) prompt = "-";
     const providerOptions = config.providerOptions || {};
     const args = [
       "-s",
@@ -487,7 +489,7 @@ const codexProvider = {
     if (config.reasoningEffort) {
       args.push("-c", `model_reasoning_effort="${config.reasoningEffort}"`);
     }
-    args.push(...shiftContextMcpConfigArgs());
+    if (!config.readOnlyInvocation) args.push(...shiftContextMcpConfigArgs());
     if (config.model) args.push("-m", config.model);
     const safeInvocationId = String(context.invocationId || "")
       .replace(/[^a-zA-Z0-9._-]/g, "-")
@@ -508,6 +510,7 @@ const codexProvider = {
     return {
       command: "codex",
       args,
+      stdinText,
       artifacts: finalOutputPath ? { finalOutputPath } : {},
     };
   },

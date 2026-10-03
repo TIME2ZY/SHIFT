@@ -440,8 +440,8 @@ test("chat endpoint streams assistant chunks and persists to session", async () 
         "Expected preparation prompt to contain the delegation contract instructions"
       );
       assert.ok(
-        calls[0].args[3].includes("MCP 回调工具说明"),
-        "Expected prompt to contain callback instructions"
+        !calls[0].args[3].includes("MCP 回调工具说明"),
+        "Read-only preparation does not inject software callback instructions"
       );
       // Soft collab rules must be present on the first (non-A2A) turn.
       assert.match(calls[0].args[3], /delegation_plan/);
@@ -2558,8 +2558,8 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
 
     assert.ok(capturedPrompt, "spawnRunner should have been called");
     // Agent persona identity (from identities/*.md) comes first
-    assert.match(capturedPrompt, /<!-- Agent Identity: codex \/ Codex -->/);
-    assert.match(capturedPrompt, /<!-- \/Agent Identity -->/);
+    assert.match(capturedPrompt, /流程 task_preparation，角色 plan/);
+    assert.doesNotMatch(capturedPrompt, /solution_baseline|final_acceptance/);
     // Session coords section
     assert.match(capturedPrompt, /<!-- Session Identity -->/);
     assert.match(capturedPrompt, /Thread: bootstrap-test-session/);
@@ -2575,7 +2575,7 @@ test("chat endpoint injects bootstrap packet (identity + recall rule) into first
     assert.match(capturedPrompt, /hello world/);
     // Order: agent identity before session identity
     assert.ok(
-      capturedPrompt.indexOf("<!-- Agent Identity:") <
+      capturedPrompt.indexOf("流程 task_preparation") <
         capturedPrompt.indexOf("<!-- Session Identity -->"),
       "agent identity should precede session identity"
     );

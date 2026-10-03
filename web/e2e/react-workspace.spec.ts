@@ -9,7 +9,7 @@ interface MockState {
   runStarted: boolean;
 }
 
-type ChatMode = "success" | "error" | "slow";
+type ChatMode = "success" | "error" | "slow" | "materials";
 
 async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise<MockState> {
   const state: MockState = {
@@ -43,6 +43,15 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
     id: "task-1",
     preparationThreadId: null as string | null,
     nodes: [] as unknown[],
+    inputs: [] as Array<{
+      id: string;
+      ownerTaskId: string;
+      name: string;
+      locator: string;
+      contentHash: string;
+      byteLength: number;
+      createdAt: string;
+    }>,
     runs: [] as unknown[],
     artifacts: [] as unknown[],
     acceptances: [] as unknown[],
@@ -80,6 +89,41 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
       return;
     }
     if (url.pathname.startsWith("/api/tasks/task-1")) {
+      if (url.pathname.endsWith("/inputs") && method === "POST") {
+        const body = request.postDataJSON();
+        expect(body.expectedRevision).toBe(task.revision);
+        task = {
+          ...task,
+          revision: task.revision + 1,
+          inputs: [
+            ...task.inputs,
+            {
+              id: "input-1",
+              ownerTaskId: task.id,
+              name: body.name,
+              locator: "/input",
+              contentHash: "a".repeat(64),
+              byteLength: 12,
+              createdAt: "",
+            },
+          ],
+        };
+      }
+      if (url.pathname.includes("/artifacts/report-1")) {
+        if (url.pathname.endsWith("/download")) {
+          expect(request.headers()["x-shift-ui-token"]).toBe("materials-token");
+          await route.fulfill({
+            contentType: "text/markdown",
+            body: "# 季度报告\n\n收入增长 12%。",
+          });
+        } else
+          await route.fulfill({
+            json: {
+              markdown: "# 季度报告\n\n收入增长 12%。\n\n## 材料来源\n\n[1] notes.md · L2–L2",
+            },
+          });
+        return;
+      }
       if (url.pathname.endsWith("/prepare")) {
         task = { ...task, contract, preparationThreadId: "session-1", revision: task.revision + 1 };
         state.runStarted = true;
@@ -109,6 +153,27 @@ async function mockShiftApi(page: Page, chatMode: ChatMode = "success"): Promise
         };
         state.chatBody = request.postDataJSON();
         state.chatCompleted = true;
+        if (chatMode === "materials") {
+          task.artifacts = [
+            {
+              id: "report-1",
+              runId: "run-1",
+              kind: "markdown_report",
+              locator: "/report",
+              summary: "季度材料报告",
+              contentHash: "b".repeat(64),
+              metadata: {},
+            },
+          ];
+          task.acceptances = [
+            {
+              runId: "run-1",
+              evidenceLevel: "agent_reviewed",
+              criteria: ["结论带引用"],
+              evidence: { sourceChecks: [{}] },
+            },
+          ];
+        }
       }
       if (url.pathname.endsWith("/cancel"))
         task = { ...task, state: "cancelled", revision: task.revision + 1 };
@@ -673,6 +738,39 @@ test("prepares an editable delegation then freezes submitted scope and restores 
   await expect(page.getByRole("radio")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("region", { name: "任务委托" })).toContainText("已交付");
+});
+
+test("uploads material, freezes versions and previews and downloads the report", async ({
+  page,
+}) => {
+  await mockShiftApi(page, "materials");
+  await page.goto("./");
+  await page.evaluate(() => {
+    const meta =
+      document.querySelector<HTMLMetaElement>('meta[name="shift-ui-token"]') ||
+      document.createElement("meta");
+    meta.name = "shift-ui-token";
+    meta.content = "materials-token";
+    document.head.append(meta);
+  });
+  await page.getByLabel("上传材料").setInputFiles({
+    name: "notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("季度\n收入增长 12%。"),
+  });
+  await expect(page.getByRole("region", { name: "分析材料" })).toContainText("notes.md");
+  await page.getByRole("textbox", { name: "目标与补充材料" }).fill("根据材料制作报告");
+  await page.getByRole("button", { name: "主 Agent 整理草稿" }).click();
+  await page.getByRole("button", { name: "提交委托" }).click();
+  await expect(page.getByRole("region", { name: "分析材料" })).toContainText("版本已冻结");
+  await expect(page.getByLabel("上传材料")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "任务委托" })).toContainText("Agent 审查");
+  await page.getByRole("button", { name: "预览报告" }).click();
+  await expect(page.getByRole("heading", { name: "季度报告" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "报告成果" })).toContainText("notes.md · L2–L2");
+  const pendingDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "下载 Markdown" }).click();
+  expect((await pendingDownload).suggestedFilename()).toBe("report.md");
 });
 
 test("retains provider failure and offers a related delegation", async ({ page }) => {

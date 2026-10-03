@@ -468,8 +468,12 @@ function createDurableRecorder({ storage, eventStore = null, logger = console } 
           invocationId: input.invocationId,
           threadId: input.threadId,
           seatId,
-          duty: requestedBinding?.duty || "discuss",
-          skillName: requestedBinding?.skillName || "cross-agent-handoff",
+          duty: requestedBinding?.workflowId ? null : requestedBinding?.duty || "discuss",
+          workflowId: requestedBinding?.workflowId,
+          roleId: requestedBinding?.roleId,
+          skillName: requestedBinding?.workflowId
+            ? null
+            : requestedBinding?.skillName || "cross-agent-handoff",
           routingReason: requestedBinding?.routingReason || "sticky",
           enforcementLevel: requestedBinding?.enforcementLevel || "advisory",
           createdAt: input.startedAt,

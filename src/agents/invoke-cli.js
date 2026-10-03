@@ -32,9 +32,15 @@ function parseArgs(argv) {
     killGraceMs: DEFAULT_KILL_GRACE_MS,
     retries: 0,
   };
+  let promptOnStdin = false;
 
   while (args.length > 0) {
     const arg = args[0];
+    if (arg === "--prompt-stdin") {
+      promptOnStdin = true;
+      args.shift();
+      continue;
+    }
 
     if (arg === "--") {
       args.shift();
@@ -119,6 +125,7 @@ function parseArgs(argv) {
       ...agent,
     },
     options,
+    promptOnStdin,
     prompt: args.join(" "),
   };
 }
@@ -174,11 +181,11 @@ function invoke(cli, prompt, options = {}) {
     },
   };
   config = applyImplementationPermissionGate(config, process.env);
-  config = require("./preparation-permissions").applyPreparationPermissions(config, process.env);
+  config = require("./invocation-permissions").applyReadOnlyPermissions(config, process.env);
   const providerId = config.providerId;
   // Read session ID from env (set by server). If present, resume the previous
   // CLI session; if absent, cold start.
-  const resumeSessionId = config.preparationOnly ? "" : process.env.INVOKE_SESSION_ID || "";
+  const resumeSessionId = config.readOnlyInvocation ? "" : process.env.INVOKE_SESSION_ID || "";
   const resolvedCli = resumeSessionId ? { ...config, resumeSessionId } : config;
   const transport = resolvedCli.transport || getProviderAdapter(providerId).protocol || "cli";
   const workspaceCwd = process.env[ENV.WORKTREE_DIR] || process.cwd();
@@ -233,6 +240,7 @@ function invoke(cli, prompt, options = {}) {
   return superviseProviderProcess({
     command,
     args,
+    stdinText: providerInvocation.stdinText,
     cwd: workspaceCwd,
     env: childEnv,
     timeoutMs: resolvedRun.timeoutMs,
@@ -259,6 +267,11 @@ async function main() {
   let parsed;
   try {
     parsed = parseArgs(process.argv.slice(2));
+    if (parsed.promptOnStdin) {
+      const chunks = [];
+      for await (const chunk of process.stdin) chunks.push(chunk);
+      parsed.prompt = Buffer.concat(chunks).toString("utf8");
+    }
   } catch (error) {
     console.error(error.message);
     process.exit(1);

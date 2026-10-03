@@ -291,7 +291,7 @@ function postMessage(
   const taskRegistry = thread.collabTaskRegistry || null;
   const currentDuty = thread.currentDutyBinding?.duty || null;
   const workflowEvidenceEvents = processWorkflowEvidenceOutput({
-    preparationOnly: thread.preparationOnly,
+    workflowId: thread.currentDutyBinding?.workflowId,
     invocationId: routeInvocationId,
     progressKey: thread.deliveryVerifier?.getHeadSha?.(thread.runWorkspace?.worktreeDir || ""),
     agent,

@@ -1,6 +1,36 @@
 "use strict";
 function createTaskRoutes({ platform, sendJson, readJsonBody }) {
   return async function handleTaskRoutes(req, res, url) {
+    const fileAction = url.pathname.match(
+      /^\/api\/tasks\/([a-zA-Z0-9_-]+)\/(inputs|artifacts)(?:\/([a-zA-Z0-9_-]+)(\/download)?)?$/
+    );
+    if (fileAction) {
+      const [, taskId, resource, fileId, download] = fileAction;
+      try {
+        if (resource === "inputs" && !fileId && req.method === "POST")
+          sendJson(res, 201, { task: platform.addInput(taskId, await readJsonBody(req)) });
+        else if (resource === "inputs" && fileId && !download && req.method === "DELETE")
+          sendJson(res, 200, {
+            task: platform.removeInput(taskId, fileId, (await readJsonBody(req)).expectedRevision),
+          });
+        else if (resource === "artifacts" && fileId && req.method === "GET") {
+          const report = platform.report(taskId, fileId);
+          if (!download) sendJson(res, 200, report);
+          else {
+            res.writeHead(200, {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Content-Disposition": 'attachment; filename="report.md"',
+              "X-Content-Type-Options": "nosniff",
+              "Cache-Control": "no-store",
+            });
+            res.end(report.markdown);
+          }
+        } else sendJson(res, 405, { error: "Method not allowed." });
+      } catch (error) {
+        sendJson(res, error.statusCode || 400, { error: error.message, code: error.code });
+      }
+      return true;
+    }
     if (url.pathname === "/api/task-catalog" && req.method === "GET") {
       sendJson(res, 200, platform.catalogs());
       return true;
